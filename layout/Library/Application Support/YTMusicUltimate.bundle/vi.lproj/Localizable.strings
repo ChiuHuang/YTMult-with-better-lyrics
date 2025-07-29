@@ -12,9 +12,9 @@
 "FORCE_PREMIUM_DESC" = "Buộc kích hoạt các tính năng Premium.\nTùy chọn này cũng sẽ ẩn tab Đoạn nhạc";
 
 "PLAYER_SETTINGS" = "Tùy chọn trình phát";
-"DOWNLOAD_AUDIO" = "Tải âm thanh";
+"DOWNLOAD_AUDIO" = "Tải âm thanh xuống";
 "DOWNLOAD_AUDIO_DESC" = "Thêm tùy chọn tải xuống âm thanh bằng cách nhấn nút YTMUltimate trong trình phát";
-"DOWNLOAD_COVER" = "Tải ảnh bìa";
+"DOWNLOAD_COVER" = "Tải ảnh bìa xuống";
 "DOWNLOAD_COVER_DESC" = "Thêm tùy chọn tải xuống ảnh bìa bằng cách nhấn nút YTMUltimate trong trình phát";
 "PLAYBACK_RATE_BUTTON" = "Nút điều khiển tốc độ";
 "PLAYBACK_RATE_BUTTON_DESC" = "Hiển thị nút điều khiển tốc độ phát";
