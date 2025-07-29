@@ -3,7 +3,7 @@
 "ENABLED_DESC" = "Mở khóa các tính năng Premium, chặn quảng cáo, phát trong nền, v.v.";
 "RESTART_FOOTER" = "Khởi động lại ứng dụng để áp dụng các thay đổi";
 
-"PREMIUM_SETTINGS" = "Tuỳ chọn Premium";
+"PREMIUM_SETTINGS" = "Tùy chọn Premium";
 "NO_ADS" = "Chặn quảng cáo";
 "NO_ADS_DESC" = "Loại bỏ quảng cáo trong ứng dụng";
 "BACKGROUND_PLAYBACK" = "Phát trong nền";
@@ -11,7 +11,7 @@
 "FORCE_PREMIUM" = "Buộc kích hoạt Premium";
 "FORCE_PREMIUM_DESC" = "Buộc kích hoạt các tính năng Premium.\nTùy chọn này cũng sẽ ẩn tab Đoạn nhạc";
 
-"PLAYER_SETTINGS" = "Tuỳ chọn trình phát";
+"PLAYER_SETTINGS" = "Tùy chọn trình phát";
 "DOWNLOAD_AUDIO" = "Tải âm thanh";
 "DOWNLOAD_AUDIO_DESC" = "Thêm tùy chọn tải xuống âm thanh bằng cách nhấn nút YTMUltimate trong trình phát";
 "DOWNLOAD_COVER" = "Tải ảnh bìa";
@@ -41,7 +41,7 @@
 "SEEK_TIME_FOOTER" = "Chọn thời lượng tua theo đơn vị giây\n\nMặc định:\nTua lại = 10 giây.\nTua đi = 30 giây.\n\nBạn có thể nhấn giữ nút tua đế chuyển đến bản nhạc trước hoặc tiếp theo tương ứng.";
 "DEFAULT" = "Mặc định";
 
-"THEME_SETTINGS" = "Tuỳ chọn giao diện";
+"THEME_SETTINGS" = "Tùy chọn giao diện";
 "OLED_DARK_THEME" = "Chủ đề OLED";
 "OLED_DARK_THEME_DESC" = "Sử dụng giao diện đen tuyền";
 "OLED_DARK_KEYBOARD" = "Bàn phím OLED";
@@ -49,17 +49,17 @@
 "LOW_CONTRAST" = "Giảm độ tương phản";
 "LOW_CONTRAST_DESC" = "Giảm độ tương phản của văn bản và các nút chức năng";
 
-"NAVBAR_SETTINGS" = "Tuỳ chọn thanh điều hướng";
+"NAVBAR_SETTINGS" = "Tùy chọn thanh điều hướng";
 "DONT_STICK_HEADERS" = "Không cố định thanh trên";
 "DONT_STICK_HEADERS_DESC" = "Tự động ẩn thanh trên khi lướt xem";
-"HIDE_HISTORY_BUTTON" = "Ẩn nút lịch sử";
+"HIDE_HISTORY_BUTTON" = "Ẩn nút Lịch sử";
 "HIDE_HISTORY_BUTTON_DESC" = "Ẩn nút mở lịch sử phát khỏi thanh điều hướng";
 "HIDE_CAST_BUTTON" = "Ẩn nút Truyền";
-"HIDE_CAST_BUTTON_DESC" = "Ẩn nút Truyền khỏi thanh điều hướng";
-"HIDE_FILTER_BUTTON" = "Ẩn nút lọc và sắp xếp";
+"HIDE_CAST_BUTTON_DESC" = "Ẩn nút truyền nội dung đến thiết bị khác khỏi thanh điều hướng";
+"HIDE_FILTER_BUTTON" = "Ẩn nút Lọc và sắp xếp";
 "HIDE_FILTER_BUTTON_DESC" = "Ẩn nút mở tùy chọn bộ lọc khỏi thanh trên trong tab Thư viện và Tải xuống";
 
-"TABBAR_SETTINGS" = "Tuỳ chọn thanh tab";
+"TABBAR_SETTINGS" = "Tùy chọn thanh tab";
 "STARTUP_TAB" = "Tab khởi động";
 "SAMPLES" = "Đoạn nhạc";
 "HOME" = "Trang chủ";
@@ -75,7 +75,7 @@
 "HIDE_LIBRARY" = "Ẩn tab Thư viện";
 "HIDE_DOWNLOADS" = "Ẩn tab Tải xuống";
 
-"CLEAR_CACHE" = "Xoá bộ nhớ đệm";
+"CLEAR_CACHE" = "Xóa bộ nhớ đệm";
 
 "APPLY" = "Áp dụng";
 "APPLY_DESC" = "Đóng ứng dụng để áp dụng các thay đổi";
@@ -84,16 +84,16 @@
 "TWITTER" = "Theo dõi %@ trên Twitter";
 "TWITTER_DESC" = "Nhận thông tin về các cập nhật mới";
 "DISCORD" = "Tham gia Discord";
-"DISCORD_DESC" = "Báo lỗi và yêu cầu tính năng mới";
+"DISCORD_DESC" = "Báo lỗi và gửi yêu cầu tính năng";
 "SOURCE_CODE" = "Mã nguồn";
 "SOURCE_CODE_DESC" = "Xem mã nguồn";
 
 "CLOSE" = "Đóng";
 "WARNING" = "Cảnh báo";
 "LOGIN_INFO" = "Yêu cầu khởi động lại ứng dụng sau khi đăng nhập thành công vào tài khoản Google";
-"RETRY_LOGIN" = "Đã sử dụng giải pháp thay thế.\n\nVui lòng thử lại.";
+"RETRY_LOGIN" = "Đã áp dụng phương thức thay thế.\n\nVui lòng thử lại.";
 "APPLY_MESSAGE" = "Hành động này sẽ đóng YouTube Music để áp dụng các thay đổi. Bạn có chắc chắn muốn tiếp tục không?";
-"CANCEL" = "Huỷ bỏ";
+"CANCEL" = "Hủy bỏ";
 "YES" = "Có";
 "REGIONAL_RESTRICTION" = "Có vẻ YouTube Music đã bị hạn chế ở quốc gia của bạn.\n\nVui lòng sử dụng VPN truy cập YouTube Music.";
 
@@ -117,5 +117,5 @@
 "PREPARING" = "Đang chuẩn bị...";
 "DELETE_MESSAGE" = "Bạn có chắc chắn muốn xóa %@ không?";
 "ALL_DOWNLOADS" = "tất cả âm thanh đã tải"; //keep it lowercase
-"DELETE" = "Xoá";
+"DELETE" = "Xóa";
 "RENAME" = "Đặt lại tên";
