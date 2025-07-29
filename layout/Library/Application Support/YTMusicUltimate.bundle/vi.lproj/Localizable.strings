@@ -22,7 +22,7 @@
 "SELECTABLE_LYRICS_DESC" = "Bật tính năng chọn văn bản lời bài hát";
 "VOLBAR" = "Thanh âm lượng";
 "VOLBAR_DESC" = "Thêm thanh âm lượng vào trình phát";
-"NO_AUTORADIO" = "Tắt tính năng Radio";
+"NO_AUTORADIO" = "Tắt tính năng đài phát";
 "NO_AUTORADIO_DESC" = "Không sử dụng tính năng phát nhạc liên tục";
 "SKIP_CONTENT_WARNING" = "Bỏ qua cảnh báo nội dung";
 "SKIP_CONTENT_WARNING_DESC" = "Không hiển thị cảnh báo nội dung độc hại";
