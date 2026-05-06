@@ -1,0 +1,27 @@
+  name: test estrazione ver deb
+  on:
+   workflow_dispatch:
+    inputs: 
+     start:
+       description: "start"
+       default: false
+       required: true
+       type: boolean
+
+  jobs:
+   extract-version:
+    runs-on: ubuntu-latest
+    steps:
+       - name: Checkout repository
+         uses: actions/checkout@v6.0.2
+
+       - name: Build Tweak for Sideloading
+         run: |
+          cd main
+          make clean package DEBUG=0 FINALPACKAGE=1 SIDELOADING=1
+          mv packages/*.deb ../ytmult.deb
+
+       - name: Estrai versione dal file .deb
+         run: |
+          echo "DEB_VERSION=$(dpkg-deb -f ytmult.deb Version)" >> $GITHUB_ENV
+          echo "Versione estratta: $DEB_VERSION" 
