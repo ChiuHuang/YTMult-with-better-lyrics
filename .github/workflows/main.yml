@@ -128,7 +128,7 @@ jobs:
 
       - name: Build Return-YouTube-Music-Dislikes
         run: |
-          cd Return-YouTube-Music-Dislikes && make clean package DEBUG=0 FINALPACKAGE=1
+          cd Return-YouTube-Music-Dislikes && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
           mv packages/*.deb ../rymd.deb
 
       - name: Build Tweak for Sideloading
@@ -139,10 +139,7 @@ jobs:
 
       - name: Inject tweak into provided IPA
         run: |
-          tweaks="rymd.deb"
-          for f in *.deb; do
-            [ -f "$f" ] && tweaks="$tweaks $f"
-          cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -uwef $tweaks -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
+          cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -uwsf rymd.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
