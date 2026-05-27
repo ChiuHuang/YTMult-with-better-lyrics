@@ -139,7 +139,7 @@ jobs:
 
       - name: Inject tweak into provided IPA
         run: |
-          cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -uwsf rymd.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
+          cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb rymd.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
