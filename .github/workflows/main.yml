@@ -104,6 +104,14 @@ jobs:
             cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git
           fi
 
+      - name: Clone PSHeader
+        run: |
+          if [ -d "$THEOS/include/PSHeader" ]; then
+            cd $THEOS/include/PSHeader && git pull
+          else
+            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git
+          fi
+
       - name: Clone YouTubeMusicHeader
         run: |
           if [ -d "$THEOS/include/YouTubeMusicHeader" ]; then
