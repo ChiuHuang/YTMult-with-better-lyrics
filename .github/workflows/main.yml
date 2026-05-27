@@ -112,6 +112,9 @@ jobs:
             cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeMusicHeader.git
           fi
 
+      - name: Clone Return-YouTube-Dislikes
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
+
       - name: Clone Return-YouTube-Music-Dislikes
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
 
