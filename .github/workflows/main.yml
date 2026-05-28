@@ -148,6 +148,9 @@ jobs:
         if: ${{ inputs.enable_rymd }}
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
 
+      - name: Clone YouPiP (for YouMusicPiP)
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
+
       - name: Clone Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
