@@ -54,8 +54,8 @@ If the github action works and you cannot find where you can download the result
    • To learn how to inject tweaks in to ipa visit __[here (Azule)](https://github.com/Al4ise/Azule)__
 
    ## YTMUltimate+ versions changelog
-   - 1.0:
-   First release, added Return-YouTube-Music-Dislikes, YTMABConfig, YouMusicPiP and VolumeBoostYT
+   * **1.0**:
+     <p>First release, added Return-YouTube-Music-Dislikes, YTMABConfig, YouMusicPiP and VolumeBoostYT</p>
 
    ## Added tweaks
    <details>
