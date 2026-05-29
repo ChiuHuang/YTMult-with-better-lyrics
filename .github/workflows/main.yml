@@ -120,6 +120,11 @@ jobs:
       - name: Download YouTube Music
         run: wget "${{ inputs.ipa_url }}" --no-verbose -O ytm.ipa
 
+      - name: Get YouTube Music Version 
+        run: |
+          unzip -q ytm.ipa -d ytmextracted
+          echo "YTM_VERSION=$(grep -A 1 '<key>CFBundleVersion</key>' ytmextracted/Payload/YouTubeMusic.app/Info.plist | grep '<string>' | awk -F'[><]' '{print $3}')" >> $GITHUB_ENV
+
       - name: Clone YouTubeHeader
         run: |
           if [ -d "$THEOS/include/YouTubeHeader" ]; then
@@ -199,13 +204,13 @@ jobs:
 
       - name: Inject tweak into provided IPA
         run: |
-          cyan -i ytm.ipa -o YTMusicUltimate_\(${{ github.run_number }}\).ipa -uwsf ytmult.deb rymd.deb ytmabc.deb youmusicpip.deb volumeboostyt.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
+          cyan -i ytm.ipa -o YTMusicUltimate_2.4.1_${{ env.YTM_VERSION }}\(${{ github.run_number }}\).ipa -uwsf ytmult.deb rymd.deb ytmabc.deb youmusicpip.deb volumeboostyt.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          name: YTMusicUltimate (${{ github.run_number }})
-          files: YTMusicUltimate_(${{ github.run_number }}).ipa
+          name: YTMusicUltimate 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
+          files: YTMusicUltimate_2.4.1_${{ env.YTM_VERSION }}\(${{ github.run_number }}\).ipa
           draft: true
 
       - name: Output Release URL
