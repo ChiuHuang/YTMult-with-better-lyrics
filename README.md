@@ -60,13 +60,13 @@ If the github action works and you cannot find where you can download the result
    ## Added tweaks
    <details>
      <summary>Return-YouTube-Music-Dislikes</summary>
-     <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music</p>
+     <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music app</p>
      <p><a href="https://github.com/PoomSmart/Return-YouTube-Music-Dislikes">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
    </details>
 
    <details>
      <summary>YTMABConfig</summary>
-     <p>YTMABConfig is a tweak that permit to view and change A/B flag of YouTube Music</p>
+     <p>YTMABConfig is a tweak that permit to view and change A/B flags of YouTube Music</p>
      <p><a href="https://github.com/PoomSmart/YTMABConfig">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
    </details>
 
