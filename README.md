@@ -23,7 +23,7 @@ Add __[https://ginsu.dev/repo](https://ginsu.dev/repo)__ to your favorite instal
 * **Sideloading:**
   You can find pre-built IPAs in the [releases tab](https://github.com/Mark02-2012/YTMusicUltimate/releases), but can also build one yourself, keep reading:
 
-## How to build a YTMusicUltimate IPA by yourself using Github actions
+## How to build a YTMusicUltimate and YTMUltimate+ IPA by yourself using Github actions
 
 If this is your first time here, start from step 1. If you built a YTMU IPA before, skip steps 1 and 2. Instead, click on the "Sync fork" button to get the latest version of the tweak and continue through step 3.
 
