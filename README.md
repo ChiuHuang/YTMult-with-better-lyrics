@@ -73,6 +73,9 @@ YTMUltimate+ is simply a fork of the original [YTMusicUltimate](https://github.c
   <p>First release, added Return-YouTube-Music-Dislikes, YTMABConfig, YouMusicPiP and VolumeBoostYT</p>
 
 ## Added tweaks
+* **MUST READ**
+  <p>All added tweaks preferences can be found in YTMusic > Account > Settings, except for VolumeBoostYT and YouMusicPiP; YTMusicUltimate preferences can be found in YTMusic > Account.</p>
+  
  <details>
   <summary>Return-YouTube-Music-Dislikes</summary>
    <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music app</p>
