@@ -3,25 +3,25 @@ on:
   workflow_dispatch:
     inputs: 
       enable_rymd:
-       description: "NEW! Integrate Return-YouTube-Music-Dislikes"
+       description: "NEW! Integrate Return-YouTube-Music-Dislikes (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_ytmabc:
-       description: "NEW! Integrate YTMABConfig"
+       description: "NEW! Integrate YTMABConfig (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_youmusicpip:
-       description: "NEW! Integrate YouMusicPiP"
+       description: "NEW! Integrate YouMusicPiP (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_volumeboostyt:
-       description: "NEW! Integrate VolumeBoostYT (YTPlusM)"
+       description: "NEW! Integrate VolumeBoostYT (YTMUltimate+)"
        type: boolean
        required: true
        default: false
