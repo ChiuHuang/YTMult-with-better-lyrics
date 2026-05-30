@@ -32,7 +32,7 @@ Add __[https://ginsu.dev/repo](https://ginsu.dev/repo)__ to your favorite instal
 (arm.deb version for Rootful and arm64.deb version for Rootless devices)
 
 * **Sideloading:**
-  You can find pre-built IPAs in the [releases tab](https://github.com/Mark02-2012/YTMusicUltimate/releases), but can also build one yourself, keep reading:
+  You can find pre-built IPAs in the [Download table](#download-table) and the [releases tab](https://github.com/Mark02-2012/YTMusicUltimate/releases), but can also build one yourself, keep reading:
 
 ## How to build a YTMusicUltimate and YTMUltimate+ IPA by yourself using Github actions
 
