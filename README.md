@@ -1,3 +1,7 @@
+[YTMU+Latest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU%2B_2.4.1_9.21/YTMUltimate+_2.4.1_9.21.4.ipa
+[YTMUlatest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU_2.4.1_9.21/YTMusicUltimate_2.4.1_9.21.4.ipa
+
+
 # YTMUltimate+
 <p align="center">
 <td><img src="Resources/IMG_5914.png"  
@@ -11,6 +15,14 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 
 <strong>The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours *VARIABLE*)</strong>
 </p>
+
+## Download table
+
+| Release | YTM version | YTMUltimate version | YTMUltimate+ version |
+| :--- | :---: | :---: | :---: |
+| [YTMUltimate+ Latest][YTMU+Latest] | 9.21.4 | 2.4.1 | 1.0 |
+| [YTMusicUltimate Latest][YTMULatest] | 9.21.4 | 2.4.1 | / |
+
 
 ## Download Links
 
