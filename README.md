@@ -64,28 +64,31 @@ If the github action works and you cannot find where you can download the result
 
    • To learn how to inject tweaks in to ipa visit __[here (Azule)](https://github.com/Al4ise/Azule)__
 
-   ## YTMUltimate+ versions changelog
-   * **1.0 (May 29 2026)**:
-     <p>First release, added Return-YouTube-Music-Dislikes, YTMABConfig, YouMusicPiP and VolumeBoostYT</p>
+## So.. What is YTMUltimate+?
+YTMUltimate+ is simply a fork of the original [YTMusicUltimate](https://github.com/Dayanch96/YTMusicUltimate) by [Dayanch96](https://github.com/Dayanch96), but with more integrated tweaks.
 
-   ## Added tweaks
-   <details>
-     <summary>Return-YouTube-Music-Dislikes</summary>
-     <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music app</p>
+## YTMUltimate+ versions changelog
+ * **1.0 (May 29 2026)**:
+  <p>First release, added Return-YouTube-Music-Dislikes, YTMABConfig, YouMusicPiP and VolumeBoostYT</p>
+
+## Added tweaks
+ <details>
+  <summary>Return-YouTube-Music-Dislikes</summary>
+   <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music app</p>
      <p><a href="https://github.com/PoomSmart/Return-YouTube-Music-Dislikes">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
    </details>
 
-   <details>
-     <summary>YTMABConfig</summary>
-     <p>YTMABConfig is a tweak that permit to view and change A/B flags of YouTube Music</p>
+  <details>
+   <summary>YTMABConfig</summary>
+    <p>YTMABConfig is a tweak that permit to view and change A/B flags of YouTube Music</p>
      <p><a href="https://github.com/PoomSmart/YTMABConfig">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
-   </details>
+  </details>
 
-   <details>
-     <summary>YouMusicPiP</summary>
-     <p>YouMusicPiP is a tweak based on YouPiP that enable PiP in YouTube Music when you select video mode on the song and exit from the app</p>
+  <details>
+   <summary>YouMusicPiP</summary>
+   <p>YouMusicPiP is a tweak based on YouPiP that enable PiP in YouTube Music when you select video mode on the song and exit from the app</p>
      <p><a href="https://github.com/PoomSmart/YouMusicPiP">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
-   </details>
+  </details>
 
    <details>
      <summary>VolumeBoostYT</summary>
