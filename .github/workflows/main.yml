@@ -202,15 +202,27 @@ jobs:
           make clean package DEBUG=0 FINALPACKAGE=1 SIDELOADING=1
           mv packages/*.deb ../ytmult.deb
 
+      - name: Determines the Release Title Prefix
+        run: |
+          if [ "${{ inputs.enable_rymd }}" = "false" ] && \
+             [ "${{ inputs.enable_volumeboostyt }}" = "false" ] && \
+             [ "${{ inputs.enable_youmusicpip }}" = "false" ] && \
+             [ "${{ inputs.enable_ytmabc }}" = "false" ]; then
+            
+            echo "RELEASE_PREFIX=YTMusicUltimate" >> $GITHUB_ENV
+          else
+            echo "RELEASE_PREFIX=YTMUltimate+" >> $GITHUB_ENV
+          fi
+
       - name: Inject tweak into provided IPA
         run: |
-          cyan -i ytm.ipa -o YTMusicUltimate_2.4.1_${{ env.YTM_VERSION }}\(${{ github.run_number }}\).ipa -uwsf ytmult.deb rymd.deb ytmabc.deb youmusicpip.deb volumeboostyt.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
+          cyan -i ytm.ipa -o ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa -uwsf ytmult.deb rymd.deb ytmabc.deb youmusicpip.deb volumeboostyt.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          name: YTMusicUltimate 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
-          files: YTMusicUltimate_2.4.1_${{ env.YTM_VERSION }}\(${{ github.run_number }}\).ipa
+          name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
+          files: ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa
           draft: true
 
       - name: Output Release URL
