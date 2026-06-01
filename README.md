@@ -19,6 +19,9 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 <strong>The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours *VARIABLE*)</strong>
 </p>
 
+## ⚠️REWRITE IN PROCESS⚠️
+**GitHub Actions may not work if you don't select all extra tweaks, so I will implement two workflow, "Build and Release YTMUltimate+" and "Build and Release YTMusicUltimate"**
+
 ## Download table
 
 | Release | YTM version | YTMUltimate version | YTMUltimate+ version |
