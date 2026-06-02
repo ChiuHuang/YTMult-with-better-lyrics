@@ -59,7 +59,7 @@ jobs:
       - name: Checkout Main
         uses: actions/checkout@v6.0.2
         with:
-          path: MYmain
+          path: main
           submodules: recursive
 
       - name: Hide sensitive inputs
@@ -231,11 +231,6 @@ jobs:
             echo "TAG_PREFIX=YTMU+" >> $GITHUB_ENV
           fi
 
-      - name: Prepare Releases Notes
-        run: |
-          sed "s/%ytm_version%/${{ env.YTM_VERSION }}/g; s/%ytmult_version%/2.4.1/g; s/%release_prefix%/${{ env.RELEASE_PREFIX }}/g" \
-          .github/RELEASE_TEMPLATE/Release_Notes.md > release_notes_prepared.md
-
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -243,7 +238,6 @@ jobs:
           name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
           files: ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa
           draft: true
-          body_path: release_notes_prepared.md
 
       - name: Output Release URL
         run: |
