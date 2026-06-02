@@ -234,8 +234,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ env.TAG_PREFIX }}_${{ env.YTM_VERSION }}_2.4.1
-          name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
+          tag_name: ${{ env.TAG_PREFIX }}_${{ env.YTM_VERSION }}_2.4.1_(${{ github.run_number }})
+          name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} 
           files: ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa
           draft: true
 
