@@ -3,25 +3,25 @@ on:
   workflow_dispatch:
     inputs: 
       enable_rymd:
-       description: "NEW! Integrate Return-YouTube-Music-Dislikes (YTMUltimate+)"
+       description: "Integrate Return-YouTube-Music-Dislikes (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_ytmabc:
-       description: "NEW! Integrate YTMABConfig (YTMUltimate+)"
+       description: "Integrate YTMABConfig (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_youmusicpip:
-       description: "NEW! Integrate YouMusicPiP (YTMUltimate+)"
+       description: "Integrate YouMusicPiP (YTMUltimate+)"
        type: boolean
        required: true
        default: false
 
       enable_volumeboostyt:
-       description: "NEW! Integrate VolumeBoostYT (YTMUltimate+)"
+       description: "Integrate VolumeBoostYT (YTMUltimate+)"
        type: boolean
        required: true
        default: false
@@ -65,7 +65,7 @@ jobs:
       - name: Hide sensitive inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: bundle_id,display_name
+          exclude_inputs: bundle_id,display_name,enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt
 
       - name: Validate IPA URL
         run: |
@@ -154,6 +154,7 @@ jobs:
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
 
       - name: Clone YouPiP (for YouMusicPiP)
+        if: ${{ inputs.enable_youmusicpip }}
         run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
 
       - name: Clone Return-YouTube-Music-Dislikes
@@ -218,9 +219,27 @@ jobs:
         run: |
           cyan -i ytm.ipa -o ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa -uwsf *.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} 
 
+      - name: Determines the Release Tag Release
+        run: |
+          if [ "${{ inputs.enable_rymd }}" = "false" ] && \
+             [ "${{ inputs.enable_volumeboostyt }}" = "false" ] && \
+             [ "${{ inputs.enable_youmusicpip }}" = "false" ] && \
+             [ "${{ inputs.enable_ytmabc }}" = "false" ]; then
+            
+            echo "TAG_PREFIX=YTMU" >> $GITHUB_ENV
+          else
+            echo "TAG_PREFIX=YTMU+" >> $GITHUB_ENV
+          fi
+
+      - name: Prepare Releases Notes
+        run: |
+          sed "s/%ytm_version%/${{ env.YTM_VERSION }}/g; s/%ytmult_version%/2.4.1/g; s/%release_prefix%/${{ env.RELEASE_PREFIX }}/g" \
+          .github/RELEASE_TEMPLATE/Release_Notes.md > release_notes_prepared.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.TAG.PREFIX }}_${{ env.YTM_VERSION }}_2.4.1
           name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
           files: ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa
           draft: true
