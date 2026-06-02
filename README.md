@@ -20,7 +20,7 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 </p>
 
 ## ⚠️Notice⚠️
-**GitHub Actions now work properly!! (fixed) but in the repo may be some issues, so please report any issue in the "Issues" section**
+**GitHub Actions now works properly!! (fixed) but in the repo may be some issues, so please report any issue in the "Issues" section**
 
 ## Download table
 
@@ -48,8 +48,8 @@ If this is your first time here, start from step 1. If you built a YTMU IPA befo
 
 1. Fork this repository using the fork button on the top right.
 2. On your forked repository, go to Repository Settings > Actions, enable Read and Write permissions.
-3. Go to the Actions tab on your forked repo, click on "Build and Release YTMusicUltimate" located on the left side. Click "Run workflow" button located on the right side.
-4. Find a decrypted YTMusic .ipa file (we cannot provide you this due to legal reasons) and upload it to a file provider (filebin.net, Dropbox or catbox.moe is recommended). Paste the url to the necessary field and click "Run workflow".
+3. Go to the Actions tab on your forked repo, click on "Build and Release YTMusicUltimate and YTMUltimate+" located on the left side. Click "Run workflow" button located on the right side.
+4. Find a decrypted YTMusic .ipa file (we cannot provide you this due to legal reasons) and upload it to a file provider (filebin.net, Dropbox or catbox.moe is recommended). Paste the url to the necessary field, select the extra tweaks you want and click "Run workflow".
 5. Wait for the build to finish. You can download the tweaked IPA from the releases section of your forked repo. (If you can't find the releases section, go to your forked repo and add /releases to the url. i.e github.com/user/YTMusicUltimate/releases)
 
 ## IPA building troubleshooting (I can't build the IPA/Github action fails/I can't find the releases section etc.)
