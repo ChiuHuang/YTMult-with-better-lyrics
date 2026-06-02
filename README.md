@@ -20,7 +20,7 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 </p>
 
 ## ⚠️REWRITE IN PROCESS⚠️
-**GitHub Actions may not work if you don't select all extra tweaks, so I will implement two workflow, "Build and Release YTMUltimate+" and "Build and Release YTMusicUltimate"**
+**GitHub Actions may not work properly, so please for now don't use it**
 
 ## Download table
 
