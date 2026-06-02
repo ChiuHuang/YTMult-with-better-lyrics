@@ -59,7 +59,7 @@ jobs:
       - name: Checkout Main
         uses: actions/checkout@v6.0.2
         with:
-          path: main
+          path: MYmain
           submodules: recursive
 
       - name: Hide sensitive inputs
