@@ -243,6 +243,7 @@ jobs:
           name: ${{ env.RELEASE_PREFIX }} 2.4.1 and ${{ env.YTM_VERSION }} (${{ github.run_number }})
           files: ${{ env.RELEASE_PREFIX }}_2.4.1_${{ env.YTM_VERSION }}.ipa
           draft: true
+          body_path: release_notes_prepared.md
 
       - name: Output Release URL
         run: |
