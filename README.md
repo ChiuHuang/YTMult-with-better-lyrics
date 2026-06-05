@@ -20,8 +20,9 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 </p>
 
 ## ⚠️Notice⚠️
-**In the repo may be some issues, so please report any issue in the "Issues" section.
-Btw I will implement a deb of YTMusicUltimate that has downloads fixed for all versions of YTMusic from the next release!**
+**In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/YTMUltimatePLUS/issues) section.**
+
+**Btw I will implement a deb of YTMusicUltimate that has downloads fixed for all versions of YTMusic from the next release!**
 
 ## Download table
 I will implement a deb of YTMusicUltimate that has downloads fixed for all versions of YTMusic from the next release (Also in Actions) 
