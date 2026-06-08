@@ -1,6 +1,6 @@
 [YTMU+Latest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU%2B_9.23.4_2.4.1_(42)/YTMUltimate+_2.4.1_9.23.4.ipa
 
-[YTMUlatest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU_9.22.2_2.4.1/YTMusicUltimate_9.22.2_2.4.1.ipa
+[YTMUlatest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU_9.23.4_2.4.1_(43)/YTMusicUltimate_2.4.1_9.23.4.ipa
 
 [YTMU+Downloads]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU%2B_9.14_2.4.1/YTMUltimate+_2.4.1_9.14.2.ipa
 
@@ -30,7 +30,7 @@ Implemented new fixed deb for working downloads! (in Actions for now isn't imple
 | Release | YTM version | YTMUltimate version | YTMUltimate+ version |
 | :--- | :---: | :---: | :---: |
 | [YTMUltimate+ Latest][YTMU+Latest] | 9.23.4 | 2.4.1 fix | 1.0 |
-| [YTMusicUltimate Latest][YTMULatest] | 9.22.2 | 2.4.1 | / |
+| [YTMusicUltimate Latest][YTMULatest] | 9.23.4 | 2.4.1 fix | / |
 
 
 ## Download Links
