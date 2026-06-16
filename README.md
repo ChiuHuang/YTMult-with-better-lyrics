@@ -24,8 +24,8 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 Implemented new fixed deb for working downloads from release 9.23.4 and 2.4.1! (Also in Actions)
 | Release | YTM version | YTMUltimate version | YTMUltimate+ version |
 | :--- | :---: | :---: | :---: |
-| [YTMUltimate+ Latest][YTMU+Latest] | 9.24.3 | 2.4.1 fix | 1.0 |
-| [YTMusicUltimate Latest][YTMULatest] | 9.24.3 | 2.4.1 fix | / |
+| [YTMUltimate+ Latest][YTMU+Latest] | 9.24.2 | 2.4.1 fix | 1.0 |
+| [YTMusicUltimate Latest][YTMULatest] | 9.24.2 | 2.4.1 fix | / |
 
 
 ## Download Links
