@@ -40,7 +40,10 @@ You can find pre-built IPAs in the [Download table](#download-table) and the [re
 
 ## How to build a YTMusicUltimate and YTMUltimate+ IPA by yourself using Github actions
 
-If this is your first time here, start from step 1. If you built a YTMU IPA before, skip steps 1 and 2. Instead, click on the "Sync fork" button to get the latest version of the tweak and continue through step 3.
+>[!NOTE]
+>If this is your first time here, start from step 1.
+>
+>If you built a YTMU IPA before, skip steps 1 and 2. Instead, click on the "Sync fork" button to get the latest version of the tweak and continue through step 3.
 
 1. Fork this repository using the fork button on the top right.
 2. On your forked repository, go to Repository Settings > Actions, enable Read and Write permissions.
