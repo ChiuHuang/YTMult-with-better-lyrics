@@ -14,7 +14,7 @@
 <p align="center">
 The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app on iOS.
 
-<strong>The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours *VARIABLE*)</strong>
+<strong>The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours *VARIABLE*), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈</strong>
 </p>
 
 ## ⚠️Notice⚠️
