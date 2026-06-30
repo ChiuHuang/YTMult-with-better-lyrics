@@ -2,6 +2,8 @@
 
 [YTMUlatest]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU_9.26.2_2.4.1_(51)/YTMusicUltimate_2.4.1_9.26.2.ipa
 
+[YTMU+no-YMP]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU%2B_9.26.2_2.4.1_(52)/YTMUltimate+_no-YMP_2.4.1_9.26.2.ipa
+
 # YTMUltimate+
 <p align="center">
 <td><img src="Resources/IMG_5914.png" width=500
@@ -25,6 +27,7 @@ Implemented new fixed deb for working downloads from release 9.23.4 and 2.4.1! (
 | Release | YTM version | YTMUltimate version | YTMUltimate+ version |
 | :--- | :---: | :---: | :---: |
 | [YTMUltimate+ Latest][YTMU+Latest] | 9.26.2 | 2.4.1 fix | 1.0 |
+| [YTMUltimate+ without YouMusicPiP][YTMU+no-YMP] | 9.26.2 | 2.4.1 fix | 1.0 |
 | [YTMusicUltimate Latest][YTMULatest] | 9.26.2 | 2.4.1 fix | / |
 
 
