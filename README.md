@@ -51,8 +51,25 @@ You can find pre-built IPAs in the [Download table](#download-table) and the [re
 1. Fork this repository using the fork button on the top right.
 2. On your forked repository, go to Repository Settings > Actions, enable Read and Write permissions.
 3. Go to the Actions tab on your forked repo, click on "Build and Release YTMusicUltimate and YTMUltimate+" located on the left side. Click "Run workflow" button located on the right side.
-4. Find a decrypted YTMusic .ipa file (from decrypt day for example) and upload it to a file provider (filebin.net, Dropbox or catbox.moe is recommended). Paste the url to the necessary field, select the extra tweaks you want and click "Run workflow".
+4. Find a decrypted YTMusic .ipa file (read [this](#how-to-find-decrypted-youtube-music-ipas) if you don't know where to find one) and upload it to a file provider (filebin.net, Dropbox or catbox.moe is recommended). Paste the url to the necessary field, select the extra tweaks you want and click "Run workflow".
 5. Wait for the build to finish. You can download the tweaked IPA from the releases section of your forked repo. (If you can't find the releases section, go to your forked repo and add /releases to the url. i.e github.com/user/YTMusicUltimate/releases)
+
+## How to find decrypted YouTube Music IPAs
+
+**If you have Telegram:**
+1. Open Telegram
+2. Search for "Eevee IPA Decrypter bot"
+3. Start the bot and send him the link for YouTube Music on App Store
+4. He will send you the latest YouTube Music decrypted IPA
+
+**If you don't have Telegram/want another version of YouTube Music:**
+> [!NOTE]
+> For this make sure to disable all adblocks you have (NextDNS, ADGuard, Brave Shields, uBlock Origin etc.)
+
+1. Open your browser and search "Decrypt Day"
+2. Click the first link (It should be like decrypt . day the link, without spaces of course)
+3. On the search bar, type "YouTube Music", click on "Search" and YouTube Music
+4. Scroll down and click on "Download for free" to download the latest available version immediately, click on "Previous versions" instead to download older versions
 
 ## IPA building troubleshooting (I can't build the IPA/Github action fails/I can't find the releases section etc.)
 
