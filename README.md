@@ -73,7 +73,7 @@ You can find pre-built IPAs in the [Download table](#download-table) and the [re
 
 ## IPA building troubleshooting (I can't build the IPA/Github action fails/I can't find the releases section etc.)
 
-99.9% of the time, the culprit is the IPA URL you provided. You HAVE TO provide a decryped IPA. It cannot be any other extension, it has to be a **.ipa** file. Find a decrypted YTMusic IPA(refer to [this](#how-to-find-decrypted-youtube-music-ipas)), upload it to filebin.net, Dropbox or catbox.moe, give the direct link to the GitHub action. If you find a working ipa and upload it properly, everything will start working perfectly, pinky promise.
+99.9% of the time, the culprit is the IPA URL you provided. You HAVE TO provide a decryped IPA. It cannot be any other extension, it has to be a **.ipa** file. Find a decrypted YTMusic IPA (refer to [this](#how-to-find-decrypted-youtube-music-ipas)), upload it to filebin.net, Dropbox or catbox.moe, give the direct link to the GitHub action. If you find a working ipa and upload it properly, everything will start working perfectly, pinky promise.
 
 If the github action works and you cannot find where you can download the result, you need to add /releases to the url of your forked repository. It'll probably look like this: https://github.com/YOURUSERNAME/YTMusicUltimate/releases, don't forget to replace the YOURUSERNAME part with your username. It may seem invisible but if the github action is successful, IPA will be there.
 
