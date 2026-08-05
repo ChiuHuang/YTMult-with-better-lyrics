@@ -4,7 +4,8 @@
 
 [YTMU+no-YMP]: https://github.com/Mark02-2012/YTMUltimatePLUS/releases/download/YTMU%2B_9.31.4_2.4.1_(76)/YTMUltimate+_no_YMP_2.4.1_9.31.4.ipa
 
-# YTMUltimate+
+<h1 p align="center">YTMUltimate+</h1>
+   
 <p align="center">
 <td><img src="Resources/IMG_5914.png" width=500
 
