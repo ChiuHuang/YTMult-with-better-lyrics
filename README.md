@@ -92,7 +92,7 @@ If the github action works and you cannot find where you can download the result
    • To learn how to inject tweaks in to ipa visit __[here (Azule)](https://github.com/Al4ise/Azule)__
 
 ## So.. What is YTMUltimate+?
-YTMUltimate+ is simply a fork of the original [YTMusicUltimate](https://github.com/Dayanch96/YTMusicUltimate) by [Dayanch96](https://github.com/Dayanch96), but with more integrated tweaks.
+YTMUltimate+ is simply a fork of the original [YTMusicUltimate](https://github.com/Dayanch96/YTMusicUltimate) by [Dayanch96](https://github.com/Dayanch96), but with more integrated tweaks and with downloads fixed in newer YTMusic versions.
 
 ## YTMUltimate+ versions changelog
  * **1.0 (May 29 2026)**:
