@@ -17,10 +17,15 @@
 <p align="center">
 The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app on iOS.
 
-<strong>The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours *VARIABLE*), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈</strong>
-</p>
+<h2 p align="center">Disclaimer</h2>
+<p align="center">
+   This project is an independent developer modification and is not affiliated with, authorized, maintained, sponsored, or endorsed by Google LLC or YouTube Music. All product and company names are trademarks of their respective holders.
 
-## ⚠️Notice⚠️
+<h2 p align="center">More info</h2>
+<p align="center">
+   The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours; VARIABLE), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈
+
+## Bug reporting
 **In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/YTMUltimatePLUS/issues) section.**
 
 ## Download table
