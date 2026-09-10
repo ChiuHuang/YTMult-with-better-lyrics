@@ -3,3 +3,5 @@
 .upload.swp
 .vscode/
 packages/
+__pycache__/
+config/admin_config.json
