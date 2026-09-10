@@ -7,6 +7,8 @@ import sys
 import requests
 import hashlib
 import time as time_module
+import subprocess
+import threading
 from collections import deque
 from datetime import datetime
 from urllib.parse import quote
@@ -187,11 +189,11 @@ def parse_lrc(lrc_text, duration_sec=0):
     lines = lrc_text.strip().split('\n')
     result = []
     offset_ms = 0
-    
+
     time_regex = re.compile(r'\[(\d+):(\d+)\.(\d+)\]')
     word_regex = re.compile(r'<(\d+):(\d+)\.(\d+)>')
     id_tag_regex = re.compile(r'^\[(\w+):(.*)\]$')
-    
+
     def parse_time_tag(m, s, cs):
         minutes = int(m)
         seconds = int(s)
@@ -203,12 +205,12 @@ def parse_lrc(lrc_text, duration_sec=0):
         else:
             ms = int(cs_str[:3])
         return minutes * 60000 + seconds * 1000 + ms
-    
+
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        
+
         # Check for offset tag
         id_match = id_tag_regex.match(line)
         if id_match and id_match.group(1) == 'offset':
@@ -219,22 +221,22 @@ def parse_lrc(lrc_text, duration_sec=0):
             continue
         if id_match and id_match.group(1) in ['ti', 'ar', 'al', 'au', 'lr', 'length', 'by', 're', 'tool', 've', '#']:
             continue
-        
+
         # Extract time tags
         time_matches = list(time_regex.finditer(line))
         if not time_matches:
             continue
-        
+
         text = time_regex.sub('', line).strip()
         if not text:
             continue
-        
+
         # Parse word-level sync if present (<mm:ss.xx>word)
         parts = []
         word_matches = list(word_regex.finditer(text))
         if word_matches:
             plain_text = re.sub(r'\s+', ' ', word_regex.sub('', text)).strip()
-            
+
             # Check for leading text before first tag
             first_match = word_matches[0]
             current_parts = []
@@ -246,7 +248,7 @@ def parse_lrc(lrc_text, duration_sec=0):
                         'words': lead + (' ' if not is_cjk(lead) else ''),
                         'durationMs': 0
                     })
-            
+
             # Find tokens: (<time>) followed by chars up to next tag
             tokens = re.findall(r'<(\d+):(\d+)\.(\d+)>([^<]*)', text)
             for tm_min, tm_sec, tm_cs, word_str in tokens:
@@ -258,7 +260,7 @@ def parse_lrc(lrc_text, duration_sec=0):
                         'words': clean_word,
                         'durationMs': 0
                     })
-            
+
             # Calculate durations for each word part
             for pi in range(len(current_parts)):
                 if pi < len(current_parts) - 1:
@@ -266,13 +268,13 @@ def parse_lrc(lrc_text, duration_sec=0):
                     current_parts[pi]['durationMs'] = max(dur, 0)
                 else:
                     current_parts[pi]['durationMs'] = 500
-            
+
             parts = current_parts
             text = plain_text
-        
+
         for tm in time_matches:
             start_ms = parse_time_tag(tm.group(1), tm.group(2), tm.group(3)) + offset_ms
-            
+
             entry_parts = []
             if parts:
                 import copy
@@ -280,7 +282,7 @@ def parse_lrc(lrc_text, duration_sec=0):
                 # If first part was leading text with 0, bind to start_ms
                 if entry_parts and entry_parts[0]['startTimeMs'] == 0:
                     entry_parts[0]['startTimeMs'] = start_ms
-            
+
             entry = {
                 'time': round(start_ms / 1000.0, 3),
                 'startTimeMs': start_ms,
@@ -289,12 +291,15 @@ def parse_lrc(lrc_text, duration_sec=0):
             }
             if entry_parts:
                 entry['parts'] = entry_parts
-            
+                # Enhanced LRC carries real per-word timestamps. Generated
+                # timings must never be treated as karaoke data by clients.
+                entry['wordSynced'] = True
+
             result.append(entry)
-    
+
     # Sort by time
     result.sort(key=lambda x: x['startTimeMs'])
-    
+
     # Calculate durations
     duration_ms = duration_sec * 1000
     for i in range(len(result)):
@@ -303,10 +308,12 @@ def parse_lrc(lrc_text, duration_sec=0):
         else:
             result[i]['durationMs'] = max(int(duration_ms - result[i]['startTimeMs']), 3000)
         result[i]['duration'] = round(result[i]['durationMs'] / 1000.0, 3)
-        
-        # Ensure every line has parts for word karaoke
+
+        # Keep generated parts for layout consumers, but mark them as
+        # non-authoritative so clients do not fake word-by-word highlighting.
         if not result[i].get('parts') or len(result[i]['parts']) == 0:
             result[i]['parts'] = generate_interpolated_parts(result[i]['text'], result[i]['startTimeMs'], result[i]['durationMs'])
+            result[i]['wordSynced'] = False
         else:
             # Sanitize existing parts
             p_list = result[i]['parts']
@@ -322,7 +329,7 @@ def parse_lrc(lrc_text, duration_sec=0):
                     p_list[pi]['durationMs'] = max(dur, 0)
                 else:
                     p_list[pi]['durationMs'] = max(result[i]['startTimeMs'] + result[i]['durationMs'] - p_list[pi]['startTimeMs'], 200)
-    
+
     return result
 
 
@@ -350,7 +357,7 @@ def parse_plain(plain_text):
 def fetch_lrclib(title, artist, album='', duration=0):
     """Fetch lyrics from LRCLIB. Tries exact match, then search with strict validation."""
     headers = {'User-Agent': 'YTMusicUltimate/1.0 (https://github.com/user/ytmusicultimate)'}
-    
+
     # Exact match
     try:
         params = {'track_name': title, 'artist_name': artist}
@@ -358,7 +365,7 @@ def fetch_lrclib(title, artist, album='', duration=0):
             params['album_name'] = album
         if duration:
             params['duration'] = duration
-        
+
         resp = requests.get('https://lrclib.net/api/get', params=params, timeout=8, headers=headers)
         if resp.status_code == 200:
             data = resp.json()
@@ -371,7 +378,7 @@ def fetch_lrclib(title, artist, album='', duration=0):
                 }
     except Exception as e:
         pass
-    
+
     # Search fallback with strict verification
     try:
         q_str = f"{artist} {title}".strip() if artist else title.strip()
@@ -386,16 +393,16 @@ def fetch_lrclib(title, artist, album='', duration=0):
                     r_dur = float(r.get('duration', 0) or 0)
                     r_artist = (r.get('artistName') or '').lower()
                     a_lower = (artist or '').lower()
-                    
+
                     # If duration is known, reject anything differing by > 5 seconds
                     if duration > 0 and r_dur > 0 and abs(r_dur - duration) > 5:
                         continue
-                    
+
                     # If artist is specified, ensure match unless duration is identical
                     if a_lower and a_lower not in r_artist and r_artist not in a_lower:
                         if duration > 0 and abs(r_dur - duration) > 2:
                             continue
-                    
+
                     if r.get('syncedLyrics'):
                         return {
                             'synced': r['syncedLyrics'],
@@ -403,19 +410,19 @@ def fetch_lrclib(title, artist, album='', duration=0):
                             'source': 'LRCLib',
                             'instrumental': r.get('instrumental', False)
                         }
-                
+
                 # Second pass: plain lyrics with same strict match
                 for r in results:
                     r_dur = float(r.get('duration', 0) or 0)
                     r_artist = (r.get('artistName') or '').lower()
                     a_lower = (artist or '').lower()
-                    
+
                     if duration > 0 and r_dur > 0 and abs(r_dur - duration) > 5:
                         continue
                     if a_lower and a_lower not in r_artist and r_artist not in a_lower:
                         if duration > 0 and abs(r_dur - duration) > 2:
                             continue
-                    
+
                     if r.get('plainLyrics'):
                         return {
                             'synced': None,
@@ -425,7 +432,7 @@ def fetch_lrclib(title, artist, album='', duration=0):
                         }
     except Exception as e:
         print(f"[LRCLIB search] Error: {e}")
-    
+
     return None
 
 
@@ -458,18 +465,18 @@ def get_song_info(video_id):
         info = ytm.get_song(video_id)
         if not info or 'videoDetails' not in info:
             return None
-        
+
         d = info['videoDetails']
         title = d.get('title', '')
         artist = d.get('author', '')
         duration = int(d.get('lengthSeconds', 0))
-        
+
         album = ''
         try:
             album = info.get('microformat', {}).get('microformatDataRenderer', {}).get('tags', [''])[0]
         except:
             pass
-        
+
         ja_title = ''
         ja_artist = ''
         try:
@@ -481,7 +488,7 @@ def get_song_info(video_id):
                 ja_artist = d_ja.get('author', '')
         except:
             pass
-        
+
         return {
             'title': title,
             'artist': artist,
@@ -500,7 +507,7 @@ def fetch_yt_lyrics(video_id):
         ytm = get_ytmusic()
         watch_playlist = ytm.get_watch_playlist(video_id)
         lyrics_browse_id = watch_playlist.get('lyrics') if watch_playlist else None
-        
+
         if lyrics_browse_id:
             lyrics = ytm.get_lyrics(lyrics_browse_id)
             if lyrics and lyrics.get('lyrics'):
@@ -523,15 +530,15 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
         "alwaysFetchMetadata": "false",
         "token": jwt_token
     }
-    
+
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
             print(f"  ❌ Cubey API error: {response.status_code}")
             return None
-            
+
         best_lyrics = None
-        
+
         for line in response.iter_lines():
             if not line:
                 continue
@@ -544,30 +551,30 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
                     event_data = json.loads(data_str)
                     provider = event_data.get("provider")
                     results = event_data.get("results")
-                    
+
                     if not results: continue
-                    
+
                     # We prefer synced LRC. QQ/KuGou often return raw JSON strings in "lyrics".
                     if provider == "musixmatch":
                         if results.get("wordByWord"):
                             return {"synced": results["wordByWord"], "source": "Musixmatch"}
                         if results.get("synced"):
                             best_lyrics = {"synced": results["synced"], "source": "Musixmatch"}
-                    
+
                     elif provider == "netease" and results.get("synced"):
                         if not best_lyrics:
                             best_lyrics = {"synced": results["synced"], "source": "NetEase"}
-                            
+
                     elif provider == "kugou" and results.get("lyrics"):
                         try:
                             k_json = json.loads(results["lyrics"])
                             if k_json.get("lyrics") and not best_lyrics:
                                 best_lyrics = {"synced": k_json["lyrics"], "source": "KuGou"}
                         except: pass
-                        
+
                 except Exception as e:
                     pass
-        
+
         return best_lyrics
     except Exception as e:
         print(f"  ❌ Cubey API request failed: {e}")
@@ -606,18 +613,18 @@ def fetch_unison(video_id, title='', artist='', duration=0):
             params['artist'] = artist
         if duration:
             params['duration'] = str(int(duration))
-        
+
         resp = requests.get('https://unison.boidu.dev/lyrics',
                           params=params, headers=headers, timeout=8)
-        
+
         if resp.status_code == 200:
             data = resp.json()
             fmt = data.get('format', '')
             lyrics_text = data.get('lyrics', '')
-            
+
             if not lyrics_text:
                 return None
-            
+
             if fmt == 'lrc':
                 return {
                     'synced': lyrics_text,
@@ -654,33 +661,33 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
     """Basic TTML parser - extracts timed lines from TTML/AMLL XML."""
     try:
         import xml.etree.ElementTree as ET
-        
+
         # Fix common namespace issues
         ttml_text = re.sub(r'xmlns:amll="[^"]*"', '', ttml_text)
         ttml_text = re.sub(r'amll:', '', ttml_text)
-        
+
         # Remove default namespace for easier parsing
         ttml_text = re.sub(r'xmlns="[^"]*"', '', ttml_text)
-        
+
         root = ET.fromstring(ttml_text)
-        
+
         results = []
-        
+
         # Find all <p> elements (lines)
         for p in root.iter('p'):
             begin = p.get('begin', p.get('{http://www.w3.org/ns/ttml}begin', ''))
             end = p.get('end', p.get('{http://www.w3.org/ns/ttml}end', ''))
-            
+
             if not begin:
                 continue
-            
+
             start_ms = parse_ttml_time(begin)
             end_ms = parse_ttml_time(end) if end else start_ms + 5000
-            
+
             # Get text content
             text_parts = []
             parts = []
-            
+
             # Check for spans (word-level sync)
             spans = list(p.iter('span'))
             if spans:
@@ -689,7 +696,7 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                     span_end = span.get('end', '')
                     span_text = (span.text or '')
                     tail_text = (span.tail or '')
-                    
+
                     # Preserving spacing between words
                     clean_word = span_text
                     if tail_text and ' ' in tail_text:
@@ -698,7 +705,7 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                     elif not is_cjk(clean_word) and idx < len(spans) - 1:
                         if not clean_word.endswith(' '):
                             clean_word += ' '
-                    
+
                     if clean_word.strip():
                         text_parts.append(clean_word)
                         if span_begin:
@@ -719,15 +726,15 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                 p_text = (p.text or '').strip()
                 if p_text:
                     text_parts = [p_text]
-            
+
             full_text = re.sub(r' +', ' ', ''.join(text_parts)).strip()
             if not full_text:
                 continue
-            
+
             line_duration_ms = end_ms - start_ms
             if not parts or len(parts) == 0:
                 parts = generate_interpolated_parts(full_text, start_ms, line_duration_ms)
-            
+
             entry = {
                 'time': round(start_ms / 1000.0, 3),
                 'startTimeMs': start_ms,
@@ -737,9 +744,10 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
             }
             if parts:
                 entry['parts'] = parts
-            
+                entry['wordSynced'] = bool(spans)
+
             results.append(entry)
-        
+
         return results if results else None
     except Exception as e:
         print(f"[TTML Parser] Error: {e}")
@@ -751,21 +759,21 @@ def parse_ttml_time(time_str):
     if not time_str:
         return 0
     time_str = str(time_str).strip().replace(',', '.')
-    
+
     # Check for milliseconds suffix: e.g. "1234ms"
     if time_str.endswith('ms'):
         try:
             return int(float(time_str[:-2]))
         except:
             return 0
-            
+
     # Check for seconds suffix: e.g. "12.34s"
     if time_str.endswith('s'):
         try:
             return int(float(time_str[:-1]) * 1000)
         except:
             return 0
-            
+
     # Check for HH:MM:SS.mmm or MM:SS.mmm
     parts = time_str.split(':')
     try:
@@ -837,24 +845,24 @@ def cohere_translate(texts, target_lang='zh-TW'):
     """Translate a list of text lines using Cohere Command A Translate."""
     if not texts:
         return []
-    
+
     # Filter out lines that are already the target language or empty
     # Simple heuristic: if all chars are CJK and target is zh, skip
     non_empty = [t for t in texts if t.strip()]
     if not non_empty:
         return texts
-    
+
     cache_key = f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
     cached = get_translate_cached(cache_key)
     if cached is not None:
         return cached
-    
+
     lang_name = LANG_NAMES.get(target_lang, target_lang)
-    
+
     # Join all lines with a numbered marker for reliable splitting
     numbered = [f"[{i+1}] {t}" for i, t in enumerate(texts)]
     joined = '\n'.join(numbered)
-    
+
     prompt = (
         f"Translate the following song lyrics into {lang_name}. "
         f"Keep the same numbered format [1], [2], etc. "
@@ -864,7 +872,7 @@ def cohere_translate(texts, target_lang='zh-TW'):
         f"Return ONLY the translated lines with their numbers, nothing else.\n\n"
         f"{joined}"
     )
-    
+
     for attempt in range(len(COHERE_API_KEYS)):
         try:
             api_key = get_cohere_key()
@@ -880,20 +888,20 @@ def cohere_translate(texts, target_lang='zh-TW'):
                 },
                 timeout=30
             )
-            
+
             if resp.status_code == 429:  # Rate limited
                 print(f"  [Cohere] Rate limited on key {attempt}, rotating...")
                 rotate_cohere_key()
                 continue
-            
+
             if resp.status_code != 200:
                 print(f"  [Cohere] Error {resp.status_code}: {resp.text[:200]}")
                 rotate_cohere_key()
                 continue
-            
+
             data = resp.json()
             translated_text = data['message']['content'][0]['text']
-            
+
             # Parse numbered lines back
             result_map = {}
             for line in translated_text.split('\n'):
@@ -906,16 +914,16 @@ def cohere_translate(texts, target_lang='zh-TW'):
                         result_map[idx] = content
                     except:
                         pass
-            
+
             # Reconstruct in order
             results = [result_map.get(i+1, texts[i]) for i in range(len(texts))]
             set_translate_cached(cache_key, results)
             return results
-            
+
         except Exception as e:
             print(f"  [Cohere] Exception: {e}")
             rotate_cohere_key()
-    
+
     # Fallback: return originals
     print(f"  [Cohere] All keys failed, returning originals")
     return texts
@@ -925,12 +933,12 @@ def google_translate_fast(texts, target_lang='zh-TW'):
     """Fast Google translate - no API key needed, for immediate results."""
     if not texts:
         return []
-    
+
     cache_key = f"gtx:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
     cached = get_translate_cached(cache_key)
     if cached is not None:
         return cached
-    
+
     delimiter = '\n\n;\n\n'
     batches, current_batch, current_len = [], [], 0
     for text in texts:
@@ -941,7 +949,7 @@ def google_translate_fast(texts, target_lang='zh-TW'):
         current_len += len(text)
     if current_batch:
         batches.append(current_batch)
-    
+
     all_translations = []
     for batch in batches:
         joined = delimiter.join(batch)
@@ -962,7 +970,7 @@ def google_translate_fast(texts, target_lang='zh-TW'):
                 all_translations.extend(['' for _ in batch])
         except Exception as e:
             all_translations.extend(['' for _ in batch])
-    
+
     set_translate_cached(cache_key, all_translations)
     return all_translations
 
@@ -1190,15 +1198,15 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
 
 def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     """Try all providers in priority order, return best result."""
-    
+
     title = song_info['title']
     artist = song_info['artist']
     album = song_info.get('album', '')
     duration = song_info.get('duration', 0)
     queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
-    
+
     result = None
-    
+
     # Priority 0: Cubey API (if we have JWT)
     if jwt_token:
         print(f"  [0/4] Trying Cubey API (with JWT)...")
@@ -1223,7 +1231,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
                 if result and result.get('lyrics'):
                     sanitize_lyrics_parts(result['lyrics'])
                 return result
-    
+
     # Priority 1: LRCLIB (best for synced lyrics)
     print(f"  [1/3] Trying LRCLIB...")
     for q in queries:
@@ -1246,7 +1254,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
                 print(f"  ⚠️ LRCLIB: plain lyrics only (query: {q_title} - {q_artist})")
                 parsed = parse_plain(lrc['plain'])
                 result = {'lyrics': parsed, 'source': 'LRCLib', 'synced': False}
-    
+
     # Priority 2: Unison (community)
     if not result or not result.get('synced'):
         print(f"  [2/3] Trying Unison...")
@@ -1268,7 +1276,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
                     print(f"  ⚠️ Unison: plain lyrics only (query: {q['title']})")
                     parsed = parse_plain(uni['plain'])
                     result = {'lyrics': parsed, 'source': 'Unison', 'synced': False}
-    
+
     # Priority 3: YouTube Music lyrics
     if not result:
         print(f"  [3/3] Trying YouTube Music lyrics...")
@@ -1277,7 +1285,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             print(f"  ✅ YouTube: plain lyrics found!")
             parsed = parse_plain(yt['plain'])
             result = {'lyrics': parsed, 'source': yt.get('source', 'YouTube Music'), 'synced': False}
-    
+
     # No lyrics found
     if not result:
         print(f"  ❌ No lyrics found from any provider")
@@ -1285,21 +1293,21 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             'lyrics': [{'time': 0, 'text': f'No lyrics found', 'translated': f'找不到歌詞: {title}', 'duration': 0}],
             'source': 'none', 'synced': False
         }
-    
+
     # Add song metadata
     result['song'] = title
     result['artist'] = artist
-    
+
     # Translation
     if translate_to and result.get('lyrics'):
         print(f"  🌐 Translating {len(result['lyrics'])} lines with Cohere...")
         texts = [l['text'] for l in result['lyrics'] if l.get('text')]
         translations = cohere_translate(texts, translate_to)
-        
+
         for i, lyric in enumerate(result['lyrics']):
             if i < len(translations):
                 lyric['translated'] = translations[i]
-    
+
     if result and result.get('lyrics'):
         sanitize_lyrics_parts(result['lyrics'])
 
@@ -1309,6 +1317,49 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 # ============================================================
 # API Endpoints
 # ============================================================
+
+_update_cache = {'commit': None, 'checked_at': 0.0}
+
+
+def latest_tweak_commit():
+    """Fetch the current public build revision, caching it for five minutes."""
+    now = time_module.time()
+    if _update_cache['commit'] and now - _update_cache['checked_at'] < 300:
+        return _update_cache['commit']
+    try:
+        response = requests.get(
+            'https://api.github.com/repos/ChiuHuang/ytmusicultimate/commits/main',
+            headers={'Accept': 'application/vnd.github+json'}, timeout=5)
+        response.raise_for_status()
+        commit = response.json().get('sha')
+        if commit:
+            _update_cache.update(commit=commit, checked_at=now)
+            return commit
+    except requests.RequestException as exc:
+        print(f"[Update] Could not check GitHub: {exc}")
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], stderr=subprocess.DEVNULL, text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+@app.route('/api/update', methods=['GET'])
+def api_update():
+    client_commit = (request.args.get('commit') or '').strip().lower()
+    if client_commit and not re.fullmatch(r'[0-9a-f]{7,64}', client_commit):
+        return jsonify({'error': 'Invalid commit hash'}), 400
+    latest_commit = latest_tweak_commit()
+    if not latest_commit:
+        return jsonify({'error': 'Update service unavailable'}), 503
+    is_current = bool(client_commit) and latest_commit.lower().startswith(client_commit)
+    return jsonify({
+        'current_commit': client_commit or None,
+        'latest_commit': latest_commit,
+        'update_available': bool(client_commit) and not is_current,
+        'repository': 'https://github.com/ChiuHuang/ytmusicultimate'
+    })
 
 @app.route('/api/lyrics', methods=['GET'])
 def api_lyrics():
@@ -1563,7 +1614,7 @@ def proxy_log():
     try:
         data = request.get_json(force=True)
         req_type = data.get('type', '')
-        
+
         if req_type == "UI_DUMP":
             os.makedirs("logs", exist_ok=True)
             timestamp = datetime.now().strftime("%H-%M-%S")
@@ -1574,7 +1625,7 @@ def proxy_log():
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(dump_content)
             print(f"✅ Saved to {filepath}")
-            
+
     except Exception as e:
         print("Log error:", e)
 
@@ -1595,7 +1646,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("Server: http://0.0.0.0:20016")
     print("=" * 60)
-    
+
     clear_not_found_caches()
     app.run(host='0.0.0.0', port=20016, debug=True)
 
