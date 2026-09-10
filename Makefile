@@ -8,13 +8,14 @@ ARCHS = arm64
 INSTALL_TARGET_PROCESSES = YouTubeMusic
 TARGET = iphone:clang:16.5:13.0
 PACKAGE_VERSION = 2.4.1
+GIT_COMMIT = $(shell git rev-parse --verify --short=12 HEAD 2>/dev/null || echo unknown)
 
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = YTMusicUltimate
 $(TWEAK_NAME)_FILES = $(filter-out Source/Sideloading.x, $(wildcard Source/*.x))
 $(TWEAK_NAME)_FILES += $(shell find Source -name '*.m')
-$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -DTWEAK_VERSION=$(PACKAGE_VERSION)
+$(TWEAK_NAME)_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -DTWEAK_VERSION=$(PACKAGE_VERSION) -DTWEAK_GIT_COMMIT=\"$(GIT_COMMIT)\"
 $(TWEAK_NAME)_FRAMEWORKS = UIKit Foundation AVFoundation AudioToolbox VideoToolbox
 $(TWEAK_NAME)_OBJ_FILES = $(shell find Source/Utils/lib -name '*.a')
 $(TWEAK_NAME)_LIBRARIES = bz2 c++ iconv z
