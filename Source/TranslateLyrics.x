@@ -47,6 +47,12 @@ static NSMutableDictionary *g_lyricsCache = nil;
 static NSString *g_globalLoadingVideoID = nil; // videoID currently being fetched
 static BOOL g_globalLoadingInFlight = NO;      // YES while a full request chain is active
 
+static BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    id value = settings[key];
+    return value ? [value boolValue] : fallback;
+}
+
 // 輔助工具：把除錯訊息傳給你的 Python 伺服器
 static void sendDebugLog(NSString *msg) {
     NSString *encodedMsg = [msg stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
@@ -186,7 +192,9 @@ static void sendUIDump(void) {
     %init;
     // Register screenshot listener at tweak load so it never misses app startup
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationUserDidTakeScreenshotNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        sendUIDump();
+        if (YTMULyricsPreference(@"sendLyricsScreenshotDebug", NO)) {
+            sendUIDump();
+        }
     }];
 }
 
@@ -294,6 +302,10 @@ static void sendUIDump(void) {
         self.lyricLabel.numberOfLines = 0;
         self.lyricLabel.font = [UIFont boldSystemFontOfSize:24];
         self.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.45];
+        self.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
+        self.lyricLabel.layer.shadowRadius = 4.0;
+        self.lyricLabel.layer.masksToBounds = NO;
         self.lyricLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.lyricLabel];
 
@@ -301,6 +313,11 @@ static void sendUIDump(void) {
         self.transLabel.numberOfLines = 0;
         self.transLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
         self.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.32];
+        self.transLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        self.transLabel.layer.shadowRadius = 2.0;
+        self.transLabel.layer.shadowOpacity = 0.35;
+        self.transLabel.layer.masksToBounds = NO;
         self.transLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.transLabel];
 
@@ -703,6 +720,14 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             }
         }
         // The current line remains highlighted until its timestamp changes.
+    } else if (newIndex >= 0) {
+        // Only real provider word timestamps are refreshed per frame. Generated
+        // proportional parts are deliberately ignored to avoid fake karaoke.
+        NSDictionary *lyric = self.lyrics[newIndex];
+        if ([lyric[@"wordSynced"] boolValue]) {
+            YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
+            if (cell) [self configureCell:cell atIndex:newIndex isActive:YES currentTime:currentTime];
+        }
     }
 }
 
@@ -787,7 +812,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     [self.tableView reloadData];
 
-    if (newLyrics.count > 0) {
+    if (newLyrics.count > 0 && YTMULyricsPreference(@"lyricsAlwaysOn", YES)) {
         self.view.hidden = NO;
         UIView *contentContainer = self.view.superview;
         if (contentContainer) {
@@ -818,6 +843,29 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     return [nonEmpty componentsJoinedByString:@" "];
 }
 
+- (NSAttributedString *)timedWordTextForLyric:(NSDictionary *)lyric displayText:(NSString *)displayText currentTime:(double)currentTime {
+    UIColor *dim = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
+    NSMutableAttributedString *result = [[NSMutableAttributedString alloc] initWithString:displayText attributes:@{
+        NSFontAttributeName: [UIFont boldSystemFontOfSize:24],
+        NSForegroundColorAttributeName: dim
+    }];
+    NSUInteger searchOffset = 0;
+    double nowMs = currentTime * 1000.0;
+    for (NSDictionary *part in lyric[@"parts"]) {
+        NSString *word = [self normalizedLyricText:part[@"words"]];
+        if (!word.length || searchOffset >= displayText.length) continue;
+        NSRange range = [displayText rangeOfString:word options:0 range:NSMakeRange(searchOffset, displayText.length - searchOffset)];
+        if (range.location == NSNotFound) continue;
+        searchOffset = NSMaxRange(range);
+        double startMs = [part[@"startTimeMs"] doubleValue];
+        double durationMs = MAX([part[@"durationMs"] doubleValue], 1.0);
+        double progress = MIN(MAX((nowMs - startMs) / durationMs, 0.0), 1.0);
+        UIColor *color = [[UIColor whiteColor] colorWithAlphaComponent:0.38 + (0.62 * progress)];
+        [result addAttribute:NSForegroundColorAttributeName value:color range:range];
+    }
+    return result;
+}
+
 - (void)configureCell:(YTMULyricsCell *)cell atIndex:(NSInteger)index isActive:(BOOL)isActive currentTime:(double)currentTime {
     if (index < 0 || index >= self.lyrics.count) return;
 
@@ -830,21 +878,27 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         cell.lyricLabel.text = displayText;
         cell.lyricLabel.textColor = [UIColor whiteColor];
         cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
-        cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 1.5);
-        cell.lyricLabel.layer.shadowRadius = 3.0;
-        cell.lyricLabel.layer.shadowOpacity = 0.45;
+        cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
+        cell.lyricLabel.layer.shadowRadius = 4.0;
+        cell.lyricLabel.layer.shadowOpacity = 0.7;
         cell.lyricLabel.layer.masksToBounds = NO;
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.75];
     } else if (isActive) {
-        cell.lyricLabel.attributedText = nil;
-        cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = [UIColor whiteColor];
+        if ([lyric[@"wordSynced"] boolValue] && [lyric[@"parts"] count] > 0) {
+            // One attributed label preserves the line and its spacing while
+            // every real word follows its own provider-supplied duration.
+            cell.lyricLabel.attributedText = [self timedWordTextForLyric:lyric displayText:displayText currentTime:currentTime];
+        } else {
+            cell.lyricLabel.attributedText = nil;
+            cell.lyricLabel.text = displayText;
+            cell.lyricLabel.textColor = [UIColor whiteColor];
+        }
 
         cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
-        cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 1.5);
-        cell.lyricLabel.layer.shadowRadius = 3.0;
-        cell.lyricLabel.layer.shadowOpacity = 0.5;
+        cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
+        cell.lyricLabel.layer.shadowRadius = 4.0;
+        cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.85];
@@ -852,7 +906,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
         cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
-        cell.lyricLabel.layer.shadowOpacity = 0.0;
+        cell.lyricLabel.layer.shadowOpacity = 0.32;
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.24];
     }
@@ -1380,8 +1434,9 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
             [(UIControl *)btn addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
         }
 
-        // Attach custom tap recognizer directly to button
-        if (!objc_getAssociatedObject(btn, @selector(ytmu_didTapLyricsBar:))) {
+        // UIControls already receive the target/action above. Attaching both a
+        // target and a recognizer made one tap open the lyrics panel twice.
+        if (![btn isKindOfClass:[UIControl class]] && !objc_getAssociatedObject(btn, @selector(ytmu_didTapLyricsBar:))) {
             UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_didTapLyricsBar:)];
             tap.cancelsTouchesInView = NO;
             [btn addGestureRecognizer:tap];

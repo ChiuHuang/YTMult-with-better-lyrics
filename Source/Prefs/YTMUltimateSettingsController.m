@@ -1,5 +1,9 @@
 #import "YTMUltimateSettingsController.h"
 
+#ifndef TWEAK_GIT_COMMIT
+#define TWEAK_GIT_COMMIT "unknown"
+#endif
+
 @implementation YTMUltimateSettingsController
 
 - (void)viewDidLoad {
@@ -35,8 +39,10 @@
     NSMutableDictionary *YTMUltimateDict = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
     if (!YTMUltimateDict[@"YTMUltimateIsEnabled"]) {
         [YTMUltimateDict setObject:@(1) forKey:@"YTMUltimateIsEnabled"];
-        [[NSUserDefaults standardUserDefaults] setObject:YTMUltimateDict forKey:@"YTMUltimate"];
     }
+    if (!YTMUltimateDict[@"lyricsAlwaysOn"]) YTMUltimateDict[@"lyricsAlwaysOn"] = @YES;
+    if (!YTMUltimateDict[@"sendLyricsScreenshotDebug"]) YTMUltimateDict[@"sendLyricsScreenshotDebug"] = @NO;
+    [[NSUserDefaults standardUserDefaults] setObject:YTMUltimateDict forKey:@"YTMUltimate"];
 
 }
 
@@ -46,27 +52,28 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 5;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    return section == 3 ? LOC(@"LINKS") : nil;
+    if (section == 2) return @"Lyrics & Diagnostics";
+    return section == 4 ? LOC(@"LINKS") : nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) {
         return LOC(@"RESTART_FOOTER");
-    } if (section == 3) {
+    } if (section == 4) {
         NSDictionary *infoDictionary = [[NSBundle mainBundle] infoDictionary];
         NSString *appVersion = infoDictionary[@"CFBundleShortVersionString"];
-        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@\nYTMusicUltimate: v%@", appVersion, @(OS_STRINGIFY(TWEAK_VERSION))];
+        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@\nYTMusicUltimate: v%@\nBuild: %@", appVersion, @(OS_STRINGIFY(TWEAK_VERSION)), @TWEAK_GIT_COMMIT];
     }
 
     return nil;
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayFooterView:(UIView *)view forSection:(NSInteger)section {
-    if (section == 3) {
+    if (section == 4) {
         UITableViewHeaderFooterView *footer = (UITableViewHeaderFooterView *)view;
         footer.textLabel.textAlignment = NSTextAlignmentCenter;
     }
@@ -79,9 +86,11 @@
         case 1:
             return 5;
         case 2:
-            return 1;
+            return 2;
         case 3:
-            return 4;
+            return 1;
+        case 4:
+            return 5;
         default:
             return 0;
     }
@@ -141,6 +150,25 @@
     }
 
     if (indexPath.section == 2) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"lyricsSection"];
+        NSArray *settings = @[
+            @{@"title": @"Always show translated lyrics", @"detail": @"Show the custom lyrics panel when lyrics load.", @"key": @"lyricsAlwaysOn", @"image": @"quote.bubble"},
+            @{@"title": @"Send screenshot debug data", @"detail": @"Upload a UI hierarchy only after you take a screenshot.", @"key": @"sendLyricsScreenshotDebug", @"image": @"ladybug"}
+        ];
+        NSDictionary *setting = settings[indexPath.row];
+        cell.textLabel.text = setting[@"title"];
+        cell.detailTextLabel.text = setting[@"detail"];
+        cell.detailTextLabel.numberOfLines = 0;
+        cell.imageView.image = [UIImage systemImageNamed:setting[@"image"]];
+        UISwitch *toggle = [[UISwitch alloc] init];
+        toggle.accessibilityIdentifier = setting[@"key"];
+        toggle.on = [YTMUltimateDict[setting[@"key"]] boolValue];
+        [toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+        return cell;
+    }
+
+    if (indexPath.section == 3) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cacheSection"];
 
         cell.textLabel.text = LOC(@"CLEAR_CACHE");
@@ -159,14 +187,15 @@
         return cell;
     }
 
-    if (indexPath.section == 3) {
+    if (indexPath.section == 4) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"linkSection"];
 
         NSArray *settingsData = @[
             @{@"text": [NSString stringWithFormat:LOC(@"TWITTER"), @"Ginsu"],  @"detail": LOC(@"TWITTER_DESC"), @"image": @"ginsu-24@2x"},
             @{@"text": [NSString stringWithFormat:LOC(@"TWITTER"), @"Dayanch96"], @"detail": LOC(@"TWITTER_DESC"), @"image": @"dayanch96-24@2x"},
             @{@"text": LOC(@"DISCORD"), @"detail": LOC(@"DISCORD_DESC"), @"image": @"discord-24@2x"},
-            @{@"text": LOC(@"SOURCE_CODE"), @"detail": LOC(@"SOURCE_CODE_DESC"), @"image": @"github-24@2x"}
+            @{@"text": LOC(@"SOURCE_CODE"), @"detail": LOC(@"SOURCE_CODE_DESC"), @"image": @"github-24@2x"},
+            @{@"text": @"Check for updates", @"detail": @"Compare this build's commit with the latest online build.", @"image": @"arrow.triangle.2.circlepath"}
         ];
 
         NSDictionary *settingData = settingsData[indexPath.row];
@@ -177,8 +206,12 @@
         cell.detailTextLabel.text = settingData[@"detail"];
         cell.detailTextLabel.numberOfLines = 0;
 
-        UIImage *image = [UIImage imageWithContentsOfFile:[NSBundle.ytmu_defaultBundle pathForResource:settingData[@"image"] ofType:@"png" inDirectory:@"icons"]];
-        cell.imageView.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+        if (indexPath.row == 4) {
+            cell.imageView.image = [UIImage systemImageNamed:settingData[@"image"]];
+        } else {
+            UIImage *image = [UIImage imageWithContentsOfFile:[NSBundle.ytmu_defaultBundle pathForResource:settingData[@"image"] ofType:@"png" inDirectory:@"icons"]];
+            cell.imageView.image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+        }
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
         return cell;
@@ -223,7 +256,7 @@
         }
     }
 
-    if (indexPath.section == 2 && indexPath.row == 0) {
+    if (indexPath.section == 3 && indexPath.row == 0) {
         UIActivityIndicatorView *activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
         activityIndicator.color = [UIColor labelColor];
         [activityIndicator startAnimating];
@@ -235,12 +268,14 @@
             [[NSFileManager defaultManager] removeItemAtPath:cachePath error:nil];
 
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:2]] withRowAnimation:UITableViewRowAnimationNone];
+                [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:0 inSection:3]] withRowAnimation:UITableViewRowAnimationNone];
             });
         });
     }
 
-    if (indexPath.section == 3) {
+    if (indexPath.section == 4 && indexPath.row == 4) {
+        [self checkForUpdates];
+    } else if (indexPath.section == 4) {
         NSArray *urls = @[@"https://twitter.com/ginsudev",
                         @"https://twitter.com/dayanch96",
                         @"https://discord.gg/VN9ZSeMhEW",
@@ -289,6 +324,47 @@
 
     [twitchDvnDict setObject:@([sender isOn]) forKey:@"YTMUltimateIsEnabled"];
     [defaults setObject:twitchDvnDict forKey:@"YTMUltimate"];
+}
+
+- (void)toggleSetting:(UISwitch *)sender {
+    NSString *key = sender.accessibilityIdentifier;
+    if (!key.length) return;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    settings[key] = @(sender.isOn);
+    [defaults setObject:settings forKey:@"YTMUltimate"];
+}
+
+- (void)checkForUpdates {
+    NSString *currentCommit = @TWEAK_GIT_COMMIT;
+    NSString *escapedCommit = [currentCommit stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/update?commit=%@", escapedCommit]];
+    UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Checking for updates" message:@"Comparing this build with the latest online commit…" preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:loading animated:YES completion:nil];
+    [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [loading dismissViewControllerAnimated:YES completion:nil];
+            NSDictionary *result = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            NSString *latest = result[@"latest_commit"] ?: @"unknown";
+            BOOL updateAvailable = [result[@"update_available"] boolValue];
+            NSString *message;
+            if (error || !result) {
+                message = @"Could not reach the update service. Try again later.";
+            } else if (updateAvailable) {
+                message = [NSString stringWithFormat:@"An update is available.\n\nThis build: %@\nLatest: %@", currentCommit, latest];
+            } else {
+                message = [NSString stringWithFormat:@"You are on the latest build.\n\nCommit: %@", latest];
+            }
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:updateAvailable ? @"Update available" : @"Up to date" message:message preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            if (updateAvailable) {
+                [alert addAction:[UIAlertAction actionWithTitle:@"Open downloads" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/ChiuHuang/ytmusicultimate"] options:@{} completionHandler:nil];
+                }]];
+            }
+            [self presentViewController:alert animated:YES completion:nil];
+        });
+    }] resume];
 }
 
 @end
