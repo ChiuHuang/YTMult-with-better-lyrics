@@ -24,13 +24,13 @@
     self = [super init];
     if (self) {
         self.completionHandlers = [NSMutableArray array];
-        
+
         WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
         [config.userContentController addScriptMessageHandler:self name:@"turnstile"];
-        
+
         self.webView = [[WKWebView alloc] initWithFrame:CGRectMake(-1000, -1000, 300, 300) configuration:config];
         self.webView.hidden = YES;
-        
+
         // Add to key window so it can render if needed
         dispatch_async(dispatch_get_main_queue(), ^{
             UIWindow *window = [UIApplication sharedApplication].keyWindow;
@@ -44,15 +44,16 @@
 
 - (void)getJWTTokenWithCompletion:(void(^)(NSString *token))completion {
     if (self.jwtToken) {
-        completion(self.jwtToken);
+        if (completion) completion(self.jwtToken);
         return;
     }
-    
-    [self.completionHandlers addObject:[completion copy]];
-    
+
+    void (^safeCompletion)(NSString *) = completion ?: ^(NSString *token) {};
+    [self.completionHandlers addObject:[safeCompletion copy]];
+
     if (self.completionHandlers.count == 1) {
         // First request, start the process
-        NSString *html = @"<html><body style='margin:0;padding:0;'><iframe id='tframe' src='https://lyrics.api.dacubeking.com/challenge' style='width:100%;height:100%;border:none;'></iframe><script>window.addEventListener('message', function(e) { if(e.data && e.data.type) { window.webkit.messageHandlers.turnstile.postMessage(e.data); } });</script></body></html>";
+        NSString *html = @"<html>...</html>";
         [self.webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://lyrics.api.dacubeking.com/"]];
     }
 }
@@ -61,7 +62,7 @@
     if ([message.name isEqualToString:@"turnstile"]) {
         NSDictionary *data = message.body;
         NSString *type = data[@"type"];
-        
+
         if ([type isEqualToString:@"turnstile-token"]) {
             NSString *token = data[@"token"];
             NSLog(@"[YTMU-Turnstile] Got token: %@", token);
@@ -79,7 +80,7 @@
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     NSDictionary *body = @{@"token": token};
     req.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    
+
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (data) {
             NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
