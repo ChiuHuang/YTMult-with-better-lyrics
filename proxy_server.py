@@ -227,6 +227,128 @@ def _handle_uncaught_exception(e):
     return jsonify({'error': 'Internal server error', 'instance': SERVER_INSTANCE_ID}), 500
 
 # ============================================================
+# Self-Update (server file) — supports any filename like app.py / main.py / bot.py
+# ============================================================
+SELF_UPDATE_REPO = "ChiuHuang/ytmusicultimate"
+SELF_UPDATE_BRANCH = "main"
+# Remote path is always proxy_server.py in repo; local target is auto-detected via __file__
+# but user can override via config/admin_config.json -> {"main_file": "app.py"} or env MAIN_FILE
+SELF_UPDATE_REMOTE_PATH = "proxy_server.py"
+
+def _get_main_file():
+    # Priority: admin_config main_file > env MAIN_FILE > current __file__
+    try:
+        cfg = _admin_cfg.get('main_file')
+        if cfg:
+            # allow relative or absolute
+            if os.path.isabs(cfg):
+                return cfg
+            # relative to workspace root
+            base = os.path.dirname(os.path.abspath(__file__))
+            cand = os.path.join(base, cfg)
+            return cand
+    except: pass
+    env = os.environ.get('MAIN_FILE')
+    if env:
+        if os.path.isabs(env):
+            return env
+        base = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base, env)
+    return os.path.abspath(__file__)
+
+def _get_local_sha():
+    # Try git first, fallback to file hash
+    try:
+        sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], stderr=subprocess.DEVNULL, text=True).strip()
+        if sha:
+            return sha
+    except: pass
+    try:
+        # file hash
+        p = _get_main_file()
+        if os.path.exists(p):
+            h = hashlib.sha256(open(p, 'rb').read()).hexdigest()[:12]
+            return h
+    except: pass
+    return "unknown"
+
+def _get_remote_sha():
+    try:
+        r = requests.get(f"https://api.github.com/repos/{SELF_UPDATE_REPO}/commits/{SELF_UPDATE_BRANCH}", headers={'Accept': 'application/vnd.github+json'}, timeout=8)
+        r.raise_for_status()
+        j = r.json()
+        sha = j.get('sha')
+        # also get parent sha for info
+        parents = j.get('parents', [])
+        parent_sha = parents[0].get('sha') if parents else None
+        return sha, parent_sha, j
+    except Exception as e:
+        print(f"[SELF-UPDATE] remote sha fetch failed: {e}")
+        return None, None, None
+
+def _fetch_remote_file(sha=None):
+    # Fetch raw file content for given sha or branch
+    try:
+        # Use raw.githubusercontent with branch
+        url = f"https://raw.githubusercontent.com/{SELF_UPDATE_REPO}/{SELF_UPDATE_BRANCH}/{SELF_UPDATE_REMOTE_PATH}"
+        # If sha provided, use cdn with sha
+        if sha:
+            url = f"https://raw.githubusercontent.com/{SELF_UPDATE_REPO}/{sha}/{SELF_UPDATE_REMOTE_PATH}"
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            return r.text
+        print(f"[SELF-UPDATE] fetch failed {r.status_code}")
+    except Exception as e:
+        print(f"[SELF-UPDATE] fetch error: {e}")
+    return None
+
+def _perform_self_update():
+    local_file = _get_main_file()
+    local_sha = _get_local_sha()
+    remote_sha, parent_sha, remote_meta = _get_remote_sha()
+    if not remote_sha:
+        return False, "Could not fetch remote SHA"
+    if local_sha == remote_sha:
+        return False, "Already up to date"
+    content = _fetch_remote_file(remote_sha)
+    if not content:
+        content = _fetch_remote_file(None)
+    if not content:
+        return False, "Could not fetch remote file"
+    # Basic sanity: must contain Flask app and not be empty
+    if "Flask" not in content or len(content) < 5000:
+        return False, "Remote file looks invalid"
+    # Backup
+    try:
+        backup = local_file + f".backup.{int(time_module.time())}"
+        if os.path.exists(local_file):
+            import shutil
+            shutil.copy2(local_file, backup)
+            print(f"[SELF-UPDATE] backup saved to {backup} (parent={parent_sha})")
+    except Exception as e:
+        print(f"[SELF-UPDATE] backup failed: {e}")
+    # Write new file
+    try:
+        # Ensure LF and no BOM
+        content = content.replace("\r\n", "\n")
+        if content.startswith("\ufeff"):
+            content = content[1:]
+        with open(local_file, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(content)
+        print(f"[SELF-UPDATE] updated {local_file} from {local_sha} -> {remote_sha} parent={parent_sha}")
+        # Write update meta for web UI
+        try:
+            meta_path = os.path.join(LOG_DIR, "self_update.json")
+            with open(meta_path, 'w', encoding='utf-8') as mf:
+                json.dump({"local_before": local_sha, "remote": remote_sha, "parent": parent_sha, "file": local_file, "ts": datetime.now().isoformat()}, mf, indent=2)
+        except: pass
+        return True, f"Updated {os.path.basename(local_file)} {local_sha[:7]} -> {remote_sha[:7]} parent {parent_sha[:7] if parent_sha else 'none'}"
+    except Exception as e:
+        print(f"[SELF-UPDATE] write failed: {e}")
+        _log_crash(type(e), e, e.__traceback__)
+        return False, str(e)
+
+# ============================================================
 # LRC Parser & Karaoke Interpolation
 # ============================================================
 
@@ -1849,6 +1971,111 @@ def admin_files_download():
         return jsonify({'error': 'Not found'}), 404
     from flask import send_file
     return send_file(fpath, as_attachment=True)
+
+@app.route('/api/admin/self_update/check', methods=['GET'])
+@login_required
+def admin_self_update_check():
+    local = _get_local_sha()
+    remote, parent, meta = _get_remote_sha()
+    main_file = _get_main_file()
+    # Also compute file hashes for accurate comparison when not in git repo
+    local_file_hash = None
+    remote_file_hash = None
+    try:
+        if os.path.exists(main_file):
+            local_file_hash = hashlib.sha256(open(main_file, 'rb').read()).hexdigest()[:12]
+    except: pass
+    try:
+        # fetch remote file to compute hash (quick, cached by GitHub)
+        content = _fetch_remote_file(remote) if remote else None
+        if content:
+            remote_file_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
+    except: pass
+    # Determine update availability: prefer git sha if both are 40-char, else file hash
+    up_to_date = None
+    update_available = False
+    if local and remote:
+        if len(local) == 40 and len(remote) == 40:
+            up_to_date = (local == remote)
+            update_available = (local != remote)
+        elif local_file_hash and remote_file_hash:
+            up_to_date = (local_file_hash == remote_file_hash)
+            update_available = (local_file_hash != remote_file_hash)
+        else:
+            up_to_date = (local == remote)
+            update_available = (local != remote)
+    return jsonify({
+        'local_sha': local,
+        'remote_sha': remote,
+        'parent_sha': parent,
+        'local_file_hash': local_file_hash,
+        'remote_file_hash': remote_file_hash,
+        'main_file': main_file,
+        'main_file_name': os.path.basename(main_file),
+        'up_to_date': up_to_date,
+        'update_available': update_available,
+        'repo': SELF_UPDATE_REPO,
+        'branch': SELF_UPDATE_BRANCH,
+        'remote_path': SELF_UPDATE_REMOTE_PATH,
+    })
+
+@app.route('/api/admin/self_update/config', methods=['GET', 'POST'])
+@login_required
+def admin_self_update_config():
+    if request.method == 'GET':
+        return jsonify({'main_file': _admin_cfg.get('main_file'), 'detected': _get_main_file(), 'repo': SELF_UPDATE_REPO, 'branch': SELF_UPDATE_BRANCH})
+    data = request.get_json(force=True) or {}
+    # Allow user to set target filename like app.py / main.py / bot.py
+    new_name = (data.get('main_file') or '').strip()
+    if not new_name:
+        _admin_cfg.pop('main_file', None)
+    else:
+        # sanitize: no path traversal, must end with .py, simple basename or relative path
+        if '..' in new_name or new_name.startswith('/'):
+            return jsonify({'error': 'Invalid filename'}), 400
+        if not new_name.endswith('.py'):
+            return jsonify({'error': 'Must be .py file'}), 400
+        _admin_cfg['main_file'] = new_name
+    _save_admin_config(_admin_cfg)
+    return jsonify({'ok': True, 'main_file': _admin_cfg.get('main_file'), 'detected': _get_main_file()})
+
+@app.route('/api/admin/self_update/perform', methods=['POST'])
+@login_required
+def admin_self_update_perform():
+    # Optional param to force even if up to date
+    force = request.args.get('force') == '1' or (request.get_json(silent=True) or {}).get('force')
+    local = _get_local_sha()
+    remote, parent, meta = _get_remote_sha()
+    if not remote:
+        return jsonify({'ok': False, 'error': 'Could not fetch remote SHA'}), 502
+    if not force:
+        # Check file hash as well
+        try:
+            lf = hashlib.sha256(open(_get_main_file(), 'rb').read()).hexdigest()[:12] if os.path.exists(_get_main_file()) else None
+            rf_content = _fetch_remote_file(remote)
+            rf = hashlib.sha256(rf_content.encode('utf-8')).hexdigest()[:12] if rf_content else None
+            if lf and rf and lf == rf:
+                return jsonify({'ok': False, 'error': 'Already up to date (file hash)', 'local': local, 'remote': remote}), 200
+        except: pass
+        if local == remote:
+            return jsonify({'ok': False, 'error': 'Already up to date', 'local': local, 'remote': remote}), 200
+    ok, msg = _perform_self_update()
+    if ok:
+        # Log and schedule restart after response
+        print(f"[SELF-UPDATE] {msg} - restarting in 1s")
+        def _restart():
+            time_module.sleep(1)
+            try:
+                # Try to restart via execv (preserves args)
+                py = sys.executable
+                os.execv(py, [py] + sys.argv)
+            except Exception as e:
+                print(f"[SELF-UPDATE] restart failed: {e}")
+                os._exit(0)
+        threading.Thread(target=_restart, daemon=True).start()
+        return jsonify({'ok': True, 'message': msg, 'local': local, 'remote': remote, 'parent': parent, 'restarting': True})
+    else:
+        return jsonify({'ok': False, 'error': msg, 'local': local, 'remote': remote}), 500
 
 @app.errorhandler(404)
 def handle_404(e):
