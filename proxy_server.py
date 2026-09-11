@@ -1582,6 +1582,7 @@ def api_update():
 
 @app.route('/api/lyrics', methods=['GET'])
 def api_lyrics():
+    _req_start = time_module.time()
     video_id = request.args.get('v')
     if not video_id:
         return jsonify({"error": "Missing video ID"}), 400
