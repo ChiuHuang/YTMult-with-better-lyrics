@@ -1223,6 +1223,13 @@ def get_search_queries(title, artist, ja_title='', ja_artist=''):
         c = re.sub(r'(?i)\s*-\s*(?:cover|official|remix|mv).*$', '', c)
         return c.strip(' -_./')
 
+    def clean_artist(a):
+        if not a: return ''
+        c = a
+        c = re.sub(r'(?i)[\(\[\{【「『（［]\s*(?:official|topic|channel|vevo)\s*[\)\]\}】」』）］]', '', c)
+        c = re.sub(r'(?i)\s*-\s*topic$', '', c)
+        return c.strip(' -_./')
+
     c_t = clean_title(title)
     c_a = clean_artist(artist)
 
