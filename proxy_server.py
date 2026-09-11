@@ -143,9 +143,19 @@ class LogTee:
         self.log_file = log_file
 
     def write(self, message):
+        # Handle bytes from click/flask (e.g. show_server_banner)
+        if isinstance(message, bytes):
+            try:
+                message = message.decode('utf-8', errors='replace')
+            except:
+                message = str(message)
         try:
             self.original_stream.write(message)
-        except: pass
+        except:
+            # If original expects bytes, try bytes
+            try:
+                self.original_stream.write(message.encode('utf-8', errors='replace'))
+            except: pass
         # Persist to file
         if self.log_file and message and message.strip():
             try:
