@@ -333,6 +333,13 @@ static void sendUIDump(void) {
     [[NSNotificationCenter defaultCenter] addObserverForName:@"YTMUClearMemoryCache" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
         if (g_lyricsCache) [g_lyricsCache removeAllObjects];
     }];
+    // Refresh JWT in background when app is opened / foregrounded so lyrics
+    // requests already have a token (manager no-ops if token is cached)
+    void (^prewarmJWT)(NSNotification *) = ^(NSNotification *note) {
+        [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
+    };
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
 }
 
 // Hook 2: 攔截靜態歌詞的 Cell (如果還存在的話)
