@@ -747,6 +747,16 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [self.displayLink invalidate];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    // Converge to the current song: covers stale sheets and fetches that
+    // finished before the view loaded (viewDidLoad resets lyrics).
+    NSString *vid = YTMUResolveCurrentVideoID();
+    if (vid && (![vid isEqualToString:self.loadingVideoID] || (self.lyrics.count == 0 && !self.isLoading))) {
+        [self fetchLyricsForVideo:vid];
+    }
+}
+
 - (void)handleLyricsDidLoad:(NSNotification *)notif {
     NSString *videoID = notif.object;
     NSArray *lyrics = notif.userInfo[@"lyrics"];
