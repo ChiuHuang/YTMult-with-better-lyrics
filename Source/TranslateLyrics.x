@@ -64,7 +64,7 @@ static void sendDebugLog(NSString *msg) {
     NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=DEBUG_%@", encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
 }
-static void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
+static void __attribute__((unused)) sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:payload ?: @{}];
     if (g_currentVideoID) dict[@"videoId"] = g_currentVideoID;
     dict[@"playbackTime"] = @(g_currentPlaybackTime);
@@ -175,7 +175,7 @@ static NSArray *YTMULyricsCacheLoad(NSString *videoID) {
     }
     return nil;
 }
-static NSDictionary *YTMULyricsCacheStats(void) {
+static __attribute__((unused)) NSDictionary *YTMULyricsCacheStats(void) {
     NSString *dir = YTMULyricsCacheDirectory();
     NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
     unsigned long long total = 0;
@@ -186,7 +186,7 @@ static NSDictionary *YTMULyricsCacheStats(void) {
     }
     return @{@"count": @(files.count), @"size": @(total), @"sizeMB": @(total/1024.0/1024.0)};
 }
-static void YTMULyricsCacheClearAll(void) {
+static void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
     NSString *dir = YTMULyricsCacheDirectory();
     [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
