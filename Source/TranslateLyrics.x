@@ -50,14 +50,34 @@ static BOOL g_globalLoadingInFlight = NO;      // YES while a full request chain
 static BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     id value = settings[key];
-    return value ? [value boolValue] : fallback;
+    return value [WAIT] [value boolValue] : fallback;
 }
 
-// 輔助工具：把除錯訊息傳給你的 Python 伺服器
+// 輔助工具：把除錯訊息傳給你的 Python 伺服器 (adds videoID context if available)
 static void sendDebugLog(NSString *msg) {
-    NSString *encodedMsg = [msg stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=DEBUG_%@", encodedMsg];
+    NSString *full = msg;
+    if (g_currentVideoID) {
+        full = [NSString stringWithFormat:@"%@ [v=%@ t=%.1f]", msg, g_currentVideoID, g_currentPlaybackTime];
+    }
+    NSLog(@"[YTMU] %@", full);
+    NSString *encodedMsg = [full stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=DEBUG_%@", encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
+}
+static void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
+    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:payload [WAIT]: @{}];
+    if (g_currentVideoID) dict[@"videoId"] = g_currentVideoID;
+    dict[@"playbackTime"] = @(g_currentPlaybackTime);
+    NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"type": @"APP_LOG", @"event": event, @"level": @"info", @"message": msg, @"payload": dict} options:0 error:nil];
+    if (json) {
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ytmtranslate.chiuhuang.dev/log"]];
+        req.HTTPMethod = @"POST";
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        req.HTTPBody = json;
+        [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
+    }
+    // also send as DEBUG_ GET for backward compat
+    sendDebugLog([NSString stringWithFormat:@"%@: %@ %@", event, msg, dict]);
 }
 
 
@@ -68,13 +88,18 @@ static void sendDebugLog(NSString *msg) {
     g_activePlayer = self;
     g_currentPlaybackTime = 0.0;
     if (self.currentVideoID) {
+        NSString *prev = g_currentVideoID;
         if (![self.currentVideoID isEqualToString:g_currentVideoID]) {
             g_currentVideoID = self.currentVideoID;
+            sendDebugLog([NSString stringWithFormat:@"🎵 Song changed: %@ -> %@ (prev=%@)", prev [WAIT]: @"(nil)", g_currentVideoID, prev [WAIT]: @"nil"]);
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
         } else {
+            sendDebugLog([NSString stringWithFormat:@"🔁 Song re-broadcast same videoID=%@", g_currentVideoID]);
             // Re-broadcast so panel loads on restore
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
         }
+    } else {
+        sendDebugLog(@"⚠️ didActivateVideo: currentVideoID is nil");
     }
 }
 
@@ -93,15 +118,15 @@ static NSString *dumpViewHierarchy(UIView *view, int indent) {
     [str appendFormat:@"<%@: %p; frame = (%.1f, %.1f; %.1f, %.1f); hidden = %@; alpha = %.2f; userInteraction = %@",
         NSStringFromClass([view class]), view,
         view.frame.origin.x, view.frame.origin.y, view.frame.size.width, view.frame.size.height,
-        view.hidden ? @"YES" : @"NO", view.alpha,
-        view.userInteractionEnabled ? @"YES" : @"NO"];
+        view.hidden [WAIT] @"YES" : @"NO", view.alpha,
+        view.userInteractionEnabled [WAIT] @"YES" : @"NO"];
     if (view.tag != 0) {
         [str appendFormat:@"; tag = %ld", (long)view.tag];
     }
     if ([view isKindOfClass:[UILabel class]]) {
-        [str appendFormat:@"; text = \"%@\"", ((UILabel *)view).text ?: @""];
+        [str appendFormat:@"; text = \"%@\"", ((UILabel *)view).text [WAIT]: @""];
     } else if ([view isKindOfClass:[UIButton class]]) {
-        [str appendFormat:@"; title = \"%@\"", [((UIButton *)view) titleForState:UIControlStateNormal] ?: @""];
+        [str appendFormat:@"; title = \"%@\"", [((UIButton *)view) titleForState:UIControlStateNormal] [WAIT]: @""];
     }
     if (view.gestureRecognizers.count > 0) {
         [str appendFormat:@"; gestures = %lu", (unsigned long)view.gestureRecognizers.count];
@@ -118,8 +143,8 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
     NSMutableString *str = [NSMutableString string];
     for (int i = 0; i < indent; i++) [str appendString:@"  "];
     [str appendFormat:@"<%@: %p; title = \"%@\"; view = %p; isViewLoaded = %@>\n",
-        NSStringFromClass([vc class]), vc, vc.title ?: @"", vc.isViewLoaded ? vc.view : nil,
-        vc.isViewLoaded ? @"YES" : @"NO"];
+        NSStringFromClass([vc class]), vc, vc.title [WAIT]: @"", vc.isViewLoaded [WAIT] vc.view : nil,
+        vc.isViewLoaded [WAIT] @"YES" : @"NO"];
     for (UIViewController *child in vc.childViewControllers) {
         [str appendString:dumpVCHierarchy(child, indent + 1)];
     }
@@ -134,7 +159,7 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
 static void sendUIDump(void) {
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
-    [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID ?: @"(none)"];
+    [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID [WAIT]: @"(none)"];
     [dump appendFormat:@"Playback Time: %f\n\n", g_currentPlaybackTime];
 
     UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
@@ -257,7 +282,7 @@ static void sendUIDump(void) {
 
     sendDebugLog([NSString stringWithFormat:@"準備向伺服器要歌詞: %@", videoID]);
 
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
+    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@", videoID];
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -598,7 +623,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     statusLabel.text = @"";
 
     // Fast Request (LRCLIB + GTX)
-    NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&fast=1", videoID];
+    NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@&fast=1", videoID];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![self.loadingVideoID isEqualToString:videoID]) return;
@@ -625,7 +650,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                     return;
                 }
 
-                NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
+                NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@", videoID];
                 if (jwt) {
                     fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
                 }
@@ -760,7 +785,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             return;
         }
 
-        NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&force=1", g_currentVideoID];
+        NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@&force=1", g_currentVideoID];
         if (jwt) {
             fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
         }
@@ -995,6 +1020,11 @@ static BOOL isLyricsEngagementPanel(UIViewController *vc) {
     } else if (pidObj) {
         pid = [pidObj description];
     }
+    if (pid) {
+        // Log panelIdentifier for debugging button confusion
+        // (not spammy: only when panel appears)
+        // sendDebugLog([NSString stringWithFormat:@"🔍 panelIdentifier=%@", pid]);
+    }
     if ([pid.lowercaseString containsString:@"lyric"]) return YES;
 }
 
@@ -1052,22 +1082,35 @@ static BOOL isLyricsViewVisibleOnScreen(void) {
 }
 
 static void openLyricsFromViewController(UIViewController *parentVC) {
-    sendDebugLog(@"🎵 openLyricsFromViewController called");
+    NSString *vcName = parentVC [WAIT] NSStringFromClass([parentVC class]) : @"nil";
+    sendDebugLog([NSString stringWithFormat:@"🎵 openLyricsFromViewController called parent=%@ video=%@ container=%@", vcName, g_currentVideoID [WAIT]: @"nil", g_activeEngagementPanelContainer [WAIT] NSStringFromClass([g_activeEngagementPanelContainer class]) : @"nil"]);
 
     if (g_activeEngagementPanelContainer) {
         NSArray *panelIDs = @[@"PAmusic_watch_lyrics_panel", @"music_watch_lyrics_panel", @"lyrics"];
+        BOOL didCall = NO;
         for (NSString *pid in panelIDs) {
             if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:animated:)]) {
+                sendDebugLog([NSString stringWithFormat:@"📤 Calling showEngagementPanelWithIdentifier:animated: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
+                didCall = YES;
                 break;
             } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:)]) {
+                sendDebugLog([NSString stringWithFormat:@"📤 Calling showEngagementPanelWithIdentifier: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:) withObject:pid];
+                didCall = YES;
                 break;
             } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(openEngagementPanelWithIdentifier:animated:)]) {
+                sendDebugLog([NSString stringWithFormat:@"📤 Calling openEngagementPanelWithIdentifier:animated: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(openEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
+                didCall = YES;
                 break;
             }
         }
+        if (!didCall) {
+            sendDebugLog(@"⚠️ No known engagement panel selector found on container");
+        }
+    } else {
+        sendDebugLog(@"⚠️ g_activeEngagementPanelContainer is nil — will rely on fallback sheet");
     }
 
     // Fallback: if native panel didn't open on screen within 0.2s, present YTMULyricsViewController as bottom sheet
@@ -1383,7 +1426,7 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
     BOOL isLyrics = NO;
     if ([v isKindOfClass:[UILabel class]]) {
         UILabel *lbl = (UILabel *)v;
-        NSString *txt = lbl.text ?: lbl.attributedText.string;
+        NSString *txt = lbl.text [WAIT]: lbl.attributedText.string;
         if (txt) {
             NSString *low = txt.lowercaseString;
             if ([txt containsString:@"歌詞"] || [txt containsString:@"歌词"] || [low containsString:@"lyric"] || [low containsString:@"unavailable"] || [txt containsString:@"沒有歌詞"] || [txt containsString:@"没有歌词"] || [txt containsString:@"無歌詞"] || [txt containsString:@"無提供歌詞"]) {

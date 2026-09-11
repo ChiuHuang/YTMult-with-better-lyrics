@@ -49,10 +49,26 @@ def login_required(f):
 
 
 import logging
+import uuid
+import traceback
+import atexit
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
-_recent_logs = deque(maxlen=500)
-_structured_logs = deque(maxlen=300)
+# Server instance identity - regenerated on each start
+SERVER_INSTANCE_ID = str(uuid.uuid4())
+SERVER_START_TIME = datetime.now()
+SERVER_START_TS = SERVER_START_TIME.isoformat()
+
+_recent_logs = deque(maxlen=800)
+_structured_logs = deque(maxlen=500)
+_recent_requests = deque(maxlen=100)
+_crash_logs = deque(maxlen=100)
+
+# Persistent log files
+LOG_DIR = "logs"
+SERVER_LOG_FILE = os.path.join(LOG_DIR, "server.log")
+CRASH_LOG_FILE = os.path.join(LOG_DIR, "crash.log")
+UI_DUMP_DIR = LOG_DIR
 
 def _classify_log(msg):
     """Classify a log message into (level, icon) based on content."""
@@ -66,26 +82,35 @@ def _classify_log(msg):
         return None, None
     if stripped.startswith(('Error', 'error', 'Traceback')):
         return 'error', 'error'
-    emoji_map = {
-        '\u2705': ('success', 'check_circle'),
-        '\u274c': ('error', 'cancel'),
-        '\u26a0': ('warning', 'warning'),
-        '\u23f3': ('pending', 'hourglass_empty'),
-        '\U0001f50d': ('info', 'person_search'),
-        '\U0001f310': ('translate', 'translate'),
-        '\U0001f4e4': ('response', 'upload'),
-        '\U0001f31f': ('request', 'search'),
-        '\U0001f9f9': ('info', 'delete_sweep'),
-        '\U0001f4e6': ('info', 'upload_file'),
-        '\U0001f3b5': ('info', 'music_note'),
-        '\U0001f4f1': ('device', 'phone_iphone'),
+    # Plain tag mapping (no emoji literals per style)
+    tag_map = {
+        '[OK]': ('success', 'check_circle'),
+        '[FAIL]': ('error', 'cancel'),
+        '[WARN]': ('warning', 'warning'),
+        '[WAIT]': ('pending', 'hourglass_empty'),
+        '[SEARCH]': ('info', 'person_search'),
+        '[TRANS]': ('translate', 'translate'),
+        '[SEND]': ('response', 'upload'),
+        '[REQ': ('request', 'search'),
+        '[CLEAN]': ('info', 'delete_sweep'),
+        '[DUMP]': ('info', 'upload_file'),
+        '[MUSIC]': ('info', 'music_note'),
+        '[iOS': ('device', 'phone_iphone'),
+        '[ALERT]': ('warning', 'notification_important'),
+        '[CRASH]': ('error', 'error'),
+        '[EXC]': ('error', 'error'),
     }
-    for emoji, (level, icon) in emoji_map.items():
-        if emoji in stripped:
+    for tag, (level, icon) in tag_map.items():
+        if tag in stripped:
             return level, icon
     kw_map = [
         ('[iOS Tweak]', 'device', 'phone_iphone'),
+        ('[REQ', 'request', 'search'),
+        ('[UI_DUMP]', 'device', 'phone_iphone'),
+        ('[CRASH]', 'error', 'error'),
+        ('[EXC]', 'error', 'error'),
         ('Cache hit', 'success', 'cached'),
+        ('Cache miss', 'warning', 'cached'),
         ('Got result from in-flight', 'success', 'cached'),
         ('Returning', 'response', 'upload'),
         ('Waiting for in-flight', 'pending', 'hourglass_empty'),
@@ -100,6 +125,9 @@ def _classify_log(msg):
         ('Saved to', 'success', 'save'),
         ('Rate limited', 'warning', 'speed'),
         ('All keys failed', 'error', 'vpn_key_off'),
+        ('[In-Flight]', 'pending', 'hourglass_empty'),
+        ('[Provider]', 'info', 'cloud'),
+        ('[Cache]', 'success', 'cached'),
     ]
     for keyword, level, icon in kw_map:
         if keyword in stripped:
@@ -110,11 +138,20 @@ def _classify_log(msg):
 
 
 class LogTee:
-    def __init__(self, original_stream):
+    def __init__(self, original_stream, log_file=None):
         self.original_stream = original_stream
+        self.log_file = log_file
 
     def write(self, message):
-        self.original_stream.write(message)
+        try:
+            self.original_stream.write(message)
+        except: pass
+        # Persist to file
+        if self.log_file and message and message.strip():
+            try:
+                with open(self.log_file, 'a', encoding='utf-8') as f:
+                    f.write(message if message.endswith('\n') else message + '\n')
+            except: pass
         if message:
             stripped = message.strip()
             if 'HTTP/1.' in stripped or 'GET /api/admin/' in stripped or 'POST /api/admin/' in stripped:
@@ -131,13 +168,63 @@ class LogTee:
                     })
 
     def flush(self):
-        self.original_stream.flush()
-
-sys.stdout = LogTee(sys.stdout)
-sys.stderr = LogTee(sys.stderr)
+        try: self.original_stream.flush()
+        except: pass
+        if self.log_file:
+            try:
+                with open(self.log_file, 'a', encoding='utf-8'): pass
+            except: pass
 
 if not os.path.exists('logs'):
     os.makedirs('logs')
+# Rotate server.log if too large (>5MB)
+try:
+    if os.path.exists(SERVER_LOG_FILE) and os.path.getsize(SERVER_LOG_FILE) > 5*1024*1024:
+        os.rename(SERVER_LOG_FILE, SERVER_LOG_FILE + ".1")
+except: pass
+
+sys.stdout = LogTee(sys.stdout, log_file=SERVER_LOG_FILE)
+sys.stderr = LogTee(sys.stderr, log_file=CRASH_LOG_FILE)
+
+def _log_crash(exc_type, exc_val, exc_tb):
+    msg = ''.join(traceback.format_exception(exc_type, exc_val, exc_tb))
+    entry = {
+        'ts': datetime.now().isoformat(),
+        'type': exc_type.__name__ if exc_type else 'Unknown',
+        'msg': str(exc_val)[:500],
+        'trace': msg[:4000],
+        'instance': SERVER_INSTANCE_ID,
+    }
+    _crash_logs.append(entry)
+    # also write to crash file and structured logs
+    try:
+        with open(CRASH_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"\n[{entry['ts']}] [CRASH] {entry['type']}: {entry['msg']}\n{msg}\n")
+    except: pass
+    try: print(f"[CRASH] {entry['type']}: {entry['msg']}")
+    except: pass
+    # also push to structured for UI
+    _structured_logs.append({'ts': datetime.now().strftime('%H:%M:%S'), 'level': 'error', 'icon': 'error', 'msg': f"[CRASH] {entry['type']}: {entry['msg']}"})
+
+# Global crash handlers - prevent silent death
+_old_excepthook = sys.excepthook
+def _global_excepthook(exc_type, exc_val, exc_tb):
+    _log_crash(exc_type, exc_val, exc_tb)
+    try: _old_excepthook(exc_type, exc_val, exc_tb)
+    except: pass
+sys.excepthook = _global_excepthook
+
+_old_thread_excepthook = getattr(threading, 'excepthook', None)
+def _thread_excepthook(args):
+    _log_crash(args.exc_type, args.exc_value, args.exc_traceback)
+    if _old_thread_excepthook:
+        try: _old_thread_excepthook(args)
+        except: pass
+threading.excepthook = _thread_excepthook
+
+def _handle_uncaught_exception(e):
+    _log_crash(type(e), e, e.__traceback__)
+    return jsonify({'error': 'Internal server error', 'instance': SERVER_INSTANCE_ID}), 500
 
 # ============================================================
 # LRC Parser & Karaoke Interpolation
@@ -513,7 +600,7 @@ def fetch_yt_lyrics(video_id):
             if lyrics and lyrics.get('lyrics'):
                 return {'plain': lyrics['lyrics'], 'source': 'YouTube Music'}
     except Exception as e:
-        print(f"  ❌ ytmusicapi error: {e}")
+        print(f"  [FAIL] ytmusicapi error: {e}")
     return None
 
 # ============================================================
@@ -534,7 +621,7 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
-            print(f"  ❌ Cubey API error: {response.status_code}")
+            print(f"  [FAIL] Cubey API error: {response.status_code}")
             return None
 
         best_lyrics = None
@@ -577,7 +664,7 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
 
         return best_lyrics
     except Exception as e:
-        print(f"  ❌ Cubey API request failed: {e}")
+        print(f"  [FAIL] Cubey API request failed: {e}")
         return None
 
 
@@ -1004,13 +1091,6 @@ def get_search_queries(title, artist, ja_title='', ja_artist=''):
         c = re.sub(r'(?i)\s*-\s*(?:cover|official|remix|mv).*$', '', c)
         return c.strip(' -_./')
 
-    def clean_artist(a):
-        if not a: return ''
-        c = a
-        c = re.sub(r'(?i)[\(\[\{【「『（［]\s*(?:official|topic|channel|vevo)\s*[\)\]\}】」』）］]', '', c)
-        c = re.sub(r'(?i)\s*-\s*topic$', '', c)
-        return c.strip(' -_./')
-
     c_t = clean_title(title)
     c_a = clean_artist(artist)
 
@@ -1137,7 +1217,7 @@ def clear_not_found_caches():
             except Exception:
                 pass
     if removed > 0:
-        print(f"🧹 Cleaned {removed} empty/not-found cache files at startup.")
+        print(f"[CLEAN] Cleaned {removed} empty/not-found cache files at startup.")
 
 
 # ============================================================
@@ -1162,20 +1242,20 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
         lrc = fetch_lrclib(q_title, q_artist, album, duration)
         if lrc:
             if lrc.get('instrumental'):
-                result = {'lyrics': [{'time': 0, 'text': '🎵 Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
+                result = {'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
                 break
             elif lrc.get('synced'):
-                print(f"  [fast] ✅ LRCLIB synced! (query: {q_title} - {q_artist})")
+                print(f"  [fast] [OK] LRCLIB synced! (query: {q_title} - {q_artist})")
                 result = {'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}
                 break
             elif lrc.get('plain') and not result:
-                print(f"  [fast] ⚠️ LRCLIB plain (query: {q_title} - {q_artist})")
+                print(f"  [fast] [WARN]️ LRCLIB plain (query: {q_title} - {q_artist})")
                 result = {'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}
 
     if not result:
         yt = fetch_yt_lyrics(video_id)
         if yt and yt.get('plain'):
-            print(f"  [fast] ✅ YouTube plain!")
+            print(f"  [fast] [OK] YouTube plain!")
             result = {'lyrics': parse_plain(yt['plain']), 'source': 'YouTube Music', 'synced': False}
 
     if not result:
@@ -1215,14 +1295,14 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             q_artist = q['artist']
             cubey = fetch_cubey(jwt_token, video_id, q_title, q_artist, duration)
             if cubey and cubey.get('synced'):
-                print(f"  ✅ Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q_title} - {q_artist})")
+                print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q_title} - {q_artist})")
                 parsed = parse_lrc(cubey['synced'], duration)
                 result = {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
                 # Skip other providers - we already have the best
                 result['song'] = title
                 result['artist'] = artist
                 if translate_to and result.get('lyrics'):
-                    print(f"  🌐 Translating {len(result['lyrics'])} lines with Cohere...")
+                    print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
                     texts = [l['text'] for l in result['lyrics'] if l.get('text')]
                     translations = cohere_translate(texts, translate_to)
                     for i, lyric in enumerate(result['lyrics']):
@@ -1241,17 +1321,17 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
         if lrc:
             if lrc.get('instrumental'):
                 result = {
-                    'lyrics': [{'time': 0, 'text': '🎵 Instrumental', 'translated': '純音樂', 'duration': 0}],
+                    'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}],
                     'source': 'LRCLib', 'synced': False
                 }
                 break
             elif lrc.get('synced'):
-                print(f"  ✅ LRCLIB: synced lyrics found! (query: {q_title} - {q_artist})")
+                print(f"  [OK] LRCLIB: synced lyrics found! (query: {q_title} - {q_artist})")
                 parsed = parse_lrc(lrc['synced'], duration)
                 result = {'lyrics': parsed, 'source': 'LRCLib', 'synced': True}
                 break
             elif lrc.get('plain') and not result:
-                print(f"  ⚠️ LRCLIB: plain lyrics only (query: {q_title} - {q_artist})")
+                print(f"  [WARN]️ LRCLIB: plain lyrics only (query: {q_title} - {q_artist})")
                 parsed = parse_plain(lrc['plain'])
                 result = {'lyrics': parsed, 'source': 'LRCLib', 'synced': False}
 
@@ -1262,18 +1342,18 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             uni = fetch_unison(video_id, q['title'], q['artist'], duration)
             if uni:
                 if uni.get('parsed'):
-                    print(f"  ✅ Unison: TTML lyrics found! (query: {q['title']})")
+                    print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
                     if not result or not result.get('synced'):
                         result = {'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}
                         break
                 elif uni.get('synced'):
-                    print(f"  ✅ Unison: synced LRC lyrics found! (query: {q['title']})")
+                    print(f"  [OK] Unison: synced LRC lyrics found! (query: {q['title']})")
                     parsed = parse_lrc(uni['synced'], duration)
                     if not result or not result.get('synced'):
                         result = {'lyrics': parsed, 'source': 'Unison', 'synced': True}
                         break
                 elif uni.get('plain') and not result:
-                    print(f"  ⚠️ Unison: plain lyrics only (query: {q['title']})")
+                    print(f"  [WARN]️ Unison: plain lyrics only (query: {q['title']})")
                     parsed = parse_plain(uni['plain'])
                     result = {'lyrics': parsed, 'source': 'Unison', 'synced': False}
 
@@ -1282,13 +1362,13 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
         print(f"  [3/3] Trying YouTube Music lyrics...")
         yt = fetch_yt_lyrics(video_id)
         if yt and yt.get('plain'):
-            print(f"  ✅ YouTube: plain lyrics found!")
+            print(f"  [OK] YouTube: plain lyrics found!")
             parsed = parse_plain(yt['plain'])
             result = {'lyrics': parsed, 'source': yt.get('source', 'YouTube Music'), 'synced': False}
 
     # No lyrics found
     if not result:
-        print(f"  ❌ No lyrics found from any provider")
+        print(f"  [FAIL] No lyrics found from any provider")
         result = {
             'lyrics': [{'time': 0, 'text': f'No lyrics found', 'translated': f'找不到歌詞: {title}', 'duration': 0}],
             'source': 'none', 'synced': False
@@ -1300,7 +1380,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
     # Translation
     if translate_to and result.get('lyrics'):
-        print(f"  🌐 Translating {len(result['lyrics'])} lines with Cohere...")
+        print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
         texts = [l['text'] for l in result['lyrics'] if l.get('text')]
         translations = cohere_translate(texts, translate_to)
 
@@ -1369,7 +1449,9 @@ def api_lyrics():
 
     if video_id.startswith('DEBUG_'):
         debug_msg = video_id[6:]
-        print(f"📱 [iOS Tweak] {debug_msg}")
+        client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
+        ua = request.headers.get('User-Agent', '')[:120]
+        print(f"[iOS] [iOS Tweak] {debug_msg} | ip={client_ip} ua={ua}")
         return jsonify({"ok": True, "source": "debug"})
 
     translate_to = request.args.get('lang', 'zh-TW')
@@ -1377,10 +1459,20 @@ def api_lyrics():
     fast_mode = request.args.get('fast', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
 
+    client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
+    ua = request.headers.get('User-Agent', '')[:120]
+    all_args = dict(request.args)
+    if 'jwt' in all_args and all_args['jwt']:
+        all_args['jwt'] = all_args['jwt'][:12] + '...'
+    req_id = _secrets.token_hex(3)
+    _recent_requests.append({'id': req_id, 'v': video_id, 'mode': 'fast' if fast_mode else 'full', 'ip': client_ip, 'ts': datetime.now().isoformat()})
+
     print("=" * 60)
     mode_str = 'FAST' if fast_mode else ('JWT+Cohere' if jwt_token else 'Normal')
     if force_mode: mode_str += ' [FORCE]'
-    print(f"🌟 Lyrics request: {video_id} [{mode_str}]")
+    print(f"[REQ] [REQ {req_id}] Lyrics request: {video_id} [{mode_str}] lang={translate_to}")
+    print(f"  [REQ {req_id}] ip={client_ip} ua={ua}")
+    print(f"  [REQ {req_id}] args={all_args} has_jwt={bool(jwt_token)}")
     print("=" * 60)
 
     # Cache keys — fast and full are stored separately
@@ -1407,14 +1499,22 @@ def api_lyrics():
 
     if wait_event is not None:
         # We're a duplicate — wait for the primary request to finish
-        print(f"⏳ Waiting for in-flight request for {video_id}...")
+        print(f"[WAIT] [REQ {req_id}] [In-Flight] Waiting for primary request dedup_key={dedup_key}...")
+        t0 = time_module.time()
         wait_event.wait(timeout=30)
+        waited = time_module.time() - t0
+        print(f"  [REQ {req_id}] [In-Flight] Wait done after {waited:.2f}s")
         # Check full cache first (might be better than fast), then fast
         cached = get_cached(full_cache_key) or get_cached(fast_cache_key)
         if cached:
-            print(f"✅ Got result from in-flight wait")
+            print(f"[OK] [REQ {req_id}] Got result from in-flight wait source={cached.get('source')} lines={len(cached.get('lyrics',[]))} synced={cached.get('synced')}")
+            print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight)")
+            print("=" * 60)
             return jsonify(cached)
         # Fell through (timeout or no cache) — return empty
+        print(f"[WARN] [REQ {req_id}] [In-Flight] No cache after wait (timeout or miss) - returning none")
+        print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight miss)")
+        print("=" * 60)
         return jsonify({
             'lyrics': [{'time': 0, 'text': 'No lyrics found', 'translated': '找不到歌詞', 'duration': 0}],
             'source': 'none', 'synced': False
@@ -1424,17 +1524,36 @@ def api_lyrics():
     if not force_mode:
         # Fast mode: accept full result too (full is strictly better)
         cached = get_cached(full_cache_key) if fast_mode else get_cached(full_cache_key)
+        cache_source = 'full'
         if not cached:
             cached = get_cached(cache_key)
+            cache_source = 'mode-specific' if cached else 'none'
         if cached:
-            print(f"✅ Cache hit!")
+            age_info = ''
+            try:
+                path = f"cache/lyrics/{(fast_cache_key if cache_source=='mode-specific' else full_cache_key)}.json"
+                import os as _os
+                if _os.path.exists(path):
+                    with open(path,'r',encoding='utf-8') as f:
+                        entry = json.load(f)
+                        ts = datetime.fromisoformat(entry['ts'])
+                        age = (datetime.now()-ts).total_seconds()
+                        age_info = f" age={age/3600:.1f}h"
+            except: pass
+            print(f"[OK] [REQ {req_id}] [Cache] hit! key={cache_source} source={cached.get('source')} lines={len(cached.get('lyrics',[]))} synced={cached.get('synced')}{age_info}")
+            print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (cache)")
             # Release in-flight slot immediately (no work needed)
             if dedup_key:
                 with _in_flight_lock:
                     if dedup_key in _in_flight:
                         _in_flight[dedup_key].set()
                         del _in_flight[dedup_key]
+            print("=" * 60)
             return jsonify(cached)
+        else:
+            print(f"  [REQ {req_id}] [Cache] miss for both full and fast keys")
+    else:
+        print(f"  [REQ {req_id}] [Cache] bypassed (force mode)")
 
     # --- We are the primary request: do the actual work ---
     def release_inflight():
@@ -1445,35 +1564,51 @@ def api_lyrics():
                     del _in_flight[dedup_key]
 
     try:
-        print(f"🔍 Looking up song info...")
+        print(f"[SEARCH] [REQ {req_id}] Looking up song info via ytmusicapi...")
+        t_song = time_module.time()
         song_info = get_song_info(video_id)
+        print(f"  [REQ {req_id}] get_song_info took {(time_module.time()-t_song)*1000:.0f}ms")
 
         if not song_info:
+            print(f"[FAIL] [REQ {req_id}] Could not identify song (get_song_info returned None)")
             release_inflight()
             return jsonify({
-                'lyrics': [{'time': 0, 'text': 'Could not identify song', 'translated': '無法識別歌曲', 'duration': 0}],
+                'lyrics': [{'time': 0, 'text': 'Could not identify song', 'translated': 'Unable to identify song', 'duration': 0}],
                 'source': 'error', 'synced': False
             })
 
-        print(f"🎵 {song_info['title']} - {song_info['artist']} ({song_info['duration']}s)")
+        print(f"[MUSIC] [REQ {req_id}] {song_info['title']} - {song_info['artist']} ({song_info['duration']}s) album='{song_info.get('album','')}' ja_title='{song_info.get('ja_title','')}' ja_artist='{song_info.get('ja_artist','')}'")
+        queries = get_search_queries(song_info['title'], song_info['artist'], song_info.get('ja_title',''), song_info.get('ja_artist',''))
+        print(f"  [REQ {req_id}] Generated {len(queries)} search queries: {queries}")
 
         if fast_mode:
+            print(f"  [REQ {req_id}] Fast mode pipeline start")
             result = fetch_fast_lyrics(video_id, song_info, translate_to)
             if not result:
+                print(f"  [REQ {req_id}] Fast pipeline returned None -> none")
                 result = {
-                    'lyrics': [{'time': 0, 'text': 'No lyrics found', 'translated': '找不到歌詞', 'duration': 0}],
+                    'lyrics': [{'time': 0, 'text': 'No lyrics found', 'translated': 'No lyrics found', 'duration': 0}],
                     'source': 'none', 'synced': False
                 }
+            else:
+                print(f"  [REQ {req_id}] Fast pipeline success source={result.get('source')} lines={len(result.get('lyrics',[]))}")
         else:
+            print(f"  [REQ {req_id}] Full pipeline start (jwt={'yes' if jwt_token else 'no'})")
             result = fetch_all_lyrics(video_id, song_info, translate_to, jwt_token)
 
+    except Exception as e:
+        _log_crash(type(e), e, e.__traceback__)
+        release_inflight()
+        return jsonify({'error': str(e), 'instance': SERVER_INSTANCE_ID}), 500
     finally:
         release_inflight()
 
     # Cache result
+    is_nf = is_not_found_result(result)
+    print(f"  [REQ {req_id}] Caching result to {cache_key} is_not_found={is_nf}")
     set_cached(cache_key, result)
 
-    print(f"📤 Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')}")
+    print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
     print("=" * 60)
 
     return jsonify(result)
@@ -1609,32 +1744,200 @@ def admin_clear_empty_caches():
     return jsonify({'cleared': removed})
 
 
+@app.route('/api/admin/server_info', methods=['GET'])
+@login_required
+def admin_server_info():
+    uptime = (datetime.now() - SERVER_START_TIME).total_seconds()
+    # count log files
+    log_files = []
+    if os.path.exists(LOG_DIR):
+        for fname in os.listdir(LOG_DIR):
+            fpath = os.path.join(LOG_DIR, fname)
+            try:
+                sz = os.path.getsize(fpath)
+                mt = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
+                log_files.append({'name': fname, 'size': sz, 'modified': mt})
+            except: pass
+    return jsonify({
+        'instance_id': SERVER_INSTANCE_ID,
+        'start_time': SERVER_START_TS,
+        'uptime_seconds': int(uptime),
+        'uptime_human': f"{int(uptime//3600)}h {int((uptime%3600)//60)}m {int(uptime%60)}s",
+        'structured_logs': len(_structured_logs),
+        'recent_logs': len(_recent_logs),
+        'crash_logs': len(_crash_logs),
+        'recent_requests': list(_recent_requests)[-20:],
+        'log_files': sorted(log_files, key=lambda x: x['modified'], reverse=True)[:20],
+    })
+
+@app.route('/api/admin/logs/download', methods=['GET'])
+@login_required
+def admin_logs_download():
+    # Bundle structured + recent + crash into downloadable text
+    from flask import Response
+    lines = []
+    lines.append(f"# Server instance {SERVER_INSTANCE_ID} start {SERVER_START_TS}")
+    lines.append(f"# Generated {datetime.now().isoformat()}")
+    lines.append("="*60)
+    lines.append("## Structured logs")
+    for e in list(_structured_logs):
+        lines.append(f"[{e.get('ts')}] [{e.get('level')}] {e.get('msg')}")
+    lines.append("="*60)
+    lines.append("## Recent raw logs")
+    for l in list(_recent_logs):
+        lines.append(l.rstrip())
+    lines.append("="*60)
+    lines.append("## Crash logs")
+    for c in list(_crash_logs):
+        lines.append(f"[{c.get('ts')}] {c.get('type')}: {c.get('msg')}")
+        lines.append(c.get('trace','')[:2000])
+    content = "\n".join(lines)
+    return Response(content, mimetype="text/plain", headers={"Content-Disposition": f"attachment; filename=server_logs_{SERVER_INSTANCE_ID[:8]}.txt"})
+
+@app.route('/api/admin/crash_logs', methods=['GET'])
+@login_required
+def admin_crash_logs():
+    return jsonify({'logs': list(_crash_logs), 'total': len(_crash_logs)})
+
+@app.route('/api/admin/crash_logs/clear', methods=['POST'])
+@login_required
+def admin_crash_clear():
+    _crash_logs.clear()
+    # also truncate crash file
+    try:
+        open(CRASH_LOG_FILE, 'w').close()
+    except: pass
+    return jsonify({'ok': True})
+
+@app.route('/api/admin/files', methods=['GET'])
+@login_required
+def admin_files():
+    result = []
+    if os.path.exists(LOG_DIR):
+        for fname in sorted(os.listdir(LOG_DIR), key=lambda f: os.path.getmtime(os.path.join(LOG_DIR, f)), reverse=True):
+            fpath = os.path.join(LOG_DIR, fname)
+            if not os.path.isfile(fpath): continue
+            try:
+                stat = os.stat(fpath)
+                result.append({
+                    'name': fname,
+                    'size': stat.st_size,
+                    'size_human': f"{stat.st_size/1024:.1f}KB" if stat.st_size < 1024*1024 else f"{stat.st_size/1024/1024:.1f}MB",
+                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    'is_log': fname.endswith('.log') or fname.startswith('UI_DUMP') or fname.endswith('.txt'),
+                })
+            except: pass
+    # also include cache dir stats
+    cache_info = {}
+    try:
+        if os.path.exists('cache/lyrics'):
+            cache_info['lyrics_count'] = len([f for f in os.listdir('cache/lyrics') if f.endswith('.json')])
+        if os.path.exists('cache/translate'):
+            cache_info['translate_count'] = len([f for f in os.listdir('cache/translate') if f.endswith('.json')])
+    except: pass
+    return jsonify({'files': result, 'cache': cache_info})
+
+@app.route('/api/admin/files/download', methods=['GET'])
+@login_required
+def admin_files_download():
+    fname = request.args.get('file','')
+    # sanitize
+    if not fname or '/' in fname or '\\' in fname or '..' in fname:
+        return jsonify({'error': 'Invalid file'}), 400
+    fpath = os.path.join(LOG_DIR, fname)
+    if not os.path.exists(fpath):
+        return jsonify({'error': 'Not found'}), 404
+    from flask import send_file
+    return send_file(fpath, as_attachment=True)
+
+@app.errorhandler(404)
+def handle_404(e):
+    # log but not crash
+    print(f"[WARN] 404 {request.path} from {request.remote_addr}")
+    return jsonify({'error': 'Not found'}), 404
+
+@app.errorhandler(500)
+def handle_500(e):
+    _log_crash(type(e), e, getattr(e, '__traceback__', None))
+    return jsonify({'error': 'Internal error', 'instance': SERVER_INSTANCE_ID}), 500
+
 @app.route('/log', methods=['POST'])
 def proxy_log():
     try:
         data = request.get_json(force=True)
         req_type = data.get('type', '')
 
+        if req_type == "APP_LOG":
+            event = data.get('event', 'unknown')
+            level = data.get('level', 'info')
+            message = data.get('message', '')
+            payload = data.get('payload', {})
+            timestamp = data.get('timestamp') or datetime.now().isoformat(timespec='milliseconds')
+            vid = payload.get('videoId') or payload.get('videoID') or ''
+            client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
+            if vid:
+                print(f"[iOS] [iOS Tweak] [{timestamp}] [{level.upper()}] {event}: {message} | payload={payload} ip={client_ip}")
+            else:
+                print(f"[iOS] [iOS Tweak] [{timestamp}] [{level.upper()}] {event}: {message}")
+                if payload:
+                    print(f"  [iOS] payload={payload} ip={client_ip}")
+            return jsonify({"status": "ok"})
+
         if req_type == "UI_DUMP":
             os.makedirs("logs", exist_ok=True)
             timestamp = datetime.now().strftime("%H-%M-%S")
-            print(f"\n[{timestamp}] 📦 UI Dump received!")
-
             dump_content = data.get('request_body', '')
+            vc_count = dump_content.count('ViewController')
+            win_count = dump_content.count('[WINDOW:')
+            has_9999 = '9999' in dump_content
+            has_engagement = 'Engagement' in dump_content
+            has_lyrics_chip = 'No lyrics found' in dump_content or 'lyric' in dump_content.lower()
+            hidden_yes = dump_content.count('hidden = YES')
+            hidden_no = dump_content.count('hidden = NO')
+            video_id_match = re.search(r'Current VideoID:\s*(\S+)', dump_content)
+            playback_match = re.search(r'Playback Time:\s*([\d\.]+)', dump_content)
+            vid = video_id_match.group(1) if video_id_match else '?'
+            ptime = playback_match.group(1) if playback_match else '?'
+            print(f"\n[ALERT] [UI_DUMP {timestamp}] [DUMP] UI Dump received! video={vid} t={ptime}s vc={vc_count} win={win_count} has9999={has_9999} hasEngagement={has_engagement} hasLyricsChip={has_lyrics_chip} hiddenYES={hidden_yes} hiddenNO={hidden_no}")
+            if not has_9999:
+                print(f"  [WARN] [UI_DUMP] Modded lyrics view tag 9999 NOT found - panel will show official!")
+            if not has_engagement:
+                print(f"  [WARN] [UI_DUMP] No Engagement panel detected - user may not have opened lyrics panel")
+            if not has_lyrics_chip:
+                print(f"  [WARN] [UI_DUMP] No lyrics chip text detected - button may be hidden/locked or ASDisplayView (unlock failed)")
+
             filepath = f"logs/UI_DUMP_{timestamp}.txt"
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(dump_content)
-            print(f"✅ Saved to {filepath}")
+            print(f"[OK] [UI_DUMP] Saved to {filepath} ({len(dump_content)} bytes)")
+            return jsonify({"status": "ok"})
+
+        if req_type == "CRASH":
+            # iOS tweak crash report
+            payload = data.get('payload', {})
+            msg = data.get('message', 'iOS crash')
+            print(f"[CRASH] [iOS] {msg} payload={payload}")
+            _crash_logs.append({'ts': datetime.now().isoformat(), 'type': 'iOS_Crash', 'msg': msg, 'trace': str(payload)[:3000], 'instance': SERVER_INSTANCE_ID})
+            try:
+                with open(CRASH_LOG_FILE, 'a', encoding='utf-8') as f:
+                    f.write(f"\n[{datetime.now().isoformat()}] [CRASH] iOS: {msg} {payload}\n")
+            except: pass
+            return jsonify({"status": "ok"})
+
+        print(f"[WARN] Unknown log type: {req_type} payload={data}")
+        return jsonify({"status": "ok"})
 
     except Exception as e:
-        print("Log error:", e)
-
-    return jsonify({"status": "ok"})
+        print(f"[FAIL] [LOG] error: {e}")
+        import traceback as _tb; _tb.print_exc()
+        _log_crash(type(e), e, e.__traceback__)
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == '__main__':
     print("=" * 60)
-    print("🎵 YTMusic Ultimate - Lyrics API Server")
+    print("[MUSIC] YTMusic Ultimate - Lyrics API Server")
+    print(f"Instance: {SERVER_INSTANCE_ID} started {SERVER_START_TS}")
     print("=" * 60)
     print("Providers (priority order):")
     print("  0. Cubey API  (Musixmatch/KuGou/NetEase, requires JWT)")
@@ -1645,8 +1948,18 @@ if __name__ == '__main__':
     print("Auth: Cloudflare Turnstile via in-app WKWebView")
     print("=" * 60)
     print("Server: http://0.0.0.0:20016")
+    print(f"Logs: {SERVER_LOG_FILE} | Crash: {CRASH_LOG_FILE}")
     print("=" * 60)
+    # Log startup to files
+    try:
+        with open(SERVER_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"\n{'='*60}\n[{SERVER_START_TS}] START instance {SERVER_INSTANCE_ID}\n{'='*60}\n")
+    except: pass
 
     clear_not_found_caches()
-    app.run(host='0.0.0.0', port=20016, debug=True)
+    try:
+        app.run(host='0.0.0.0', port=20016, debug=False, use_reloader=False, threaded=True)
+    except Exception as e:
+        _log_crash(type(e), e, e.__traceback__)
+        raise
 

@@ -12,12 +12,12 @@
     UIBarButtonItem *closeButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"xmark"]
                                                                     style:UIBarButtonItemStylePlain
                                                                    target:self
-                                                                   action:@selector(closeButtonTapped:)]; 
+                                                                   action:@selector(closeButtonTapped:)];
 
     UIBarButtonItem *applyButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark"]
                                                                     style:UIBarButtonItemStylePlain
                                                                    target:self
-                                                                   action:@selector(applyButtonTapped:)]; 
+                                                                   action:@selector(applyButtonTapped:)];
 
     self.navigationItem.leftBarButtonItem = closeButton;
     self.navigationItem.rightBarButtonItem = applyButton;
@@ -42,6 +42,8 @@
     }
     if (!YTMUltimateDict[@"lyricsAlwaysOn"]) YTMUltimateDict[@"lyricsAlwaysOn"] = @YES;
     if (!YTMUltimateDict[@"sendLyricsScreenshotDebug"]) YTMUltimateDict[@"sendLyricsScreenshotDebug"] = @NO;
+    if (!YTMUltimateDict[@"sendDebugLogsToServer"]) YTMUltimateDict[@"sendDebugLogsToServer"] = @NO;
+    if (!YTMUltimateDict[@"debugLogLevel"]) YTMUltimateDict[@"debugLogLevel"] = @1;
     [[NSUserDefaults standardUserDefaults] setObject:YTMUltimateDict forKey:@"YTMUltimate"];
 
 }
@@ -152,19 +154,30 @@
     if (indexPath.section == 2) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"lyricsSection"];
         NSArray *settings = @[
-            @{@"title": @"Always show translated lyrics", @"detail": @"Show the custom lyrics panel when lyrics load.", @"key": @"lyricsAlwaysOn", @"image": @"quote.bubble"},
-            @{@"title": @"Send screenshot debug data", @"detail": @"Upload a UI hierarchy only after you take a screenshot.", @"key": @"sendLyricsScreenshotDebug", @"image": @"ladybug"}
+            @{@"title": @"Always show translated lyrics", @"detail": @"Show the custom lyrics panel when lyrics load.", @"key": @"lyricsAlwaysOn", @"type": @"switch", @"image": @"quote.bubble"},
+            @{@"title": @"Send screenshot debug data", @"detail": @"Upload a UI hierarchy only after you take a screenshot.", @"key": @"sendLyricsScreenshotDebug", @"type": @"switch", @"image": @"ladybug"},
+            @{@"title": @"Push debug logs to API", @"detail": @"Upload debug events and exceptions to ytmtranslate.chiuhuang.dev.", @"key": @"sendDebugLogsToServer", @"type": @"switch", @"image": @"arrow.up.circle"},
+            @{@"title": @"Log level", @"detail": @"Off = no uploads, Errors = failures only, All = info + warnings + errors.", @"key": @"debugLogLevel", @"type": @"segmented", @"image": @"waveform.badge.exclamationmark"}
         ];
         NSDictionary *setting = settings[indexPath.row];
         cell.textLabel.text = setting[@"title"];
         cell.detailTextLabel.text = setting[@"detail"];
         cell.detailTextLabel.numberOfLines = 0;
         cell.imageView.image = [UIImage systemImageNamed:setting[@"image"]];
-        UISwitch *toggle = [[UISwitch alloc] init];
-        toggle.accessibilityIdentifier = setting[@"key"];
-        toggle.on = [YTMUltimateDict[setting[@"key"]] boolValue];
-        [toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];
-        cell.accessoryView = toggle;
+
+        if ([setting[@"type"] isEqualToString:@"switch"]) {
+            UISwitch *toggle = [[UISwitch alloc] init];
+            toggle.accessibilityIdentifier = setting[@"key"];
+            toggle.on = [YTMUltimateDict[setting[@"key"]] boolValue];
+            [toggle addTarget:self action:@selector(toggleSetting:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = toggle;
+        } else {
+            UISegmentedControl *segment = [[UISegmentedControl alloc] initWithItems:@[@"Off", @"Err", @"All"]];
+            segment.selectedSegmentIndex = MIN(MAX([YTMUltimateDict[setting[@"key"]] integerValue], 0), 2);
+            segment.accessibilityIdentifier = setting[@"key"];
+            [segment addTarget:self action:@selector(segmentSettingChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = segment;
+        }
         return cell;
     }
 
@@ -332,6 +345,15 @@
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
     settings[key] = @(sender.isOn);
+    [defaults setObject:settings forKey:@"YTMUltimate"];
+}
+
+- (void)segmentSettingChanged:(UISegmentedControl *)sender {
+    NSString *key = sender.accessibilityIdentifier;
+    if (!key.length) return;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    settings[key] = @(sender.selectedSegmentIndex);
     [defaults setObject:settings forKey:@"YTMUltimate"];
 }
 
