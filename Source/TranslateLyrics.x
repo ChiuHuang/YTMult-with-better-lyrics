@@ -988,9 +988,15 @@ static BOOL isLyricsEngagementPanel(UIViewController *vc) {
 
     // 1. Check panelIdentifier or identifier property
     if ([obj respondsToSelector:@selector(panelIdentifier)]) {
-        NSString *pid = [obj performSelector:@selector(panelIdentifier)];
-        if ([pid.lowercaseString containsString:@"lyric"]) return YES;
+    id pidObj = [obj performSelector:@selector(panelIdentifier)];
+    NSString *pid = nil;
+    if ([pidObj isKindOfClass:[NSString class]]) {
+        pid = pidObj;
+    } else if (pidObj) {
+        pid = [pidObj description];
     }
+    if ([pid.lowercaseString containsString:@"lyric"]) return YES;
+}
 
     // 2. Check model description
     if ([obj respondsToSelector:@selector(model)]) {
