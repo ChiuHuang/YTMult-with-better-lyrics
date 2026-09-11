@@ -1367,6 +1367,13 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
         if (!top) return;
 
         if ([top isKindOfClass:[YTMULyricsViewController class]] || [top.presentedViewController isKindOfClass:[YTMULyricsViewController class]]) {
+            // Sheet is already up (possibly stale from the previous song):
+            // refresh it for the current video instead of doing nothing.
+            YTMULyricsViewController *existing = [top isKindOfClass:[YTMULyricsViewController class]]
+                ? (YTMULyricsViewController *)top
+                : (YTMULyricsViewController *)top.presentedViewController;
+            NSString *existingVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
+            if (existingVideoID) [existing fetchLyricsForVideo:existingVideoID];
             return;
         }
 
@@ -1496,14 +1503,14 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
 %end
 
 
-// Unlock lyrics button when YTM has no native lyrics
-%hook YTIButtonRenderer
-
-- (BOOL)isDisabled {
-    if (self.text) {
+// Central lyrics-renderer check: text, accessibility, description, and the
+// command's browseEndpoint.browseId (catches icon-only chips with no text).
+static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
+    if (!renderer) return NO;
+    if (renderer.text) {
         NSString *t = nil;
-        if ([self.text respondsToSelector:@selector(runs)]) {
-            NSArray *runs = [self.text performSelector:@selector(runs)];
+        if ([renderer.text respondsToSelector:@selector(runs)]) {
+            NSArray *runs = [renderer.text performSelector:@selector(runs)];
             if (runs && runs.count > 0) {
                 NSMutableString *ms = [NSMutableString string];
                 for (id r in runs) {
@@ -1515,35 +1522,50 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
                 t = ms;
             }
         }
-        if (!t && [self.text respondsToSelector:@selector(simpleText)]) {
-            t = [self.text performSelector:@selector(simpleText)];
+        if (!t && [renderer.text respondsToSelector:@selector(simpleText)]) {
+            t = [renderer.text performSelector:@selector(simpleText)];
         }
         if (t && ([t containsString:@"歌詞"] || [t containsString:@"歌词"] || [t.lowercaseString containsString:@"lyric"])) {
-            return NO;
+            return YES;
         }
     }
-    if (self.accessibilityData) {
-        NSString *accDesc = [self.accessibilityData description];
+    if (renderer.accessibilityData) {
+        NSString *accDesc = [renderer.accessibilityData description];
         if ([accDesc containsString:@"歌詞"] || [accDesc containsString:@"歌词"] || [accDesc.lowercaseString containsString:@"lyric"]) {
-            return NO;
+            return YES;
         }
     }
-    if (self.accessibility) {
-        NSString *accDesc = [self.accessibility description];
+    if (renderer.accessibility) {
+        NSString *accDesc = [renderer.accessibility description];
         if ([accDesc containsString:@"歌詞"] || [accDesc containsString:@"歌词"] || [accDesc.lowercaseString containsString:@"lyric"]) {
-            return NO;
+            return YES;
         }
     }
-    NSString *desc = [self description];
+    @try {
+        NSString *browseId = renderer.command.browseEndpoint.browseId;
+        if (browseId.length && [browseId.lowercaseString containsString:@"lyric"]) {
+            return YES;
+        }
+    } @catch (NSException *e) {}
+    NSString *desc = [renderer description];
     if ([desc containsString:@"PAmusic_watch_lyrics_panel"] || [desc.lowercaseString containsString:@"lyrics_panel"] || [desc.lowercaseString containsString:@"lyrics"]) {
+        return YES;
+    }
+    return NO;
+}
+
+// Unlock lyrics button when YTM has no native lyrics
+%hook YTIButtonRenderer
+
+- (BOOL)isDisabled {
+    if (YTMUIsLyricsRenderer(self)) {
         return NO;
     }
     return %orig;
 }
 
 - (void)setIsDisabled:(BOOL)disabled {
-    NSString *desc = [self description];
-    if ([desc containsString:@"歌詞"] || [desc containsString:@"歌词"] || [desc.lowercaseString containsString:@"lyric"]) {
+    if (YTMUIsLyricsRenderer(self)) {
         %orig(NO);
         return;
     }
@@ -1595,27 +1617,40 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
 %end
 
 
-// Unlock lyrics button tap in Elements (ELM)
+// Unlock lyrics button tap in Elements (ELM) — mirrors Downloading.x:
+// exact node-key match first, NowPlaying ancestor required.
 %hook ELMTouchCommandPropertiesHandler
 
 - (void)handleTap {
-    if (class_getInstanceVariable([self class], "_controller") != NULL) {
-        id node = [self valueForKey:@"_controller"];
-        NSString *nodeDesc = [node description];
-        if ([node respondsToSelector:@selector(key)]) {
-            NSString *key = [node performSelector:@selector(key)];
-            if (key) nodeDesc = [NSString stringWithFormat:@"%@ %@", key, nodeDesc];
-        }
-        if ([nodeDesc containsString:@"lyric"] || [nodeDesc containsString:@"format_quote"] || [nodeDesc containsString:@"queue_music"]) {
-            if (class_getInstanceVariable([self class], "_tapRecognizer") != NULL) {
-                UIGestureRecognizer *tapRecognizer = [self valueForKey:@"_tapRecognizer"];
-                UIViewController *vc = [tapRecognizer.view _viewControllerForAncestor];
-                openLyricsFromViewController(vc);
-                return;
-            }
-        }
+    if (class_getInstanceVariable([self class], "_controller") == NULL) {
+        return %orig;
     }
-    %orig;
+    if (class_getInstanceVariable([self class], "_tapRecognizer") == NULL) {
+        return %orig;
+    }
+
+    ELMNodeController *node = [self valueForKey:@"_controller"];
+    UIGestureRecognizer *tapRecognizer = [self valueForKey:@"_tapRecognizer"];
+
+    NSString *key = nil;
+    if ([node respondsToSelector:@selector(key)]) {
+        @try { key = [node key]; } @catch (NSException *e) { key = nil; }
+    }
+    NSString *nodeDesc = [node description] ?: @"";
+    BOOL keyMatch = key.length > 0 && [key.lowercaseString containsString:@"lyric"];
+    BOOL descMatch = [nodeDesc containsString:@"lyric"] || [nodeDesc containsString:@"format_quote"] || [nodeDesc containsString:@"queue_music"];
+    if (!keyMatch && !descMatch) {
+        return %orig;
+    }
+
+    UIViewController *vc = [tapRecognizer.view _viewControllerForAncestor];
+    if (![vc isKindOfClass:[YTMNowPlayingViewController class]]) {
+        return %orig;
+    }
+
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] Lyrics ELM tap key=%@ vc=%@", key ?: @"(nil)", NSStringFromClass([vc class])]);
+    openLyricsFromViewController(vc);
+    return;
 }
 
 %end
