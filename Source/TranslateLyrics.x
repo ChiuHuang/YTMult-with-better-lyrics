@@ -50,10 +50,10 @@ static BOOL g_globalLoadingInFlight = NO;      // YES while a full request chain
 static BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     id value = settings[key];
-    return value [WAIT] [value boolValue] : fallback;
+    return value ? [value boolValue] : fallback;
 }
 
-// 輔助工具：把除錯訊息傳給你的 Python 伺服器 (adds videoID context if available)
+// 輔助工具：把除錯訊息傳給你的 Python 伺服器
 static void sendDebugLog(NSString *msg) {
     NSString *full = msg;
     if (g_currentVideoID) {
@@ -61,11 +61,11 @@ static void sendDebugLog(NSString *msg) {
     }
     NSLog(@"[YTMU] %@", full);
     NSString *encodedMsg = [full stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=DEBUG_%@", encodedMsg];
+    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=DEBUG_%@", encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
 }
 static void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
-    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:payload [WAIT]: @{}];
+    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:payload ?: @{}];
     if (g_currentVideoID) dict[@"videoId"] = g_currentVideoID;
     dict[@"playbackTime"] = @(g_currentPlaybackTime);
     NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"type": @"APP_LOG", @"event": event, @"level": @"info", @"message": msg, @"payload": dict} options:0 error:nil];
@@ -76,9 +76,123 @@ static void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary
         req.HTTPBody = json;
         [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
     }
-    // also send as DEBUG_ GET for backward compat
     sendDebugLog([NSString stringWithFormat:@"%@: %@ %@", event, msg, dict]);
 }
+
+// Client persistent cache for lyrics
+static NSString *YTMULyricsCacheDirectory(void) {
+    NSString *cache = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+    NSString *dir = [cache stringByAppendingPathComponent:@"YTMU_LyricsCache"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return dir;
+}
+static NSString *YTMULyricsCachePathForVideoID(NSString *vid) {
+    if (!vid.length) return nil;
+    NSString *safe = [vid stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    return [[YTMULyricsCacheDirectory() stringByAppendingPathComponent:safe] stringByAppendingPathExtension:@"json"];
+}
+static BOOL YTMULyricsCacheEnabled(void) {
+    NSDictionary *s = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    if (!s[@"lyricsCacheEnabled"]) return YES;
+    return [s[@"lyricsCacheEnabled"] boolValue];
+}
+static NSInteger YTMULyricsCacheMaxCount(void) {
+    NSDictionary *s = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    NSInteger v = [s[@"lyricsCacheMaxCount"] integerValue];
+    return v > 0 ? v : 200;
+}
+static NSInteger YTMULyricsCacheMaxSizeMB(void) {
+    NSDictionary *s = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    NSInteger v = [s[@"lyricsCacheMaxSizeMB"] integerValue];
+    return v > 0 ? v : 50;
+}
+static void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics) {
+    if (!YTMULyricsCacheEnabled() || !videoID.length || !lyrics) return;
+    NSString *path = YTMULyricsCachePathForVideoID(videoID);
+    if (!path) return;
+    NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID};
+    NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+    if (data) [data writeToFile:path atomically:YES];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        NSString *dir = YTMULyricsCacheDirectory();
+        NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
+        if (!files) return;
+        NSInteger maxCount = YTMULyricsCacheMaxCount();
+        if ((NSInteger)files.count > maxCount) {
+            NSMutableArray *infos = [NSMutableArray array];
+            for (NSString *f in files) {
+                NSString *fp = [dir stringByAppendingPathComponent:f];
+                NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:fp error:nil];
+                NSDate *mod = attr[NSFileModificationDate] ?: [NSDate distantPast];
+                [infos addObject:@{@"path": fp, @"date": mod}];
+            }
+            [infos sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b){
+                return [a[@"date"] compare:b[@"date"]];
+            }];
+            NSInteger toRemove = files.count - maxCount;
+            for (NSInteger i=0; i<toRemove; i++) {
+                [[NSFileManager defaultManager] removeItemAtPath:infos[i][@"path"] error:nil];
+            }
+        }
+        NSInteger maxBytes = YTMULyricsCacheMaxSizeMB() * 1024 * 1024;
+        NSArray *allFiles = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
+        unsigned long long total = 0;
+        NSMutableArray *sized = [NSMutableArray array];
+        for (NSString *f in allFiles) {
+            NSString *fp = [dir stringByAppendingPathComponent:f];
+            NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:fp error:nil];
+            unsigned long long sz = [attr fileSize];
+            NSDate *mod = attr[NSFileModificationDate] ?: [NSDate distantPast];
+            total += sz;
+            [sized addObject:@{@"path": fp, @"size": @(sz), @"date": mod}];
+        }
+        if (total > (unsigned long long)maxBytes) {
+            [sized sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b){
+                return [a[@"date"] compare:b[@"date"]];
+            }];
+            for (NSDictionary *info in sized) {
+                if (total <= (unsigned long long)maxBytes) break;
+                [[NSFileManager defaultManager] removeItemAtPath:info[@"path"] error:nil];
+                total -= [info[@"size"] unsignedLongLongValue];
+            }
+        }
+    });
+}
+static NSArray *YTMULyricsCacheLoad(NSString *videoID) {
+    if (!YTMULyricsCacheEnabled() || !videoID.length) return nil;
+    NSString *path = YTMULyricsCachePathForVideoID(videoID);
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return nil;
+    NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    NSArray *lyrics = dict[@"lyrics"];
+    if ([lyrics isKindOfClass:[NSArray class]] && lyrics.count) {
+        NSTimeInterval ts = [dict[@"ts"] doubleValue];
+        if (ts > 0 && [[NSDate date] timeIntervalSince1970] - ts > 7*24*3600) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            return nil;
+        }
+        return lyrics;
+    }
+    return nil;
+}
+static NSDictionary *YTMULyricsCacheStats(void) {
+    NSString *dir = YTMULyricsCacheDirectory();
+    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    unsigned long long total = 0;
+    for (NSString *f in files) {
+        NSString *fp = [dir stringByAppendingPathComponent:f];
+        NSDictionary *attr = [[NSFileManager defaultManager] attributesOfItemAtPath:fp error:nil];
+        total += [attr fileSize];
+    }
+    return @{@"count": @(files.count), @"size": @(total), @"sizeMB": @(total/1024.0/1024.0)};
+}
+static void YTMULyricsCacheClearAll(void) {
+    NSString *dir = YTMULyricsCacheDirectory();
+    [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    if (g_lyricsCache) [g_lyricsCache removeAllObjects];
+}
+
 
 
 
@@ -88,18 +202,13 @@ static void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary
     g_activePlayer = self;
     g_currentPlaybackTime = 0.0;
     if (self.currentVideoID) {
-        NSString *prev = g_currentVideoID;
         if (![self.currentVideoID isEqualToString:g_currentVideoID]) {
             g_currentVideoID = self.currentVideoID;
-            sendDebugLog([NSString stringWithFormat:@"🎵 Song changed: %@ -> %@ (prev=%@)", prev [WAIT]: @"(nil)", g_currentVideoID, prev [WAIT]: @"nil"]);
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
         } else {
-            sendDebugLog([NSString stringWithFormat:@"🔁 Song re-broadcast same videoID=%@", g_currentVideoID]);
             // Re-broadcast so panel loads on restore
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
         }
-    } else {
-        sendDebugLog(@"⚠️ didActivateVideo: currentVideoID is nil");
     }
 }
 
@@ -118,15 +227,15 @@ static NSString *dumpViewHierarchy(UIView *view, int indent) {
     [str appendFormat:@"<%@: %p; frame = (%.1f, %.1f; %.1f, %.1f); hidden = %@; alpha = %.2f; userInteraction = %@",
         NSStringFromClass([view class]), view,
         view.frame.origin.x, view.frame.origin.y, view.frame.size.width, view.frame.size.height,
-        view.hidden [WAIT] @"YES" : @"NO", view.alpha,
-        view.userInteractionEnabled [WAIT] @"YES" : @"NO"];
+        view.hidden ? @"YES" : @"NO", view.alpha,
+        view.userInteractionEnabled ? @"YES" : @"NO"];
     if (view.tag != 0) {
         [str appendFormat:@"; tag = %ld", (long)view.tag];
     }
     if ([view isKindOfClass:[UILabel class]]) {
-        [str appendFormat:@"; text = \"%@\"", ((UILabel *)view).text [WAIT]: @""];
+        [str appendFormat:@"; text = \"%@\"", ((UILabel *)view).text ?: @""];
     } else if ([view isKindOfClass:[UIButton class]]) {
-        [str appendFormat:@"; title = \"%@\"", [((UIButton *)view) titleForState:UIControlStateNormal] [WAIT]: @""];
+        [str appendFormat:@"; title = \"%@\"", [((UIButton *)view) titleForState:UIControlStateNormal] ?: @""];
     }
     if (view.gestureRecognizers.count > 0) {
         [str appendFormat:@"; gestures = %lu", (unsigned long)view.gestureRecognizers.count];
@@ -143,8 +252,8 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
     NSMutableString *str = [NSMutableString string];
     for (int i = 0; i < indent; i++) [str appendString:@"  "];
     [str appendFormat:@"<%@: %p; title = \"%@\"; view = %p; isViewLoaded = %@>\n",
-        NSStringFromClass([vc class]), vc, vc.title [WAIT]: @"", vc.isViewLoaded [WAIT] vc.view : nil,
-        vc.isViewLoaded [WAIT] @"YES" : @"NO"];
+        NSStringFromClass([vc class]), vc, vc.title ?: @"", vc.isViewLoaded ? vc.view : nil,
+        vc.isViewLoaded ? @"YES" : @"NO"];
     for (UIViewController *child in vc.childViewControllers) {
         [str appendString:dumpVCHierarchy(child, indent + 1)];
     }
@@ -159,7 +268,7 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
 static void sendUIDump(void) {
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
-    [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID [WAIT]: @"(none)"];
+    [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID ?: @"(none)"];
     [dump appendFormat:@"Playback Time: %f\n\n", g_currentPlaybackTime];
 
     UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
@@ -187,16 +296,16 @@ static void sendUIDump(void) {
     };
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     if (jsonData) {
-        sendDebugLog(@"📸 Screenshot detected, uploading UI dump...");
+        sendDebugLog(@" Screenshot detected, uploading UI dump...");
         NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ytmtranslate.chiuhuang.dev/log"]];
         req.HTTPMethod = @"POST";
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         req.HTTPBody = jsonData;
         [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
             if (err) {
-                sendDebugLog([NSString stringWithFormat:@"❌ UI Dump upload failed: %@", err.localizedDescription]);
+                sendDebugLog([NSString stringWithFormat:@"[FAIL] UI Dump upload failed: %@", err.localizedDescription]);
             } else {
-                sendDebugLog(@"✅ UI Dump uploaded successfully!");
+                sendDebugLog(@"[OK] UI Dump uploaded successfully!");
             }
         }] resume];
     }
@@ -220,6 +329,9 @@ static void sendUIDump(void) {
         if (YTMULyricsPreference(@"sendLyricsScreenshotDebug", NO)) {
             sendUIDump();
         }
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"YTMUClearMemoryCache" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        if (g_lyricsCache) [g_lyricsCache removeAllObjects];
     }];
 }
 
@@ -255,11 +367,11 @@ static void sendUIDump(void) {
 - (void)setRenderer:(id)renderer {
     %orig;
 
-    sendDebugLog(@"✅ 成功進入歌詞 Cell (YTMLightweightMusicDescriptionShelfCell)");
+    sendDebugLog(@"[OK] 成功進入歌詞 Cell (YTMLightweightMusicDescriptionShelfCell)");
 
     UILabel *descriptionLabel = [self valueForKey:@"_descriptionLabel"];
     if (!descriptionLabel) {
-        sendDebugLog(@"⚠️ 找不到 _descriptionLabel");
+        sendDebugLog(@"[WARN]️ 找不到 _descriptionLabel");
         return;
     }
 
@@ -282,7 +394,7 @@ static void sendUIDump(void) {
 
     sendDebugLog([NSString stringWithFormat:@"準備向伺服器要歌詞: %@", videoID]);
 
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@", videoID];
+    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -452,7 +564,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     UIButton *reloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     reloadBtn.frame = CGRectMake(self.view.bounds.size.width - 105, 10, 85, 34);
     reloadBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-    [reloadBtn setTitle:@"🔄 Reload" forState:UIControlStateNormal];
+    [reloadBtn setTitle:@"Reload Reload" forState:UIControlStateNormal];
     [reloadBtn setTitleColor:[[UIColor whiteColor] colorWithAlphaComponent:0.9] forState:UIControlStateNormal];
     reloadBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     reloadBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
@@ -463,7 +575,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     if (self.isModal || self.presentingViewController) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         closeBtn.frame = CGRectMake(16, 10, 36, 36);
-        [closeBtn setTitle:@"✕" forState:UIControlStateNormal];
+        [closeBtn setTitle:@"X" forState:UIControlStateNormal];
         [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
         closeBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
@@ -595,12 +707,24 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         g_lyricsCache = [[NSMutableDictionary alloc] init];
     }
 
-    // Cache hit — serve immediately
+    // Memory cache hit
     if (g_lyricsCache[videoID]) {
         UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
         statusLabel.text = @"";
         [self updateLyrics:g_lyricsCache[videoID]];
         return;
+    }
+    // File cache hit
+    if (YTMULyricsCacheEnabled()) {
+        NSArray *fileCached = YTMULyricsCacheLoad(videoID);
+        if (fileCached) {
+            if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+            g_lyricsCache[videoID] = fileCached;
+            UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+            statusLabel.text = @"";
+            [self updateLyrics:fileCached];
+            return;
+        }
     }
 
     // Global in-flight guard: if ANY VC instance is already fetching this video,
@@ -623,7 +747,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     statusLabel.text = @"";
 
     // Fast Request (LRCLIB + GTX)
-    NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@&fast=1", videoID];
+    NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&fast=1", videoID];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![self.loadingVideoID isEqualToString:videoID]) return;
@@ -650,7 +774,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                     return;
                 }
 
-                NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@", videoID];
+                NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
                 if (jwt) {
                     fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
                 }
@@ -671,13 +795,14 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                             if (fullDict && fullDict[@"lyrics"]) {
                                 statusLabel.text = @"";
                                 g_lyricsCache[videoID] = fullDict[@"lyrics"];
+                                YTMULyricsCacheSave(videoID, fullDict[@"lyrics"]);
                                 [self updateLyrics:fullDict[@"lyrics"]];
                                 // Broadcast full result so all other VCs update too
                                 [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                                     object:videoID
                                                                                   userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
                             } else if (!g_lyricsCache[videoID]) {
-                                statusLabel.text = @"⚠️ 找不到歌詞 / No lyrics found";
+                                statusLabel.text = @"[WARN]️ 找不到歌詞 / No lyrics found";
                                 self.lyrics = @[];
                                 [self.tableView reloadData];
                             }
@@ -766,7 +891,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [self.tableView reloadData];
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
-    statusLabel.text = @"🔄 Force Reloading & Retranslating...";
+    statusLabel.text = @"Reload Force Reloading & Retranslating...";
 
     g_globalLoadingInFlight = YES;
     g_globalLoadingVideoID = g_currentVideoID;
@@ -785,7 +910,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             return;
         }
 
-        NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics[WAIT]v=%@&force=1", g_currentVideoID];
+        NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&force=1", g_currentVideoID];
         if (jwt) {
             fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
         }
@@ -805,15 +930,16 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                         statusLabel.text = @"";
                         if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                         g_lyricsCache[g_currentVideoID] = fullDict[@"lyrics"];
+                        YTMULyricsCacheSave(g_currentVideoID, fullDict[@"lyrics"]);
                         [self updateLyrics:fullDict[@"lyrics"]];
                         [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                             object:g_currentVideoID
                                                                           userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
                     } else {
-                        statusLabel.text = @"⚠️ 重譯失敗 / Force failed";
+                        statusLabel.text = @"[WARN]️ 重譯失敗 / Force failed";
                     }
                 } else {
-                    statusLabel.text = @"⚠️ 網路錯誤 / Network error";
+                    statusLabel.text = @"[WARN]️ 網路錯誤 / Network error";
                 }
             });
         }] resume];
@@ -1020,11 +1146,6 @@ static BOOL isLyricsEngagementPanel(UIViewController *vc) {
     } else if (pidObj) {
         pid = [pidObj description];
     }
-    if (pid) {
-        // Log panelIdentifier for debugging button confusion
-        // (not spammy: only when panel appears)
-        // sendDebugLog([NSString stringWithFormat:@"🔍 panelIdentifier=%@", pid]);
-    }
     if ([pid.lowercaseString containsString:@"lyric"]) return YES;
 }
 
@@ -1082,41 +1203,28 @@ static BOOL isLyricsViewVisibleOnScreen(void) {
 }
 
 static void openLyricsFromViewController(UIViewController *parentVC) {
-    NSString *vcName = parentVC [WAIT] NSStringFromClass([parentVC class]) : @"nil";
-    sendDebugLog([NSString stringWithFormat:@"🎵 openLyricsFromViewController called parent=%@ video=%@ container=%@", vcName, g_currentVideoID [WAIT]: @"nil", g_activeEngagementPanelContainer [WAIT] NSStringFromClass([g_activeEngagementPanelContainer class]) : @"nil"]);
+    sendDebugLog(@"[MUSIC] openLyricsFromViewController called");
 
     if (g_activeEngagementPanelContainer) {
         NSArray *panelIDs = @[@"PAmusic_watch_lyrics_panel", @"music_watch_lyrics_panel", @"lyrics"];
-        BOOL didCall = NO;
         for (NSString *pid in panelIDs) {
             if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:animated:)]) {
-                sendDebugLog([NSString stringWithFormat:@"📤 Calling showEngagementPanelWithIdentifier:animated: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
-                didCall = YES;
                 break;
             } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:)]) {
-                sendDebugLog([NSString stringWithFormat:@"📤 Calling showEngagementPanelWithIdentifier: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:) withObject:pid];
-                didCall = YES;
                 break;
             } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(openEngagementPanelWithIdentifier:animated:)]) {
-                sendDebugLog([NSString stringWithFormat:@"📤 Calling openEngagementPanelWithIdentifier:animated: pid=%@", pid]);
                 [g_activeEngagementPanelContainer performSelector:@selector(openEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
-                didCall = YES;
                 break;
             }
         }
-        if (!didCall) {
-            sendDebugLog(@"⚠️ No known engagement panel selector found on container");
-        }
-    } else {
-        sendDebugLog(@"⚠️ g_activeEngagementPanelContainer is nil — will rely on fallback sheet");
     }
 
     // Fallback: if native panel didn't open on screen within 0.2s, present YTMULyricsViewController as bottom sheet
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (isLyricsViewVisibleOnScreen()) {
-            sendDebugLog(@"🎵 Native lyrics panel already visible on screen, skipping fallback");
+            sendDebugLog(@"[MUSIC] Native lyrics panel already visible on screen, skipping fallback");
             return;
         }
 
@@ -1127,7 +1235,7 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
             return;
         }
 
-        sendDebugLog(@"🎵 Presenting fallback YTMULyricsViewController bottom sheet");
+        sendDebugLog(@"[MUSIC] Presenting fallback YTMULyricsViewController bottom sheet");
         YTMULyricsViewController *lyricsVC = [[YTMULyricsViewController alloc] init];
         lyricsVC.isModal = YES;
         lyricsVC.modalPresentationStyle = UIModalPresentationPageSheet;
@@ -1426,7 +1534,7 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
     BOOL isLyrics = NO;
     if ([v isKindOfClass:[UILabel class]]) {
         UILabel *lbl = (UILabel *)v;
-        NSString *txt = lbl.text [WAIT]: lbl.attributedText.string;
+        NSString *txt = lbl.text ?: lbl.attributedText.string;
         if (txt) {
             NSString *low = txt.lowercaseString;
             if ([txt containsString:@"歌詞"] || [txt containsString:@"歌词"] || [low containsString:@"lyric"] || [low containsString:@"unavailable"] || [txt containsString:@"沒有歌詞"] || [txt containsString:@"没有歌词"] || [txt containsString:@"無歌詞"] || [txt containsString:@"無提供歌詞"]) {
@@ -1511,13 +1619,13 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
 
 %new
 - (void)ytmu_didTapLyricsButtonAction:(id)sender {
-    sendDebugLog(@"🎵 Lyrics button tapped via UIControl");
+    sendDebugLog(@"[MUSIC] Lyrics button tapped via UIControl");
     openLyricsFromViewController((UIViewController *)self);
 }
 
 %new
 - (void)ytmu_didTapLyricsBar:(UITapGestureRecognizer *)gesture {
-    sendDebugLog(@"🎵 Lyrics chip tapped via UITapGestureRecognizer");
+    sendDebugLog(@"[MUSIC] Lyrics chip tapped via UITapGestureRecognizer");
     openLyricsFromViewController((UIViewController *)self);
 }
 
