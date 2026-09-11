@@ -481,6 +481,11 @@ static void sendUIDump(void) {
 @interface YTMULyricsCell : UITableViewCell
 @property (nonatomic, strong) UILabel *lyricLabel;
 @property (nonatomic, strong) UILabel *transLabel;
+// Bright overlay clipped by wipeMask: sliding left-to-right fill on the active line
+@property (nonatomic, strong) UILabel *wipeLabel;
+@property (nonatomic, strong) CALayer *wipeMask;
+@property (nonatomic, assign) CGFloat wipeProgress;
+- (void)setWipeProgress:(CGFloat)progress;
 @end
 
 @implementation YTMULyricsCell
@@ -493,7 +498,7 @@ static void sendUIDump(void) {
 
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
-        self.lyricLabel.font = [UIFont boldSystemFontOfSize:24];
+        self.lyricLabel.font = [UIFont boldSystemFontOfSize:20];
         self.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.45];
         self.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -502,9 +507,28 @@ static void sendUIDump(void) {
         self.lyricLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.lyricLabel];
 
+        // Same text/font/geometry as lyricLabel, revealed left-to-right by wipeMask
+        self.wipeLabel = [[UILabel alloc] init];
+        self.wipeLabel.numberOfLines = 0;
+        self.wipeLabel.font = [UIFont boldSystemFontOfSize:20];
+        self.wipeLabel.textColor = [UIColor whiteColor];
+        self.wipeLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
+        self.wipeLabel.layer.shadowRadius = 4.0;
+        self.wipeLabel.layer.shadowOpacity = 0.75;
+        self.wipeLabel.layer.masksToBounds = NO;
+        self.wipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.wipeLabel];
+
+        self.wipeMask = [CALayer layer];
+        self.wipeMask.backgroundColor = [UIColor whiteColor].CGColor;
+        self.wipeMask.frame = CGRectZero;
+        self.wipeLabel.layer.mask = self.wipeMask;
+        _wipeProgress = 0.0;
+
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
-        self.transLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        self.transLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
         self.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.32];
         self.transLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
@@ -519,6 +543,11 @@ static void sendUIDump(void) {
             [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
             [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
 
+            [self.wipeLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.topAnchor],
+            [self.wipeLabel.leadingAnchor constraintEqualToAnchor:self.lyricLabel.leadingAnchor],
+            [self.wipeLabel.trailingAnchor constraintEqualToAnchor:self.lyricLabel.trailingAnchor],
+            [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
+
             [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:5],
             [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
             [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
@@ -526,6 +555,26 @@ static void sendUIDump(void) {
         ]];
     }
     return self;
+}
+
+- (void)setWipeProgress:(CGFloat)progress {
+    _wipeProgress = MIN(MAX(progress, 0.0), 1.0);
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    // Mask lives in wipeLabel's own coordinate space: reveal width * progress
+    CGRect b = self.wipeLabel.bounds;
+    self.wipeMask.frame = CGRectMake(0, 0, b.size.width * self.wipeProgress, b.size.height);
+}
+
+- (void)prepareForReuse {
+    [super prepareForReuse];
+    _wipeProgress = 0.0;
+    self.wipeLabel.text = nil;
+    self.wipeLabel.attributedText = nil;
+    self.lyricLabel.attributedText = nil;
 }
 
 @end
@@ -623,6 +672,8 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [reloadBtn setTitle:@"Reload" forState:UIControlStateNormal];
     [reloadBtn setTitleColor:[[UIColor whiteColor] colorWithAlphaComponent:0.9] forState:UIControlStateNormal];
     reloadBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    reloadBtn.titleLabel.adjustsFontSizeToFitWidth = YES;
+    reloadBtn.titleLabel.minimumScaleFactor = 0.7;
     reloadBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
     reloadBtn.layer.cornerRadius = 17;
     [reloadBtn addTarget:self action:@selector(forceReloadLyrics) forControlEvents:UIControlEventTouchUpInside];
@@ -661,6 +712,14 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+
+    // The header is built while bounds are still zero, and tableHeaderView
+    // does not autoresize — without this the Reload button stays clipped.
+    UIView *header = self.tableView.tableHeaderView;
+    if (header && fabs(header.frame.size.width - self.tableView.bounds.size.width) > 1.0) {
+        header.frame = CGRectMake(0, 0, self.tableView.bounds.size.width, 50);
+        self.tableView.tableHeaderView = header;
+    }
 
     // Dynamically size the bottom inset so the last row can scroll to the middle of the screen.
     // We need at least half the visible height as padding below the last row.
@@ -757,8 +816,6 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 - (void)fetchLyricsForVideo:(NSString *)videoID {
     if (!videoID || videoID.length == 0) return;
 
-    [self loadArtworkForVideo:videoID];
-
     if (!g_lyricsCache) {
         g_lyricsCache = [[NSMutableDictionary alloc] init];
     }
@@ -799,8 +856,11 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     self.isLoading = YES;
     self.loadingVideoID = videoID;
 
+    // loadingVideoID must be set before artwork starts so the background applies
+    [self loadArtworkForVideo:videoID];
+
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
-    statusLabel.text = @"";
+    statusLabel.text = @"Loading...";
 
     // Fast Request (LRCLIB + GTX)
     NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&fast=1", videoID];
@@ -927,13 +987,10 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         }
         // The current line remains highlighted until its timestamp changes.
     } else if (newIndex >= 0) {
-        // Only real provider word timestamps are refreshed per frame. Generated
-        // proportional parts are deliberately ignored to avoid fake karaoke.
-        NSDictionary *lyric = self.lyrics[newIndex];
-        if ([lyric[@"wordSynced"] boolValue]) {
-            YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
-            if (cell) [self configureCell:cell atIndex:newIndex isActive:YES currentTime:currentTime];
-        }
+        // Glide the wipe on the active line every frame so the fill speed
+        // follows the song, with or without provider word timestamps.
+        YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
+        if (cell) [cell setWipeProgress:[self wipeProgressForLyricAtIndex:newIndex currentTime:currentTime]];
     }
 }
 
@@ -947,7 +1004,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [self.tableView reloadData];
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
-    statusLabel.text = @"Reload Force Reloading & Retranslating...";
+    statusLabel.text = @"Force Reloading...";
 
     g_globalLoadingInFlight = YES;
     g_globalLoadingVideoID = g_currentVideoID;
@@ -1050,27 +1107,43 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     return [nonEmpty componentsJoinedByString:@" "];
 }
 
-- (NSAttributedString *)timedWordTextForLyric:(NSDictionary *)lyric displayText:(NSString *)displayText currentTime:(double)currentTime {
-    UIColor *dim = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
-    NSMutableAttributedString *result = [[NSMutableAttributedString alloc] initWithString:displayText attributes:@{
-        NSFontAttributeName: [UIFont boldSystemFontOfSize:24],
-        NSForegroundColorAttributeName: dim
-    }];
-    NSUInteger searchOffset = 0;
+// Sliding fill progress for the active line: smooth left-to-right wipe.
+// Uses real per-word timestamps when the provider supplied them, otherwise
+// glides across the whole line duration so the speed still follows the song.
+- (CGFloat)wipeProgressForLyricAtIndex:(NSInteger)index currentTime:(double)currentTime {
+    if (index < 0 || index >= self.lyrics.count) return 0.0;
+    NSDictionary *lyric = self.lyrics[index];
     double nowMs = currentTime * 1000.0;
-    for (NSDictionary *part in lyric[@"parts"]) {
-        NSString *word = [self normalizedLyricText:part[@"words"]];
-        if (!word.length || searchOffset >= displayText.length) continue;
-        NSRange range = [displayText rangeOfString:word options:0 range:NSMakeRange(searchOffset, displayText.length - searchOffset)];
-        if (range.location == NSNotFound) continue;
-        searchOffset = NSMaxRange(range);
-        double startMs = [part[@"startTimeMs"] doubleValue];
-        double durationMs = MAX([part[@"durationMs"] doubleValue], 1.0);
-        double progress = MIN(MAX((nowMs - startMs) / durationMs, 0.0), 1.0);
-        UIColor *color = [[UIColor whiteColor] colorWithAlphaComponent:0.38 + (0.62 * progress)];
-        [result addAttribute:NSForegroundColorAttributeName value:color range:range];
+    NSArray *parts = lyric[@"parts"];
+    if ([lyric[@"wordSynced"] boolValue] && [parts count] > 0) {
+        NSInteger n = [parts count];
+        for (NSInteger i = 0; i < n; i++) {
+            NSDictionary *p = parts[i];
+            double s = [p[@"startTimeMs"] doubleValue];
+            double d = MAX([p[@"durationMs"] doubleValue], 1.0);
+            if (nowMs < s) return (CGFloat)i / (CGFloat)n;
+            if (nowMs < s + d) {
+                double frac = (nowMs - s) / d;
+                return (CGFloat)((double)i + frac) / (CGFloat)n;
+            }
+        }
+        return 1.0;
     }
-    return result;
+    double startMs = [lyric[@"startTimeMs"] doubleValue];
+    if (startMs <= 0) startMs = [lyric[@"time"] doubleValue] * 1000.0;
+    double endMs = 0;
+    if (index + 1 < self.lyrics.count) {
+        NSDictionary *next = self.lyrics[index + 1];
+        endMs = [next[@"startTimeMs"] doubleValue];
+        if (endMs <= 0) endMs = [next[@"time"] doubleValue] * 1000.0;
+    }
+    if (endMs <= startMs) {
+        double durMs = [lyric[@"durationMs"] doubleValue];
+        if (durMs <= 0) durMs = [lyric[@"duration"] doubleValue] * 1000.0;
+        endMs = startMs + (durMs > 0 ? durMs : 4000.0);
+    }
+    if (endMs <= startMs) return 1.0;
+    return (CGFloat)MIN(MAX((nowMs - startMs) / (endMs - startMs), 0.0), 1.0);
 }
 
 - (void)configureCell:(YTMULyricsCell *)cell atIndex:(NSInteger)index isActive:(BOOL)isActive currentTime:(double)currentTime {
@@ -1089,18 +1162,17 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         cell.lyricLabel.layer.shadowRadius = 4.0;
         cell.lyricLabel.layer.shadowOpacity = 0.7;
         cell.lyricLabel.layer.masksToBounds = NO;
+        cell.wipeLabel.text = nil;
+        [cell setWipeProgress:0.0];
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.75];
     } else if (isActive) {
-        if ([lyric[@"wordSynced"] boolValue] && [lyric[@"parts"] count] > 0) {
-            // One attributed label preserves the line and its spacing while
-            // every real word follows its own provider-supplied duration.
-            cell.lyricLabel.attributedText = [self timedWordTextForLyric:lyric displayText:displayText currentTime:currentTime];
-        } else {
-            cell.lyricLabel.attributedText = nil;
-            cell.lyricLabel.text = displayText;
-            cell.lyricLabel.textColor = [UIColor whiteColor];
-        }
+        // Dim base plus bright overlay revealed by the sliding wipe.
+        cell.lyricLabel.attributedText = nil;
+        cell.lyricLabel.text = displayText;
+        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
+        cell.wipeLabel.text = displayText;
+        [cell setWipeProgress:[self wipeProgressForLyricAtIndex:index currentTime:currentTime]];
 
         cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -1114,6 +1186,8 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         cell.lyricLabel.text = displayText;
         cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
         cell.lyricLabel.layer.shadowOpacity = 0.32;
+        cell.wipeLabel.text = nil;
+        [cell setWipeProgress:0.0];
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.24];
     }
