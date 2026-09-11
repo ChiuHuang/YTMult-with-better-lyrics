@@ -203,6 +203,7 @@
       <mdui-button-icon icon="library_music"></mdui-button-icon>
       <mdui-top-app-bar-title>YTM Lyrics Server Dashboard</mdui-top-app-bar-title>
       <div style="flex-grow: 1"></div>
+      <mdui-chip icon="fingerprint" variant="elevated" id="instanceChip" title="Server instance ID">ID: ...</mdui-chip>
       <mdui-chip icon="bolt" variant="elevated" id="statusChip">Online</mdui-chip>
       <mdui-button-icon icon="refresh" id="refreshBtn" onclick="reloadAll()"></mdui-button-icon>
       <mdui-button-icon icon="dark_mode" onclick="toggleTheme()"></mdui-button-icon>
@@ -260,11 +261,27 @@
             </div>
           </mdui-card>
 
+          <!-- Server Info Bar -->
+          <mdui-card variant="filled" style="padding: 12px 16px; border-radius: 12px; margin-top: 14px; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+            <mdui-icon name="fingerprint" style="font-size:20px;"></mdui-icon>
+            <div style="flex:1; min-width:200px;">
+              <div style="font-size:13px; font-weight:600;">Instance: <span id="instanceId">...</span></div>
+              <div style="font-size:12px; opacity:0.7;">Started: <span id="instanceStart">...</span> | Uptime: <span id="instanceUptime">...</span> | Logs: <span id="instanceLogs">...</span></div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <mdui-button variant="tonal" icon="download" onclick="downloadLogs()">Download Logs</mdui-button>
+              <mdui-button variant="tonal" icon="bug_report" onclick="document.getElementById('rightTabs').value='crash'; loadCrashLogs()">Crash Logs</mdui-button>
+              <mdui-button variant="tonal" icon="description" onclick="document.getElementById('rightTabs').value='files'; loadFiles()">All Files</mdui-button>
+            </div>
+          </mdui-card>
+
           <!-- Right: Caches and Server Logs (Tabs) -->
           <mdui-card variant="outlined" style="padding: 18px; border-radius: 16px;">
             <mdui-tabs value="logs" id="rightTabs">
               <mdui-tab value="logs" icon="terminal">Live Logs</mdui-tab>
+              <mdui-tab value="crash" icon="bug_report">Crash Logs (<span id="crashCount">0</span>)</mdui-tab>
               <mdui-tab value="cache" icon="folder_zip">Cached Songs (<span id="cacheCount">0</span>)</mdui-tab>
+              <mdui-tab value="files" icon="folder">All Logs & Files</mdui-tab>
               <mdui-tab value="system" icon="tune">Config & Stats</mdui-tab>
 
               <mdui-tab-panel slot="panel" value="logs" style="padding-top: 14px;">
@@ -272,10 +289,22 @@
                   <span style="font-size: 12px; opacity: 0.7;">Real-time Server Activity <mdui-badge id="logCountBadge" style="margin-left: 6px;">0</mdui-badge></span>
                   <div style="display: flex; gap: 4px; align-items: center;">
                     <mdui-checkbox id="logAutoScroll" checked>Auto-scroll</mdui-checkbox>
+                    <mdui-button variant="text" icon="download" onclick="downloadLogs()">Download</mdui-button>
                     <mdui-button variant="text" icon="clear_all" onclick="clearLogs()">Clear</mdui-button>
                   </div>
                 </div>
                 <div class="log-box" id="logBox"></div>
+              </mdui-tab-panel>
+
+              <mdui-tab-panel slot="panel" value="crash" style="padding-top: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 12px; opacity: 0.7;">Crash & Exception Logs <mdui-badge id="crashBadge" style="margin-left: 6px;">0</mdui-badge></span>
+                  <div style="display: flex; gap: 4px;">
+                    <mdui-button variant="text" icon="download" onclick="downloadCrash()">Download Crash</mdui-button>
+                    <mdui-button variant="text" icon="clear_all" onclick="clearCrash()">Clear</mdui-button>
+                  </div>
+                </div>
+                <div class="log-box" id="crashBox" style="height: 480px; overflow-y: auto; background:#1a0a0a;"></div>
               </mdui-tab-panel>
 
               <mdui-tab-panel slot="panel" value="cache" style="padding-top: 14px;">
@@ -290,14 +319,31 @@
                 </div>
               </mdui-tab-panel>
 
+              <mdui-tab-panel slot="panel" value="files" style="padding-top: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 12px; opacity: 0.7;">Logs directory & other files</span>
+                  <mdui-button variant="text" icon="refresh" onclick="loadFiles()">Refresh</mdui-button>
+                </div>
+                <div class="cache-list-container">
+                  <mdui-list id="fileList"><mdui-list-item>Loading files...</mdui-list-item></mdui-list>
+                </div>
+              </mdui-tab-panel>
+
               <mdui-tab-panel slot="panel" value="system" style="padding-top: 14px;">
+                <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">Instance: <span id="sysInstance">...</span> | Start: <span id="sysStart">...</span> | Uptime: <span id="sysUptime">...</span></div>
                 <mdui-list>
                   <mdui-list-item headline="Provider 0: Cubey API" description="Musixmatch/NetEase/KuGou (Auto Cloudflare Turnstile JWT)"></mdui-list-item>
                   <mdui-list-item headline="Provider 1: LRCLIB" description="Multi-query cleaned metadata + Synced LRC"></mdui-list-item>
                   <mdui-list-item headline="Provider 2: Unison Community" description="Synced LRC / TTML / AMLL XML"></mdui-list-item>
                   <mdui-list-item headline="Provider 3: YouTube Music" description="ytmusicapi fallback"></mdui-list-item>
                   <mdui-list-item headline="Translation Engine" description="Cohere Command A Translate (Pro) / Google Translate (Fast)"></mdui-list-item>
+                  <mdui-list-item headline="Log Files" description="server.log, crash.log, UI_DUMP_*.txt in logs/"></mdui-list-item>
                 </mdui-list>
+                <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                  <mdui-button variant="filled" icon="download" onclick="downloadLogs()">Download All Logs</mdui-button>
+                  <mdui-button variant="tonal" icon="bug_report" onclick="downloadCrash()">Download Crash Log</mdui-button>
+                  <mdui-button variant="tonal" icon="folder_zip" onclick="loadFiles()">Check Other Logs</mdui-button>
+                </div>
               </mdui-tab-panel>
             </mdui-tabs>
           </mdui-card>
@@ -655,10 +701,87 @@
       loadCaches();
     }
 
+    async function loadServerInfo() {
+      try {
+        const res = await fetch('/api/admin/server_info');
+        const data = await res.json();
+        document.getElementById('instanceId').textContent = data.instance_id.slice(0,8);
+        document.getElementById('instanceStart').textContent = new Date(data.start_time).toLocaleString();
+        document.getElementById('instanceUptime').textContent = data.uptime_human;
+        document.getElementById('instanceLogs').textContent = data.structured_logs + ' entries';
+        document.getElementById('instanceChip').textContent = 'ID: ' + data.instance_id.slice(0,8);
+        document.getElementById('instanceChip').title = data.instance_id;
+        // system tab
+        const sysId = document.getElementById('sysInstance');
+        if (sysId) sysId.textContent = data.instance_id;
+        const sysStart = document.getElementById('sysStart');
+        if (sysStart) sysStart.textContent = data.start_time;
+        const sysUp = document.getElementById('sysUptime');
+        if (sysUp) sysUp.textContent = data.uptime_human;
+      } catch(e){ console.error(e); }
+    }
+
+    function downloadLogs() {
+      window.location.href = '/api/admin/logs/download';
+    }
+    function downloadCrash() {
+      window.location.href = '/api/admin/files/download?file=crash.log';
+    }
+
+    async function loadCrashLogs() {
+      try {
+        const res = await fetch('/api/admin/crash_logs');
+        const data = await res.json();
+        const box = document.getElementById('crashBox');
+        const badge = document.getElementById('crashCount');
+        const badge2 = document.getElementById('crashBadge');
+        if (badge) badge.textContent = data.total;
+        if (badge2) badge2.textContent = data.total;
+        box.innerHTML = '';
+        if (!data.logs || data.logs.length===0) {
+          box.innerHTML = '<div style="text-align:center; padding:40px; opacity:0.6;">No crash logs - server healthy</div>';
+          return;
+        }
+        data.logs.slice().reverse().forEach(e=>{
+          const div=document.createElement('div');
+          div.className='log-entry';
+          div.setAttribute('data-level','error');
+          div.innerHTML = `<span class="log-ts">${escapeHtml(e.ts||'')}</span><span class="log-icon material-icons">error</span><span class="log-msg">[${escapeHtml(e.type||'CRASH')}] ${escapeHtml(e.msg||'')}<br><small style="opacity:0.6; white-space:pre-wrap;">${escapeHtml((e.trace||'').slice(0,800))}</small></span>`;
+          box.appendChild(div);
+        });
+      } catch(e){ console.error(e); }
+    }
+    async function clearCrash() {
+      await fetch('/api/admin/crash_logs/clear', {method:'POST'});
+      document.getElementById('crashBox').innerHTML='';
+      mdui.snackbar({message:'Crash logs cleared'});
+      loadCrashLogs();
+    }
+    async function loadFiles() {
+      try {
+        const res = await fetch('/api/admin/files');
+        const data = await res.json();
+        const listEl = document.getElementById('fileList');
+        if (!data.files || data.files.length===0) {
+          listEl.innerHTML='<mdui-list-item>No files</mdui-list-item>';
+          return;
+        }
+        listEl.innerHTML = data.files.map(f=>`
+          <mdui-list-item headline="${escapeHtml(f.name)}" description="${f.size_human} | ${f.modified}">
+            <mdui-icon slot="icon" name="${f.name.includes('crash')?'bug_report': f.name.includes('server')?'article': 'description'}"></mdui-icon>
+            <mdui-button slot="end-icon" icon="download" variant="text" onclick="window.location.href='/api/admin/files/download?file=${encodeURIComponent(f.name)}'"></mdui-button>
+          </mdui-list-item>
+        `).join('');
+      } catch(e){ console.error(e); }
+    }
+
     function reloadAll() {
       _logTotal = 0;
       loadCaches();
       loadLogs();
+      loadCrashLogs();
+      loadFiles();
+      loadServerInfo();
       mdui.snackbar({ message: 'Refreshed logs and caches' });
     }
 
@@ -671,8 +794,13 @@
     // Auto poll logs (2s) and caches (10s)
     setInterval(loadLogs, 2000);
     setInterval(loadCaches, 10000);
+    setInterval(loadServerInfo, 10000);
+    setInterval(loadCrashLogs, 5000);
     loadCaches();
     loadLogs();
+    loadServerInfo();
+    loadCrashLogs();
+    loadFiles();
   </script>
 </body>
 </html>
