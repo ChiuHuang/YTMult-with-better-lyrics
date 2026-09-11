@@ -2134,7 +2134,7 @@ def proxy_log():
             dump_content = data.get('request_body', '')
             vc_count = dump_content.count('ViewController')
             win_count = dump_content.count('[WINDOW:')
-            has_9999 = '9999' in dump_content
+            has_9999 = 'tag = 9999' in dump_content
             has_engagement = 'Engagement' in dump_content
             has_lyrics_chip = 'No lyrics found' in dump_content or 'lyric' in dump_content.lower()
             hidden_yes = dump_content.count('hidden = YES')

@@ -196,6 +196,29 @@ static void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
 
 
 
+// Resolve the current video ID from multiple sources. The didActivateVideo
+// hook can miss (delegate signature changes), leaving g_currentVideoID nil
+// and the lyrics sheet empty — so re-resolve lazily at tap time.
+static NSString *YTMUResolveCurrentVideoID(void) {
+    if (g_currentVideoID.length) return g_currentVideoID;
+    YTPlayerViewController *player = g_activePlayer;
+    if (player) {
+        NSString *vid = nil;
+        if ([player respondsToSelector:@selector(currentVideoID)]) {
+            @try { vid = [player currentVideoID]; } @catch (NSException *e) { vid = nil; }
+        }
+        if (!vid.length && [player respondsToSelector:@selector(contentVideoID)]) {
+            @try { vid = [player contentVideoID]; } @catch (NSException *e) { vid = nil; }
+        }
+        if (vid.length) {
+            g_currentVideoID = [vid copy];
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
+            return g_currentVideoID;
+        }
+    }
+    return nil;
+}
+
 %hook YTPlayerViewController
 - (void)playbackController:(id)arg1 didActivateVideo:(id)arg2 withPlaybackData:(id)arg3 {
     %orig;
@@ -209,6 +232,8 @@ static void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
             // Re-broadcast so panel loads on restore
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
         }
+    } else {
+        sendDebugLog(@"[WARN] didActivateVideo fired but currentVideoID is nil");
     }
 }
 
@@ -216,6 +241,16 @@ static void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
 - (void)playbackController:(id)arg1 didReceivePlaybackPositionTime:(double)time {
     %orig;
     g_currentPlaybackTime = time;
+    // Self-heal: if the activate hook missed, grab the ID from the player here
+    if (!g_currentVideoID.length && [self respondsToSelector:@selector(currentVideoID)]) {
+        NSString *vid = nil;
+        @try { vid = [self currentVideoID]; } @catch (NSException *e) { vid = nil; }
+        if (vid.length) {
+            g_currentVideoID = [vid copy];
+            sendDebugLog([NSString stringWithFormat:@"[MUSIC] Recovered videoID from playback position: %@", vid]);
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSongDidChange" object:g_currentVideoID];
+        }
+    }
 }
 %end
 
@@ -269,7 +304,21 @@ static void sendUIDump(void) {
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
     [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID ?: @"(none)"];
-    [dump appendFormat:@"Playback Time: %f\n\n", g_currentPlaybackTime];
+    [dump appendFormat:@"Playback Time: %f\n", g_currentPlaybackTime];
+    YTPlayerViewController *dbgPlayer = g_activePlayer;
+    if (dbgPlayer) {
+        NSString *dbgCurrent = nil, *dbgContent = nil;
+        if ([dbgPlayer respondsToSelector:@selector(currentVideoID)]) {
+            @try { dbgCurrent = [dbgPlayer currentVideoID]; } @catch (NSException *e) { dbgCurrent = nil; }
+        }
+        if ([dbgPlayer respondsToSelector:@selector(contentVideoID)]) {
+            @try { dbgContent = [dbgPlayer contentVideoID]; } @catch (NSException *e) { dbgContent = nil; }
+        }
+        [dump appendFormat:@"ActivePlayer: %@ currentVideoID=%@ contentVideoID=%@\n\n",
+            NSStringFromClass([dbgPlayer class]), dbgCurrent ?: @"(nil)", dbgContent ?: @"(nil)"];
+    } else {
+        [dump appendString:@"ActivePlayer: (nil)\n\n"];
+    }
 
     UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
     if (!keyWin) {
@@ -571,7 +620,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     UIButton *reloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     reloadBtn.frame = CGRectMake(self.view.bounds.size.width - 105, 10, 85, 34);
     reloadBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-    [reloadBtn setTitle:@"Reload Reload" forState:UIControlStateNormal];
+    [reloadBtn setTitle:@"Reload" forState:UIControlStateNormal];
     [reloadBtn setTitleColor:[[UIColor whiteColor] colorWithAlphaComponent:0.9] forState:UIControlStateNormal];
     reloadBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     reloadBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
@@ -1211,6 +1260,11 @@ static BOOL isLyricsViewVisibleOnScreen(void) {
 
 static void openLyricsFromViewController(UIViewController *parentVC) {
     sendDebugLog(@"[MUSIC] openLyricsFromViewController called");
+    // Resolve video ID now — didActivateVideo may have missed, leaving nil
+    NSString *resolvedVideoID = YTMUResolveCurrentVideoID();
+    if (!resolvedVideoID) {
+        sendDebugLog(@"[WARN] openLyrics: no video ID could be resolved");
+    }
 
     if (g_activeEngagementPanelContainer) {
         NSArray *panelIDs = @[@"PAmusic_watch_lyrics_panel", @"music_watch_lyrics_panel", @"lyrics"];
@@ -1251,10 +1305,16 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
             sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
             sheet.prefersGrabberVisible = YES;
         }
-        if (g_currentVideoID) {
-            [lyricsVC fetchLyricsForVideo:g_currentVideoID];
+        NSString *tapVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
+        if (tapVideoID) {
+            [lyricsVC fetchLyricsForVideo:tapVideoID];
         }
-        [top presentViewController:lyricsVC animated:YES completion:nil];
+        [top presentViewController:lyricsVC animated:YES completion:^{
+            if (!tapVideoID) {
+                UILabel *statusLabel = [lyricsVC.tableView.tableHeaderView viewWithTag:8888];
+                if (statusLabel) statusLabel.text = @"No video playing";
+            }
+        }];
     });
 }
 
@@ -1305,8 +1365,9 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
 
             lyricsVC.view.frame = contentContainer.bounds;
 
-            if (g_currentVideoID) {
-                [lyricsVC fetchLyricsForVideo:g_currentVideoID];
+            NSString *panelVideoID = YTMUResolveCurrentVideoID();
+            if (panelVideoID) {
+                [lyricsVC fetchLyricsForVideo:panelVideoID];
             }
         }
     }
