@@ -224,8 +224,8 @@
               clearable>
             </mdui-text-field>
             <mdui-segmented-button-group id="modeSelect" value="full">
-              <mdui-segmented-button value="fast">⚡️ Fast (LRCLIB)</mdui-segmented-button>
-              <mdui-segmented-button value="full">🌟 Pro (Cohere + Cubey)</mdui-segmented-button>
+              <mdui-segmented-button value="fast">Fast (LRCLIB)</mdui-segmented-button>
+              <mdui-segmented-button value="full">Pro (Cohere + Cubey)</mdui-segmented-button>
             </mdui-segmented-button-group>
             <mdui-checkbox id="forceReload">Force Fresh</mdui-checkbox>
             <mdui-button variant="filled" icon="play_arrow" onclick="fetchLiveLyrics()">Search & Preview</mdui-button>
@@ -339,6 +339,26 @@
                   <mdui-list-item headline="Translation Engine" description="Cohere Command A Translate (Pro) / Google Translate (Fast)"></mdui-list-item>
                   <mdui-list-item headline="Log Files" description="server.log, crash.log, UI_DUMP_*.txt in logs/"></mdui-list-item>
                 </mdui-list>
+                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
+                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Server Self-Update</div>
+                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
+                    Main file: <span id="selfMainFile" style="font-family:monospace; opacity:1;">...</span> |
+                    Local SHA: <span id="selfLocalSha" style="font-family:monospace;">...</span><br>
+                    Remote SHA: <span id="selfRemoteSha" style="font-family:monospace;">...</span> |
+                    Parent SHA: <span id="selfParentSha" style="font-family:monospace;">...</span> |
+                    <span id="selfUpdateStatus" style="font-weight:600;"></span>
+                  </div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+                    <mdui-text-field id="selfMainInput" label="Main file name" placeholder="proxy_server.py / app.py / main.py / bot.py" style="flex:1; min-width:180px;"></mdui-text-field>
+                    <mdui-button variant="tonal" icon="save" onclick="saveSelfUpdateConfig()">Save Name</mdui-button>
+                  </div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <mdui-button variant="tonal" icon="sync" onclick="checkSelfUpdate()">Check for Update</mdui-button>
+                    <mdui-button variant="filled" icon="system_update" onclick="doSelfUpdate()">Update Now</mdui-button>
+                    <mdui-button variant="text" icon="refresh" onclick="checkSelfUpdate()">Refresh SHA</mdui-button>
+                  </div>
+                  <div id="selfUpdateMsg" style="font-size:12px; opacity:0.8; margin-top:8px;"></div>
+                </mdui-card>
                 <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
                   <mdui-button variant="filled" icon="download" onclick="downloadLogs()">Download All Logs</mdui-button>
                   <mdui-button variant="tonal" icon="bug_report" onclick="downloadCrash()">Download Crash Log</mdui-button>
@@ -775,6 +795,64 @@
       } catch(e){ console.error(e); }
     }
 
+    async function checkSelfUpdate() {
+      try {
+        const res = await fetch('/api/admin/self_update/check');
+        const data = await res.json();
+        document.getElementById('selfMainFile').textContent = data.main_file;
+        document.getElementById('selfLocalSha').textContent = (data.local_sha||'').slice(0,7);
+        document.getElementById('selfRemoteSha').textContent = (data.remote_sha||'').slice(0,7);
+        document.getElementById('selfParentSha').textContent = (data.parent_sha||'').slice(0,7);
+        document.getElementById('selfMainInput').value = data.main_file ? data.main_file.split('/').pop() : '';
+        const status = document.getElementById('selfUpdateStatus');
+        const msg = document.getElementById('selfUpdateMsg');
+        if (data.update_available) {
+          status.textContent = 'Update available';
+          status.style.color = '#f85149';
+          msg.textContent = `Local ${data.local_sha.slice(0,7)} -> Remote ${data.remote_sha.slice(0,7)} (parent ${data.parent_sha ? data.parent_sha.slice(0,7) : 'none'})`;
+        } else if (data.local_sha && data.remote_sha) {
+          status.textContent = 'Up to date';
+          status.style.color = '#3fb950';
+          msg.textContent = `SHA ${data.local_sha.slice(0,7)} matches remote`;
+        } else {
+          status.textContent = 'Unknown';
+          msg.textContent = 'Could not fetch remote SHA';
+        }
+        mdui.snackbar({ message: 'Self-update check done' });
+      } catch(e){ console.error(e); mdui.snackbar({ message: 'Check failed: '+e }); }
+    }
+    async function doSelfUpdate() {
+      if (!confirm('Update server file from GitHub and restart? This will overwrite the current file.')) return;
+      try {
+        const res = await fetch('/api/admin/self_update/perform', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force:false})});
+        const data = await res.json();
+        const msgEl = document.getElementById('selfUpdateMsg');
+        if (data.ok) {
+          msgEl.textContent = data.message + ' - restarting...';
+          mdui.snackbar({ message: data.message });
+          setTimeout(()=>location.reload(), 3000);
+        } else {
+          msgEl.textContent = data.error || 'Update failed';
+          mdui.snackbar({ message: data.error || 'Update failed' });
+        }
+        checkSelfUpdate();
+      } catch(e){ mdui.snackbar({ message: 'Update failed: '+e }); }
+    }
+    async function saveSelfUpdateConfig() {
+      const v = document.getElementById('selfMainInput').value.trim();
+      if (!v) { mdui.snackbar({ message: 'Enter a filename like app.py' }); return; }
+      try {
+        const res = await fetch('/api/admin/self_update/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({main_file: v})});
+        const data = await res.json();
+        if (data.ok) {
+          mdui.snackbar({ message: 'Saved as ' + data.detected });
+          checkSelfUpdate();
+        } else {
+          mdui.snackbar({ message: data.error || 'Save failed' });
+        }
+      } catch(e){ mdui.snackbar({ message: 'Save failed: '+e }); }
+    }
+
     function reloadAll() {
       _logTotal = 0;
       loadCaches();
@@ -782,6 +860,7 @@
       loadCrashLogs();
       loadFiles();
       loadServerInfo();
+      checkSelfUpdate();
       mdui.snackbar({ message: 'Refreshed logs and caches' });
     }
 
@@ -801,6 +880,7 @@
     loadServerInfo();
     loadCrashLogs();
     loadFiles();
+    checkSelfUpdate();
   </script>
 </body>
 </html>
