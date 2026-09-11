@@ -32,12 +32,20 @@
         self.webView.hidden = YES;
 
         // Add to key window so it can render if needed
-        dispatch_async(dispatch_get_main_queue(), ^{
+        // Key window is often nil at tweak load, so retry with fallbacks
+        void (^attachWebView)(void) = ^{
             UIWindow *window = [UIApplication sharedApplication].keyWindow;
-            if (window) {
+            if (!window) {
+                for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                    if (w.rootViewController) { window = w; break; }
+                }
+            }
+            if (window && !self.webView.superview) {
                 [window addSubview:self.webView];
             }
-        });
+        };
+        dispatch_async(dispatch_get_main_queue(), attachWebView);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), attachWebView);
     }
     return self;
 }
@@ -53,7 +61,7 @@
 
     if (self.completionHandlers.count == 1) {
         // First request, start the process
-        NSString *html = @"<html>...</html>";
+        NSString *html = @"<html><body style='margin:0;padding:0;'><iframe id='tframe' src='https://lyrics.api.dacubeking.com/challenge' style='width:100%;height:100%;border:none;'></iframe><script>window.addEventListener('message', function(e) { if(e.data && e.data.type) { window.webkit.messageHandlers.turnstile.postMessage(e.data); } });</script></body></html>";
         [self.webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://lyrics.api.dacubeking.com/"]];
     }
 }
