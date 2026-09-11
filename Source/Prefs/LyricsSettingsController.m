@@ -105,9 +105,18 @@
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell"];
     if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"cell"];
     else {
+        // Full reset: recycled cells otherwise leak icons, colors and fonts
+        // from other rows (e.g. random icons on lyric preview rows).
         for (UIView *v in cell.contentView.subviews) [v removeFromSuperview];
         cell.accessoryView = nil;
         cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.backgroundColor = nil;
+        cell.textLabel.textColor = nil;
+        cell.textLabel.font = nil;
+        cell.textLabel.numberOfLines = 1;
+        cell.detailTextLabel.textColor = nil;
+        cell.detailTextLabel.font = nil;
+        cell.imageView.image = nil;
     }
     cell.detailTextLabel.numberOfLines = 0;
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
