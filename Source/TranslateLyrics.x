@@ -7,6 +7,10 @@
 #import "Headers/ELMNodeController.h"
 #import "Headers/YTMActionRowView.h"
 
+#ifndef TWEAK_GIT_COMMIT
+#define TWEAK_GIT_COMMIT "unknown"
+#endif
+
 @interface UIView ()
 - (UIViewController *)_viewControllerForAncestor;
 @end
@@ -311,6 +315,7 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
 static void sendUIDump(void) {
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
+    [dump appendFormat:@"Tweak Build: %@\n", @TWEAK_GIT_COMMIT];
     [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID ?: @"(none)"];
     [dump appendFormat:@"Playback Time: %f\n", g_currentPlaybackTime];
     YTPlayerViewController *dbgPlayer = g_activePlayer;

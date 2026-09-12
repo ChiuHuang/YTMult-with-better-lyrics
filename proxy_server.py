@@ -2467,9 +2467,15 @@ def proxy_log():
             hidden_no = dump_content.count('hidden = NO')
             video_id_match = re.search(r'Current VideoID:\s*(\S+)', dump_content)
             playback_match = re.search(r'Playback Time:\s*([\d\.]+)', dump_content)
+            tweak_match = re.search(r'Tweak Build:\s*(\S+)', dump_content)
             vid = video_id_match.group(1) if video_id_match else '?'
             ptime = playback_match.group(1) if playback_match else '?'
-            print(f"\n[ALERT] [UI_DUMP {timestamp}] [DUMP] UI Dump received! video={vid} t={ptime}s vc={vc_count} win={win_count} has9999={has_9999} hasEngagement={has_engagement} hasLyricsChip={has_lyrics_chip} hiddenYES={hidden_yes} hiddenNO={hidden_no}")
+            tweak_sha = tweak_match.group(1) if tweak_match else '?'
+            try:
+                srv_sha = (_get_local_sha() or '?')[:7]
+            except Exception:
+                srv_sha = '?'
+            print(f"\n[ALERT] [UI_DUMP {timestamp}] [DUMP] UI Dump received! video={vid} t={ptime}s tweak={tweak_sha} srv={srv_sha} vc={vc_count} win={win_count} has9999={has_9999} hasEngagement={has_engagement} hasLyricsChip={has_lyrics_chip} hiddenYES={hidden_yes} hiddenNO={hidden_no}")
             if not has_9999:
                 print(f"  [WARN] [UI_DUMP] Modded lyrics view tag 9999 NOT found - panel will show official!")
             if not has_engagement:
