@@ -746,7 +746,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     // Start display link for real-time lyric highlighting. Ask for the full
     // ProMotion range; the panel caps at 60 and the system may still dip.
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updatePlaybackTime)];
-    if ([self.displayLink respondsToSelector:@selector(setPreferredFrameRateRange:)]) {
+    if (@available(iOS 15.0, *)) {
         self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 120, 120);
     } else if ([self.displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
         self.displayLink.preferredFramesPerSecond = 120;
