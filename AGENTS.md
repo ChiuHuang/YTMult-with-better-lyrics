@@ -68,8 +68,19 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
-- `a8138d3` model-level lyrics detect (`browseEndpoint.browseId`) + exact ELM
-  key tap hijack (Downloading.x pattern) + tap key logging.
+- `3e8fe9b` stuck-empty-sheet fix: fetch watchdog (45s reclaim), status before
+  guards (Loading/Waiting), full fetch extracted to helper with 10s JWT
+  fallback (nil JWT -> server skips Cubey), no clobber of fast lyrics on full
+  failure. Root cause of 11:42 empty sheet: lost JWT callback wedged
+  g_globalLoadingInFlight/isLoading, re-taps bailed silently.
+- `abd2abd` link fix: `%c(YTMNowPlayingViewController)` runtime lookup
+  (a8138d3 used `[.. class]` -> undefined `_OBJC_CLASS_$_` at link).
+- `6466e66` AM theme pass: inactive white 0.2, dim translations, 1.04->1
+  activation pop at 120fps display link.
+- `fc57242` word-run coloring from real per-word timestamps (no geometric
+  wipe), fonts 22/15, bg fix on cache hits.
+- `3d91ee8` SSE `/api/lyrics/stream`: parallel provider race, raw->machine->
+  final stages. Server ranking now wbw-sync (2000+) > line-sync > provider.
 - `2af5e15` Apple Music sliding wipe (mask overlay), smaller fonts (20/14),
   header-width fix (was `Relo...eload`), persistent artwork background.
 - `eaa04c3` lazy video-ID resolution, empty-sheet guard, `tag = 9999` fix.
