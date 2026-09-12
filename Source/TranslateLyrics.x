@@ -618,6 +618,10 @@ static void sendUIDump(void) {
 @property (nonatomic, assign) BOOL isModal;
 @property (nonatomic, assign) BOOL isSynced;
 @property (nonatomic, strong) NSString *lastColorKey;
+// One-time TextKit measurement per (line, width): the 60/120fps tick only
+// does timestamp math + a rect-union path build from these cached rects.
+@property (nonatomic, copy) NSString *cachedWordLayoutKey;
+@property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, strong) NSDate *loadingSince;
 @property (nonatomic, copy) NSString *artworkVideoID;
 @property (nonatomic, strong) UILabel *fpsLabel;
@@ -1218,6 +1222,8 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         self.currentIndex = -1;
     }
     self.lastColorKey = nil;
+    self.cachedWordLayoutKey = nil;
+    self.cachedWordRects = nil;
 
     // Background safety net: lyrics delivered without a fetch on this
     // instance (broadcast from another VC) never triggered artwork loading.
@@ -1312,94 +1318,98 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     return [UIBezierPath bezierPathWithRect:CGRectInset(b, -1, -2)];
 }
 
+// Word-by-word MASK reveal modeled on better-lyrics/braccato: raw provider
+// start/duration per word, never stretched to fill the line window (the old
+// ratioK remap is what made the speed wrong). Each word's reveal window
+// opens a touch early (10% lead) and sweeps 1.6x its duration, matching the
+// reference karaoke feel instead of a rigid per-word clip.
+//
+// 120fps budget: TextKit measurement + base/overlay text setup run ONCE per
+// (line, width) into cachedWordRects. The per-frame tick only does timestamp
+// math + a cheap rect-union path build, and bails early when the reveal key
+// (which includes the width bucket) is unchanged.
 - (void)applyWordColorsToCell:(YTMULyricsCell *)cell lyric:(NSDictionary *)lyric index:(NSInteger)index currentTime:(double)currentTime force:(BOOL)force {
     NSArray *parts = lyric[@"parts"];
     if ([parts count] == 0) return;
+    CGFloat width = cell.wipeLabel.bounds.size.width;
+    if (width <= 0) return; // no layout yet: retry on a later key, never cache this
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
-    // Ratio normalization: provider word spans rarely fill the line window,
-    // which leaves dead fully-lit time after the last word reveals. Stretch
-    // the word schedule proportionally so the last word lands exactly on the
-    // line end (next line start), keeping each word's share by duration ratio.
-    double lineStart = [lyric[@"startTimeMs"] doubleValue];
-    if (lineStart <= 0) lineStart = [lyric[@"time"] doubleValue] * 1000.0;
-    double lineEnd = 0;
-    if (index + 1 < self.lyrics.count) {
-        NSDictionary *nextLyric = self.lyrics[index + 1];
-        lineEnd = [nextLyric[@"startTimeMs"] doubleValue];
-        if (lineEnd <= 0) lineEnd = [nextLyric[@"time"] doubleValue] * 1000.0;
-    }
-    if (lineEnd <= lineStart) {
-        double lineDur = [lyric[@"durationMs"] doubleValue];
-        if (lineDur <= 0) lineDur = [lyric[@"duration"] doubleValue] * 1000.0;
-        lineEnd = lineStart + (lineDur > 0 ? lineDur : 4000.0);
-    }
-    NSDictionary *firstPart = parts[0];
-    double firstStart = [firstPart[@"startTimeMs"] doubleValue];
-    double lastEnd = firstStart;
-    for (NSDictionary *p in parts) {
-        double e = [p[@"startTimeMs"] doubleValue] + MAX([p[@"durationMs"] doubleValue], 1.0);
-        if (e > lastEnd) lastEnd = e;
-    }
-    double ratioK = 1.0;
-    if (lastEnd > firstStart && lineEnd > lineStart) {
-        ratioK = (lineEnd - lineStart) / (lastEnd - firstStart);
-    }
     NSInteger curWord = partCount; // past-the-end = everything sung
     double curFrac = 1.0;
     for (NSInteger i = 0; i < partCount; i++) {
         NSDictionary *p = parts[i];
-        double s = lineStart + ([p[@"startTimeMs"] doubleValue] - firstStart) * ratioK;
-        double d = MAX([p[@"durationMs"] doubleValue], 1.0) * ratioK;
+        double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
+        double s = [p[@"startTimeMs"] doubleValue] - rawDur * 0.1;
+        double d = rawDur * 1.6;
         if (nowMs < s) { curWord = i; curFrac = 0.0; break; }
         if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
     }
     NSInteger fracQ = (NSInteger)(curFrac * 24.0); // quantized: stable key, smooth glide
-    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld", (long)index, (long)curWord, (long)fracQ];
+    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord, (long)fracQ, (double)width];
     if (!force && [key isEqualToString:self.lastColorKey]) return;
-    if (cell.wipeLabel.bounds.size.width <= 0) return; // no layout yet: retry on a later key, never cache this
-    self.lastColorKey = key;
 
-    NSArray *ranges = nil;
-    NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
-
-    // Dim base
-    cell.lyricLabel.attributedText = nil;
-    cell.lyricLabel.text = display;
-    cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
-
-    // Bright overlay with baked shadow (layer shadow would be clipped by the mask)
     UIFont *font = cell.wipeLabel.font;
     if (!font) font = [UIFont boldSystemFontOfSize:22];
-    NSShadow *sh = [[NSShadow alloc] init];
-    sh.shadowColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
-    sh.shadowOffset = CGSizeMake(0, 2);
-    sh.shadowBlurRadius = 4;
-    cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
-        attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: [UIColor whiteColor], NSShadowAttributeName: sh}];
+    NSArray *ranges = nil;
+    NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
+    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%.1f|%@", (long)index, (double)width, display];
+    if (![layoutKey isEqualToString:self.cachedWordLayoutKey]) {
+        // One-time setup per (line, width): dim base + bright overlay text,
+        // measured once with TextKit under the label's width/wrapping.
+        // (Texts are set here, not on the tick, so a recycled cell for the
+        // same line still gets correct labels on a cache hit.)
+        cell.lyricLabel.attributedText = nil;
+        cell.lyricLabel.text = display;
+        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
 
-    // Measure word rects with TextKit under the same width/wrapping as the label
-    NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
-    NSLayoutManager *lm = [[NSLayoutManager alloc] init];
-    NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:CGSizeMake(cell.wipeLabel.bounds.size.width, CGFLOAT_MAX)];
-    tc.lineFragmentPadding = 0;
-    tc.maximumNumberOfLines = 0;
-    tc.lineBreakMode = NSLineBreakByWordWrapping;
-    [lm addTextContainer:tc];
-    [ts addLayoutManager:lm];
-    [lm ensureLayoutForTextContainer:tc];
+        // Bright overlay with baked shadow (layer shadow would be clipped by the mask)
+        NSShadow *sh = [[NSShadow alloc] init];
+        sh.shadowColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+        sh.shadowOffset = CGSizeMake(0, 2);
+        sh.shadowBlurRadius = 4;
+        cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
+            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: [UIColor whiteColor], NSShadowAttributeName: sh}];
+
+        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
+        NSLayoutManager *lm = [[NSLayoutManager alloc] init];
+        NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
+        tc.lineFragmentPadding = 0;
+        tc.maximumNumberOfLines = 0;
+        tc.lineBreakMode = NSLineBreakByWordWrapping;
+        [lm addTextContainer:tc];
+        [ts addLayoutManager:lm];
+        [lm ensureLayoutForTextContainer:tc];
+
+        NSMutableArray *rects = [NSMutableArray arrayWithCapacity:[ranges count]];
+        for (NSValue *v in ranges) {
+            NSRange r = [v rangeValue];
+            if (r.location == NSNotFound || r.length == 0) {
+                [rects addObject:[NSValue valueWithCGRect:CGRectNull]];
+                continue;
+            }
+            NSRange glyphs = [lm glyphRangeForCharacterRange:r actualCharacterRange:NULL];
+            CGRect b = [lm boundingRectForGlyphRange:glyphs inTextContainer:tc];
+            // Pad so ascenders/descenders and the baked shadow are not hard-clipped
+            [rects addObject:[NSValue valueWithCGRect:CGRectInset(b, -1, -2)]];
+        }
+        self.cachedWordRects = rects;
+        self.cachedWordLayoutKey = layoutKey;
+    }
+    self.lastColorKey = key;
 
     UIBezierPath *path = [UIBezierPath bezierPath];
-    NSInteger rcount = MIN(partCount, (NSInteger)[ranges count]);
+    NSInteger rcount = MIN(partCount, (NSInteger)[self.cachedWordRects count]);
     for (NSInteger i = 0; i < curWord && i < rcount; i++) {
-        NSRange r = [ranges[i] rangeValue];
-        if (r.location == NSNotFound || r.length == 0) continue;
-        [path appendPath:[self maskPathForWordRange:r inLayoutManager:lm textContainer:tc fraction:1.0]];
+        CGRect b = [self.cachedWordRects[i] CGRectValue];
+        if (CGRectIsNull(b)) continue;
+        [path appendPath:[UIBezierPath bezierPathWithRect:b]];
     }
     if (curWord >= 0 && curWord < rcount) {
-        NSRange r = [ranges[curWord] rangeValue];
-        if (r.location != NSNotFound && r.length > 0) {
-            [path appendPath:[self maskPathForWordRange:r inLayoutManager:lm textContainer:tc fraction:curFrac]];
+        CGRect b = [self.cachedWordRects[curWord] CGRectValue];
+        if (!CGRectIsNull(b)) {
+            b.size.width *= MAX(curFrac, 0.0);
+            [path appendPath:[UIBezierPath bezierPathWithRect:b]];
         }
     } else if (curWord >= rcount && display.length > 0) {
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
