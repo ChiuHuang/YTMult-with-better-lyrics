@@ -571,6 +571,86 @@ def parse_plain(plain_text):
 
 
 # ============================================================
+# QQ QRC Parser (word-by-word, ms precision)
+# QRC lines: [lineStartMs,lineDurMs]word (offMs,durMs)word (offMs,durMs)...
+# Each word's text PRECEDES its timing group; offsets are absolute ms in
+# practice (treated as relative when below the line start). Cubey
+# double-encodes the payload: results["lyrics"] is a JSON string holding
+# {"lyrics": "<QrcInfos.../>", "provider": "qq"}.
+# Output is enhanced LRC so the standard parse_lrc path (wordSynced=True)
+# handles parts/timing downstream with no special cases.
+# ============================================================
+
+_QRC_CREDIT_RE = re.compile(r'\b(lyrics|composed|arranged|produced|written|vocals?|chorus|mixed|mastered)\s*by\b', re.I)
+
+def _qrc_tag(ms, bracket=True):
+    ms = max(int(ms), 0)
+    tag = f"{ms // 60000:02d}:{(ms % 60000) // 1000:02d}.{(ms % 1000) // 10:02d}"
+    return f"[{tag}]" if bracket else f"<{tag}>"
+
+def _qrc_clean_text(text):
+    text = re.sub(r'\s+([.,!?;:\'")\]}])', r'\1', text)
+    text = re.sub(r'([(\["\'])\s+', r'\1', text)
+    return re.sub(r'\s+', ' ', text).strip()
+
+def parse_qrc_to_lrc(blob):
+    """Convert QQ QRC payload to enhanced LRC. Returns LRC string or None."""
+    if isinstance(blob, dict):
+        blob = blob.get('lyrics', '')
+    if not isinstance(blob, str) or not blob:
+        return None
+    # Peel Cubey's inner JSON envelope when present
+    s = blob.strip()
+    if s.startswith('{'):
+        try:
+            inner = json.loads(s)
+            if isinstance(inner, dict) and inner.get('lyrics'):
+                s = inner['lyrics']
+        except Exception:
+            pass
+    if not isinstance(s, str) or not s:
+        return None
+    # Tolerate partially-decoded escapes
+    if '\\n' in s and '\n' not in s:
+        s = s.replace('\\n', '\n')
+    # Title text (ti:) marks the header line to drop (it carries timed words)
+    ti_match = re.search(r'\[ti:(.*?)\]', s)
+    ti_text = _qrc_clean_text(ti_match.group(1)) if ti_match else ''
+
+    out_lines = []
+    for m in re.finditer(r'\[(\d+),(\d+)\]([^\[]*)', s):
+        line_start, seg = int(m.group(1)), m.group(3)
+        els = re.split(r'\((\d+),(\d+)\)', seg)
+        n = (len(els) - 1) // 3
+        if n <= 0:
+            continue  # metadata ([ti:]/[ar:]/[offset:]) or wordless line
+        words = []
+        for k in range(1, n + 1):
+            txt = els[3 * k - 3].strip()
+            if not txt:
+                continue
+            off, dur = int(els[3 * k - 2]), int(els[3 * k - 1])
+            start = off if off >= line_start else line_start + off
+            words.append((txt, start, max(dur, 1)))
+        if not words:
+            continue
+        text = _qrc_clean_text(' '.join(w for w, _, _ in words))
+        if not text:
+            continue
+        if ti_text and ti_text in text:
+            continue
+        if _QRC_CREDIT_RE.search(text):
+            continue
+        line = _qrc_tag(line_start)
+        for w, start, dur in words:
+            line += _qrc_tag(start, bracket=False) + w + ' '
+        out_lines.append(line.rstrip())
+    if not out_lines:
+        return None
+    return '\n'.join(out_lines)
+
+
+# ============================================================
 # Provider 1: LRCLIB (free, no auth)
 # ============================================================
 
@@ -758,6 +838,7 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
             return None
 
         best_lyrics = None
+        best_is_wbw = False
 
         for line in response.iter_lines():
             if not line:
@@ -778,8 +859,17 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec):
                     if provider == "musixmatch":
                         if results.get("wordByWord"):
                             return {"synced": results["wordByWord"], "source": "Musixmatch"}
-                        if results.get("synced"):
+                        if results.get("synced") and not best_is_wbw:
                             best_lyrics = {"synced": results["synced"], "source": "Musixmatch"}
+
+                    elif provider == "qq" and results.get("lyrics"):
+                        # QRC carries true word-by-word timing: outranks any
+                        # line-sync best collected so far (e.g. Musixmatch LRC)
+                        qrc_lrc = parse_qrc_to_lrc(results["lyrics"])
+                        if qrc_lrc:
+                            print(f"  [OK] Cubey: QQ word-sync lyrics found!")
+                            best_lyrics = {"synced": qrc_lrc, "source": "QQ"}
+                            best_is_wbw = True
 
                     elif provider == "netease" and results.get("synced"):
                         if not best_lyrics:
@@ -1544,6 +1634,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
 _PROVIDER_RANK = {
     'Musixmatch': 40,
+    'QQ': 36,
     'KuGou': 35,
     'NetEase': 33,
     'LRCLib': 30,
@@ -2517,7 +2608,7 @@ if __name__ == '__main__':
     print(f"Instance: {SERVER_INSTANCE_ID} started {SERVER_START_TS}")
     print("=" * 60)
     print("Providers (priority order):")
-    print("  0. Cubey API  (Musixmatch/KuGou/NetEase, requires JWT)")
+    print("  0. Cubey API  (Musixmatch/QQ/KuGou/NetEase, requires JWT)")
     print("  1. LRCLIB     (synced + plain, free)")
     print("  2. Unison     (community, free)")
     print("  3. YT Music   (plain, via ytmusicapi)")
