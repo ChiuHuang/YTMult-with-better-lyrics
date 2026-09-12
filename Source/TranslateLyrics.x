@@ -1776,7 +1776,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     }
 
     UIViewController *vc = [tapRecognizer.view _viewControllerForAncestor];
-    if (![vc isKindOfClass:[YTMNowPlayingViewController class]]) {
+    if (![vc isKindOfClass:%c(YTMNowPlayingViewController)]) {
         return %orig;
     }
 
