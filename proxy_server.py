@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 import functools
 import json
 import os
@@ -9,6 +9,7 @@ import hashlib
 import time as time_module
 import subprocess
 import threading
+import concurrent.futures
 from collections import deque
 from datetime import datetime
 from urllib.parse import quote
@@ -1534,6 +1535,143 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
 
 # ============================================================
+# Parallel provider race + SSE streaming
+# Same providers as fetch_all_lyrics, but raced concurrently so the
+# client gets the first hit fast, then upgrades when a better result
+# (synced beats plain) arrives. Raw synced lines are pushed BEFORE
+# translation runs, so Cohere latency never blocks first paint.
+# ============================================================
+
+_PROVIDER_RANK = {
+    'Musixmatch': 40,
+    'KuGou': 35,
+    'NetEase': 33,
+    'LRCLib': 30,
+    'Unison': 20,
+    'YouTube Music': 10,
+}
+
+_STAGE_RANK = {'raw': 0, 'machine': 1, 'final': 2, 'cached': 3}
+
+
+def _lyrics_score(res):
+    """Higher is better. Synced always outranks plain; ties break by provider."""
+    if not res or not res.get('lyrics'):
+        return -1
+    base = 100 if res.get('synced') else 0
+    prov = _PROVIDER_RANK.get(res.get('source', ''), 0)
+    return base + prov + min(len(res.get('lyrics', [])), 50) * 0.01
+
+
+def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
+    t0 = time_module.time()
+    try:
+        for q in queries:
+            try:
+                cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration)
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Race] Cubey query error: {e}")
+                continue
+            if cubey and cubey.get('synced'):
+                parsed = parse_lrc(cubey['synced'], duration)
+                sanitize_lyrics_parts(parsed)
+                print(f"  [REQ {req_id}] [Race] Cubey hit from {cubey.get('source')} ({(time_module.time()-t0)*1000:.0f}ms)")
+                return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] Cubey worker error: {e}")
+    print(f"  [REQ {req_id}] [Race] Cubey miss ({(time_module.time()-t0)*1000:.0f}ms)")
+    return None
+
+
+def _race_lrclib(queries, album, duration, req_id='?'):
+    t0 = time_module.time()
+    plain_fallback = None
+    try:
+        for q in queries:
+            try:
+                lrc = fetch_lrclib(q['title'], q['artist'], album, duration)
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Race] LRCLIB query error: {e}")
+                continue
+            if not lrc:
+                continue
+            if lrc.get('instrumental'):
+                parsed = [{'time': 0, 'startTimeMs': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'durationMs': 0, 'duration': 0}]
+                return {'lyrics': parsed, 'source': 'LRCLib', 'synced': False}
+            if lrc.get('synced'):
+                parsed = parse_lrc(lrc['synced'], duration)
+                sanitize_lyrics_parts(parsed)
+                print(f"  [REQ {req_id}] [Race] LRCLIB synced hit ({(time_module.time()-t0)*1000:.0f}ms)")
+                return {'lyrics': parsed, 'source': 'LRCLib', 'synced': True}
+            if lrc.get('plain') and plain_fallback is None:
+                parsed = parse_plain(lrc['plain'])
+                sanitize_lyrics_parts(parsed)
+                plain_fallback = {'lyrics': parsed, 'source': 'LRCLib', 'synced': False}
+        if plain_fallback:
+            print(f"  [REQ {req_id}] [Race] LRCLIB plain fallback ({(time_module.time()-t0)*1000:.0f}ms)")
+        else:
+            print(f"  [REQ {req_id}] [Race] LRCLIB miss ({(time_module.time()-t0)*1000:.0f}ms)")
+        return plain_fallback
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] LRCLIB worker error: {e}")
+        return plain_fallback
+
+
+def _race_unison(queries, video_id, duration, req_id='?'):
+    t0 = time_module.time()
+    plain_fallback = None
+    try:
+        for q in queries:
+            try:
+                uni = fetch_unison(video_id, q['title'], q['artist'], duration)
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Race] Unison query error: {e}")
+                continue
+            if not uni:
+                continue
+            if uni.get('parsed'):
+                sanitize_lyrics_parts(uni['parsed'])
+                print(f"  [REQ {req_id}] [Race] Unison TTML hit ({(time_module.time()-t0)*1000:.0f}ms)")
+                return {'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}
+            if uni.get('synced'):
+                parsed = parse_lrc(uni['synced'], duration)
+                sanitize_lyrics_parts(parsed)
+                print(f"  [REQ {req_id}] [Race] Unison synced hit ({(time_module.time()-t0)*1000:.0f}ms)")
+                return {'lyrics': parsed, 'source': 'Unison', 'synced': True}
+            if uni.get('plain') and plain_fallback is None:
+                parsed = parse_plain(uni['plain'])
+                sanitize_lyrics_parts(parsed)
+                plain_fallback = {'lyrics': parsed, 'source': 'Unison', 'synced': False}
+        if plain_fallback:
+            print(f"  [REQ {req_id}] [Race] Unison plain fallback ({(time_module.time()-t0)*1000:.0f}ms)")
+        else:
+            print(f"  [REQ {req_id}] [Race] Unison miss ({(time_module.time()-t0)*1000:.0f}ms)")
+        return plain_fallback
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] Unison worker error: {e}")
+        return plain_fallback
+
+
+def _race_yt(video_id, req_id='?'):
+    t0 = time_module.time()
+    try:
+        yt = fetch_yt_lyrics(video_id)
+        if yt and yt.get('plain'):
+            parsed = parse_plain(yt['plain'])
+            sanitize_lyrics_parts(parsed)
+            print(f"  [REQ {req_id}] [Race] YouTube plain hit ({(time_module.time()-t0)*1000:.0f}ms)")
+            return {'lyrics': parsed, 'source': yt.get('source', 'YouTube Music'), 'synced': False}
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] YouTube worker error: {e}")
+    print(f"  [REQ {req_id}] [Race] YouTube miss ({(time_module.time()-t0)*1000:.0f}ms)")
+    return None
+
+
+def _sse_event(name, payload):
+    return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+# ============================================================
 # API Endpoints
 # ============================================================
 
@@ -1752,6 +1890,174 @@ def api_lyrics():
     print("=" * 60)
 
     return jsonify(result)
+
+
+@app.route('/api/lyrics/stream', methods=['GET'])
+def api_lyrics_stream():
+    """SSE stream: parallel provider race with progressive upgrades.
+
+    Event flow (client replaces lyrics when stage rank or score improves):
+      meta    -> {song, artist, duration} once song_info resolves
+      status  -> per-provider finish {provider, ok, synced, elapsed_ms}
+      lyrics  -> {stage: raw|machine|final|cached, source, synced, lyrics, song, artist}
+                 raw = untranslated lines pushed FIRST (never blocked on Cohere)
+                 machine = Google fast translation interim
+                 final = Cohere quality translation (pro/JWT path: sync pushed
+                         as raw first, then re-pushed as final with translated)
+      done    -> {ok, source, synced, stages} terminal event
+    """
+    _req_start = time_module.time()
+    video_id = request.args.get('v')
+    if not video_id:
+        return jsonify({"error": "Missing video ID"}), 400
+    translate_to = request.args.get('lang', 'zh-TW')
+    jwt_token = request.args.get('jwt')
+    force_mode = request.args.get('force', '0') == '1'
+    full_cache_key = f"{video_id}:{translate_to}"
+    req_id = _secrets.token_hex(3)
+
+    print("=" * 60)
+    print(f"[REQ] [REQ {req_id}] Lyrics STREAM: {video_id} [{'JWT' if jwt_token else 'Normal'}] lang={translate_to}")
+    print("=" * 60)
+
+    def generate():
+        # --- Fast path: full cache hit closes the stream immediately ---
+        if not force_mode:
+            cached = get_cached(full_cache_key)
+            if cached:
+                print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
+                payload = dict(cached)
+                payload['stage'] = 'cached'
+                yield _sse_event('lyrics', payload)
+                yield _sse_event('done', {'ok': True, 'source': cached.get('source'), 'synced': cached.get('synced'), 'stages': ['cached']})
+                return
+
+        # --- Song lookup (required by all providers) ---
+        t_song = time_module.time()
+        try:
+            song_info = get_song_info(video_id)
+        except Exception as e:
+            yield _sse_event('done', {'ok': False, 'error': f'song lookup failed: {e}'})
+            return
+        if not song_info:
+            yield _sse_event('done', {'ok': False, 'error': 'Could not identify song'})
+            return
+        title, artist = song_info['title'], song_info['artist']
+        duration = song_info.get('duration', 0)
+        album = song_info.get('album', '')
+        print(f"[MUSIC] [REQ {req_id}] [Stream] {title} - {artist} ({duration}s) lookup={(time_module.time()-t_song)*1000:.0f}ms")
+        yield _sse_event('meta', {'song': title, 'artist': artist, 'duration': duration,
+                                  'lookup_ms': int((time_module.time()-t_song)*1000)})
+
+        queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
+
+        # --- Race all providers concurrently ---
+        jobs = {}
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
+            if jwt_token:
+                jobs[pool.submit(_race_cubey, queries, video_id, duration, jwt_token, req_id)] = 'Cubey'
+            jobs[pool.submit(_race_lrclib, queries, album, duration, req_id)] = 'LRCLIB'
+            jobs[pool.submit(_race_unison, queries, video_id, duration, req_id)] = 'Unison'
+            jobs[pool.submit(_race_yt, video_id, req_id)] = 'YouTube'
+
+            best = None
+            best_score = -1
+            stages = []
+            deadline = time_module.time() + 15
+            pending = set(jobs.keys())
+            while pending:
+                remaining = max(deadline - time_module.time(), 0.1)
+                try:
+                    done, pending = concurrent.futures.wait(pending, timeout=remaining,
+                                                            return_when=concurrent.futures.FIRST_COMPLETED)
+                except Exception:
+                    break
+                for fut in done:
+                    name = jobs.get(fut, '?')
+                    try:
+                        res = fut.result()
+                    except Exception as e:
+                        print(f"  [REQ {req_id}] [Stream] {name} worker crashed: {e}")
+                        res = None
+                    elapsed = int((time_module.time()-_req_start)*1000)
+                    score = _lyrics_score(res)
+                    yield _sse_event('status', {'provider': name, 'ok': res is not None,
+                                                'synced': bool(res and res.get('synced')),
+                                                'score': round(score, 2), 'elapsed_ms': elapsed})
+                    if score > best_score:
+                        best_score = score
+                        best = res
+                        best['song'] = title
+                        best['artist'] = artist
+                        payload = dict(best)
+                        payload['stage'] = 'raw'
+                        payload['elapsed_ms'] = elapsed
+                        stages.append(f"raw:{best.get('source')}")
+                        print(f"[SEND] [REQ {req_id}] [Stream] push RAW {best.get('source')} synced={best.get('synced')} lines={len(best.get('lyrics', []))} elapsed={elapsed}ms")
+                        yield _sse_event('lyrics', payload)
+                if time_module.time() >= deadline:
+                    for fut in pending:
+                        fut.cancel()
+                    break
+
+            if best is None:
+                print(f"[FAIL] [REQ {req_id}] [Stream] no provider hit")
+                yield _sse_event('lyrics', {'stage': 'raw', 'source': 'none', 'synced': False, 'song': title,
+                                            'artist': artist, 'lyrics': [{'time': 0, 'startTimeMs': 0, 'text': 'No lyrics found', 'translated': f'找不到歌詞: {title}', 'durationMs': 0, 'duration': 0}]})
+                yield _sse_event('done', {'ok': True, 'source': 'none', 'synced': False, 'stages': stages})
+                return
+
+            # --- Translation upgrades: machine interim, then Cohere final ---
+            if translate_to and best.get('lyrics'):
+                texts = [l.get('text', '') for l in best['lyrics'] if l.get('text')]
+                # Interim: Google fast (~1s) so UI shows translation before Cohere finishes
+                try:
+                    machine = google_translate_fast(texts, translate_to)
+                    if any(m for m in machine):
+                        for i, lyric in enumerate(best['lyrics']):
+                            if i < len(machine) and machine[i]:
+                                lyric['translated'] = machine[i]
+                        payload = dict(best)
+                        payload['stage'] = 'machine'
+                        payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
+                        stages.append('machine:google')
+                        print(f"[SEND] [REQ {req_id}] [Stream] push MACHINE google elapsed={payload['elapsed_ms']}ms")
+                        yield _sse_event('lyrics', payload)
+                except Exception as e:
+                    print(f"  [REQ {req_id}] [Stream] google interim failed: {e}")
+
+                # Final: Cohere quality translation, with keepalive pings so the
+                # connection survives the ~7s gap
+                print(f"  [TRANS] [REQ {req_id}] [Stream] Cohere final for {len(texts)} lines...")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as tex:
+                    tf = tex.submit(cohere_translate, texts, translate_to)
+                    while True:
+                        try:
+                            final_trans = tf.result(timeout=2)
+                            break
+                        except concurrent.futures.TimeoutError:
+                            yield ": ping\n\n"
+                    for i, lyric in enumerate(best['lyrics']):
+                        if i < len(final_trans):
+                            lyric['translated'] = final_trans[i]
+                sanitize_lyrics_parts(best['lyrics'])
+                payload = dict(best)
+                payload['stage'] = 'final'
+                payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
+                stages.append('final:cohere')
+                print(f"[SEND] [REQ {req_id}] [Stream] push FINAL cohere lines={len(best.get('lyrics', []))} elapsed={payload['elapsed_ms']}ms")
+                yield _sse_event('lyrics', payload)
+
+            set_cached(full_cache_key, best)
+            yield _sse_event('done', {'ok': True, 'source': best.get('source'), 'synced': best.get('synced'), 'stages': stages})
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        print(f"  [REQ {req_id}] [Stream] closed elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
+        print("=" * 60)
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive'})
 
 
 @app.route('/login', methods=['GET', 'POST'])
