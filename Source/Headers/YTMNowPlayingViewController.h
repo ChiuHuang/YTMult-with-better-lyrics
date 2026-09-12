@@ -13,4 +13,5 @@
 - (void)ytmu_makeLyricsViewClickable:(UIView *)v;
 - (void)ytmu_didTapLyricsButtonAction:(id)sender;
 - (void)ytmu_didTapLyricsBar:(UITapGestureRecognizer *)gesture;
+- (BOOL)ytmu_replaceLyricsChip:(UIView *)official;
 @end

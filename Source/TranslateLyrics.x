@@ -26,6 +26,7 @@
 @interface YTMNowPlayingViewController (YTMULyrics)
 - (void)ytmu_makeLyricsViewClickable:(UIView *)v;
 - (void)ytmu_didTapLyricsBar:(UITapGestureRecognizer *)gesture;
+- (BOOL)ytmu_replaceLyricsChip:(UIView *)official;
 @end
 
 @interface YTPlayerViewController (YTMUExt)
@@ -2050,6 +2051,13 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
             btn = btn.superview;
         }
 
+        // Own-button mode: hide the official chip and show ours in its
+        // place. Falls through to the legacy unlock path when replacement
+        // is impossible (e.g. ELM texture node with no container view).
+        if (YTMULyricsPreference(@"lyricsOwnButton", YES) && [self ytmu_replaceLyricsChip:btn]) {
+            return;
+        }
+
         // Tag button and all subviews with ytmu_isLyricsButton so hooks persistently force them active
         objc_setAssociatedObject(btn, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         btn.userInteractionEnabled = YES;
@@ -2094,6 +2102,54 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     for (UIView *child in v.subviews) {
         [self ytmu_makeLyricsViewClickable:child];
     }
+}
+
+%new
+- (BOOL)ytmu_replaceLyricsChip:(UIView *)official {
+    UIView *parent = official.superview;
+    if (!parent) return NO;
+    // Never fight ourselves, and never swallow a large container: only a
+    // chip-sized view gets replaced (layout rescans heal anything else).
+    if ([official isKindOfClass:[UIButton class]] && official.tag == 9777) return YES;
+    if (official.bounds.size.width >= 250 || official.bounds.size.width <= 0) return NO;
+
+    // Untag so our force-visible hooks let the official chip stay hidden.
+    objc_setAssociatedObject(official, @selector(ytmu_isLyricsButton), nil);
+    for (UIView *child in official.subviews) {
+        objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), nil);
+    }
+    official.hidden = YES;
+
+    // Reuse the official label text when we can find it.
+    NSString *chipTitle = @"歌詞";
+    if ([official isKindOfClass:[UILabel class]] && ((UILabel *)official).text.length) {
+        chipTitle = ((UILabel *)official).text;
+    } else {
+        for (UIView *child in official.subviews) {
+            if ([child isKindOfClass:[UILabel class]] && ((UILabel *)child).text.length) {
+                chipTitle = ((UILabel *)child).text;
+                break;
+            }
+        }
+    }
+
+    UIButton *own = (UIButton *)[parent viewWithTag:9777];
+    if (![own isKindOfClass:[UIButton class]]) {
+        own = [UIButton buttonWithType:UIButtonTypeSystem];
+        own.tag = 9777;
+        [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        own.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+        own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+        own.layer.masksToBounds = YES;
+        [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
+        [parent addSubview:own];
+    }
+    [own setTitle:chipTitle forState:UIControlStateNormal];
+    own.frame = official.frame;
+    own.autoresizingMask = official.autoresizingMask;
+    own.layer.cornerRadius = MAX(official.bounds.size.height / 2.0, 8.0);
+    own.hidden = NO;
+    return YES;
 }
 
 %new
