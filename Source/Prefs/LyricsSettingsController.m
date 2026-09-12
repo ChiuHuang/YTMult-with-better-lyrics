@@ -473,10 +473,11 @@
 
     __block BOOL cancelled = NO;
     __block NSOperationQueue *syncQueue = nil;
+    __weak YTMUSyncProgressOverlay *weakOverlay = overlay;
     overlay.onCancel = ^{
         cancelled = YES;
         [syncQueue cancelAllOperations];
-        [overlay dismissAnimated];
+        [weakOverlay dismissAnimated];
     };
 
     __weak typeof(self) weakSelf = self;
