@@ -1712,16 +1712,13 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
         // with whichever selector is available; a container simply no-ops
         // on an identifier it doesn't recognize, so this is safe.
         NSArray *panelIDs = @[@"PAmusic_watch_lyrics_panel", @"music_watch_lyrics_panel", @"lyrics"];
-        SEL selAnimated = @selector(showEngagementPanelWithIdentifier:animated:);
-        SEL selPlain = @selector(showEngagementPanelWithIdentifier:);
-        SEL selOpenAnimated = @selector(openEngagementPanelWithIdentifier:animated:);
         for (NSString *pid in panelIDs) {
-            if ([g_activeEngagementPanelContainer respondsToSelector:selAnimated]) {
-                [g_activeEngagementPanelContainer performSelector:selAnimated withObject:pid withObject:(id)kCFBooleanTrue];
-            } else if ([g_activeEngagementPanelContainer respondsToSelector:selPlain]) {
-                [g_activeEngagementPanelContainer performSelector:selPlain withObject:pid];
-            } else if ([g_activeEngagementPanelContainer respondsToSelector:selOpenAnimated]) {
-                [g_activeEngagementPanelContainer performSelector:selOpenAnimated withObject:pid withObject:(id)kCFBooleanTrue];
+            if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:animated:)]) {
+                [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
+            } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:)]) {
+                [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:) withObject:pid];
+            } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(openEngagementPanelWithIdentifier:animated:)]) {
+                [g_activeEngagementPanelContainer performSelector:@selector(openEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
             } else {
                 sendDebugLog(@"[WARN] engagement panel container responds to none of the known show/open selectors");
                 break;
