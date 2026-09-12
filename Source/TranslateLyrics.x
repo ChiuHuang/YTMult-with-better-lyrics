@@ -46,6 +46,18 @@ static double g_currentPlaybackTime = 0.0;
 
 static NSString *g_currentVideoID = nil;
 static __weak YTPlayerViewController *g_activePlayer = nil;
+// The replacement lyrics chip, tracked independently of its current
+// superview. YTM's ELM-backed action row is torn down and rebuilt (new
+// UIView instances) on essentially every render pass, including on song
+// change -- so `[parent viewWithTag:9777]` only ever finds the button on
+// the parent instance that created it. Once that parent is deallocated our
+// button goes with it, and a lookup scoped to the *new* parent always comes
+// up empty, so a fresh button gets created while the old one silently
+// vanishes: net effect is a flash of the button right after a song change,
+// then nothing until the next full re-render happens to line up again.
+// Tracking it globally lets us just move the same button to whatever the
+// current live parent is instead of losing/recreating it every time.
+static __weak UIButton *g_ytmuOwnLyricsButton = nil;
 static NSMutableDictionary *g_lyricsCache = nil;
 // Global in-flight guard: prevents multiple VC instances from firing parallel
 // requests for the same video. Only one full fetch runs at a time across all VCs.
@@ -66,6 +78,26 @@ static BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     return value ? [value boolValue] : fallback;
 }
 
+// User-configurable server base URL + translation target, set from the
+// Lyrics System settings page. Always falls back to the stock server/lang
+// so a blank or corrupted default never breaks lyrics fetching.
+static NSString *YTMUApiBase(void) {
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    NSString *base = settings[@"lyricsApiEndpoint"];
+    if (![base isKindOfClass:[NSString class]] || !base.length) return @"https://ytmtranslate.chiuhuang.dev";
+    while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
+    return base;
+}
+static NSString *YTMUTargetLang(void) {
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    NSString *lang = settings[@"lyricsTargetLang"];
+    if (![lang isKindOfClass:[NSString class]] || !lang.length) return @"zh-TW";
+    return lang;
+}
+static NSString *YTMUUrlEncode(NSString *s) {
+    return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: s;
+}
+
 // 輔助工具：把除錯訊息傳給你的 Python 伺服器
 static void sendDebugLog(NSString *msg) {
     NSString *full = msg;
@@ -73,8 +105,8 @@ static void sendDebugLog(NSString *msg) {
         full = [NSString stringWithFormat:@"%@ [v=%@ t=%.1f]", msg, g_currentVideoID, g_currentPlaybackTime];
     }
     NSLog(@"[YTMU] %@", full);
-    NSString *encodedMsg = [full stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=DEBUG_%@", encodedMsg];
+    NSString *encodedMsg = YTMUUrlEncode(full);
+    NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=DEBUG_%@", YTMUApiBase(), encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
 }
 static void __attribute__((unused)) sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
@@ -83,7 +115,7 @@ static void __attribute__((unused)) sendDebugLogWithPayload(NSString *event, NSS
     dict[@"playbackTime"] = @(g_currentPlaybackTime);
     NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"type": @"APP_LOG", @"event": event, @"level": @"info", @"message": msg, @"payload": dict} options:0 error:nil];
     if (json) {
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ytmtranslate.chiuhuang.dev/log"]];
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@/log", YTMUApiBase()]]];
         req.HTTPMethod = @"POST";
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         req.HTTPBody = json;
@@ -360,7 +392,7 @@ static void sendUIDump(void) {
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
     if (jsonData) {
         sendDebugLog(@" Screenshot detected, uploading UI dump...");
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://ytmtranslate.chiuhuang.dev/log"]];
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"%@/log", YTMUApiBase()]]];
         req.HTTPMethod = @"POST";
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         req.HTTPBody = jsonData;
@@ -464,7 +496,7 @@ static void sendUIDump(void) {
 
     sendDebugLog([NSString stringWithFormat:@"準備向伺服器要歌詞: %@", videoID]);
 
-    NSString *serverURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
+    NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -921,7 +953,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         return;
     }
 
-    NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
+    NSString *fullURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
     if (force) {
         fullURL = [fullURL stringByAppendingString:@"&force=1"];
     }
@@ -1051,7 +1083,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [self loadArtworkForVideo:videoID];
 
     // Fast Request (LRCLIB + GTX)
-    NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&fast=1", videoID];
+    NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![self.loadingVideoID isEqualToString:videoID]) return;
@@ -1673,19 +1705,30 @@ static void openLyricsFromViewController(UIViewController *parentVC) {
     }
 
     if (g_activeEngagementPanelContainer) {
+        // Which selector the container responds to doesn't depend on the
+        // panel ID, so `break`-ing on the first match here only ever tried
+        // the FIRST candidate ID and silently gave up if it was wrong for
+        // this YTM build -- the other two IDs were dead code. Try every ID
+        // with whichever selector is available; a container simply no-ops
+        // on an identifier it doesn't recognize, so this is safe.
         NSArray *panelIDs = @[@"PAmusic_watch_lyrics_panel", @"music_watch_lyrics_panel", @"lyrics"];
+        SEL selAnimated = @selector(showEngagementPanelWithIdentifier:animated:);
+        SEL selPlain = @selector(showEngagementPanelWithIdentifier:);
+        SEL selOpenAnimated = @selector(openEngagementPanelWithIdentifier:animated:);
         for (NSString *pid in panelIDs) {
-            if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:animated:)]) {
-                [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
-                break;
-            } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(showEngagementPanelWithIdentifier:)]) {
-                [g_activeEngagementPanelContainer performSelector:@selector(showEngagementPanelWithIdentifier:) withObject:pid];
-                break;
-            } else if ([g_activeEngagementPanelContainer respondsToSelector:@selector(openEngagementPanelWithIdentifier:animated:)]) {
-                [g_activeEngagementPanelContainer performSelector:@selector(openEngagementPanelWithIdentifier:animated:) withObject:pid withObject:(id)kCFBooleanTrue];
+            if ([g_activeEngagementPanelContainer respondsToSelector:selAnimated]) {
+                [g_activeEngagementPanelContainer performSelector:selAnimated withObject:pid withObject:(id)kCFBooleanTrue];
+            } else if ([g_activeEngagementPanelContainer respondsToSelector:selPlain]) {
+                [g_activeEngagementPanelContainer performSelector:selPlain withObject:pid];
+            } else if ([g_activeEngagementPanelContainer respondsToSelector:selOpenAnimated]) {
+                [g_activeEngagementPanelContainer performSelector:selOpenAnimated withObject:pid withObject:(id)kCFBooleanTrue];
+            } else {
+                sendDebugLog(@"[WARN] engagement panel container responds to none of the known show/open selectors");
                 break;
             }
         }
+    } else {
+        sendDebugLog(@"[WARN] openLyrics: no active engagement panel container captured, native panel path skipped entirely");
     }
 
     // Fallback: if native panel didn't open on screen within 0.2s, present YTMULyricsViewController as bottom sheet
@@ -2162,7 +2205,13 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
         }
     }
 
+    // Prefer the tag lookup scoped to this parent (cheap, common case: same
+    // parent instance re-laying out), then fall back to the globally
+    // tracked button, which survives even if its old parent was torn down.
     UIButton *own = (UIButton *)[parent viewWithTag:9777];
+    if (![own isKindOfClass:[UIButton class]]) {
+        own = g_ytmuOwnLyricsButton;
+    }
     if (![own isKindOfClass:[UIButton class]]) {
         own = [UIButton buttonWithType:UIButtonTypeSystem];
         own.tag = 9777;
@@ -2171,6 +2220,13 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
         own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
         own.layer.masksToBounds = YES;
         [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
+        g_ytmuOwnLyricsButton = own;
+    }
+    // Own it defensively: if anything (ours or YTM's) tries to hide/disable
+    // an "unrecognized" subview during a re-render, the same force-visible
+    // hooks that protect the legacy unlock path protect this button too.
+    objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (own.superview != parent) {
         [parent addSubview:own];
     }
     [own setTitle:chipTitle forState:UIControlStateNormal];
@@ -2178,6 +2234,8 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     own.autoresizingMask = official.autoresizingMask;
     own.layer.cornerRadius = MAX(official.bounds.size.height / 2.0, 8.0);
     own.hidden = NO;
+    own.userInteractionEnabled = YES;
+    own.alpha = 1.0;
     return YES;
 }
 
