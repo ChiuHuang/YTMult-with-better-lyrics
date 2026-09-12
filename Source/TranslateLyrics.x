@@ -955,11 +955,13 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                                                                       userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
                 } else if (self.lyrics.count == 0) {
                     statusLabel.text = @"[WARN]️ 找不到歌詞 / No lyrics found";
+                    if (self.isModal) self.view.hidden = NO;
                     self.lyrics = @[];
                     [self.tableView reloadData];
                 }
             } else if (self.lyrics.count == 0) {
                 statusLabel.text = @"[WARN]️ 網路錯誤 / Network error";
+                if (self.isModal) self.view.hidden = NO;
                 self.lyrics = @[];
                 [self.tableView reloadData];
             }
@@ -1004,6 +1006,16 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
     statusLabel.text = @"Loading...";
+
+    // New video on a reused sheet: drop stale rows now so a guard bail
+    // ("Waiting...") or a slow fetch never shows the previous song's lines.
+    // A user-opened modal must be visible regardless of the auto-show pref.
+    if (![videoID isEqualToString:self.loadingVideoID]) {
+        self.currentIndex = -1;
+        self.lyrics = @[];
+        [self.tableView reloadData];
+        if (self.isModal) self.view.hidden = NO;
+    }
 
     // Global in-flight guard: if ANY VC instance is already fetching this video,
     // wait for it — the result arrives via YTMULyricsDidLoad notification.
@@ -1238,7 +1250,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     [self.tableView reloadData];
 
-    if (newLyrics.count > 0 && YTMULyricsPreference(@"lyricsAlwaysOn", YES)) {
+    if (newLyrics.count > 0 && (self.isModal || YTMULyricsPreference(@"lyricsAlwaysOn", YES))) {
         self.view.hidden = NO;
         UIView *contentContainer = self.view.superview;
         if (contentContainer) {
