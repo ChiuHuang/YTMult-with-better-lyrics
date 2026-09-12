@@ -619,6 +619,7 @@ static void sendUIDump(void) {
 @property (nonatomic, assign) BOOL isSynced;
 @property (nonatomic, strong) NSString *lastColorKey;
 @property (nonatomic, strong) NSDate *loadingSince;
+@property (nonatomic, copy) NSString *artworkVideoID;
 @property (nonatomic, strong) UILabel *fpsLabel;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
@@ -828,6 +829,9 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                 statusLabel.text = @"";
                 self.lyrics = @[];
                 [self.tableView reloadData];
+                // Force the backdrop to refresh for the new song even if this
+                // instance never fetches (global-guard bail + broadcast path).
+                self.artworkVideoID = nil;
             }
             [self fetchLyricsForVideo:videoID];
         });
@@ -874,6 +878,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                         [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
                             self.artworkImageView.image = img;
                         } completion:nil];
+                        self.artworkVideoID = videoID;
                     }
                 });
                 return;
@@ -890,6 +895,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                             [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
                                 self.artworkImageView.image = img2;
                             } completion:nil];
+                            self.artworkVideoID = videoID;
                         }
                     });
                 }
@@ -1214,11 +1220,12 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     self.lastColorKey = nil;
 
     // Background safety net: lyrics delivered without a fetch on this
-    // instance (broadcast from another VC) never triggered artwork loading,
-    // which is why the backdrop stayed black most of the time.
+    // instance (broadcast from another VC) never triggered artwork loading.
+    // Keyed on video, not nil image, so song changes always refresh the
+    // backdrop while the old one stays up until the new art arrives.
     NSString *artVid = self.loadingVideoID;
     if (!artVid) artVid = g_currentVideoID;
-    if (artVid && !self.artworkImageView.image) {
+    if (artVid && ![artVid isEqualToString:self.artworkVideoID]) {
         if (!self.loadingVideoID) self.loadingVideoID = artVid;
         [self loadArtworkForVideo:artVid];
     }
@@ -2114,9 +2121,9 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     if (official.bounds.size.width >= 250 || official.bounds.size.width <= 0) return NO;
 
     // Untag so our force-visible hooks let the official chip stay hidden.
-    objc_setAssociatedObject(official, @selector(ytmu_isLyricsButton), nil);
+    objc_setAssociatedObject(official, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     for (UIView *child in official.subviews) {
-        objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), nil);
+        objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     official.hidden = YES;
 
