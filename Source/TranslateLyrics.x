@@ -1309,12 +1309,40 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     if ([parts count] == 0) return;
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
+    // Ratio normalization: provider word spans rarely fill the line window,
+    // which leaves dead fully-lit time after the last word reveals. Stretch
+    // the word schedule proportionally so the last word lands exactly on the
+    // line end (next line start), keeping each word's share by duration ratio.
+    double lineStart = [lyric[@"startTimeMs"] doubleValue];
+    if (lineStart <= 0) lineStart = [lyric[@"time"] doubleValue] * 1000.0;
+    double lineEnd = 0;
+    if (index + 1 < self.lyrics.count) {
+        NSDictionary *nextLyric = self.lyrics[index + 1];
+        lineEnd = [nextLyric[@"startTimeMs"] doubleValue];
+        if (lineEnd <= 0) lineEnd = [nextLyric[@"time"] doubleValue] * 1000.0;
+    }
+    if (lineEnd <= lineStart) {
+        double lineDur = [lyric[@"durationMs"] doubleValue];
+        if (lineDur <= 0) lineDur = [lyric[@"duration"] doubleValue] * 1000.0;
+        lineEnd = lineStart + (lineDur > 0 ? lineDur : 4000.0);
+    }
+    NSDictionary *firstPart = parts[0];
+    double firstStart = [firstPart[@"startTimeMs"] doubleValue];
+    double lastEnd = firstStart;
+    for (NSDictionary *p in parts) {
+        double e = [p[@"startTimeMs"] doubleValue] + MAX([p[@"durationMs"] doubleValue], 1.0);
+        if (e > lastEnd) lastEnd = e;
+    }
+    double ratioK = 1.0;
+    if (lastEnd > firstStart && lineEnd > lineStart) {
+        ratioK = (lineEnd - lineStart) / (lastEnd - firstStart);
+    }
     NSInteger curWord = partCount; // past-the-end = everything sung
     double curFrac = 1.0;
     for (NSInteger i = 0; i < partCount; i++) {
         NSDictionary *p = parts[i];
-        double s = [p[@"startTimeMs"] doubleValue];
-        double d = MAX([p[@"durationMs"] doubleValue], 1.0);
+        double s = lineStart + ([p[@"startTimeMs"] doubleValue] - firstStart) * ratioK;
+        double d = MAX([p[@"durationMs"] doubleValue], 1.0) * ratioK;
         if (nowMs < s) { curWord = i; curFrac = 0.0; break; }
         if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
     }
