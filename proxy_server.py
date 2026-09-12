@@ -1554,13 +1554,31 @@ _PROVIDER_RANK = {
 _STAGE_RANK = {'raw': 0, 'machine': 1, 'final': 2, 'cached': 3}
 
 
+def _wbw_line_count(res):
+    """Count lines carrying real provider word timestamps (not interpolated)."""
+    n = 0
+    for l in (res.get('lyrics') or []):
+        parts = l.get('parts') or []
+        if l.get('wordSynced') and len(parts) > 1:
+            if len({p.get('startTimeMs') for p in parts}) > 1:
+                n += 1
+    return n
+
+
 def _lyrics_score(res):
-    """Higher is better. Synced always outranks plain; ties break by provider."""
+    """Higher is better. Word-by-word sync beats everything; if both sides
+    have it (or neither does), provider weight decides, then coverage."""
     if not res or not res.get('lyrics'):
         return -1
-    base = 100 if res.get('synced') else 0
+    wbw = _wbw_line_count(res)
+    if wbw > 0:
+        base = 2000
+    elif res.get('synced'):
+        base = 100
+    else:
+        base = 0
     prov = _PROVIDER_RANK.get(res.get('source', ''), 0)
-    return base + prov + min(len(res.get('lyrics', [])), 50) * 0.01
+    return base + prov + min(len(res.get('lyrics', [])), 50) * 0.01 + min(wbw, 100) * 0.1
 
 
 def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
@@ -1984,12 +2002,14 @@ def api_lyrics_stream():
                     score = _lyrics_score(res)
                     yield _sse_event('status', {'provider': name, 'ok': res is not None,
                                                 'synced': bool(res and res.get('synced')),
+                                                'wbw_lines': _wbw_line_count(res) if res else 0,
                                                 'score': round(score, 2), 'elapsed_ms': elapsed})
                     if score > best_score:
                         best_score = score
                         best = res
                         best['song'] = title
                         best['artist'] = artist
+                        best['wbw_lines'] = _wbw_line_count(best)
                         payload = dict(best)
                         payload['stage'] = 'raw'
                         payload['elapsed_ms'] = elapsed
