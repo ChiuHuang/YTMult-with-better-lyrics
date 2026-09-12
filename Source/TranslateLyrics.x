@@ -46,6 +46,14 @@ static NSMutableDictionary *g_lyricsCache = nil;
 // requests for the same video. Only one full fetch runs at a time across all VCs.
 static NSString *g_globalLoadingVideoID = nil; // videoID currently being fetched
 static BOOL g_globalLoadingInFlight = NO;      // YES while a full request chain is active
+static NSDate *g_loadingSince = nil;           // when the current fetch claimed the slot
+
+// Release the global fetch slot (always clears the watchdog timestamp too)
+static void YTMUReleaseGlobalFetch(void) {
+    g_globalLoadingInFlight = NO;
+    g_globalLoadingVideoID = nil;
+    g_loadingSince = nil;
+}
 
 static BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
@@ -595,6 +603,7 @@ static void sendUIDump(void) {
 @property (nonatomic, assign) BOOL isModal;
 @property (nonatomic, assign) BOOL isSynced;
 @property (nonatomic, strong) NSString *lastColorKey;
+@property (nonatomic, strong) NSDate *loadingSince;
 - (void)updateLyrics:(NSArray *)newLyrics;
 - (void)fetchLyricsForVideo:(NSString *)videoID;
 - (void)loadArtworkForVideo:(NSString *)videoID;
@@ -830,6 +839,65 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     }] resume];
 }
 
+// Full lyrics request (server full pipeline + translation). Never blocks on
+// JWT: callers race getJWTTokenWithCompletion against a timeout and pass nil
+// on expiry — the server simply skips Cubey and tries the free providers.
+- (void)fetchFullLyricsForVideo:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force {
+    if (![self.loadingVideoID isEqualToString:videoID]) {
+        self.isLoading = NO;
+        self.loadingSince = nil;
+        if ([g_globalLoadingVideoID isEqualToString:videoID]) {
+            YTMUReleaseGlobalFetch();
+        }
+        return;
+    }
+
+    NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
+    if (force) {
+        fullURL = [fullURL stringByAppendingString:@"&force=1"];
+    }
+    if (jwt) {
+        fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
+    }
+
+    [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fullURL] completionHandler:^(NSData *fullData, NSURLResponse *fullRes, NSError *fullErr) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.isLoading = NO;
+            self.loadingSince = nil;
+            // Release global in-flight slot
+            if ([g_globalLoadingVideoID isEqualToString:videoID]) {
+                YTMUReleaseGlobalFetch();
+            }
+
+            if (![self.loadingVideoID isEqualToString:videoID]) return;
+
+            UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+            if (fullData && !fullErr) {
+                NSDictionary *fullDict = [NSJSONSerialization JSONObjectWithData:fullData options:0 error:nil];
+                if (fullDict && fullDict[@"lyrics"]) {
+                    statusLabel.text = @"";
+                    if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+                    g_lyricsCache[videoID] = fullDict[@"lyrics"];
+                    YTMULyricsCacheSave(videoID, fullDict[@"lyrics"]);
+                    [self updateLyrics:fullDict[@"lyrics"]];
+                    // Broadcast full result so all other VCs update too
+                    [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
+                                                                        object:videoID
+                                                                      userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
+                } else if (self.lyrics.count == 0) {
+                    statusLabel.text = @"[WARN]️ 找不到歌詞 / No lyrics found";
+                    self.lyrics = @[];
+                    [self.tableView reloadData];
+                }
+            } else if (self.lyrics.count == 0) {
+                statusLabel.text = @"[WARN]️ 網路錯誤 / Network error";
+                self.lyrics = @[];
+                [self.tableView reloadData];
+            }
+        });
+    }] resume];
+}
+
 - (void)fetchLyricsForVideo:(NSString *)videoID {
     if (!videoID || videoID.length == 0) return;
 
@@ -865,27 +933,41 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         }
     }
 
+    UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+    statusLabel.text = @"Loading...";
+
     // Global in-flight guard: if ANY VC instance is already fetching this video,
-    // skip — we'll receive the result via YTMULyricsDidLoad notification below.
+    // wait for it — the result arrives via YTMULyricsDidLoad notification.
+    // Watchdog: a fetch that claimed the slot but never finished (e.g. lost
+    // JWT callback) must not wedge the sheet empty forever. Reclaim after 45s.
     if (g_globalLoadingInFlight && [g_globalLoadingVideoID isEqualToString:videoID]) {
-        return;
+        if (g_loadingSince && [[NSDate date] timeIntervalSinceDate:g_loadingSince] > 45) {
+            sendDebugLog(@"[WARN] Reclaiming stale global fetch slot");
+            YTMUReleaseGlobalFetch();
+        } else {
+            statusLabel.text = @"Waiting...";
+            return;
+        }
     }
     // Per-instance guard (for the same VC re-entering)
     if (self.isLoading && [self.loadingVideoID isEqualToString:videoID]) {
-        return;
+        if (self.loadingSince && [[NSDate date] timeIntervalSinceDate:self.loadingSince] <= 45) {
+            statusLabel.text = @"Waiting...";
+            return;
+        }
+        sendDebugLog(@"[WARN] Reclaiming stale instance fetch slot");
     }
 
     // Claim the global in-flight slot
     g_globalLoadingInFlight = YES;
     g_globalLoadingVideoID = videoID;
+    g_loadingSince = [NSDate date];
     self.isLoading = YES;
     self.loadingVideoID = videoID;
+    self.loadingSince = [NSDate date];
 
     // loadingVideoID must be set before artwork starts so the background applies
     [self loadArtworkForVideo:videoID];
-
-    UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
-    statusLabel.text = @"Loading...";
 
     // Fast Request (LRCLIB + GTX)
     NSString *fastURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&fast=1", videoID];
@@ -904,53 +986,21 @@ static void openLyricsFromViewController(UIViewController *parentVC);
                 }
             }
 
-            // Full Request (Cubey + Cohere) using JWT
+            // Full Request (Cubey + Cohere) using JWT, with a 10s fallback so
+            // a lost Turnstile callback can never wedge the sheet empty.
+            __block BOOL jwtResolved = NO;
             [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-                if (![self.loadingVideoID isEqualToString:videoID]) {
-                    self.isLoading = NO;
-                    if ([g_globalLoadingVideoID isEqualToString:videoID]) {
-                        g_globalLoadingInFlight = NO;
-                        g_globalLoadingVideoID = nil;
-                    }
-                    return;
-                }
-
-                NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@", videoID];
-                if (jwt) {
-                    fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
-                }
-
-                [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fullURL] completionHandler:^(NSData *fullData, NSURLResponse *fullRes, NSError *fullErr) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        self.isLoading = NO;
-                        // Release global in-flight slot
-                        if ([g_globalLoadingVideoID isEqualToString:videoID]) {
-                            g_globalLoadingInFlight = NO;
-                            g_globalLoadingVideoID = nil;
-                        }
-
-                        if (![self.loadingVideoID isEqualToString:videoID]) return;
-
-                        if (fullData && !fullErr) {
-                            NSDictionary *fullDict = [NSJSONSerialization JSONObjectWithData:fullData options:0 error:nil];
-                            if (fullDict && fullDict[@"lyrics"]) {
-                                statusLabel.text = @"";
-                                g_lyricsCache[videoID] = fullDict[@"lyrics"];
-                                YTMULyricsCacheSave(videoID, fullDict[@"lyrics"]);
-                                [self updateLyrics:fullDict[@"lyrics"]];
-                                // Broadcast full result so all other VCs update too
-                                [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
-                                                                                    object:videoID
-                                                                                  userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
-                            } else if (!g_lyricsCache[videoID]) {
-                                statusLabel.text = @"[WARN]️ 找不到歌詞 / No lyrics found";
-                                self.lyrics = @[];
-                                [self.tableView reloadData];
-                            }
-                        }
-                    });
-                }] resume];
+                if (jwtResolved) return;
+                jwtResolved = YES;
+                [self fetchFullLyricsForVideo:videoID jwt:jwt force:NO];
             }];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (!jwtResolved && [self.loadingVideoID isEqualToString:videoID]) {
+                    jwtResolved = YES;
+                    sendDebugLog(@"[WARN] JWT timeout, full fetch without JWT");
+                    [self fetchFullLyricsForVideo:videoID jwt:nil force:NO];
+                }
+            });
         });
     }] resume];
 }
@@ -1050,55 +1100,28 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     g_globalLoadingInFlight = YES;
     g_globalLoadingVideoID = g_currentVideoID;
+    g_loadingSince = [NSDate date];
     self.isLoading = YES;
     self.loadingVideoID = g_currentVideoID;
+    self.loadingSince = [NSDate date];
 
     [self loadArtworkForVideo:g_currentVideoID];
 
+    // Same 10s JWT fallback as the normal path — a lost Turnstile callback
+    // must not wedge the sheet on "Force Reloading..." forever.
+    __block BOOL jwtResolved = NO;
     [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-        if (![self.loadingVideoID isEqualToString:g_currentVideoID]) {
-            self.isLoading = NO;
-            if ([g_globalLoadingVideoID isEqualToString:g_currentVideoID]) {
-                g_globalLoadingInFlight = NO;
-                g_globalLoadingVideoID = nil;
-            }
-            return;
-        }
-
-        NSString *fullURL = [NSString stringWithFormat:@"https://ytmtranslate.chiuhuang.dev/api/lyrics?v=%@&force=1", g_currentVideoID];
-        if (jwt) {
-            fullURL = [fullURL stringByAppendingFormat:@"&jwt=%@", jwt];
-        }
-
-        [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fullURL] completionHandler:^(NSData *fullData, NSURLResponse *fullRes, NSError *fullErr) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                self.isLoading = NO;
-                if ([g_globalLoadingVideoID isEqualToString:g_currentVideoID]) {
-                    g_globalLoadingInFlight = NO;
-                    g_globalLoadingVideoID = nil;
-                }
-                if (![self.loadingVideoID isEqualToString:g_currentVideoID]) return;
-
-                if (fullData && !fullErr) {
-                    NSDictionary *fullDict = [NSJSONSerialization JSONObjectWithData:fullData options:0 error:nil];
-                    if (fullDict && fullDict[@"lyrics"]) {
-                        statusLabel.text = @"";
-                        if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
-                        g_lyricsCache[g_currentVideoID] = fullDict[@"lyrics"];
-                        YTMULyricsCacheSave(g_currentVideoID, fullDict[@"lyrics"]);
-                        [self updateLyrics:fullDict[@"lyrics"]];
-                        [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
-                                                                            object:g_currentVideoID
-                                                                          userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
-                    } else {
-                        statusLabel.text = @"[WARN]️ 重譯失敗 / Force failed";
-                    }
-                } else {
-                    statusLabel.text = @"[WARN]️ 網路錯誤 / Network error";
-                }
-            });
-        }] resume];
+        if (jwtResolved) return;
+        jwtResolved = YES;
+        [self fetchFullLyricsForVideo:g_currentVideoID jwt:jwt force:YES];
     }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!jwtResolved && [self.loadingVideoID isEqualToString:g_currentVideoID]) {
+            jwtResolved = YES;
+            sendDebugLog(@"[WARN] JWT timeout, force reload without JWT");
+            [self fetchFullLyricsForVideo:g_currentVideoID jwt:nil force:YES];
+        }
+    });
 }
 
 - (void)updateLyrics:(NSArray *)newLyrics {
