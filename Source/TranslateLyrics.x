@@ -604,6 +604,10 @@ static void sendUIDump(void) {
 @property (nonatomic, assign) BOOL isSynced;
 @property (nonatomic, strong) NSString *lastColorKey;
 @property (nonatomic, strong) NSDate *loadingSince;
+@property (nonatomic, strong) UILabel *fpsLabel;
+@property (nonatomic, assign) NSInteger fpsTicks;
+@property (nonatomic, assign) NSTimeInterval fpsWindowStart;
+@property (nonatomic, assign) float lastVolume;
 - (void)updateLyrics:(NSArray *)newLyrics;
 - (void)fetchLyricsForVideo:(NSString *)videoID;
 - (void)loadArtworkForVideo:(NSString *)videoID;
@@ -707,6 +711,18 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     [self.view addSubview:self.tableView];
 
+    // FPS readout (toggled by volume-down, gated by lyricsFpsMeter setting)
+    self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
+    self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
+    self.fpsLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.7];
+    self.fpsLabel.hidden = YES;
+    self.fpsLabel.autoresizingMask = UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
+    [self.view addSubview:self.fpsLabel];
+    self.fpsTicks = 0;
+    self.fpsWindowStart = 0;
+    self.lastVolume = -1;
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(ytmu_volumeChanged:) name:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil];
+
     self.lyrics = @[];
 
     // Listen for song changes and lyrics updates across instances
@@ -798,6 +814,32 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             }
             [self fetchLyricsForVideo:videoID];
         });
+    }
+}
+
+// Volume-down toggles the FPS readout (setting: lyricsFpsMeter). Uses only
+// the notification name string + defensive userInfo parsing, no private API.
+- (void)ytmu_volumeChanged:(NSNotification *)notif {
+    if (!YTMULyricsPreference(@"lyricsFpsMeter", YES)) return;
+    id param = notif.userInfo[@"AVSystemController_AudioVolumeNotificationParameter"];
+    float vol = -1;
+    if ([param isKindOfClass:[NSNumber class]]) {
+        vol = [param floatValue];
+    } else if ([param isKindOfClass:[NSDictionary class]]) {
+        id v = ((NSDictionary *)param)[@"Volume"];
+        if ([v isKindOfClass:[NSNumber class]]) vol = [v floatValue];
+    }
+    if (vol < 0) return;
+    float prev = self.lastVolume;
+    self.lastVolume = vol;
+    if (prev >= 0 && vol < prev - 0.001) {
+        self.fpsLabel.hidden = !self.fpsLabel.hidden;
+        if (!self.fpsLabel.hidden) {
+            self.fpsTicks = 0;
+            self.fpsWindowStart = CACurrentMediaTime();
+            self.fpsLabel.text = @"... fps";
+        }
+        sendDebugLog(@"[FPS] readout toggled by volume-down");
     }
 }
 
@@ -1006,6 +1048,19 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 }
 
 - (void)updatePlaybackTime {
+    // FPS probe: measures the display-link tick rate itself (before guards),
+    // so it reports the real link rate even with plain/empty lyrics.
+    self.fpsTicks++;
+    NSTimeInterval fpsNow = CACurrentMediaTime();
+    if (fpsNow - self.fpsWindowStart >= 1.0) {
+        NSInteger fps = (NSInteger)(self.fpsTicks / MAX(fpsNow - self.fpsWindowStart, 0.001));
+        self.fpsTicks = 0;
+        self.fpsWindowStart = fpsNow;
+        if (self.fpsLabel && !self.fpsLabel.hidden) {
+            self.fpsLabel.text = [NSString stringWithFormat:@"%ld fps", (long)fps];
+            sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps", (long)fps]);
+        }
+    }
     if (!self.isSynced || self.lyrics.count == 0) return;
 
     double currentTime = 0;
