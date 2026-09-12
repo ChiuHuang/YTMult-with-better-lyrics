@@ -29,6 +29,7 @@
     if (!d[@"sendLyricsScreenshotDebug"]) d[@"sendLyricsScreenshotDebug"] = @NO;
     if (!d[@"sendDebugLogsToServer"]) d[@"sendDebugLogsToServer"] = @NO;
     if (!d[@"lyricsFpsMeter"]) d[@"lyricsFpsMeter"] = @YES;
+    if (!d[@"lyricsOwnButton"]) d[@"lyricsOwnButton"] = @YES;
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
     [self loadPreview];
 }
@@ -79,7 +80,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 4;
+    if (section == 0) return 5;
     if (section == 1) return 3;
     if (section == 2) return (NSInteger)self.previewLyrics.count + 1;
     if (section == 3) return 2;
@@ -127,12 +128,13 @@
             @{@"title": @"Always show translated lyrics", @"desc": @"Auto-show custom panel when lyrics load", @"key": @"lyricsAlwaysOn"},
             @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"key": @"lyricsCacheEnabled"},
             @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
-            @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"}
+            @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
+            @{@"title": @"Replace lyrics chip", @"desc": @"Hide official chip, show our own button instead", @"key": @"lyricsOwnButton"}
         ];
         NSDictionary *it = items[indexPath.row];
         cell.textLabel.text = it[@"title"];
         cell.detailTextLabel.text = it[@"desc"];
-        cell.imageView.image = [UIImage systemImageNamed:(indexPath.row==0?@"quote.bubble": indexPath.row==1?@"internaldrive": indexPath.row==2?@"antenna.radiowaves.left.and.right":@"speedometer")];
+        cell.imageView.image = [UIImage systemImageNamed:(indexPath.row==0?@"quote.bubble": indexPath.row==1?@"internaldrive": indexPath.row==2?@"antenna.radiowaves.left.and.right": indexPath.row==3?@"speedometer":@"hand.tap")];
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = it[@"key"];
         sw.on = [dict[it[@"key"]] boolValue];
