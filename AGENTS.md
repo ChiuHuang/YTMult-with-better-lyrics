@@ -68,6 +68,13 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- `25f61d4` mask reveal: CAShapeLayer union of TextKit word rects (real
+  per-word timing, wrapped lines OK), normalized spacing via forward-search
+  alignment (fixes 5-space karaoke padding), baked text shadow on bright
+  overlay, 60-120 frame-rate range, fps/max readout, artwork safety net in
+  updateLyrics (broadcast path never loaded bg).
+- `5469a4d` FPS probe (volume-down toggles `N fps` readout + `/log` lines,
+  `lyricsFpsMeter` setting default ON).
 - `3e8fe9b` stuck-empty-sheet fix: fetch watchdog (45s reclaim), status before
   guards (Loading/Waiting), full fetch extracted to helper with 10s JWT
   fallback (nil JWT -> server skips Cubey), no clobber of fast lyrics on full
