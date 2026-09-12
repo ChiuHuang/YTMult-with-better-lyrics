@@ -5,3 +5,4 @@
 packages/
 __pycache__/
 config/admin_config.json
+logs/
