@@ -573,6 +573,7 @@ static void sendUIDump(void) {
     [super prepareForReuse];
     _wipeProgress = 0.0;
     self.lyricLabel.alpha = 1.0;
+    self.lyricLabel.transform = CGAffineTransformIdentity;
     self.wipeLabel.text = nil;
     self.wipeLabel.attributedText = nil;
     self.lyricLabel.attributedText = nil;
@@ -1001,14 +1002,18 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
             if (newCell) {
                 [self configureCell:newCell atIndex:newIndex isActive:YES currentTime:currentTime];
-                // Line-by-line rows crossfade in; word rows color themselves per tick.
+                // Apple-Music-style activation pop: line-level rows crossfade
+                // in, every row settles from a slight scale-up. Word rows keep
+                // coloring themselves per tick after the pop.
                 NSDictionary *nl = self.lyrics[newIndex];
                 if (!([nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0)) {
                     newCell.lyricLabel.alpha = 0.3;
-                    [UIView animateWithDuration:0.25 animations:^{
-                        newCell.lyricLabel.alpha = 1.0;
-                    }];
                 }
+                newCell.lyricLabel.transform = CGAffineTransformMakeScale(1.04, 1.04);
+                [UIView animateWithDuration:0.5 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+                    newCell.lyricLabel.alpha = 1.0;
+                    newCell.lyricLabel.transform = CGAffineTransformIdentity;
+                } completion:nil];
             }
 
             // Smooth auto-scroll to the middle of the screen (only if user is not manually scrolling)
@@ -1200,7 +1205,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         loc += w.length;
     }
     UIColor *sung = [UIColor whiteColor];
-    UIColor *unsung = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
+    UIColor *unsung = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
     UIFont *font = cell.lyricLabel.font;
     if (!font) font = [UIFont boldSystemFontOfSize:22];
     NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:full
@@ -1272,6 +1277,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric];
     cell.lyricLabel.alpha = 1.0;
+    cell.lyricLabel.transform = CGAffineTransformIdentity;
 
     if (!self.isSynced) {
         // Plain unsynced lyrics: display every line clearly without dimming.
@@ -1306,16 +1312,16 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
-        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.85];
+        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.7];
     } else {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
+        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
         cell.lyricLabel.layer.shadowOpacity = 0.32;
         cell.wipeLabel.text = nil;
         [cell setWipeProgress:0.0];
 
-        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.24];
+        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.25];
     }
 
     NSString *translated = lyric[@"translated"];
