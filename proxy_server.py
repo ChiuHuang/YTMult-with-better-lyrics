@@ -1187,6 +1187,20 @@ def _is_chinese_target(target_lang):
     return (target_lang or '').lower().replace('_', '-') in ('zh-tw', 'zh-hant', 'zh-cn', 'zh-hans', 'zh')
 
 
+# video_id and translate_to both end up embedded directly in cache filenames
+# (e.g. cache/lyrics/{video_id}:{translate_to}.json), so anything containing
+# '/', '\', or '..' must never reach that point -- otherwise a crafted value
+# could write or read outside the cache directory entirely.
+_SAFE_CACHE_COMPONENT_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+
+
+def _safe_cache_component(value):
+    if not isinstance(value, str) or not _SAFE_CACHE_COMPONENT_RE.match(value):
+        return None
+    return value
+
+
+
 def _line_is_already_chinese(text):
     """True if a line is Han-script lyrics (any variant of Chinese) that only
     ever needs a script pass, never a real translation. Japanese lines with
@@ -1932,6 +1946,8 @@ def api_lyrics():
         return jsonify({"ok": True, "source": "debug"})
 
     translate_to = request.args.get('lang', 'zh-TW')
+    if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
+        return jsonify({"error": "Invalid video ID or lang"}), 400
     jwt_token = request.args.get('jwt')
     fast_mode = request.args.get('fast', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
@@ -2091,6 +2107,61 @@ def api_lyrics():
     return jsonify(result)
 
 
+@app.route('/api/cache/list', methods=['GET'])
+def api_cache_list():
+    """Public, lightweight listing of what this server already has cached, so
+    a client can bulk-sync its local on-device cache without re-running the
+    full fetch+translate pipeline per song. Pair this with GET /api/lyrics
+    (force=0) for each returned video_id: that already serves straight from
+    this same cache almost instantly, so no new fetch endpoint is needed."""
+    lang_filter = (request.args.get('lang') or '').strip()
+    try:
+        limit = min(max(int(request.args.get('limit', 500)), 1), 2000)
+    except (TypeError, ValueError):
+        limit = 500
+
+    lyrics_dir = 'cache/lyrics'
+    items = []
+    if os.path.exists(lyrics_dir):
+        fnames = sorted(
+            (f for f in os.listdir(lyrics_dir) if f.endswith('.json')),
+            key=lambda f: os.path.getmtime(os.path.join(lyrics_dir, f)),
+            reverse=True,
+        )
+        for fname in fnames:
+            cache_key = fname[:-5]
+            # cache_key on disk is "<video_id>:<lang>" or "<video_id>:<lang>:fast"
+            parts = cache_key.split(':')
+            if len(parts) < 2:
+                continue
+            video_id, lang = parts[0], parts[1]
+            if len(parts) > 2 and parts[2] == 'fast':
+                continue  # skip rough first-pass results; only sync full ones
+            if lang_filter and lang != lang_filter:
+                continue
+            fpath = os.path.join(lyrics_dir, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    entry = json.load(f)
+                data = entry.get('data', {})
+                if is_not_found_result(data):
+                    continue
+                items.append({
+                    'video_id': video_id,
+                    'lang': lang,
+                    'song': data.get('song', ''),
+                    'artist': data.get('artist', ''),
+                    'lines': len(data.get('lyrics', [])),
+                    'synced': bool(data.get('synced', False)),
+                    'ts': entry.get('ts', ''),
+                })
+            except Exception:
+                continue
+            if len(items) >= limit:
+                break
+    return jsonify({'count': len(items), 'items': items})
+
+
 @app.route('/api/lyrics/stream', methods=['GET'])
 def api_lyrics_stream():
     """SSE stream: parallel provider race with progressive upgrades.
@@ -2110,6 +2181,8 @@ def api_lyrics_stream():
     if not video_id:
         return jsonify({"error": "Missing video ID"}), 400
     translate_to = request.args.get('lang', 'zh-TW')
+    if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
+        return jsonify({"error": "Invalid video ID or lang"}), 400
     jwt_token = request.args.get('jwt')
     force_mode = request.args.get('force', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
