@@ -1151,13 +1151,71 @@ LANG_NAMES = {
     'en': 'English',
 }
 
+# ------------------------------------------------------------
+# Chinese script detection / conversion
+#
+# Cohere is a general-purpose translator, not a script converter: asking it
+# to "translate" a line that is already Chinese wastes a request and can
+# subtly reword lyrics that didn't need touching (and it doesn't reliably
+# stick to Traditional characters even when told to). So for zh-TW/zh-CN
+# targets we split lines into two buckets before calling Cohere:
+#   - lines that are already Han-script Chinese (Mandarin/Cantonese lyrics,
+#     Simplified or Traditional) -> never sent to Cohere, just script-
+#     converted with OpenCC
+#   - everything else (Japanese kana, Hangul, Latin/romanized lyrics, etc.)
+#     -> still goes through Cohere for real translation
+# The OpenCC pass is then re-applied to the merged, final result so any
+# Simplified characters Cohere still slips in get normalized too.
+# ------------------------------------------------------------
+try:
+    import opencc
+    _opencc_s2t = opencc.OpenCC('s2t')  # Simplified -> Traditional
+    _opencc_t2s = opencc.OpenCC('t2s')  # Traditional -> Simplified
+except Exception as _e:
+    opencc = None
+    _opencc_s2t = None
+    _opencc_t2s = None
+    print(f"  [OpenCC] not available ({_e}); install 'opencc-python-reimplemented' to enable "
+          f"Simplified<->Traditional conversion. Falling back to Cohere for all Chinese lines.")
+
+_HIRAGANA_KATAKANA_RE = re.compile(r'[\u3040-\u30FF\uFF66-\uFF9F]')
+_HANGUL_RE = re.compile(r'[\uAC00-\uD7A3]')
+_HAN_RE = re.compile(r'[\u4E00-\u9FFF\u3400-\u4DBF]')
+
+
+def _is_chinese_target(target_lang):
+    return (target_lang or '').lower().replace('_', '-') in ('zh-tw', 'zh-hant', 'zh-cn', 'zh-hans', 'zh')
+
+
+def _line_is_already_chinese(text):
+    """True if a line is Han-script lyrics (any variant of Chinese) that only
+    ever needs a script pass, never a real translation. Japanese lines with
+    kana or Korean lines with Hangul still need translation even though they
+    may also contain Han/Hanja characters."""
+    if not text or not text.strip():
+        return True
+    if _HIRAGANA_KATAKANA_RE.search(text) or _HANGUL_RE.search(text):
+        return False
+    return bool(_HAN_RE.search(text))
+
+
+def _apply_zh_script(texts, target_lang):
+    """Normalize every line to the requested Chinese script. No-op (and
+    cheap) for lines already in that script; also a no-op if OpenCC isn't
+    installed."""
+    norm = (target_lang or '').lower().replace('_', '-')
+    if norm in ('zh-tw', 'zh-hant') and _opencc_s2t:
+        return [_opencc_s2t.convert(t) if t else t for t in texts]
+    if norm in ('zh-cn', 'zh-hans') and _opencc_t2s:
+        return [_opencc_t2s.convert(t) if t else t for t in texts]
+    return texts
+
+
 def cohere_translate(texts, target_lang='zh-TW'):
     """Translate a list of text lines using Cohere Command A Translate."""
     if not texts:
         return []
 
-    # Filter out lines that are already the target language or empty
-    # Simple heuristic: if all chars are CJK and target is zh, skip
     non_empty = [t for t in texts if t.strip()]
     if not non_empty:
         return texts
@@ -1166,6 +1224,37 @@ def cohere_translate(texts, target_lang='zh-TW'):
     cached = get_translate_cached(cache_key)
     if cached is not None:
         return cached
+
+    # Chinese target: lines that are already Chinese script skip Cohere
+    # entirely and only get a script conversion pass at the end.
+    chinese_target = _is_chinese_target(target_lang)
+    if chinese_target:
+        to_translate_idx = [i for i, t in enumerate(texts) if not _line_is_already_chinese(t)]
+    else:
+        to_translate_idx = list(range(len(texts)))
+
+    results = list(texts)  # default: keep original line
+
+    if to_translate_idx:
+        subset = [texts[i] for i in to_translate_idx]
+        translated_subset = _cohere_translate_raw(subset, target_lang)
+        for local_i, global_i in enumerate(to_translate_idx):
+            results[global_i] = translated_subset[local_i]
+    else:
+        print(f"  [Cohere] All {len(texts)} line(s) already {LANG_NAMES.get(target_lang, target_lang)}, skipping API call")
+
+    if chinese_target:
+        results = _apply_zh_script(results, target_lang)
+
+    set_translate_cached(cache_key, results)
+    return results
+
+
+def _cohere_translate_raw(texts, target_lang):
+    """Send exactly these lines to Cohere and return them translated, in order.
+    Falls back to returning the originals if every key fails."""
+    if not texts:
+        return []
 
     lang_name = LANG_NAMES.get(target_lang, target_lang)
 
@@ -1226,9 +1315,7 @@ def cohere_translate(texts, target_lang='zh-TW'):
                         pass
 
             # Reconstruct in order
-            results = [result_map.get(i+1, texts[i]) for i in range(len(texts))]
-            set_translate_cached(cache_key, results)
-            return results
+            return [result_map.get(i+1, texts[i]) for i in range(len(texts))]
 
         except Exception as e:
             print(f"  [Cohere] Exception: {e}")
@@ -1280,6 +1367,9 @@ def google_translate_fast(texts, target_lang='zh-TW'):
                 all_translations.extend(['' for _ in batch])
         except Exception as e:
             all_translations.extend(['' for _ in batch])
+
+    if _is_chinese_target(target_lang):
+        all_translations = _apply_zh_script(all_translations, target_lang)
 
     set_translate_cached(cache_key, all_translations)
     return all_translations

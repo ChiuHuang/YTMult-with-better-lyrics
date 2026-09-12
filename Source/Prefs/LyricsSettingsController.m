@@ -30,6 +30,8 @@
     if (!d[@"sendDebugLogsToServer"]) d[@"sendDebugLogsToServer"] = @NO;
     if (!d[@"lyricsFpsMeter"]) d[@"lyricsFpsMeter"] = @YES;
     if (!d[@"lyricsOwnButton"]) d[@"lyricsOwnButton"] = @YES;
+    if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
+    if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
     [self loadPreview];
 }
@@ -77,28 +79,31 @@
 
 #pragma mark - Table
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 4; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 5; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 5;
-    if (section == 1) return 3;
-    if (section == 2) return (NSInteger)self.previewLyrics.count + 1;
-    if (section == 3) return 2;
+    if (section == 1) return 2;
+    if (section == 2) return 3;
+    if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
+    if (section == 4) return 2;
     return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"Lyrics Display";
-    if (section == 1) return @"Client Cache";
-    if (section == 2) return @"Preview (most recent cached)";
-    if (section == 3) return @"Actions";
+    if (section == 1) return @"Translation";
+    if (section == 2) return @"Client Cache";
+    if (section == 3) return @"Preview (most recent cached)";
+    if (section == 4) return @"Actions";
     return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return @"Always On shows translated panel when lyrics load. Cache stores lyrics on device for offline and faster load.";
-    if (section == 1) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
-    if (section == 2) return @"Preview shows up to 20 lines from the newest cached file.";
+    if (section == 1) return @"Server used to fetch and translate lyrics, and the language lyrics get translated into. Lines already in that Chinese script (Simplified or Traditional) are never sent to the translator — they just get their script normalized. Examples: zh-TW, zh-CN, en, ja, ko.";
+    if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
+    if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
     return nil;
 }
 
@@ -144,6 +149,43 @@
     }
     if (indexPath.section == 1) {
         if (indexPath.row == 0) {
+            cell.textLabel.text = @"API endpoint";
+            cell.detailTextLabel.text = @"Server for fetching + translating lyrics";
+            UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 200, 32)];
+            tf.text = dict[@"lyricsApiEndpoint"] ?: @"https://ytmtranslate.chiuhuang.dev";
+            tf.borderStyle = UITextBorderStyleRoundedRect;
+            tf.keyboardType = UIKeyboardTypeURL;
+            tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+            tf.autocorrectionType = UITextAutocorrectionTypeNo;
+            tf.textAlignment = NSTextAlignmentRight;
+            tf.adjustsFontSizeToFitWidth = YES;
+            tf.minimumFontSize = 11;
+            tf.accessibilityIdentifier = @"lyricsApiEndpoint";
+            tf.delegate = self;
+            tf.inputAccessoryView = [self KBToolbar:tf];
+            cell.accessoryView = tf;
+            cell.imageView.image = [UIImage systemImageNamed:@"server.rack"];
+            return cell;
+        }
+        if (indexPath.row == 1) {
+            cell.textLabel.text = @"Translate to";
+            cell.detailTextLabel.text = @"Language code, e.g. zh-TW, zh-CN, en, ja, ko";
+            UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 100, 32)];
+            tf.text = dict[@"lyricsTargetLang"] ?: @"zh-TW";
+            tf.borderStyle = UITextBorderStyleRoundedRect;
+            tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+            tf.autocorrectionType = UITextAutocorrectionTypeNo;
+            tf.textAlignment = NSTextAlignmentRight;
+            tf.accessibilityIdentifier = @"lyricsTargetLang";
+            tf.delegate = self;
+            tf.inputAccessoryView = [self KBToolbar:tf];
+            cell.accessoryView = tf;
+            cell.imageView.image = [UIImage systemImageNamed:@"character.book.closed"];
+            return cell;
+        }
+    }
+    if (indexPath.section == 2) {
+        if (indexPath.row == 0) {
             cell.textLabel.text = @"Max cached songs";
             cell.detailTextLabel.text = @"Number of videoIDs to keep";
             UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
@@ -184,7 +226,7 @@
             return cell;
         }
     }
-    if (indexPath.section == 2) {
+    if (indexPath.section == 3) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Refresh preview";
             cell.textLabel.textColor = [UIColor systemBlueColor];
@@ -201,7 +243,7 @@
         cell.backgroundColor = [UIColor secondarySystemGroupedBackgroundColor];
         return cell;
     }
-    if (indexPath.section == 3) {
+    if (indexPath.section == 4) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Clear all cached lyrics";
             cell.textLabel.textColor = [UIColor systemRedColor];
@@ -221,12 +263,12 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == 2 && indexPath.row == 0) {
+    if (indexPath.section == 3 && indexPath.row == 0) {
         [self loadPreview];
-        [tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationAutomatic];
+        [tableView reloadSections:[NSIndexSet indexSetWithIndex:3] withRowAnimation:UITableViewRowAnimationAutomatic];
         return;
     }
-    if (indexPath.section == 3 && indexPath.row == 0) {
+    if (indexPath.section == 4 && indexPath.row == 0) {
         UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Clear cache" message:@"Remove all cached lyrics from device?" preferredStyle:UIAlertControllerStyleAlert];
         [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
         [a addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act){
@@ -239,7 +281,7 @@
         }]];
         [self presentViewController:a animated:YES completion:nil];
     }
-    if (indexPath.section == 3 && indexPath.row == 1) {
+    if (indexPath.section == 4 && indexPath.row == 1) {
         // enforce limits by touching a save with nil to trigger cleanup - or manually
         NSString *dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"YTMU_LyricsCache"];
         NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
@@ -263,6 +305,31 @@
 - (void)textFieldDidEndEditing:(UITextField *)textField {
     NSString *key = textField.accessibilityIdentifier;
     if (!key.length) return;
+
+    if ([key isEqualToString:@"lyricsApiEndpoint"]) {
+        NSString *urlStr = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        // Strip a trailing slash so URL concatenation elsewhere never double-slashes.
+        while ([urlStr hasSuffix:@"/"]) urlStr = [urlStr substringToIndex:urlStr.length - 1];
+        NSURL *url = [NSURL URLWithString:urlStr];
+        BOOL valid = url && url.scheme && url.host && ([url.scheme isEqualToString:@"https"] || [url.scheme isEqualToString:@"http"]);
+        if (!valid) urlStr = @"https://ytmtranslate.chiuhuang.dev";
+        NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
+        d[key] = urlStr;
+        [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+        textField.text = urlStr;
+        return;
+    }
+
+    if ([key isEqualToString:@"lyricsTargetLang"]) {
+        NSString *lang = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!lang.length) lang = @"zh-TW";
+        NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
+        d[key] = lang;
+        [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+        textField.text = lang;
+        return;
+    }
+
     NSInteger v = [textField.text integerValue];
     if (v <= 0) v = ([key isEqualToString:@"lyricsCacheMaxCount"] ? 200 : 50);
     if ([key isEqualToString:@"lyricsCacheMaxCount"] && v > 2000) v = 2000;
