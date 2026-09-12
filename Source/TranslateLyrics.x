@@ -498,7 +498,7 @@ static void sendUIDump(void) {
 
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
-        self.lyricLabel.font = [UIFont boldSystemFontOfSize:20];
+        self.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
         self.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.45];
         self.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -510,7 +510,7 @@ static void sendUIDump(void) {
         // Same text/font/geometry as lyricLabel, revealed left-to-right by wipeMask
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
-        self.wipeLabel.font = [UIFont boldSystemFontOfSize:20];
+        self.wipeLabel.font = [UIFont boldSystemFontOfSize:22];
         self.wipeLabel.textColor = [UIColor whiteColor];
         self.wipeLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -528,7 +528,7 @@ static void sendUIDump(void) {
 
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
-        self.transLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
+        self.transLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
         self.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.32];
         self.transLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
@@ -572,6 +572,7 @@ static void sendUIDump(void) {
 - (void)prepareForReuse {
     [super prepareForReuse];
     _wipeProgress = 0.0;
+    self.lyricLabel.alpha = 1.0;
     self.wipeLabel.text = nil;
     self.wipeLabel.attributedText = nil;
     self.lyricLabel.attributedText = nil;
@@ -592,6 +593,7 @@ static void sendUIDump(void) {
 @property (nonatomic, strong) UIView *darkOverlay;
 @property (nonatomic, assign) BOOL isModal;
 @property (nonatomic, assign) BOOL isSynced;
+@property (nonatomic, strong) NSString *lastColorKey;
 - (void)updateLyrics:(NSArray *)newLyrics;
 - (void)fetchLyricsForVideo:(NSString *)videoID;
 - (void)loadArtworkForVideo:(NSString *)videoID;
@@ -701,8 +703,12 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleSongChange:) name:@"YTMUSongDidChange" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLyricsDidLoad:) name:@"YTMULyricsDidLoad" object:nil];
 
-    // Start display link for real-time line-level lyric highlighting
+    // Start display link for real-time line-level lyric highlighting.
+    // 120fps on ProMotion screens so the word fill glides instead of stepping.
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updatePlaybackTime)];
+    if ([self.displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
+        self.displayLink.preferredFramesPerSecond = 120;
+    }
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
@@ -834,6 +840,11 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     if (g_lyricsCache[videoID]) {
         UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
         statusLabel.text = @"";
+        // Cache hits never set loadingVideoID, so artwork stayed black.
+        // Claim the ID first, then load the background like the fetch path.
+        self.loadingVideoID = videoID;
+        self.isLoading = NO;
+        [self loadArtworkForVideo:videoID];
         [self updateLyrics:g_lyricsCache[videoID]];
         return;
     }
@@ -845,6 +856,9 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             g_lyricsCache[videoID] = fileCached;
             UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
             statusLabel.text = @"";
+            self.loadingVideoID = videoID;
+            self.isLoading = NO;
+            [self loadArtworkForVideo:videoID];
             [self updateLyrics:fileCached];
             return;
         }
@@ -987,6 +1001,14 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
             if (newCell) {
                 [self configureCell:newCell atIndex:newIndex isActive:YES currentTime:currentTime];
+                // Line-by-line rows crossfade in; word rows color themselves per tick.
+                NSDictionary *nl = self.lyrics[newIndex];
+                if (!([nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0)) {
+                    newCell.lyricLabel.alpha = 0.3;
+                    [UIView animateWithDuration:0.25 animations:^{
+                        newCell.lyricLabel.alpha = 1.0;
+                    }];
+                }
             }
 
             // Smooth auto-scroll to the middle of the screen (only if user is not manually scrolling)
@@ -997,10 +1019,15 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         }
         // The current line remains highlighted until its timestamp changes.
     } else if (newIndex >= 0) {
-        // Glide the wipe on the active line every frame so the fill speed
-        // follows the song, with or without provider word timestamps.
+        // Same line still active: advance the word-by-word fill from real
+        // per-word timestamps (line-level rows need no per-frame work).
         YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
-        if (cell) [cell setWipeProgress:[self wipeProgressForLyricAtIndex:newIndex currentTime:currentTime]];
+        if (cell) {
+            NSDictionary *lyric = self.lyrics[newIndex];
+            if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
+                [self applyWordColorsToCell:cell lyric:lyric index:newIndex currentTime:currentTime force:NO];
+            }
+        }
     }
 }
 
@@ -1083,6 +1110,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     if (!self.isSynced) {
         self.currentIndex = -1;
     }
+    self.lastColorKey = nil;
 
     [self.tableView reloadData];
 
@@ -1117,6 +1145,86 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     return [nonEmpty componentsJoinedByString:@" "];
 }
 
+// Display string for a word-synced line: concatenated provider word runs so
+// coloring ranges line up exactly (normalized text would shift spacing).
+- (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric {
+    NSArray *parts = lyric[@"parts"];
+    if ([parts count] == 0) return [self normalizedLyricText:lyric[@"text"]];
+    NSMutableString *s = [NSMutableString string];
+    for (NSDictionary *p in parts) {
+        NSString *w = p[@"words"];
+        if (w) [s appendString:w];
+    }
+    if (s.length == 0) return [self normalizedLyricText:lyric[@"text"]];
+    return s;
+}
+
+// Word-by-word highlight driven by each word's real start/duration (not a
+// uniform left-to-right sweep). Completed words go bright, the live word
+// fills character-by-character from its own timing, the rest stays dim.
+// Works for multi-line text since it colors runs, not geometry. Skips work
+// when the coloring key is unchanged so 120fps ticks stay cheap.
+- (void)applyWordColorsToCell:(YTMULyricsCell *)cell lyric:(NSDictionary *)lyric index:(NSInteger)index currentTime:(double)currentTime force:(BOOL)force {
+    NSArray *parts = lyric[@"parts"];
+    if ([parts count] == 0) return;
+    double nowMs = currentTime * 1000.0;
+    NSInteger partCount = [parts count];
+    NSInteger curWord = partCount; // past-the-end = everything sung
+    NSInteger curChars = 0;
+    for (NSInteger i = 0; i < partCount; i++) {
+        NSDictionary *p = parts[i];
+        double s = [p[@"startTimeMs"] doubleValue];
+        double d = MAX([p[@"durationMs"] doubleValue], 1.0);
+        NSString *w = p[@"words"];
+        if (!w) w = @"";
+        if (nowMs < s) { curWord = i; curChars = 0; break; }
+        if (nowMs < s + d) {
+            curWord = i;
+            curChars = (NSInteger)(((nowMs - s) / d) * (double)w.length);
+            break;
+        }
+    }
+    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld", (long)index, (long)curWord, (long)curChars];
+    if (!force && [key isEqualToString:self.lastColorKey]) return;
+    self.lastColorKey = key;
+
+    NSString *full = [self wbwDisplayTextForLyric:lyric];
+    NSMutableArray *ranges = [NSMutableArray arrayWithCapacity:partCount];
+    NSUInteger loc = 0;
+    for (NSDictionary *p in parts) {
+        NSString *w = p[@"words"];
+        if (!w) w = @"";
+        // Guard against provider spacing drift vs the concatenated string
+        if (loc + w.length > full.length) break;
+        [ranges addObject:[NSValue valueWithRange:NSMakeRange(loc, w.length)]];
+        loc += w.length;
+    }
+    UIColor *sung = [UIColor whiteColor];
+    UIColor *unsung = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
+    UIFont *font = cell.lyricLabel.font;
+    if (!font) font = [UIFont boldSystemFontOfSize:22];
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:full
+        attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: unsung}];
+    NSInteger built = [ranges count];
+    for (NSInteger i = 0; i < curWord && i < built; i++) {
+        NSRange r = [ranges[i] rangeValue];
+        if (r.length > 0) [attr addAttribute:NSForegroundColorAttributeName value:sung range:r];
+    }
+    if (curWord >= 0 && curWord < built) {
+        NSRange r = [ranges[curWord] rangeValue];
+        NSInteger n = MIN(curChars, (NSInteger)r.length);
+        if (n > 0) [attr addAttribute:NSForegroundColorAttributeName value:sung range:NSMakeRange(r.location, (NSUInteger)n)];
+    } else if (curWord >= built && full.length > 0) {
+        [attr addAttribute:NSForegroundColorAttributeName value:sung range:NSMakeRange(0, full.length)];
+    }
+    cell.lyricLabel.attributedText = attr;
+    cell.wipeLabel.text = nil;
+    [cell setWipeProgress:0.0];
+}
+
+// Legacy geometric wipe (kept for the mask plumbing). Active lines now use
+// per-word run coloring (applyWordColorsToCell) or line-level brightening;
+// this helper is no longer on the render path.
 // Sliding fill progress for the active line: smooth left-to-right wipe.
 // Uses real per-word timestamps when the provider supplied them, otherwise
 // glides across the whole line duration so the speed still follows the song.
@@ -1161,6 +1269,9 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
     NSDictionary *lyric = self.lyrics[index];
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
+    BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
+    if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric];
+    cell.lyricLabel.alpha = 1.0;
 
     if (!self.isSynced) {
         // Plain unsynced lyrics: display every line clearly without dimming.
@@ -1177,12 +1288,17 @@ static void openLyricsFromViewController(UIViewController *parentVC);
 
         cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.75];
     } else if (isActive) {
-        // Dim base plus bright overlay revealed by the sliding wipe.
-        cell.lyricLabel.attributedText = nil;
-        cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.38];
-        cell.wipeLabel.text = displayText;
-        [cell setWipeProgress:[self wipeProgressForLyricAtIndex:index currentTime:currentTime]];
+        if (hasWords) {
+            // Word-by-word coloring from real per-word timestamps.
+            [self applyWordColorsToCell:cell lyric:lyric index:index currentTime:currentTime force:YES];
+        } else {
+            // Line-by-line: the whole line lights up at once, no fake sweep.
+            cell.lyricLabel.attributedText = nil;
+            cell.lyricLabel.text = displayText;
+            cell.lyricLabel.textColor = [UIColor whiteColor];
+            cell.wipeLabel.text = nil;
+            [cell setWipeProgress:0.0];
+        }
 
         cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
