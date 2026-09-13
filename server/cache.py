@@ -13,7 +13,7 @@ import threading
 import concurrent.futures
 from collections import deque
 from datetime import datetime
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 import secrets as _secrets
 import uuid
 import traceback
@@ -63,8 +63,24 @@ def sanitize_lyrics_parts(lyrics):
                 else:
                     parts[pi]['durationMs'] = max(l_ms + l_dur - parts[pi]['startTimeMs'], 200)
 
+def _cache_filename(key):
+    """Windows-safe on-disk name for a logical cache key. Logical keys are
+    "vid:lang" / "vid:lang:fast"; colons are illegal to *enumerate* on NTFS
+    (they become alternate-data-stream names, so os.listdir/glob only see a
+    bare base file). Percent-encoding keeps every file listable and is fully
+    reversible for the dashboard/list nodes."""
+    return quote(key, safe='')
+
+
+def _cache_key_from_filename(fname):
+    """Reverse of _cache_filename: 'dQw%3Azh-TW.json' -> 'dQw:zh-TW'."""
+    if not fname.endswith('.json'):
+        return None
+    return unquote(fname[:-5])
+
+
 def get_cached(video_id):
-    path = f"cache/lyrics/{video_id}.json"
+    path = f"cache/lyrics/{_cache_filename(video_id)}.json"
     if os.path.exists(path):
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -85,7 +101,7 @@ def set_cached(video_id, data):
     # Do not cache not-found or error records so future attempts or new lyrics can be resolved
     if is_not_found_result(data):
         return
-    path = f"cache/lyrics/{video_id}.json"
+    path = f"cache/lyrics/{_cache_filename(video_id)}.json"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
@@ -99,7 +115,7 @@ def clear_not_found_caches():
         return
     removed = 0
     for fname in os.listdir(lyrics_dir):
-        if fname.endswith('.json'):
+        if _cache_key_from_filename(fname) is not None:
             fpath = os.path.join(lyrics_dir, fname)
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:

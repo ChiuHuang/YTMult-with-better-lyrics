@@ -6,4 +6,4 @@ packages/
 __pycache__/
 config/admin_config.json
 logs/
-cache/jwt.json
+cache/
