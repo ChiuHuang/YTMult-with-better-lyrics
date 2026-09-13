@@ -281,9 +281,9 @@
           <mdui-card variant="outlined" style="padding: 18px; border-radius: 16px;">
             <mdui-tabs value="logs" id="rightTabs">
               <mdui-tab value="logs" icon="terminal">Live Logs</mdui-tab>
-              <mdui-tab value="crash" icon="bug_report">Crash Logs (<span id="crashCount">0</span>)</mdui-tab>
-              <mdui-tab value="cache" icon="folder_zip">Cached Songs (<span id="cacheCount">0</span>)</mdui-tab>
-              <mdui-tab value="nodes" icon="hub">Nodes (<span id="nodeCount">0</span>)</mdui-tab>
+              <mdui-tab id="crashTab" value="crash" icon="bug_report">Crash Logs (0)</mdui-tab>
+              <mdui-tab id="cacheTab" value="cache" icon="folder_zip">Cached Songs (0)</mdui-tab>
+              <mdui-tab id="nodestab" value="nodes" icon="hub">Nodes (0/0)</mdui-tab>
               <mdui-tab value="files" icon="folder">All Logs & Files</mdui-tab>
               <mdui-tab value="system" icon="tune">Config & Stats</mdui-tab>
 
@@ -659,11 +659,19 @@
       document.getElementById('timeDisplay').textContent = `${formatTime(currentSimTime)} / ${formatTime(songDuration)}`;
     }
 
+    // Rebuild a tab label as ONE text node. Mixing raw text + an inline span
+    // inside the mdui-tab slot made browsers scramble text runs on update
+    // (rendered as "Cached636) Songs ("). A single text node cannot reorder.
+    function setTabCount(tabId, label, n) {
+      const el = document.getElementById(tabId);
+      if (el) el.textContent = `${label} (${n})`;
+    }
+
     async function loadCaches() {
       try {
         const res = await fetch('/api/admin/caches');
         const list = await res.json();
-        document.getElementById('cacheCount').textContent = list.length;
+        setTabCount('cacheTab', 'Cached Songs', list.length);
         const cacheListEl = document.getElementById('cacheList');
         if (list.length === 0) {
           cacheListEl.innerHTML = '<mdui-list-item>No cached songs</mdui-list-item>';
@@ -764,7 +772,7 @@
         const res = await fetch('/api/admin/nodes');
         const data = await res.json();
         const list = data.nodes || [];
-        document.getElementById('nodeCount').textContent = list.filter(n => n.online).length + '/' + list.length;
+        setTabCount('nodestab', 'Nodes', list.filter(n => n.online).length + '/' + list.length);
         const el = document.getElementById('nodeList');
         if (list.length === 0) {
           el.innerHTML = '<mdui-list-item>No nodes yet -- click "New Node" to generate one</mdui-list-item>';
@@ -902,9 +910,8 @@
         const res = await fetch('/api/admin/crash_logs');
         const data = await res.json();
         const box = document.getElementById('crashBox');
-        const badge = document.getElementById('crashCount');
         const badge2 = document.getElementById('crashBadge');
-        if (badge) badge.textContent = data.total;
+        setTabCount('crashTab', 'Crash Logs', data.total);
         if (badge2) badge2.textContent = data.total;
         box.innerHTML = '';
         if (!data.logs || data.logs.length===0) {
