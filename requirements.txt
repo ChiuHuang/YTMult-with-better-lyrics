@@ -1,0 +1,9 @@
+# YTMusicUltimate server dependencies (pip install -r requirements.txt)
+# Python >= 3.12
+Flask>=3.0
+flask-sock>=0.7.0
+requests>=2.31
+ytmusicapi>=1.0.0
+# Optional: Simplified<->Traditional conversion for zh lyrics.
+# Without it the server logs a warning and falls back to Cohere only.
+opencc-python-reimplemented>=0.1.7
