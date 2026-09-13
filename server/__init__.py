@@ -17,6 +17,8 @@ from . import metadata  # noqa: F401
 from . import cache  # noqa: F401
 from . import jwt_pool  # noqa: F401  (subscribes the cubey token pool)
 jwt_pool.start_jwt_pool()
+from . import rerace  # noqa: F401
+rerace.start_rerace()
 from . import pipeline  # noqa: F401
 from . import race  # noqa: F401
 from . import routes_lyrics  # noqa: F401

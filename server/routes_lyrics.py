@@ -22,7 +22,7 @@ import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import app, SERVER_INSTANCE_ID, _recent_requests
 from .utils import _safe_cache_component
-from .cache import get_cached, set_cached, is_not_found_result
+from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename
 from .nodes import ask_nodes_for_cache
 from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
@@ -288,12 +288,12 @@ def api_cache_list():
     items = []
     if os.path.exists(lyrics_dir):
         fnames = sorted(
-            (f for f in os.listdir(lyrics_dir) if f.endswith('.json')),
+            (f for f in os.listdir(lyrics_dir) if _cache_key_from_filename(f) is not None),
             key=lambda f: os.path.getmtime(os.path.join(lyrics_dir, f)),
             reverse=True,
         )
         for fname in fnames:
-            cache_key = fname[:-5]
+            cache_key = _cache_key_from_filename(fname)
             # cache_key on disk is "<video_id>:<lang>" or "<video_id>:<lang>:fast"
             parts = cache_key.split(':')
             if len(parts) < 2:
@@ -324,6 +324,48 @@ def api_cache_list():
             if len(items) >= limit:
                 break
     return jsonify({'count': len(items), 'items': items})
+
+
+_TIER_RANK = {'raw': 0, 'line': 1, 'wbw': 2}
+
+
+@app.route('/api/lyrics/check', methods=['GET'])
+def api_lyrics_check():
+    """Cheap version reconciliation. The client pings this even on a cache
+    hit (it costs one tiny cache read, no provider calls) and compares the
+    server's best tier against its own via `ct`: raw < line < wbw. Same tier
+    -> upgrade=0 and the client ignores; strictly better -> upgrade=1 and the
+    client does a normal (non-force) full fetch that serves the upgraded
+    entry straight from the server cache -- which is how a background node
+    re-race reaches a device whose lyrics were already shown."""
+    video_id = request.args.get('v', '')
+    translate_to = request.args.get('lang', '') or 'zh-TW'
+    client_tier = request.args.get('ct', '')
+    if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
+        return jsonify({'error': 'Invalid video ID or lang'}), 400
+
+    from .race import _lyrics_score, _wbw_line_count
+    data = get_cached(f"{video_id}:{translate_to}") or get_cached(f"{video_id}:{translate_to}:fast")
+    if not data:
+        return jsonify({'found': False, 'upgrade': False})
+
+    if _wbw_line_count(data) > 0:
+        srv_tier = 'wbw'
+    elif data.get('synced'):
+        srv_tier = 'line'
+    else:
+        srv_tier = 'raw'
+    if client_tier not in _TIER_RANK:
+        client_tier = 'raw'
+    return jsonify({
+        'found': True,
+        'tier': srv_tier,
+        'source': data.get('source', ''),
+        'synced': bool(data.get('synced')),
+        'wordSynced': srv_tier == 'wbw',
+        'score': _lyrics_score(data),
+        'upgrade': _TIER_RANK[srv_tier] > _TIER_RANK[client_tier],
+    })
 
 
 
