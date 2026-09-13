@@ -186,6 +186,8 @@
     .badge-synced { background: rgba(76, 175, 80, 0.2); color: #81c784; }
     .badge-plain { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
     .badge-none { background: rgba(244, 67, 54, 0.2); color: #e57373; }
+    .badge-online { background: rgba(76, 175, 80, 0.2); color: #81c784; }
+    .badge-offline { background: rgba(158, 158, 158, 0.2); color: #b0b0b0; }
     .preview-player {
       width: 1px;
       height: 1px;
@@ -281,6 +283,7 @@
               <mdui-tab value="logs" icon="terminal">Live Logs</mdui-tab>
               <mdui-tab value="crash" icon="bug_report">Crash Logs (<span id="crashCount">0</span>)</mdui-tab>
               <mdui-tab value="cache" icon="folder_zip">Cached Songs (<span id="cacheCount">0</span>)</mdui-tab>
+              <mdui-tab value="nodes" icon="hub">Nodes (<span id="nodeCount">0</span>)</mdui-tab>
               <mdui-tab value="files" icon="folder">All Logs & Files</mdui-tab>
               <mdui-tab value="system" icon="tune">Config & Stats</mdui-tab>
 
@@ -317,6 +320,32 @@
                     <mdui-list-item>Loading caches...</mdui-list-item>
                   </mdui-list>
                 </div>
+              </mdui-tab-panel>
+
+              <mdui-tab-panel slot="panel" value="nodes" style="padding-top: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                  <span style="font-size: 12px; opacity: 0.7;">Worker nodes -- run node.py elsewhere for cache sharing + IP-diverse fetches</span>
+                  <div style="display: flex; gap: 4px;">
+                    <mdui-button variant="text" icon="refresh" onclick="loadNodes()">Refresh</mdui-button>
+                    <mdui-button variant="filled" icon="add" onclick="generateNode()">New Node</mdui-button>
+                  </div>
+                </div>
+                <div class="cache-list-container">
+                  <mdui-list id="nodeList"><mdui-list-item>Loading nodes...</mdui-list-item></mdui-list>
+                </div>
+
+                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
+                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Cache a public playlist in the background</div>
+                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
+                    Warms the cache for every track so later requests are instant. Runs as a background job -- this page doesn't need to stay open.
+                  </div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                    <mdui-text-field id="playlistInput" label="Playlist URL or ID" placeholder="https://music.youtube.com/playlist?list=..." style="flex:1; min-width:260px;"></mdui-text-field>
+                    <mdui-text-field id="playlistLang" label="Language" value="zh-TW" style="width:110px;"></mdui-text-field>
+                    <mdui-button variant="filled" icon="cloud_sync" onclick="startPlaylistCache()">Cache in Background</mdui-button>
+                  </div>
+                  <div id="playlistJobMsg" style="font-size:12px; opacity:0.8; margin-top:10px;"></div>
+                </mdui-card>
               </mdui-tab-panel>
 
               <mdui-tab-panel slot="panel" value="files" style="padding-top: 14px;">
@@ -721,6 +750,126 @@
       loadCaches();
     }
 
+    function timeAgo(iso) {
+      if (!iso) return 'never';
+      const s = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s/60) + 'm ago';
+      if (s < 86400) return Math.floor(s/3600) + 'h ago';
+      return Math.floor(s/86400) + 'd ago';
+    }
+
+    async function loadNodes() {
+      try {
+        const res = await fetch('/api/admin/nodes');
+        const data = await res.json();
+        const list = data.nodes || [];
+        document.getElementById('nodeCount').textContent = list.filter(n => n.online).length + '/' + list.length;
+        const el = document.getElementById('nodeList');
+        if (list.length === 0) {
+          el.innerHTML = '<mdui-list-item>No nodes yet -- click "New Node" to generate one</mdui-list-item>';
+          return;
+        }
+        el.innerHTML = list.map(n => `
+          <mdui-list-item rounded>
+            <mdui-icon slot="icon" name="${n.online ? 'lan' : 'lan_off'}"></mdui-icon>
+            <div style="font-weight:600;">${escapeHtml(n.label || n.node_id)}</div>
+            <div slot="description" style="font-size:12px; opacity:0.7;">
+              <span class="status-badge ${n.online ? 'badge-online' : 'badge-offline'}">${n.online ? 'online' : 'offline'}</span>
+              &nbsp;${n.node_id} • last seen ${timeAgo(n.last_seen)}
+            </div>
+            <mdui-button-icon slot="end-icon" icon="delete" title="Revoke" onclick="revokeNode('${n.node_id}')"></mdui-button-icon>
+          </mdui-list-item>
+        `).join('');
+      } catch (e) {
+        console.error('Failed to load nodes:', e);
+      }
+    }
+
+    async function generateNode() {
+      const label = prompt('Label for this node (e.g. "tokyo-vps"):', '');
+      if (label === null) return; // cancelled
+      try {
+        const res = await fetch('/api/admin/nodes/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label }),
+        });
+        if (!res.ok) {
+          mdui.snackbar({ message: 'Failed to generate node' });
+          return;
+        }
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="([^"]+)"/);
+        const filename = match ? match[1] : 'node.py';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        mdui.snackbar({ message: `Downloaded ${filename} -- this is the only copy of its key, keep it safe` });
+        loadNodes();
+      } catch (e) {
+        mdui.snackbar({ message: 'Failed to generate node: ' + e });
+      }
+    }
+
+    async function revokeNode(nodeId) {
+      if (!confirm('Revoke this node? Its node.py will stop being able to reconnect.')) return;
+      try {
+        await fetch(`/api/admin/nodes/${nodeId}/revoke`, { method: 'POST' });
+        mdui.snackbar({ message: 'Node revoked' });
+        loadNodes();
+      } catch (e) {
+        mdui.snackbar({ message: 'Failed to revoke: ' + e });
+      }
+    }
+
+    let _playlistPollTimer = null;
+
+    async function startPlaylistCache() {
+      const playlist = document.getElementById('playlistInput').value.trim();
+      const lang = document.getElementById('playlistLang').value.trim() || 'zh-TW';
+      const msgEl = document.getElementById('playlistJobMsg');
+      if (!playlist) { mdui.snackbar({ message: 'Enter a playlist URL or ID' }); return; }
+      try {
+        const res = await fetch('/api/playlist/cache', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playlist, lang }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          msgEl.textContent = data.error || 'Failed to start job';
+          return;
+        }
+        mdui.snackbar({ message: 'Playlist caching started in the background' });
+        if (_playlistPollTimer) clearInterval(_playlistPollTimer);
+        _playlistPollTimer = setInterval(() => pollPlaylistJob(data.job_id), 2000);
+        pollPlaylistJob(data.job_id);
+      } catch (e) {
+        msgEl.textContent = 'Failed to start: ' + e;
+      }
+    }
+
+    async function pollPlaylistJob(jobId) {
+      const msgEl = document.getElementById('playlistJobMsg');
+      try {
+        const res = await fetch(`/api/playlist/cache/status/${jobId}`);
+        const job = await res.json();
+        if (job.error) { msgEl.textContent = job.error; clearInterval(_playlistPollTimer); return; }
+        msgEl.textContent = `${job.status}: ${job.done}/${job.total} done ` +
+          `(${job.newly_cached} newly cached, ${job.already_cached} already cached, ${job.failed} failed)`;
+        if (job.status === 'complete' || job.status === 'failed') {
+          clearInterval(_playlistPollTimer);
+          loadCaches();
+        }
+      } catch (e) {
+        console.error('Failed to poll playlist job:', e);
+      }
+    }
+
     async function loadServerInfo() {
       try {
         const res = await fetch('/api/admin/server_info');
@@ -860,6 +1009,7 @@
       loadCrashLogs();
       loadFiles();
       loadServerInfo();
+      loadNodes();
       checkSelfUpdate();
       mdui.snackbar({ message: 'Refreshed logs and caches' });
     }
@@ -875,11 +1025,13 @@
     setInterval(loadCaches, 10000);
     setInterval(loadServerInfo, 10000);
     setInterval(loadCrashLogs, 5000);
+    setInterval(loadNodes, 10000);
     loadCaches();
     loadLogs();
     loadServerInfo();
     loadCrashLogs();
     loadFiles();
+    loadNodes();
     checkSelfUpdate();
   </script>
 </body>
