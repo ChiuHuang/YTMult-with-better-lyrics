@@ -201,7 +201,11 @@ def admin_nodes_generate():
     with open(template_path, 'r', encoding='utf-8') as f:
         script = f.read()
 
-    scheme = 'wss' if request.is_secure else 'ws'
+    # Behind an HTTPS reverse proxy (pterodactyl/nginx) Flask's is_secure is
+    # False, so plain ws:// URLs get 301'd to wss:// and websocket-client
+    # rejects the scheme switch. Trust X-Forwarded-Proto too.
+    xfp = request.headers.get('X-Forwarded-Proto', '')
+    scheme = 'wss' if (request.is_secure or xfp == 'https') else 'ws'
     ws_url = f"{scheme}://{request.host}/ws/node"
     script = script.replace('__SERVER_WS_URL__', ws_url)
     script = script.replace('__NODE_ID__', node_id)

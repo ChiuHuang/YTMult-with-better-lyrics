@@ -146,28 +146,49 @@ def on_message(ws, raw):
         return
 
 
-def on_error(ws, error):
-    print(f"[node] error: {error}")
-
-
 def on_close(ws, code, reason):
     print(f"[node] disconnected (code={code} reason={reason})")
 
 
+def _to_wss(url):
+    # Reverse proxies often 301 ws:// -> wss:// ; websocket-client treats a
+    # scheme change as an invalid redirect, so we upgrade the URL ourselves.
+    if url.startswith('ws://'):
+        return 'wss://' + url[5:]
+    if url.startswith('http://'):
+        return 'https://' + url[7:]
+    return url
+
+
 def run_forever_with_backoff():
     backoff = 2
+    url = SERVER_WS_URL
+    state = {'upgrade': False}
     while True:
+
+        def _on_error(ws, error):
+            msg = str(error)
+            if ('Invalid redirect target' in msg and 'scheme' in msg
+                    and url.startswith(('ws://', 'http://'))):
+                state['upgrade'] = True
+            print(f"[node] error: {msg}")
+
         try:
             ws = websocket.WebSocketApp(
-                SERVER_WS_URL,
+                url,
                 on_open=on_open,
                 on_message=on_message,
-                on_error=on_error,
+                on_error=_on_error,
                 on_close=on_close,
             )
             ws.run_forever(ping_interval=30, ping_timeout=10)
         except Exception as e:
             print(f"[node] connection loop error: {e}")
+        if state['upgrade']:
+            url = _to_wss(url)
+            state['upgrade'] = False
+            backoff = 2
+            print(f"[node] server requires HTTPS websocket, upgraded to {url}")
         print(f"[node] reconnecting in {backoff}s…")
         time.sleep(backoff)
         backoff = min(backoff * 2, 60)
