@@ -191,13 +191,25 @@
 
 %new
 - (UIView *)ytmu_findThreeDotControl:(UIView *)v {
-    if ([v isKindOfClass:[UIControl class]]) {
+    // Check UIControl and also UIView with gesture recognizers (some 3-dot
+    // buttons are plain UIViews with a tap recognizer, not UIControl subclasses).
+    BOOL isCandidate = [v isKindOfClass:[UIControl class]];
+    if (!isCandidate && v.gestureRecognizers.count > 0) {
+        for (UIGestureRecognizer *gr in v.gestureRecognizers) {
+            if ([gr isKindOfClass:[UITapGestureRecognizer class]]) { isCandidate = YES; break; }
+        }
+    }
+    if (isCandidate) {
         NSString *label = [v accessibilityLabel].lowercaseString ?: @"";
         NSString *ident = v.accessibilityIdentifier ? [v.accessibilityIdentifier lowercaseString] : @"";
         NSString *hint = [v accessibilityHint].lowercaseString ?: @"";
-        if ((label.length && ([label containsString:@"more"] || [label containsString:@"menu"] || [label containsString:@"option"] || [label containsString:@"更多"])) ||
+        BOOL match = (label.length && ([label containsString:@"more"] || [label containsString:@"menu"] || [label containsString:@"option"] || [label containsString:@"更多"])) ||
             (ident.length && ([ident containsString:@"more"] || [ident containsString:@"menu"] || [ident containsString:@"option"] || [ident containsString:@"overflow"] || [ident containsString:@"ellipsis"])) ||
-            (hint.length && [hint containsString:@"更多"])) {
+            (hint.length && [hint containsString:@"更多"]);
+        if (match) {
+            sendDebugLog([NSString stringWithFormat:@"[3DOT] FOUND: class=%@ label=\"%@\" ident=\"%@\" hint=\"%@\" frame=(%.0f,%.0f;%.0f,%.0f)",
+                NSStringFromClass([v class]), [v accessibilityLabel] ?: @"", [v accessibilityIdentifier] ?: @"", [v accessibilityHint] ?: @"",
+                v.frame.origin.x, v.frame.origin.y, v.frame.size.width, v.frame.size.height]);
             return v;
         }
     }
@@ -210,12 +222,55 @@
 
 %new
 - (void)ytmuPlaceLyricsBesideThreeDot {
+    static NSInteger lastLoggedCount = -1;
+    NSInteger count = self.view.subviews.count;
+    if (count != lastLoggedCount) {
+        sendDebugLog([NSString stringWithFormat:@"[3DOT] Searching %ld subviews in %@", (long)count, NSStringFromClass([self class])]);
+        lastLoggedCount = count;
+    }
     UIView *threeDot = nil;
     for (UIView *sub in self.view.subviews) {
         threeDot = [self ytmu_findThreeDotControl:sub];
         if (threeDot) break;
     }
-    if (!threeDot) return;
+    if (!threeDot) {
+        // Fallback: place the button top-right when 3-dot is not found.
+        // Log the subview tree once so we can see what IS there.
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            NSMutableString *tree = [NSMutableString stringWithFormat:@"[3DOT] NOT FOUND — top subviews of %@:", NSStringFromClass([self class])];
+            for (UIView *sub in self.view.subviews) {
+                [tree appendFormat:@"\n  %@ frame=(%.0f,%.0f;%.0f,%.0f) accLabel=\"%@\" accId=\"%@\"",
+                    NSStringFromClass([sub class]),
+                    sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height,
+                    [sub accessibilityLabel] ?: @"", [sub accessibilityIdentifier] ?: @""];
+            }
+            sendDebugLog(tree);
+        });
+        // Place button at fixed top-right position (below status bar / nav bar)
+        UIButton *own = (UIButton *)[self.view viewWithTag:9778];
+        if (![own isKindOfClass:[UIButton class]]) {
+            own = [UIButton buttonWithType:UIButtonTypeSystem];
+            own.tag = 9778;
+            [own setTitle:@"歌詞" forState:UIControlStateNormal];
+            [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+            own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+            own.layer.masksToBounds = YES;
+            objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
+            [self.view addSubview:own];
+        }
+        CGFloat btnW = 56.0, btnH = 32.0;
+        CGFloat topPad = 54.0; // below status bar + nav area
+        own.frame = CGRectMake(self.view.bounds.size.width - btnW - 12.0, topPad, btnW, btnH);
+        own.layer.cornerRadius = btnH / 2.0;
+        own.hidden = NO;
+        own.alpha = 1.0;
+        own.userInteractionEnabled = YES;
+        [self.view bringSubviewToFront:own];
+        return;
+    }
     if (!threeDot.superview || !self.view) return;
 
     UIButton *own = (UIButton *)[self.view viewWithTag:9778];
