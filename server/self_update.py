@@ -25,7 +25,7 @@ from .logging_util import _log_crash
 # ============================================================
 # Self-Update (server file) — supports any filename like app.py / main.py / bot.py
 # ============================================================
-SELF_UPDATE_REPO = "ChiuHuang/ytmusicultimate"
+SELF_UPDATE_REPO = "ChiuHuang/YTMult-with-better-lyrics"
 SELF_UPDATE_BRANCH = "main"
 # Remote path is always proxy_server.py in repo; local target is auto-detected via __file__
 # but user can override via config/admin_config.json -> {"main_file": "app.py"} or env MAIN_FILE
@@ -68,7 +68,39 @@ def _get_local_sha():
     except: pass
     return "unknown"
 
+def _git_root():
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if os.path.isdir(os.path.join(_root, '.git')):
+        return _root
+    return None
+
+
+def _git_ls_remote_sha():
+    """HEAD sha of origin/main via git protocol. Uses the same transport as
+    the pull (no GitHub REST API, so no 60/hr unauthenticated rate limit)."""
+    _root = _git_root()
+    if not _root:
+        return None
+    try:
+        r = subprocess.run(['git', 'ls-remote', 'origin', 'refs/heads/main'],
+            cwd=_root, capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            return None
+        line = (r.stdout or '').strip().split('\n')[0]
+        sha = line.split('\t')[0].strip()
+        return sha if len(sha) == 40 else None
+    except Exception:
+        return None
+
+
 def _get_remote_sha():
+    # Prefer the git protocol when we're inside a repo -- it can't be
+    # rate-limited the way api.github.com is on shared container IPs. The
+    # API path (with parent sha / meta) stays as a fallback for non-git
+    # installs.
+    git_sha = _git_ls_remote_sha()
+    if git_sha:
+        return git_sha, None, None
     try:
         r = requests.get(f"https://api.github.com/repos/{SELF_UPDATE_REPO}/commits/{SELF_UPDATE_BRANCH}", headers={'Accept': 'application/vnd.github+json'}, timeout=8)
         r.raise_for_status()
