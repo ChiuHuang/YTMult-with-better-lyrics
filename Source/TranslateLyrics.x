@@ -6,6 +6,8 @@
 #import "Headers/YTMNowPlayingViewController.h"
 #import "Headers/ELMNodeController.h"
 #import "Headers/YTMActionRowView.h"
+#import "Headers/YTMActionSheetController.h"
+#import "Headers/YTUIResources.h"
 
 #ifndef TWEAK_GIT_COMMIT
 #define TWEAK_GIT_COMMIT "unknown"
@@ -2125,10 +2127,12 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
             btn = btn.superview;
         }
 
-        // Own-button mode: hide the official chip and show ours in its
-        // place. Falls through to the legacy unlock path when replacement
-        // is impossible (e.g. ELM texture node with no container view).
-        if (YTMULyricsPreference(@"lyricsOwnButton", YES) && [self ytmu_replaceLyricsChip:btn]) {
+        // Own-button mode: the official lyrics chip is always removed and
+        // replaced with ours -- YTM's native button has repeatedly loaded
+        // empty/broken, so we never fall back to it. Falls through to the
+        // legacy unlock path when replacement is impossible (e.g. ELM
+        // texture node with no container view).
+        if ([self ytmu_replaceLyricsChip:btn]) {
             return;
         }
 
@@ -2251,6 +2255,37 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 - (void)ytmu_didTapLyricsBar:(UITapGestureRecognizer *)gesture {
     sendDebugLog(@"[MUSIC] Lyrics chip tapped via UITapGestureRecognizer");
     openLyricsFromViewController((UIViewController *)self);
+}
+
+%end
+
+// Add an always-present "Our lyrics" row to the Now Playing action sheet
+// (the '...' button next to the song title). This is the guaranteed entry
+// point even when the chip replacement can't place a button on a given
+// layout -- the official chip is removed unconditionally, so without this
+// row a failed replacement would leave no way in.
+%hook YTMActionSheetController
+
+- (void)presentFromViewController:(UIViewController *)vc animated:(BOOL)animated completion:(void (^)(void))completion {
+    UIViewController *anc = vc;
+    BOOL playerContext = NO;
+    for (NSInteger i = 0; i < 8 && anc; i++) {
+        if ([NSStringFromClass([anc class]) containsString:@"YTMNowPlaying"]) {
+            playerContext = YES;
+            break;
+        }
+        anc = anc.parentViewController;
+    }
+    if (playerContext) {
+        [self addAction:[%c(YTActionSheetAction) actionWithTitle:@"歌詞"
+                                                       iconImage:[%c(YTUIResources) outlineImageWithColor:[UIColor whiteColor]]
+                                                          style:0
+                                                        handler:^{
+            sendDebugLog(@"[MUSIC] Our lyrics opened from the action sheet");
+            openLyricsFromViewController((UIViewController *)vc);
+        }]];
+    }
+    %orig(animated, completion);
 }
 
 %end
