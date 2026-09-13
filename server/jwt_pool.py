@@ -103,6 +103,12 @@ def contribute_jwt(token, node_id=None):
     now = datetime.now().isoformat()
     with _lock:
         prev = _pool.get(jid)
+        # Fast path: identical token already contributed by this same source
+        # (e.g. every device lyric request re-sends its JWT) -- avoid the disk
+        # write churn. A persisted hash-only record (token=None) still falls
+        # through so we re-populate the raw token on this live contribution.
+        if prev is not None and prev.get('token') == token and (prev.get('node_id') or '') == (node_id or ''):
+            return {'ok': True, 'id': jid, 'num_pool': len(_pool)}
         was_ok = bool(prev and prev.get('ok')) if prev else None
         entry = {
             'id': jid,

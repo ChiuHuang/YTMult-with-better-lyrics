@@ -23,6 +23,7 @@ from flask import Flask, request, jsonify, render_template, session, redirect, u
 from .app import app
 from .utils import _safe_cache_component
 from .cache import get_cached, set_cached, sanitize_lyrics_parts
+from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .race import (_lyrics_score, _race_cubey, _race_lrclib,
@@ -51,6 +52,8 @@ def api_lyrics_stream():
     if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
         return jsonify({"error": "Invalid video ID or lang"}), 400
     jwt_token = request.args.get('jwt')
+    if jwt_token:
+        _pool_contribute(jwt_token, node_id='device')
     force_mode = request.args.get('force', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)

@@ -2285,7 +2285,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
             openLyricsFromViewController((UIViewController *)vc);
         }]];
     }
-    %orig(animated, completion);
+    %orig(vc, animated, completion);
 }
 
 %end
