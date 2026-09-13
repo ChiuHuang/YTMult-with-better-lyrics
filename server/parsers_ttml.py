@@ -22,6 +22,7 @@ import logging
 # ============================================================
 # Basic TTML Parser
 # ============================================================
+from .parsers_lrc import is_cjk, generate_interpolated_parts
 
 def parse_ttml_basic(ttml_text, duration_sec=0):
     """Basic TTML parser - extracts timed lines from TTML/AMLL XML."""
