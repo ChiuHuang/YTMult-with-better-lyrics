@@ -15,6 +15,8 @@ from . import providers_unison  # noqa: F401
 from . import translate  # noqa: F401
 from . import metadata  # noqa: F401
 from . import cache  # noqa: F401
+from . import jwt_pool  # noqa: F401  (subscribes the cubey token pool)
+jwt_pool.start_jwt_pool()
 from . import pipeline  # noqa: F401
 from . import race  # noqa: F401
 from . import routes_lyrics  # noqa: F401

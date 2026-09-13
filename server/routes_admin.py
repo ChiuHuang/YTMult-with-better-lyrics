@@ -21,10 +21,11 @@ import atexit
 import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import (app, login_required, _admin_cfg, SERVER_INSTANCE_ID,
-    SERVER_START_TIME, SERVER_START_TS, LOG_DIR,
+    SERVER_START_TIME, SERVER_START_TS, LOG_DIR, CRASH_LOG_FILE,
     _recent_logs, _structured_logs, _recent_requests, _crash_logs)
 from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
+from .jwt_pool import contribute_jwt, list_jwt, check_all as jwt_check_all
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
@@ -180,6 +181,26 @@ def admin_nodes_list():
     return jsonify({'nodes': items})
 
 
+def _render_node_script(node_id, node_key):
+    """Personalize the node.py template for one node. The node_key here is the
+    RAW key -- it only exists in the response and in the node's own copy of the
+    script; the server persists only its hash. Never store the key server-side."""
+    template_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'node.py')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        script = f.read()
+
+    # Behind an HTTPS reverse proxy (pterodactyl/nginx) Flask's is_secure is
+    # False, so plain ws:// URLs get 301'd to wss:// and websocket-client
+    # rejects the scheme switch. Trust X-Forwarded-Proto too.
+    xfp = request.headers.get('X-Forwarded-Proto', '')
+    scheme = 'wss' if (request.is_secure or xfp == 'https') else 'ws'
+    ws_url = f"{scheme}://{request.host}/ws/node"
+    script = script.replace('__SERVER_WS_URL__', ws_url)
+    script = script.replace('__NODE_ID__', node_id)
+    script = script.replace('__NODE_KEY__', node_key)
+    return script
+
+
 @app.route('/api/admin/nodes/generate', methods=['POST'])
 @login_required
 def admin_nodes_generate():
@@ -197,24 +218,24 @@ def admin_nodes_generate():
     }
     _save_nodes(nodes)
 
-    template_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'node.py')
-    with open(template_path, 'r', encoding='utf-8') as f:
-        script = f.read()
+    script = _render_node_script(node_id, node_key)
 
-    # Behind an HTTPS reverse proxy (pterodactyl/nginx) Flask's is_secure is
-    # False, so plain ws:// URLs get 301'd to wss:// and websocket-client
-    # rejects the scheme switch. Trust X-Forwarded-Proto too.
-    xfp = request.headers.get('X-Forwarded-Proto', '')
-    scheme = 'wss' if (request.is_secure or xfp == 'https') else 'ws'
-    ws_url = f"{scheme}://{request.host}/ws/node"
-    script = script.replace('__SERVER_WS_URL__', ws_url)
-    script = script.replace('__NODE_ID__', node_id)
-    script = script.replace('__NODE_KEY__', node_key)
+    resp = Response(script, mimetype='text/x-python')
+    resp.headers['Content-Disposition'] = f'attachment; filename="node_{node_id}.py"'
+    return resp
 
-    # The raw key exists only in this response and in the node's own copy of
-    # the script from here on -- the server only ever stores its hash. If
-    # this download is lost, revoke the node and generate a new one; it
-    # can't be regenerated with the same key.
+
+@app.route('/api/admin/nodes/generate/<node_id>', methods=['GET'])
+def admin_nodes_regenerate(node_id):
+    key = request.args.get('key', '')
+    nodes = _load_nodes()
+    record = nodes.get(node_id)
+    if not record or not key or record.get('key_hash') != _hash_node_key(key):
+        return jsonify({'error': 'invalid node_id or key'}), 403
+    record['last_seen'] = datetime.now().isoformat()
+    nodes[node_id] = record
+    _save_nodes(nodes)
+    script = _render_node_script(node_id, key)
     resp = Response(script, mimetype='text/x-python')
     resp.headers['Content-Disposition'] = f'attachment; filename="node_{node_id}.py"'
     return resp
@@ -236,6 +257,36 @@ def admin_nodes_revoke(node_id):
         except Exception:
             pass
     return jsonify({'ok': True})
+
+
+@app.route('/api/admin/jwt/contribute', methods=['POST'])
+@login_required
+def admin_jwt_contribute():
+    """Manually add a Cubey JWT to the shared pool (e.g. pasted from a device,
+    a curl, or forwarded from a node)."""
+    body = request.get_json(silent=True) or request.form.to_dict() or {}
+    token = (body.get('token') or '').strip()
+    if not token:
+        return jsonify({'ok': False, 'error': 'missing token'}), 400
+    node_id = (body.get('node_id') or '').strip() or None
+    res = contribute_jwt(token, node_id=node_id)
+    return jsonify(res)
+
+
+@app.route('/api/admin/jwt/list', methods=['GET'])
+@login_required
+def admin_jwt_list():
+    """Pool state for the dashboard; raw tokens are never exposed."""
+    return jsonify({'count': len(list_jwt()), 'jwt': list_jwt()})
+
+
+@app.route('/api/admin/jwt/check', methods=['POST'])
+@login_required
+def admin_jwt_check():
+    """Force a re-probe of every live token against Cubey now; dead tokens get
+    evicted. Returns {ok, dead, unknown, total}."""
+    summary = jwt_check_all(evict=True)
+    return jsonify({'ok': True, **summary})
 
 
 @app.route('/api/admin/server_info', methods=['GET'])

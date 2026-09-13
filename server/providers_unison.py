@@ -19,6 +19,8 @@ import uuid
 import traceback
 import atexit
 import logging
+from urllib.parse import urlencode
+from .nodes import relay_http_request
 from .parsers_ttml import parse_ttml_basic
 
 # ============================================================
@@ -39,8 +41,10 @@ def get_unison_key():
     return _unison_key
 
 
-def fetch_unison(video_id, title='', artist='', duration=0):
-    """Fetch lyrics from Unison community API."""
+def fetch_unison(video_id, title='', artist='', duration=0, via_node=None):
+    """Fetch lyrics from Unison community API. via_node relays the GET through a
+    connected node's outbound IP (same pattern as LRCLIB/Cubey) with a direct
+    local fallback when the relay is unavailable."""
     try:
         headers = {
             'x-key-id': get_unison_key(),
@@ -54,11 +58,29 @@ def fetch_unison(video_id, title='', artist='', duration=0):
         if duration:
             params['duration'] = str(int(duration))
 
-        resp = requests.get('https://unison.boidu.dev/lyrics',
-                          params=params, headers=headers, timeout=8)
+        data = None
+        if via_node:
+            relayed = relay_http_request(via_node, 'GET',
+                                         f'https://unison.boidu.dev/lyrics?{urlencode(params)}',
+                                         headers=headers, timeout=8)
+            if relayed is not None:
+                status, text = relayed
+                if status == 200:
+                    try:
+                        data = json.loads(text)
+                    except Exception:
+                        pass
+                else:
+                    print(f"  [FAIL] Unison via node {via_node}: HTTP {status}")
+            else:
+                print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
+        if data is None:
+            resp = requests.get('https://unison.boidu.dev/lyrics',
+                              params=params, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
 
-        if resp.status_code == 200:
-            data = resp.json()
+        if data:
             fmt = data.get('format', '')
             lyrics_text = data.get('lyrics', '')
 
