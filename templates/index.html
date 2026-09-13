@@ -10,7 +10,8 @@
   <script src="https://unpkg.com/mdui@2/mdui.global.js"></script>
   <style>
     :root {
-      --mdui-color-primary: 255 64 129;
+      --mdui-color-primary: 33 150 243;
+      --mdui-color-primary-dark: 158 202 255;
     }
     body {
       margin: 0;
@@ -18,6 +19,13 @@
       background-color: rgb(var(--mdui-color-surface));
       color: rgb(var(--mdui-color-on-surface));
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    mdui-top-app-bar {
+      background: linear-gradient(135deg, rgba(33, 150, 243, 0.28), rgba(33, 150, 243, 0.06));
+    }
+    mdui-top-app-bar mdui-top-app-bar-title {
+      font-weight: 600;
+      letter-spacing: 0.2px;
     }
     .main-container {
       max-width: 1300px;
@@ -63,7 +71,8 @@
     }
     .lyric-row.active {
       opacity: 1;
-      background: rgba(255, 255, 255, 0.08);
+      background: rgba(33, 150, 243, 0.16);
+      box-shadow: inset 3px 0 0 rgb(33 150 243);
     }
     .lyric-row.active .orig-text {
       color: #ffffff;
@@ -315,6 +324,7 @@
                   <span style="font-size: 12px; opacity: 0.7;">Saved file caches (`cache/lyrics/*.json`)</span>
                   <mdui-button variant="tonal" icon="delete_sweep" onclick="clearAllCaches()">Clear Not-Found</mdui-button>
                 </div>
+                <mdui-linear-progress id="cacheProgress" indeterminate style="margin-bottom: 12px; display: none;"></mdui-linear-progress>
                 <div class="cache-list-container">
                   <mdui-list id="cacheList">
                     <mdui-list-item>Loading caches...</mdui-list-item>
@@ -333,6 +343,23 @@
                 <div class="cache-list-container">
                   <mdui-list id="nodeList"><mdui-list-item>Loading nodes...</mdui-list-item></mdui-list>
                 </div>
+
+                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
+                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Cubey JWT Pool</div>
+                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
+                    Contributed tokens the server falls back to when a request arrives without one.
+                    Auto-rechecked against Cubey, dead tokens evicted. Nodes contribute via YTMU_JWT.
+                  </div>
+                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+                    <mdui-text-field id="jwtInput" label="Paste a Cubey JWT" style="flex:1; min-width:220px;"></mdui-text-field>
+                    <mdui-button variant="tonal" icon="key" onclick="contributeJwt()">Contribute</mdui-button>
+                    <mdui-button variant="text" icon="verified_user" onclick="checkJwtPool()">Re-check</mdui-button>
+                    <mdui-button variant="text" icon="refresh" onclick="loadJwtPool()">Refresh</mdui-button>
+                  </div>
+                  <div class="cache-list-container" style="max-height:180px;">
+                    <mdui-list id="jwtList"><mdui-list-item>No tokens yet</mdui-list-item></mdui-list>
+                  </div>
+                </mdui-card>
 
                 <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
                   <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Cache a public playlist in the background</div>
@@ -668,6 +695,8 @@
     }
 
     async function loadCaches() {
+      const progressEl = document.getElementById('cacheProgress');
+      if (progressEl) progressEl.style.display = 'block';
       try {
         const res = await fetch('/api/admin/caches');
         const list = await res.json();
@@ -689,6 +718,8 @@
         `).join('');
       } catch (e) {
         console.error('Failed to load caches:', e);
+      } finally {
+        if (progressEl) progressEl.style.display = 'none';
       }
     }
 
@@ -831,6 +862,61 @@
         loadNodes();
       } catch (e) {
         mdui.snackbar({ message: 'Failed to revoke: ' + e });
+      }
+    }
+
+    async function loadJwtPool() {
+      try {
+        const res = await fetch('/api/admin/jwt/list');
+        const data = await res.json();
+        const el = document.getElementById('jwtList');
+        if (!el) return;
+        const list = data.jwt || [];
+        if (list.length === 0) {
+          el.innerHTML = '<mdui-list-item>No tokens in pool -- contribute one or set YTMU_JWT on a node</mdui-list-item>';
+          return;
+        }
+        el.innerHTML = list.map(j => `
+          <mdui-list-item rounded>
+            <mdui-icon slot="icon" name="${j.ok ? 'verified_user' : (j.live ? 'schedule' : 'key_off')}"></mdui-icon>
+            <div style="font-weight:600; font-family:monospace;">${escapeHtml(j.id)}</div>
+            <div slot="description" style="font-size:12px; opacity:0.7;">
+              ${j.live ? '[LIVE]' : '[record]'} ${j.ok ? '[OK]' : ''} ${j.node_id ? 'node ' + escapeHtml(j.node_id) : 'manual'}
+              &middot; ${escapeHtml(j.token_hash)}... &middot; added ${timeAgo(j.added)}
+            </div>
+          </mdui-list-item>
+        `).join('');
+      } catch (e) {
+        console.error('Failed to load jwt pool:', e);
+      }
+    }
+
+    async function contributeJwt() {
+      const token = document.getElementById('jwtInput').value.trim();
+      if (!token) { mdui.snackbar({ message: 'Paste a JWT first' }); return; }
+      try {
+        const res = await fetch('/api/admin/jwt/contribute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        });
+        const data = await res.json();
+        mdui.snackbar({ message: data.ok ? `Added ${data.id} (pool ${data.num_pool})` : (data.error || 'Contribute failed') });
+        document.getElementById('jwtInput').value = '';
+        loadJwtPool();
+      } catch (e) {
+        mdui.snackbar({ message: 'Contribute failed: ' + e });
+      }
+    }
+
+    async function checkJwtPool() {
+      try {
+        const res = await fetch('/api/admin/jwt/check', { method: 'POST' });
+        const data = await res.json();
+        mdui.snackbar({ message: `JWT re-check: ${data.ok} ok, ${data.dead} dead, ${data.unknown} unknown` });
+        loadJwtPool();
+      } catch (e) {
+        mdui.snackbar({ message: 'Check failed: ' + e });
       }
     }
 
@@ -1017,6 +1103,7 @@
       loadFiles();
       loadServerInfo();
       loadNodes();
+      loadJwtPool();
       checkSelfUpdate();
       mdui.snackbar({ message: 'Refreshed logs and caches' });
     }
@@ -1027,18 +1114,26 @@
       );
     }
 
+    // Blue (Material 500) primary -- overrides the default pink across every
+    // mdui component; the :root --mdui-color-primary above covers plain CSS.
+    if (window.mdui && mdui.setColorScheme) {
+      mdui.setColorScheme('#2196f3');
+    }
+
     // Auto poll logs (2s) and caches (10s)
     setInterval(loadLogs, 2000);
     setInterval(loadCaches, 10000);
     setInterval(loadServerInfo, 10000);
     setInterval(loadCrashLogs, 5000);
     setInterval(loadNodes, 10000);
+    setInterval(loadJwtPool, 15000);
     loadCaches();
     loadLogs();
     loadServerInfo();
     loadCrashLogs();
     loadFiles();
     loadNodes();
+    loadJwtPool();
     checkSelfUpdate();
   </script>
 </body>
