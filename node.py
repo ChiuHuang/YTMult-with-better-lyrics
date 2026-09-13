@@ -180,6 +180,7 @@ def handle_task(msg):
     server asks for and hand back the raw status + body."""
     if msg.get('task') != 'http_fetch':
         return {'error': f"unknown task {msg.get('task')}"}
+    print(f"[node] executing http task from server: {msg.get('method', 'GET')} {msg.get('url')}")
     try:
         resp = requests.request(
             msg.get('method', 'GET'),

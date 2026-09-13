@@ -165,7 +165,18 @@ def relay_http_request(node_id, method, url, data=None, headers=None, timeout=15
     }, timeout=timeout + 3)
     if not reply or 'status' not in reply:
         return None
+    print(f"  [NODE] {node_label(node_id)} handled {method} {url} (HTTP {reply['status']})")
     return reply['status'], reply.get('text', '')
+
+
+def node_label(node_id):
+    """Human-readable label for a node: its configured label when known,
+    otherwise just the id."""
+    with _connected_nodes_lock:
+        entry = connected_nodes.get(node_id)
+    if entry and entry.get('label'):
+        return f"{entry['label']} ({node_id})"
+    return node_id
 
 
 # ============================================================
