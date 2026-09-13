@@ -28,6 +28,7 @@ from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
+from .cache import sanitize_lyrics_parts
 
 # ============================================================
 # Parallel provider race + SSE streaming

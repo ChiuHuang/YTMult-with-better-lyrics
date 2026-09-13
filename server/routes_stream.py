@@ -22,7 +22,7 @@ import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import app
 from .utils import _safe_cache_component
-from .cache import get_cached, set_cached
+from .cache import get_cached, set_cached, sanitize_lyrics_parts
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .race import (_lyrics_score, _race_cubey, _race_lrclib,

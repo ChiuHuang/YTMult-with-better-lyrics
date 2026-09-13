@@ -27,7 +27,7 @@ from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
-from .cache import is_not_found_result
+from .cache import is_not_found_result, sanitize_lyrics_parts
 from .nodes import pick_node
 
 # ============================================================
