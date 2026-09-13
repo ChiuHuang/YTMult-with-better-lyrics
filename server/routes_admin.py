@@ -28,6 +28,7 @@ from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
 from .jwt_pool import contribute_jwt, list_jwt, check_all as jwt_check_all
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
+from .cache import _cache_key_from_filename
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
 from .logging_util import _log_crash
@@ -106,7 +107,8 @@ def admin_caches():
         for fname in sorted(os.listdir(lyrics_dir),
                             key=lambda f: os.path.getmtime(os.path.join(lyrics_dir, f)),
                             reverse=True):
-            if not fname.endswith('.json'):
+            cache_key = _cache_key_from_filename(fname)
+            if cache_key is None:
                 continue
             fpath = os.path.join(lyrics_dir, fname)
             try:
@@ -125,7 +127,6 @@ def admin_caches():
                         time_ago = f"{int(diff // 86400)}d ago"
                 except Exception:
                     time_ago = 'unknown'
-                cache_key = fname[:-5]
                 video_id = cache_key.split(':')[0]
                 items.append({
                     'video_id': video_id,
@@ -149,16 +150,17 @@ def admin_clear_empty_caches():
     removed = 0
     if os.path.exists(lyrics_dir):
         for fname in os.listdir(lyrics_dir):
-            if fname.endswith('.json'):
-                fpath = os.path.join(lyrics_dir, fname)
-                try:
-                    with open(fpath, 'r', encoding='utf-8') as f:
-                        entry = json.load(f)
-                    if is_not_found_result(entry.get('data')):
-                        os.remove(fpath)
-                        removed += 1
-                except Exception:
-                    pass
+            if _cache_key_from_filename(fname) is None:
+                continue
+            fpath = os.path.join(lyrics_dir, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    entry = json.load(f)
+                if is_not_found_result(entry.get('data')):
+                    os.remove(fpath)
+                    removed += 1
+            except Exception:
+                pass
     return jsonify({'cleared': removed})
 
 

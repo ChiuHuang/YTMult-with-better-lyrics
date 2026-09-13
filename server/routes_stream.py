@@ -26,7 +26,7 @@ from .cache import get_cached, set_cached, sanitize_lyrics_parts
 from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
-from .race import (_lyrics_score, _race_cubey, _race_lrclib,
+from .race import (_lyrics_score, _wbw_line_count, _race_cubey, _race_lrclib,
     _race_unison, _race_yt, _race_boidu, _race_binimum, _sse_event)
 from .translate import cohere_translate, google_translate_fast
 

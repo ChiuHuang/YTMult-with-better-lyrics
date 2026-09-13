@@ -6,8 +6,6 @@
 #import "Headers/YTMNowPlayingViewController.h"
 #import "Headers/ELMNodeController.h"
 #import "Headers/YTMActionRowView.h"
-#import "Headers/YTMActionSheetController.h"
-#import "Headers/YTUIResources.h"
 
 #ifndef TWEAK_GIT_COMMIT
 #define TWEAK_GIT_COMMIT "unknown"
@@ -98,6 +96,19 @@ static NSString *YTMUTargetLang(void) {
 }
 static NSString *YTMUUrlEncode(NSString *s) {
     return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: s;
+}
+
+// Fidelity tier of a lyric set, mirroring the server's check endpoint tiers:
+// raw (plain text) < line (per-line sync) < wbw (per-word parts). Used for
+// cache-vs-server reconciliation: same tier -> ignore, higher tier -> update.
+static NSString *YTMULyricsTier(NSArray *lyrics) {
+    for (NSDictionary *l in lyrics) {
+        if (l[@"wordSynced"] && [l[@"parts"] count] > 1) return @"wbw";
+    }
+    for (NSDictionary *l in lyrics) {
+        if ([l[@"time"] doubleValue] > 0.0) return @"line";
+    }
+    return @"raw";
 }
 
 // 輔助工具：把除錯訊息傳給你的 Python 伺服器
@@ -1003,6 +1014,42 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     }] resume];
 }
 
+// Server reconciliation ping: even when this sheet is served purely from the
+// client cache (memory or file), ask the server whether it now has something
+// strictly better (raw < line < wbw) -- e.g. a background node re-race just
+// found Portato QRC word timing for a line-synced Musixmatch entry. Same
+// tier -> ignore. One throttled check per video every 5 minutes.
+- (void)ytmuCheckServerUpgradeForVideoID:(NSString *)videoID {
+    if (!videoID.length) return;
+    NSArray *tierLyrics = g_lyricsCache[videoID] ?: YTMULyricsCacheLoad(videoID);
+    if (!tierLyrics) return;
+    static NSMutableDictionary *g_upgradeLastCheck = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        g_upgradeLastCheck = [NSMutableDictionary dictionary];
+    });
+    NSDate *last = g_upgradeLastCheck[videoID];
+    if (last && [[NSDate date] timeIntervalSinceDate:last] < 300) return;
+    g_upgradeLastCheck[videoID] = [NSDate date];
+
+    NSString *tier = YTMULyricsTier(tierLyrics);
+    NSString *url = [NSString stringWithFormat:@"%@/api/lyrics/check?v=%@&lang=%@&ct=%@",
+                     YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), tier];
+    [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url]
+        completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!data || err) return;
+            NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if ([dict[@"upgrade"] boolValue]) {
+                sendDebugLog(@"[MUSIC] Server has a better lyrics tier, upgrading");
+                [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
+                    [self fetchFullLyricsForVideo:videoID jwt:jwt force:NO];
+                }];
+            }
+        });
+    }] resume];
+}
+
 - (void)fetchLyricsForVideo:(NSString *)videoID {
     if (!videoID || videoID.length == 0) return;
 
@@ -1020,6 +1067,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
         self.isLoading = NO;
         [self loadArtworkForVideo:videoID];
         [self updateLyrics:g_lyricsCache[videoID]];
+        [self ytmuCheckServerUpgradeForVideoID:videoID];
         return;
     }
     // File cache hit
@@ -1034,6 +1082,7 @@ static void openLyricsFromViewController(UIViewController *parentVC);
             self.isLoading = NO;
             [self loadArtworkForVideo:videoID];
             [self updateLyrics:fileCached];
+            [self ytmuCheckServerUpgradeForVideoID:videoID];
             return;
         }
     }
@@ -2056,6 +2105,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 
 - (void)viewDidLayoutSubviews {
     %orig;
+    [self ytmuPlaceLyricsBesideThreeDot];
     for (UIView *sub in self.view.subviews) {
         [self ytmu_makeLyricsViewClickable:sub];
     }
@@ -2068,15 +2118,18 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 
 %new
 - (void)ytmu_keepLyricsButtonActive {
+    [self ytmuPlaceLyricsBesideThreeDot];
     for (UIView *sub in self.view.subviews) {
         [self ytmu_makeLyricsViewClickable:sub];
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self ytmuPlaceLyricsBesideThreeDot];
         for (UIView *sub in self.view.subviews) {
             [self ytmu_makeLyricsViewClickable:sub];
         }
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self ytmuPlaceLyricsBesideThreeDot];
         for (UIView *sub in self.view.subviews) {
             [self ytmu_makeLyricsViewClickable:sub];
         }
@@ -2257,38 +2310,69 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     openLyricsFromViewController((UIViewController *)self);
 }
 
-%end
-
-// Add an always-present "Our lyrics" row to the Now Playing action sheet
-// (the '...' button next to the song title). This is the guaranteed entry
-// point even when the chip replacement can't place a button on a given
-// layout -- the official chip is removed unconditionally, so without this
-// row a failed replacement would leave no way in.
-%hook YTMActionSheetController
-
-- (void)presentFromViewController:(UIViewController *)vc animated:(BOOL)animated completion:(void (^)(void))completion {
-    UIViewController *anc = vc;
-    BOOL playerContext = NO;
-    for (NSInteger i = 0; i < 8 && anc; i++) {
-        if ([NSStringFromClass([anc class]) containsString:@"YTMNowPlaying"]) {
-            playerContext = YES;
-            break;
+// Beside-the-3-dot lyrics entry: find the Now Playing '...' (top-right)
+// control by its accessibility "more/menu/options" smell and park our own
+// lyrics button just left of it, so the entry never lives only inside the
+// action sheet that '...' opens. Repositioned on every layout pass.
+%new
+- (UIView *)ytmu_findThreeDotControl:(UIView *)v {
+    if ([v isKindOfClass:[UIControl class]]) {
+        NSString *label = [v accessibilityLabel].lowercaseString ?: @"";
+        NSString *ident = v.accessibilityIdentifier ? [v.accessibilityIdentifier lowercaseString] : @"";
+        NSString *hint = [v accessibilityHint].lowercaseString ?: @"";
+        if ((label.length && ([label containsString:@"more"] || [label containsString:@"menu"] || [label containsString:@"option"] || [label containsString:@"更多"])) ||
+            (ident.length && ([ident containsString:@"more"] || [ident containsString:@"menu"] || [ident containsString:@"option"] || [ident containsString:@"overflow"] || [ident containsString:@"ellipsis"])) ||
+            (hint.length && [hint containsString:@"更多"])) {
+            return v;
         }
-        anc = anc.parentViewController;
     }
-    if (playerContext) {
-        [self addAction:[%c(YTActionSheetAction) actionWithTitle:@"歌詞"
-                                                       iconImage:[%c(YTUIResources) outlineImageWithColor:[UIColor whiteColor]]
-                                                          style:0
-                                                        handler:^{
-            sendDebugLog(@"[MUSIC] Our lyrics opened from the action sheet");
-            openLyricsFromViewController((UIViewController *)vc);
-        }]];
+    for (UIView *child in v.subviews) {
+        UIView *found = [self ytmu_findThreeDotControl:child];
+        if (found) return found;
     }
-    %orig(vc, animated, completion);
+    return nil;
+}
+
+%new
+- (void)ytmuPlaceLyricsBesideThreeDot {
+    UIView *threeDot = nil;
+    for (UIView *sub in self.view.subviews) {
+        threeDot = [self ytmu_findThreeDotControl:sub];
+        if (threeDot) break;
+    }
+    if (!threeDot) return;
+    if (!threeDot.superview || !self.view) return;
+
+    UIButton *own = (UIButton *)[self.view viewWithTag:9778];
+    if (![own isKindOfClass:[UIButton class]]) {
+        own = [UIButton buttonWithType:UIButtonTypeSystem];
+        own.tag = 9778;
+        [own setTitle:@"歌詞" forState:UIControlStateNormal];
+        [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+        own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+        own.layer.masksToBounds = YES;
+        objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
+        [self.view addSubview:own];
+    }
+    CGRect threeFrame = [threeDot.superview convertRect:threeDot.frame toView:self.view];
+    CGFloat btnW = 56.0, btnH = 32.0;
+    own.frame = CGRectMake(threeFrame.origin.x - btnW - 8.0,
+                           threeFrame.origin.y + (threeFrame.size.height - btnH) / 2.0,
+                           btnW, btnH);
+    own.layer.cornerRadius = btnH / 2.0;
+    own.hidden = NO;
+    own.alpha = 1.0;
+    own.userInteractionEnabled = YES;
+    [self.view bringSubviewToFront:own];
 }
 
 %end
+
+// The lyrics entry now lives beside the 3-dot button in Now Playing
+// (ytmuPlaceLyricsBesideThreeDot), so the action-sheet row is gone: the
+// entry point no longer needs to wait for the '...' sheet to open.
 
 %hook YTPlayerViewController
 

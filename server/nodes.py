@@ -20,6 +20,7 @@ import traceback
 import atexit
 import logging
 from .app import sock
+from .cache import _cache_key_from_filename
 
 # ============================================================
 # Node mesh (WebSocket worker nodes)
@@ -225,7 +226,8 @@ def _cache_entries_for_sync(newer_than=None):
     except Exception:
         return
     for fname in fnames:
-        if not fname.endswith('.json'):
+        cache_key = _cache_key_from_filename(fname)
+        if cache_key is None:
             continue
         fpath = os.path.join(lyrics_dir, fname)
         try:
@@ -237,7 +239,7 @@ def _cache_entries_for_sync(newer_than=None):
             data = entry.get('data')
             if data is None:
                 continue
-            yield {'cache_key': fname[:-5], 'data': data, 'ts': mt}
+            yield {'cache_key': cache_key, 'data': data, 'ts': mt}
         except Exception:
             continue
 

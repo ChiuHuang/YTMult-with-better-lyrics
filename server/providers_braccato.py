@@ -13,6 +13,7 @@
 import re
 import json
 import requests
+from urllib.parse import urlencode
 from .parsers_qrc import parse_qrc_to_lrc
 from .parsers_ttml import parse_ttml_basic
 
@@ -22,6 +23,28 @@ BOIDU_KUGOU_URL = "https://lyrics-api.boidu.dev/kugou/getLyrics"
 BINIMUM_SEARCH_URL = "https://lyrics-api.binimum.org/"
 
 _TIMEOUT = 10
+
+
+def _retrieve(url, params, via_node=None):
+    """GET url+params, returning the response body text or None on any
+    failure. When via_node is set the request egresses through that node's
+    IP (same discipline as every other provider): node failure falls back to
+    a direct request so a dead node never blocks a re-race."""
+    if via_node:
+        from .nodes import relay_http_request
+        full = url + ('?' + urlencode(params) if params else '')
+        out = relay_http_request(via_node, 'GET', full, timeout=_TIMEOUT + 5)
+        if out is not None:
+            status, text = out
+            return text if status == 200 else None
+    try:
+        resp = requests.get(url, params=params, timeout=_TIMEOUT)
+    except Exception as e:
+        print(f"[braccato] fetch error: {e}")
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.text
 
 
 def _peel_json_string(value):
@@ -61,16 +84,16 @@ def _parse_ttml(payload):
     return parse_ttml_basic(payload)
 
 
-def fetch_boidu_ttml(song, artist, duration=0, album=''):
+def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None):
     """bLyrics TTML (boidu.dev/getLyrics). Word-synced when spans exist."""
     try:
         params = {'s': song, 'a': artist, 'd': str(int(duration))}
         if album:
             params['al'] = album
-        resp = requests.get(BOIDU_TTML_URL, params=params, timeout=_TIMEOUT)
-        if resp.status_code != 200:
+        text = _retrieve(BOIDU_TTML_URL, params, via_node)
+        if not text:
             return None
-        data = resp.json()
+        data = json.loads(text)
         lyrics = _parse_ttml(data.get('ttml'))
         if not lyrics:
             return None
@@ -80,16 +103,16 @@ def fetch_boidu_ttml(song, artist, duration=0, album=''):
         return None
 
 
-def fetch_boidu_qq(song, artist, duration=0, album=''):
+def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
     """Portato QRC (boidu.dev/qq/getLyrics): true word-by-word timing."""
     try:
         params = {'s': song, 'a': artist, 'd': str(int(duration))}
         if album:
             params['al'] = album
-        resp = requests.get(BOIDU_QQ_URL, params=params, timeout=_TIMEOUT)
-        if resp.status_code != 200:
+        text = _retrieve(BOIDU_QQ_URL, params, via_node)
+        if not text:
             return None
-        data = resp.json()
+        data = json.loads(text)
         if not data.get('lyrics') or data.get('error'):
             return None
         qrc_lrc = parse_qrc_to_lrc(_peel_json_string(data.get('lyrics')))
@@ -101,16 +124,16 @@ def fetch_boidu_qq(song, artist, duration=0, album=''):
         return None
 
 
-def fetch_boidu_kugou(song, artist, duration=0, album=''):
+def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None):
     """Legato LRC (boidu.dev/kugou/getLyrics)."""
     try:
         params = {'s': song, 'a': artist, 'd': str(int(duration))}
         if album:
             params['al'] = album
-        resp = requests.get(BOIDU_KUGOU_URL, params=params, timeout=_TIMEOUT)
-        if resp.status_code != 200:
+        text = _retrieve(BOIDU_KUGOU_URL, params, via_node)
+        if not text:
             return None
-        data = resp.json()
+        data = json.loads(text)
         lrc = _peel_json_string(data.get('lyrics'))
         if not lrc:
             return None
@@ -120,24 +143,24 @@ def fetch_boidu_kugou(song, artist, duration=0, album=''):
         return None
 
 
-def fetch_binimum(song, artist, duration=0, album=''):
+def fetch_binimum(song, artist, duration=0, album='', via_node=None):
     """BiniLyrics TTML via search -> lyricsUrl (lyrics-api.binimum.org)."""
     try:
         params = {'track': song, 'artist': artist, 'duration': str(int(duration))}
         if album:
             params['album'] = album
-        resp = requests.get(BINIMUM_SEARCH_URL, params=params, timeout=_TIMEOUT)
-        if resp.status_code != 200:
+        text = _retrieve(BINIMUM_SEARCH_URL, params, via_node)
+        if not text:
             return None
-        search = resp.json()
+        search = json.loads(text)
         selected = (search.get('results') or [{}])[0]
         lyrics_url = selected.get('lyricsUrl')
         if not lyrics_url:
             return None
-        ttml_resp = requests.get(lyrics_url, timeout=_TIMEOUT)
-        if ttml_resp.status_code != 200:
+        ttml_text = _retrieve(lyrics_url, None, via_node)
+        if not ttml_text:
             return None
-        lyrics = _parse_ttml(ttml_resp.text)
+        lyrics = _parse_ttml(ttml_text)
         if not lyrics:
             return None
         syllable = selected.get('timing_type') == 'syllable' or any(l.get('wordSynced') for l in lyrics)
@@ -173,11 +196,12 @@ def _candidate_dict(raw, duration, priority):
             'wordSynced': wbw, 'tier': (0 if wbw else 1), 'priority': priority}
 
 
-def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kugou', 'binimum')):
+def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kugou', 'binimum'), via_node=None):
     """Race the direct braccato providers across all search queries and
     return the single best result ({lyrics, source, synced, wordSynced}) or
     None. Word/syllable timing beats line sync; within a tier, source order
-    above is the tiebreak."""
+    above is the tiebreak. via_node relays every request through a node
+    (falling back to a direct request when the relay fails)."""
     best = None
     for q in queries:
         for i, name in enumerate(sources):
@@ -185,7 +209,7 @@ def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kug
             if not fetcher:
                 continue
             try:
-                raw = fetcher(q['title'], q['artist'], duration, album)
+                raw = fetcher(q['title'], q['artist'], duration, album, via_node)
             except Exception:
                 continue
             cand = _candidate_dict(raw, duration, priority=i)
