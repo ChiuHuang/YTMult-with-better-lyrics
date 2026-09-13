@@ -121,8 +121,12 @@ def _perform_self_update():
         content = _fetch_remote_file(None)
     if not content:
         return False, "Could not fetch remote file"
-    # Basic sanity: must contain Flask app and not be empty
-    if "Flask" not in content or len(content) < 5000:
+    # Basic sanity: must not be empty and must look like server code.
+    # Accepts both the old monolith (contains "Flask") and the post-split
+    # thin shim (imports from server/), which is ~2KB and Flask-free.
+    looks_like_server = ("Flask" in content or "from server import" in content
+                         or "from server." in content)
+    if len(content) < 200 or not looks_like_server:
         return False, "Remote file looks invalid"
     # Backup
     try:
