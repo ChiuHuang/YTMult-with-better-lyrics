@@ -42,7 +42,8 @@
   (`LogTee` -> `logs/server.log` + `crash.log`, `SERVER_INSTANCE_ID`),
   `self_update` (prefers `git pull`, falls back to single-file fetch),
   `parsers_lrc`/`parsers_qrc`/`parsers_ttml`, `providers_lrclib`/
-  `providers_yt`/`providers_cubey`/`providers_unison`, `translate`
+  `providers_yt`/`providers_cubey`/`providers_unison`/`providers_braccato`
+  (boidu + binimum direct, no JWT), `translate`
   (Cohere + Google), `metadata`, `cache`, `pipeline` (fast/full fetch),
   `race` (parallel race + SSE helpers), `playlist`, `routes_lyrics`,
   `routes_stream`, `routes_admin`, `routes_misc`, `utils`
@@ -76,6 +77,14 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- `54fe344` wbw-first rank parity with braccato: Cubey events golyrics
+  (bLyrics TTML) + binimum (syllable TTML); new `providers_braccato.py`
+  direct boidu (TTML/QRC/LRC) + binimum hunt, raced as its own jobs (pool
+  -> 8); `_lyrics_score` applied uniformly in pipeline (plain never beats
+  synced, wbw beats all); self-update shim sanity (Flask-free 2KB) fix +
+  `_log_crash` import; iOS exact per-word window `[start,start+dur]` floor
+  120ms (was 0.1x/1.6x stretch = the lag/jump), cell ptr into
+  lastColorKey.
 - `25f61d4` mask reveal: CAShapeLayer union of TextKit word rects (real
   per-word timing, wrapped lines OK), normalized spacing via forward-search
   alignment (fixes 5-space karaoke padding), baked text shadow on bright
