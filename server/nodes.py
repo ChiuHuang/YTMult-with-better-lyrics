@@ -19,6 +19,7 @@ import uuid
 import traceback
 import atexit
 import logging
+from flask import request
 from .app import sock
 from .cache import _cache_key_from_filename
 
@@ -62,6 +63,14 @@ def _save_nodes(nodes):
 
 def _hash_node_key(key):
     return hashlib.sha256(key.encode()).hexdigest()
+
+
+def client_real_ip():
+    """Real client IP, honoring Cloudflare's proxy headers. Works in both
+    regular Flask routes and flask-sock websocket handlers (the WS upgrade
+    is just an HTTP request with the same headers)."""
+    xff = (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+    return (request.headers.get('CF-Connecting-IP') or xff or request.remote_addr) or ''
 
 
 connected_nodes = {}          # node_id -> {'ws':..., 'connected_ts':..., 'label':...}
@@ -328,12 +337,15 @@ def ws_node(ws):
             return
 
         node_id = candidate_id
+        real_ip = client_real_ip()
         record['last_seen'] = datetime.now().isoformat()
+        if real_ip:
+            record['last_ip'] = real_ip
         nodes[node_id] = record
         _save_nodes(nodes)
 
         with _connected_nodes_lock:
-            connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id)}
+            connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id), 'ip': real_ip}
         print(f"  [NODE] {node_id} ({record.get('label', '')}) connected")
         ws.send(json.dumps({'type': 'hello_ack', 'ok': True,
                             'code_sha': _node_template_sha(),
