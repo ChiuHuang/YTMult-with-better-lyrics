@@ -102,8 +102,16 @@ def _perform_self_update():
     try:
         _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if os.path.isdir(os.path.join(_root, '.git')):
-            r = subprocess.run(['git', 'pull', '--ff-only'], cwd=_root,
-                capture_output=True, text=True, timeout=60)
+            # PaaS/container eggs often reset --hard to origin/main without an
+            # upstream branch, so a bare `git pull` says "no tracking info".
+            # Try explicit ref first, then upstream, then plain pull.
+            r = subprocess.run(['git', 'pull', '--ff-only', 'origin', 'main'],
+                cwd=_root, capture_output=True, text=True, timeout=60)
+            if r.returncode != 0:
+                subprocess.run(['git', 'branch', '--set-upstream-to=origin/main', 'main'],
+                    cwd=_root, capture_output=True, text=True, timeout=30)
+                r = subprocess.run(['git', 'pull', '--ff-only'], cwd=_root,
+                    capture_output=True, text=True, timeout=60)
             if r.returncode == 0:
                 return True, f"git pull: {(r.stdout or '').strip()[:200]}"
             return False, f"git pull failed: {(r.stderr or r.stdout or '').strip()[:200]}"
