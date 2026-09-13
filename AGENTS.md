@@ -36,12 +36,20 @@
 - `git push` prints "repository moved" redirect notice — harmless, push succeeds.
 
 ## Architecture (what lives where)
-- `proxy_server.py` (Flask, port 20016): LRCLIB / Unison / YouTube / Cubey(JWT)
-  providers, Cohere + Google translate, file caches, admin dashboard
-  (`templates/index.html`), `LogTee` -> `logs/server.log` + `crash.log`,
-  `SERVER_INSTANCE_ID` (uuid4 per start), self-update endpoints
-  (`/api/admin/self_update/*`, supports `app.py`/`main.py`/`bot.py` via
-  `admin_config["main_file"]` or `MAIN_FILE` env), UI_DUMP analysis.
+- `server/` package (Flask, port 20016; `proxy_server.py` is now a thin shim
+  that re-exports it, so `python proxy_server.py` still works). Modules:
+  `app` (app/sock/shared state), `nodes` (ws mesh), `logging_util`
+  (`LogTee` -> `logs/server.log` + `crash.log`, `SERVER_INSTANCE_ID`),
+  `self_update` (prefers `git pull`, falls back to single-file fetch),
+  `parsers_lrc`/`parsers_qrc`/`parsers_ttml`, `providers_lrclib`/
+  `providers_yt`/`providers_cubey`/`providers_unison`, `translate`
+  (Cohere + Google), `metadata`, `cache`, `pipeline` (fast/full fetch),
+  `race` (parallel race + SSE helpers), `playlist`, `routes_lyrics`,
+  `routes_stream`, `routes_admin`, `routes_misc`, `utils`
+  (`_safe_cache_component`). Run: `python proxy_server.py` or
+  `.venv\Scripts\python -c "from server import main; main()"`.
+  DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
+  providers/translate/cache; routes->all, nothing imports routes.
 - `Source/TranslateLyrics.x`: player hooks, `YTMULyricsViewController`
   (fallback sheet + engagement-panel embed tag 9999), sliding wipe highlight,
   client file cache (`YTMU_LyricsCache`, count+size limits), ELM tap hijack,
