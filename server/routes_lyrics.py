@@ -24,6 +24,7 @@ from .app import app, SERVER_INSTANCE_ID, _recent_requests
 from .utils import _safe_cache_component
 from .cache import get_cached, set_cached, is_not_found_result
 from .nodes import ask_nodes_for_cache
+from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .pipeline import fetch_fast_lyrics, fetch_all_lyrics, _in_flight, _in_flight_lock
@@ -94,6 +95,12 @@ def api_lyrics():
     if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
         return jsonify({"error": "Invalid video ID or lang"}), 400
     jwt_token = request.args.get('jwt')
+    if jwt_token:
+        # Auto opt-in: a real bootstrapped device carries a Turnstile-verified
+        # Cubey JWT for this request -- share it with the pool so later requests
+        # without one (other devices, nodes) can fall back on it. The pool
+        # persists only a hash; contribution is cheap (dedup + probe evicts junk).
+        _pool_contribute(jwt_token, node_id='device')
     fast_mode = request.args.get('fast', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
 
