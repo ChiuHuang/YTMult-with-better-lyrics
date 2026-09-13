@@ -225,7 +225,13 @@ def admin_nodes_generate():
     return resp
 
 
+# Backwards-compat with node builds before 6b2ab34: they derived the
+# self-update URL from SERVER_WS_URL, producing /ws/node/api/admin/nodes/
+# generate/<id>. Mapping both paths to the same handler lets an outdated node
+# refetch the fixed script itself; after that its _http_base() drops the
+# /ws/node prefix and only ever uses the canonical /api/... path.
 @app.route('/api/admin/nodes/generate/<node_id>', methods=['GET'])
+@app.route('/ws/node/api/admin/nodes/generate/<node_id>', methods=['GET'])
 def admin_nodes_regenerate(node_id):
     key = request.args.get('key', '')
     nodes = _load_nodes()

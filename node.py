@@ -44,7 +44,7 @@ import sys
 import time
 import requests
 import websocket  # pip install websocket-client
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 SERVER_WS_URL = "__SERVER_WS_URL__"
 NODE_ID = "__NODE_ID__"
@@ -118,16 +118,13 @@ def _code_sha():
 
 
 def _http_base():
-    u = SERVER_WS_URL
-    if u.startswith('wss://'):
-        return 'https://' + u[6:]
-    if u.startswith('ws://'):
-        return 'http://' + u[5:]
-    if u.startswith('https://'):
-        return u
-    if u.startswith('http://'):
-        return u
-    return None
+    # SERVER_WS_URL carries the ws endpoint path too (e.g. wss://host/ws/node);
+    # self-update and any direct HTTP need the bare origin, not that path.
+    parts = urlsplit(SERVER_WS_URL)
+    if not parts.scheme or not parts.netloc:
+        return None
+    scheme = 'https' if parts.scheme == 'wss' else ('http' if parts.scheme == 'ws' else parts.scheme)
+    return f"{scheme}://{parts.netloc}"
 
 
 def _maybe_self_update(server_code_sha):
