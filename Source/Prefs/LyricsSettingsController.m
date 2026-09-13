@@ -128,6 +128,7 @@
     if (!d[@"lyricsAlwaysOn"]) d[@"lyricsAlwaysOn"] = @YES;
     if (!d[@"sendLyricsScreenshotDebug"]) d[@"sendLyricsScreenshotDebug"] = @NO;
     if (!d[@"sendDebugLogsToServer"]) d[@"sendDebugLogsToServer"] = @NO;
+    if (!d[@"debugLogLevel"]) d[@"debugLogLevel"] = @0;
     if (!d[@"lyricsFpsMeter"]) d[@"lyricsFpsMeter"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
     if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
@@ -181,7 +182,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 5; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 4;
+    if (section == 0) return 7;
     if (section == 1) return 2;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
@@ -199,7 +200,7 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Always On shows translated panel when lyrics load. Cache stores lyrics on device for offline and faster load.";
+    if (section == 0) return @"Always show translated lyrics auto-opens the panel, storage is on-device, and debug uploads default to off.";
     if (section == 1) return @"Server used to fetch and translate lyrics, and the language lyrics get translated into. Lines already in that Chinese script (Simplified or Traditional) are never sent to the translator — they just get their script normalized. Examples: zh-TW, zh-CN, en, ja, ko.";
     if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
     if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
@@ -229,16 +230,29 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
     if (indexPath.section == 0) {
+        if (indexPath.row == 6) {
+            cell.textLabel.text = @"Log level";
+            cell.detailTextLabel.text = @"Off = no uploads, Errors = failures only, All = info + warnings + errors";
+            cell.imageView.image = [UIImage systemImageNamed:@"waveform.badge.exclamationmark"];
+            UISegmentedControl *segment = [[UISegmentedControl alloc] initWithItems:@[@"Off", @"Err", @"All"]];
+            segment.selectedSegmentIndex = MIN(MAX([dict[@"debugLogLevel"] integerValue], 0), 2);
+            segment.accessibilityIdentifier = @"debugLogLevel";
+            [segment addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = segment;
+            return cell;
+        }
         NSArray *items = @[
             @{@"title": @"Always show translated lyrics", @"desc": @"Auto-show custom panel when lyrics load", @"key": @"lyricsAlwaysOn"},
             @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"key": @"lyricsCacheEnabled"},
+            @{@"title": @"Selectable lyrics", @"desc": @"Allow selecting / copying text inside the lyrics panel", @"key": @"selectableLyrics"},
+            @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
             @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
-            @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"}
+            @{@"title": @"Send screenshot debug data", @"desc": @"Upload a UI hierarchy only after you take a screenshot", @"key": @"sendLyricsScreenshotDebug"}
         ];
         NSDictionary *it = items[indexPath.row];
         cell.textLabel.text = it[@"title"];
         cell.detailTextLabel.text = it[@"desc"];
-        cell.imageView.image = [UIImage systemImageNamed:(indexPath.row==0?@"quote.bubble": indexPath.row==1?@"internaldrive": indexPath.row==2?@"antenna.radiowaves.left.and.right":@"speedometer")];
+        cell.imageView.image = [UIImage systemImageNamed:(indexPath.row==0?@"quote.bubble": indexPath.row==1?@"internaldrive": indexPath.row==2?@"textformat.abc": indexPath.row==3?@"speedometer": indexPath.row==4?@"antenna.radiowaves.left.and.right":@"ladybug")];
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = it[@"key"];
         sw.on = [dict[it[@"key"]] boolValue];
@@ -409,6 +423,14 @@
     if (!key.length) return;
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
     d[key] = @(sender.isOn);
+    [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+}
+
+- (void)segmentChanged:(UISegmentedControl *)sender {
+    NSString *key = sender.accessibilityIdentifier;
+    if (!key.length) return;
+    NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
+    d[key] = @(sender.selectedSegmentIndex);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
 }
 
