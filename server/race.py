@@ -29,6 +29,8 @@ from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
 from .cache import sanitize_lyrics_parts
+from .nodes import pick_node
+from .jwt_pool import pick_jwt
 
 # ============================================================
 # Parallel provider race + SSE streaming
@@ -82,10 +84,16 @@ def _lyrics_score(res):
 
 def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
     t0 = time_module.time()
+    if not jwt_token:
+        jwt_token = pick_jwt()
+    if not jwt_token:
+        print(f"  [REQ {req_id}] [Race] Cubey skipped (no JWT in pool)")
+        return None
+    via_node = pick_node()
     try:
         for q in queries:
             try:
-                cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration)
+                cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=via_node)
             except Exception as e:
                 print(f"  [REQ {req_id}] [Race] Cubey query error: {e}")
                 continue
@@ -109,10 +117,11 @@ def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
 def _race_lrclib(queries, album, duration, req_id='?'):
     t0 = time_module.time()
     plain_fallback = None
+    node = pick_node()
     try:
         for q in queries:
             try:
-                lrc = fetch_lrclib(q['title'], q['artist'], album, duration)
+                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=node)
             except Exception as e:
                 print(f"  [REQ {req_id}] [Race] LRCLIB query error: {e}")
                 continue
@@ -143,10 +152,11 @@ def _race_lrclib(queries, album, duration, req_id='?'):
 def _race_unison(queries, video_id, duration, req_id='?'):
     t0 = time_module.time()
     plain_fallback = None
+    node = pick_node()
     try:
         for q in queries:
             try:
-                uni = fetch_unison(video_id, q['title'], q['artist'], duration)
+                uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=node)
             except Exception as e:
                 print(f"  [REQ {req_id}] [Race] Unison query error: {e}")
                 continue

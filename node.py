@@ -9,11 +9,18 @@ drop it onto any machine and run it with zero manual configuration:
     pip install websocket-client requests
     python3 node.py
 
-It connects back to the main server over a WebSocket and does two things:
+It connects back to the main server over a WebSocket and does more than two
+things:
   1. Answers "do you have this cached?" queries, so a cache hit doesn't
      repeat work someone else's node (or the server itself) already did.
   2. Relays outbound lyric-provider HTTP requests through this machine's IP
      when asked, for IP diversity against provider rate limits.
+  3. Accepts lyric-cache sync pushes from the server ('sync' messages), so a
+     node's cache reflects what the main server already resolved.
+  4. Self-updates: the server tells it the current node.template code_sha in
+     the hello_ack and in periodic ping messages; when its own copy is stale
+     it refetches the personalized script from the server and restarts.
+  5. Contributes a Cubey JWT to the shared pool if YTMU_JWT is set.
 
 This node never sees the server's Cohere/translation API keys -- those stay
 on the main server. All this node does is fetch raw (untranslated) lyrics
@@ -29,6 +36,7 @@ this file and in a hash on the server; it cannot be recovered or reissued
 for the same node_id.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -36,6 +44,7 @@ import sys
 import time
 import requests
 import websocket  # pip install websocket-client
+from urllib.parse import quote
 
 SERVER_WS_URL = "__SERVER_WS_URL__"
 NODE_ID = "__NODE_ID__"
@@ -88,6 +97,86 @@ def _save_local_cache(cache_key, data):
         pass
 
 
+# ---------------------------------------------------------------------------
+# Self-update + JWT contribution
+# ---------------------------------------------------------------------------
+# SERVER_WS_URL / NODE_ID / NODE_KEY are personalized per node, so hashes of
+# the raw file would differ even for identical code. Normalize those three
+# lines to empty values -- the server hashes its node.py template the same
+# way -- so the sha only changes when node code actually changes.
+_NODE_VERSION_RE = re.compile(r'^(SERVER_WS_URL|NODE_ID|NODE_KEY)(\s*=\s*)["\'](.*)["\']$', re.M)
+
+
+def _code_sha():
+    try:
+        with open(os.path.abspath(__file__), 'r', encoding='utf-8') as f:
+            src = f.read()
+        norm = _NODE_VERSION_RE.sub(lambda m: m.group(1) + m.group(2) + '""', src)
+        return hashlib.sha256(norm.encode('utf-8')).hexdigest()
+    except Exception:
+        return None
+
+
+def _http_base():
+    u = SERVER_WS_URL
+    if u.startswith('wss://'):
+        return 'https://' + u[6:]
+    if u.startswith('ws://'):
+        return 'http://' + u[5:]
+    if u.startswith('https://'):
+        return u
+    if u.startswith('http://'):
+        return u
+    return None
+
+
+def _maybe_self_update(server_code_sha):
+    """Refetch the personalized node script when the server's node-template
+    code_sha differs from ours. Returns True only if it execv'd a fresh
+    interpreter (never returns in that case), else False."""
+    local = _code_sha()
+    if not server_code_sha or not local or server_code_sha == local:
+        return False
+    print(f"[node] server code_sha {server_code_sha[:10]} != local {local[:10]}, refetching script")
+    base = _http_base()
+    if not base:
+        return False
+    url = f"{base}/api/admin/nodes/generate/{quote(NODE_ID)}?key={quote(NODE_KEY)}"
+    try:
+        resp = requests.get(url, timeout=20)
+    except Exception as e:
+        print(f"[node] self-update fetch failed: {e}")
+        return False
+    script = resp.text
+    if resp.status_code != 200 or len(script) < 500:
+        print(f"[node] self-update: bad response status={resp.status_code}")
+        return False
+    if NODE_ID not in script or NODE_KEY not in script:
+        print("[node] self-update: server returned a different identity, ignoring")
+        return False
+    try:
+        with open(os.path.abspath(__file__), 'w', encoding='utf-8', newline='\n') as f:
+            f.write(script.replace('\r\n', '\n'))
+    except Exception as e:
+        print(f"[node] self-update: write failed: {e}")
+        return False
+    print("[node] self-update: downloaded new script, restarting")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+    return True
+
+
+_jwt_env = os.environ.get('YTMU_JWT') or ''
+
+
+def _maybe_contribute_jwt(ws):
+    if not _jwt_env:
+        return
+    try:
+        ws.send(json.dumps({'type': 'jwt_contribute', 'token': _jwt_env}))
+    except Exception:
+        pass
+
+
 def handle_task(msg):
     """Perform a relayed task on this node's own IP and return the result.
     Currently only 'http_fetch' exists: run the exact HTTP request the
@@ -109,7 +198,7 @@ def handle_task(msg):
 
 def on_open(ws):
     print(f"[node] socket open, authenticating as {NODE_ID}")
-    ws.send(json.dumps({'type': 'hello', 'node_id': NODE_ID, 'key': NODE_KEY}))
+    ws.send(json.dumps({'type': 'hello', 'node_id': NODE_ID, 'key': NODE_KEY, 'code_sha': _code_sha()}))
 
 
 def on_message(ws, raw):
@@ -123,9 +212,24 @@ def on_message(ws, raw):
     if mtype == 'hello_ack':
         if msg.get('ok'):
             print(f"[node] connected and authenticated as {NODE_ID}")
+            if not _maybe_self_update(msg.get('code_sha')):
+                _maybe_contribute_jwt(ws)
         else:
             print(f"[node] server rejected connection: {msg.get('error')}")
             ws.close()
+        return
+
+    if mtype == 'ping':
+        # server broadcast -- self-update when the template sha moved on
+        _maybe_self_update(msg.get('code_sha'))
+        return
+
+    if mtype == 'sync':
+        _save_local_cache(msg.get('cache_key', ''), msg.get('data'))
+        return
+
+    if mtype == 'sync_end':
+        print(f"[node] cache sync complete: {msg.get('count', 0)} entries")
         return
 
     if mtype == 'cache_check':

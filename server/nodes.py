@@ -158,6 +158,152 @@ def relay_http_request(node_id, method, url, data=None, headers=None, timeout=15
     return reply['status'], reply.get('text', '')
 
 
+# ============================================================
+# Node script versioning + cache sync + pings
+# ============================================================
+_NODE_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'node.py')
+# These three lines are personalized per node, so comparing raw hashes would
+# always report a bogus mismatch. Normalize their values to empty on BOTH the
+# server template and the node's own copy (the node mirrors this regex), so
+# the hashes only change when the actual node code changes.
+_NODE_VERSION_RE = re.compile(r'^(SERVER_WS_URL|NODE_ID|NODE_KEY)(\s*=\s*)["\'](.*)["\']$', re.M)
+
+
+def _normalize_node_source(src):
+    return _NODE_VERSION_RE.sub(lambda m: f'{m.group(1)}{m.group(2)}""', src)
+
+
+def _node_template_sha():
+    try:
+        with open(_NODE_TEMPLATE_PATH, 'r', encoding='utf-8') as f:
+            return hashlib.sha256(_normalize_node_source(f.read()).encode('utf-8')).hexdigest()
+    except Exception as e:
+        print(f"  [NODE] template sha error: {e}")
+        return None
+
+
+def _current_server_sha():
+    try:
+        from .self_update import _get_local_sha
+        return _get_local_sha()
+    except Exception:
+        return None
+
+
+def _broadcast_pings():
+    """Keep every node honest: periodically tell it the server's node-template
+    code_sha (plus the server's own repo sha). A node whose own script version
+    differs refetches its personalized script and restarts itself."""
+    while True:
+        time_module.sleep(30)
+        try:
+            code_sha = _node_template_sha()
+        except Exception:
+            code_sha = None
+        server_sha = _current_server_sha()
+        msg = json.dumps({'type': 'ping', 'server_sha': server_sha, 'code_sha': code_sha, 'ts': time_module.time()})
+        with _connected_nodes_lock:
+            ws_list = [e['ws'] for e in connected_nodes.values()]
+        for entry_ws in ws_list:
+            try:
+                entry_ws.send(msg)
+            except Exception:
+                pass
+
+
+def _cache_entries_for_sync(newer_than=None):
+    """Yield {cache_key, data, ts(epoch)} for cache/lyrics/*.json, newest first.
+    newer_than is an epoch cutoff: entries older than it are skipped (used for
+    incremental pushes right after a full sync)."""
+    lyrics_dir = 'cache/lyrics'
+    if not os.path.isdir(lyrics_dir):
+        return
+    try:
+        fnames = sorted(os.listdir(lyrics_dir),
+                        key=lambda f: os.path.getmtime(os.path.join(lyrics_dir, f)),
+                        reverse=True)
+    except Exception:
+        return
+    for fname in fnames:
+        if not fname.endswith('.json'):
+            continue
+        fpath = os.path.join(lyrics_dir, fname)
+        try:
+            mt = os.path.getmtime(fpath)
+            if newer_than is not None and mt < newer_than:
+                break
+            with open(fpath, 'r', encoding='utf-8') as f:
+                entry = json.load(f)
+            data = entry.get('data')
+            if data is None:
+                continue
+            yield {'cache_key': fname[:-5], 'data': data, 'ts': mt}
+        except Exception:
+            continue
+
+
+def _push_cache_sync(node_id, newer_than=None, limit=300):
+    """Stream cache entries to one node as 'sync' control messages (each entry
+    is one message, so the node's existing receive loop just stores them), then
+    send a 'sync_end' terminator. Returns the number of entries pushed."""
+    entry_ws = None
+    with _connected_nodes_lock:
+        entry = connected_nodes.get(node_id)
+        if entry:
+            entry_ws = entry['ws']
+    if entry_ws is None:
+        return 0
+    count = 0
+    try:
+        for info in _cache_entries_for_sync(newer_than=newer_than):
+            if count >= limit:
+                break
+            entry_ws.send(json.dumps({'type': 'sync', 'cache_key': info['cache_key'],
+                                      'data': info['data'], 'ts': info['ts']}))
+            count += 1
+            if count % 25 == 0:
+                time_module.sleep(0.05)  # don't flood the socket
+        entry_ws.send(json.dumps({'type': 'sync_end', 'count': count}))
+    except Exception as e:
+        print(f"  [NODE] cache sync to {node_id} aborted: {e}")
+        return 0
+    return count
+
+
+def _full_sync_for(node_id, newer_than=None):
+    n = _push_cache_sync(node_id, newer_than=newer_than)
+    print(f"  [NODE] cache sync to {node_id}: {n} entries")
+
+
+def _cache_sync_loop():
+    """Re-push recent cache changes to every connected node periodically, so a
+    song cached after a node connected still reaches it within a minute."""
+    while True:
+        time_module.sleep(60)
+        try:
+            with _connected_nodes_lock:
+                ids = list(connected_nodes.keys())
+            cutoff = time_module.time() - 120
+            for nid in ids:
+                _push_cache_sync(nid, newer_than=cutoff, limit=300)
+        except Exception as e:
+            print(f"  [NODE] cache sync loop error: {e}")
+
+
+_started_threads = False
+_thread_start_lock = threading.Lock()
+
+
+def _ensure_node_workers():
+    global _started_threads
+    with _thread_start_lock:
+        if _started_threads:
+            return
+        _started_threads = True
+    threading.Thread(target=_broadcast_pings, daemon=True).start()
+    threading.Thread(target=_cache_sync_loop, daemon=True).start()
+
+
 @sock.route('/ws/node')
 def ws_node(ws):
     node_id = None
@@ -187,7 +333,10 @@ def ws_node(ws):
         with _connected_nodes_lock:
             connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id)}
         print(f"  [NODE] {node_id} ({record.get('label', '')}) connected")
-        ws.send(json.dumps({'type': 'hello_ack', 'ok': True}))
+        ws.send(json.dumps({'type': 'hello_ack', 'ok': True,
+                            'code_sha': _node_template_sha(),
+                            'server_sha': _current_server_sha()}))
+        threading.Thread(target=_full_sync_for, args=(node_id,), daemon=True).start()
 
         while True:
             raw = ws.receive(timeout=90)  # generous: the node's WebSocketApp pings every 30s
@@ -205,6 +354,20 @@ def ws_node(ws):
                 if pending:
                     pending['result'] = msg
                     pending['event'].set()
+            elif mtype == 'jwt_contribute':
+                # A node boots with a Cubey JWT available (env YTMU_JWT) and
+                # hands it over here so the server can fall back to it when a
+                # request arrives without one.
+                from .jwt_pool import contribute_jwt
+                res = contribute_jwt(msg.get('token'), node_id=node_id)
+                if request_id:
+                    ack = dict(res)
+                    ack['type'] = 'jwt_contribute_ack'
+                    ack['request_id'] = request_id
+                    try:
+                        ws.send(json.dumps(ack))
+                    except Exception:
+                        pass
             # any other message type (e.g. a bare ping) needs no action --
             # receive() just needs to return periodically to keep the loop alive
     except Exception as e:
@@ -214,4 +377,7 @@ def ws_node(ws):
             with _connected_nodes_lock:
                 connected_nodes.pop(node_id, None)
             print(f"  [NODE] {node_id} disconnected")
+
+
+_ensure_node_workers()
 

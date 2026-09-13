@@ -29,6 +29,7 @@ from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
 from .cache import is_not_found_result, sanitize_lyrics_parts
 from .nodes import pick_node
+from .jwt_pool import pick_jwt
 
 # ============================================================
 # Main Lyrics Pipeline
@@ -46,10 +47,11 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
     result = None
 
     queries = get_search_queries(song_info['title'], song_info['artist'], song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
+    node = pick_node()
     for q in queries:
         q_title = q['title']
         q_artist = q['artist']
-        lrc = fetch_lrclib(q_title, q_artist, album, duration)
+        lrc = fetch_lrclib(q_title, q_artist, album, duration, via_node=node)
         if lrc:
             if lrc.get('instrumental'):
                 result = {'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
@@ -115,10 +117,16 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     # Priority 0: Cubey API (if we have JWT) -- one pass covers Musixmatch
     # wordByWord/synced, QQ QRC, KuGou LRC, NetEase and the bLyrics/BiniLyrics
     # TTML events, with word-by-word always preferred inside the stream.
+    # No request JWT? Fall back to the contributed pool before giving up.
+    if not jwt_token:
+        jwt_token = pick_jwt()
+        if jwt_token:
+            print(f"  [0/5] No request JWT -- using a contributed token from the pool")
     if jwt_token:
         print(f"  [0/5] Trying Cubey API (with JWT)...")
+        cubey_node = pick_node()
         for q in queries:
-            cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=pick_node())
+            cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
             if not cubey:
                 continue
             if cubey.get('parsed'):
@@ -137,8 +145,9 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
     # Priority 2: LRCLIB (best general line-sync source)
     print(f"  [2/5] Trying LRCLIB...")
+    lrclib_node = pick_node()
     for q in queries:
-        lrc = fetch_lrclib(q['title'], q['artist'], album, duration)
+        lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
         if not lrc:
             continue
         if lrc.get('instrumental'):
@@ -153,8 +162,9 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
     # Priority 3: Unison (community; TTML can carry word timing)
     print(f"  [3/5] Trying Unison...")
+    unison_node = pick_node()
     for q in queries:
-        uni = fetch_unison(video_id, q['title'], q['artist'], duration)
+        uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
         if not uni:
             continue
         if uni.get('parsed'):
