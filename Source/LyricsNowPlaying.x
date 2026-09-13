@@ -228,10 +228,19 @@
         sendDebugLog([NSString stringWithFormat:@"[3DOT] Searching %ld subviews in %@", (long)count, NSStringFromClass([self class])]);
         lastLoggedCount = count;
     }
+    // The 3-dot button lives in the parent container (YTMWatchView), NOT inside
+    // YTMNowPlayingView — same family as the cast MDCFloatingButton. Search both
+    // self.view (NowPlayingView) and self.view.superview (the watch container).
     UIView *threeDot = nil;
     for (UIView *sub in self.view.subviews) {
         threeDot = [self ytmu_findThreeDotControl:sub];
         if (threeDot) break;
+    }
+    if (!threeDot && self.view.superview) {
+        for (UIView *sub in self.view.superview.subviews) {
+            threeDot = [self ytmu_findThreeDotControl:sub];
+            if (threeDot) break;
+        }
     }
     if (!threeDot) {
         // Fallback: place the button top-right when 3-dot is not found.
@@ -273,7 +282,9 @@
     }
     if (!threeDot.superview || !self.view) return;
 
-    UIButton *own = (UIButton *)[self.view viewWithTag:9778];
+    // Add the button to the same container as the 3-dot, so z-ordering is correct.
+    UIView *btnContainer = threeDot.superview;
+    UIButton *own = (UIButton *)[btnContainer viewWithTag:9778];
     if (![own isKindOfClass:[UIButton class]]) {
         own = [UIButton buttonWithType:UIButtonTypeSystem];
         own.tag = 9778;
@@ -284,9 +295,9 @@
         own.layer.masksToBounds = YES;
         objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
-        [self.view addSubview:own];
+        [btnContainer addSubview:own];
     }
-    CGRect threeFrame = [threeDot.superview convertRect:threeDot.frame toView:self.view];
+    CGRect threeFrame = [threeDot.superview convertRect:threeDot.frame toView:btnContainer];
     CGFloat btnW = 56.0, btnH = 32.0;
     own.frame = CGRectMake(threeFrame.origin.x - btnW - 8.0,
                            threeFrame.origin.y + (threeFrame.size.height - btnH) / 2.0,
@@ -295,7 +306,7 @@
     own.hidden = NO;
     own.alpha = 1.0;
     own.userInteractionEnabled = YES;
-    [self.view bringSubviewToFront:own];
+    [btnContainer bringSubviewToFront:own];
 }
 
 %end
