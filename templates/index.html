@@ -815,7 +815,7 @@
             <div style="font-weight:600;">${escapeHtml(n.label || n.node_id)}</div>
             <div slot="description" style="font-size:12px; opacity:0.7;">
               <span class="status-badge ${n.online ? 'badge-online' : 'badge-offline'}">${n.online ? 'online' : 'offline'}</span>
-              &nbsp;${n.node_id} • last seen ${timeAgo(n.last_seen)}
+              &nbsp;${escapeHtml(n.node_id)}${n.ip ? ' • ' + escapeHtml(n.ip) : ''} • last seen ${timeAgo(n.last_seen)}
             </div>
             <mdui-button-icon slot="end-icon" icon="delete" title="Revoke" onclick="revokeNode('${n.node_id}')"></mdui-button-icon>
           </mdui-list-item>

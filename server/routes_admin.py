@@ -170,6 +170,7 @@ def admin_nodes_list():
     nodes = _load_nodes()
     with _connected_nodes_lock:
         online_ids = set(connected_nodes.keys())
+        live_ips = {nid: entry.get('ip', '') for nid, entry in connected_nodes.items()}
     items = []
     for node_id, rec in nodes.items():
         items.append({
@@ -177,6 +178,7 @@ def admin_nodes_list():
             'label': rec.get('label', ''),
             'created': rec.get('created', ''),
             'last_seen': rec.get('last_seen'),
+            'ip': live_ips.get(node_id) or rec.get('last_ip', ''),
             'online': node_id in online_ids,
         })
     items.sort(key=lambda x: x['created'], reverse=True)
