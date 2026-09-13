@@ -25,6 +25,7 @@ from .app import (app, login_required, _admin_cfg, SERVER_INSTANCE_ID,
     _recent_logs, _structured_logs, _recent_requests, _crash_logs)
 from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
+from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
