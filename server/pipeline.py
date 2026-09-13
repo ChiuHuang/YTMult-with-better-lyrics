@@ -24,6 +24,7 @@ from .providers_lrclib import fetch_lrclib
 from .providers_yt import fetch_yt_lyrics, get_song_info
 from .providers_cubey import fetch_cubey
 from .providers_unison import fetch_unison
+from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
 from .cache import is_not_found_result
@@ -86,7 +87,11 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
     return result
 
 def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
-    """Try all providers in priority order, return best result."""
+    """Try all providers and keep the single best result, ranked by the same
+    word-by-word-first score the stream race uses (_lyrics_score), so the
+    sequential endpoint and the SSE endpoint agree on what 'best' means.
+    A plain hit never outranks a synced one, and a syllable/word-timed hit
+    outranks everything else."""
 
     title = song_info['title']
     artist = song_info['artist']
@@ -94,86 +99,83 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     duration = song_info.get('duration', 0)
     queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
 
-    result = None
+    from .race import _lyrics_score
 
-    # Priority 0: Cubey API (if we have JWT)
+    result = None  # best across providers, decided by score
+
+    def consider(candidate, label):
+        nonlocal result
+        if not candidate or not candidate.get('lyrics'):
+            return
+        sanitize_lyrics_parts(candidate['lyrics'])
+        if result is None or _lyrics_score(candidate) > _lyrics_score(result):
+            result = candidate
+            print(f"  [rank] {label}: {candidate.get('source')} now best (score={_lyrics_score(result):.2f})")
+
+    # Priority 0: Cubey API (if we have JWT) -- one pass covers Musixmatch
+    # wordByWord/synced, QQ QRC, KuGou LRC, NetEase and the bLyrics/BiniLyrics
+    # TTML events, with word-by-word always preferred inside the stream.
     if jwt_token:
-        print(f"  [0/4] Trying Cubey API (with JWT)...")
+        print(f"  [0/5] Trying Cubey API (with JWT)...")
         for q in queries:
-            q_title = q['title']
-            q_artist = q['artist']
-            cubey = fetch_cubey(jwt_token, video_id, q_title, q_artist, duration, via_node=pick_node())
-            if cubey and cubey.get('synced'):
-                print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q_title} - {q_artist})")
-                parsed = parse_lrc(cubey['synced'], duration)
-                result = {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
-                # Skip other providers - we already have the best
-                result['song'] = title
-                result['artist'] = artist
-                if translate_to and result.get('lyrics'):
-                    print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
-                    texts = [l['text'] for l in result['lyrics'] if l.get('text')]
-                    translations = cohere_translate(texts, translate_to)
-                    for i, lyric in enumerate(result['lyrics']):
-                        if i < len(translations):
-                            lyric['translated'] = translations[i]
-                if result and result.get('lyrics'):
-                    sanitize_lyrics_parts(result['lyrics'])
-                return result
+            cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=pick_node())
+            if not cubey:
+                continue
+            if cubey.get('parsed'):
+                print(f"  [OK] Cubey: {cubey.get('source')} TTML lyrics found (wordSynced={cubey.get('wordSynced')}) (query: {q['title']})")
+                consider({'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}, 'Cubey TTML')
+            elif cubey.get('synced'):
+                print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q['title']})")
+                consider({'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
 
-    # Priority 1: LRCLIB (best for synced lyrics)
-    print(f"  [1/3] Trying LRCLIB...")
+    # Priority 1: direct braccato providers (no JWT) -- bLyrics TTML (often
+    # syllable-timed), Portato QQ QRC (word-by-word), Legato KuGou LRC.
+    direct = fetch_direct_best(queries, album, duration)
+    if direct:
+        print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
+        consider(direct, 'braccato direct')
+
+    # Priority 2: LRCLIB (best general line-sync source)
+    print(f"  [2/5] Trying LRCLIB...")
     for q in queries:
-        q_title = q['title']
-        q_artist = q['artist']
-        lrc = fetch_lrclib(q_title, q_artist, album, duration)
-        if lrc:
-            if lrc.get('instrumental'):
-                result = {
-                    'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}],
-                    'source': 'LRCLib', 'synced': False
-                }
-                break
-            elif lrc.get('synced'):
-                print(f"  [OK] LRCLIB: synced lyrics found! (query: {q_title} - {q_artist})")
-                parsed = parse_lrc(lrc['synced'], duration)
-                result = {'lyrics': parsed, 'source': 'LRCLib', 'synced': True}
-                break
-            elif lrc.get('plain') and not result:
-                print(f"  [WARN]️ LRCLIB: plain lyrics only (query: {q_title} - {q_artist})")
-                parsed = parse_plain(lrc['plain'])
-                result = {'lyrics': parsed, 'source': 'LRCLib', 'synced': False}
+        lrc = fetch_lrclib(q['title'], q['artist'], album, duration)
+        if not lrc:
+            continue
+        if lrc.get('instrumental'):
+            consider({'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}, 'LRCLib instrumental')
+            break
+        if lrc.get('synced'):
+            print(f"  [OK] LRCLIB: synced lyrics found! (query: {q['title']})")
+            consider({'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}, 'LRCLib synced')
+        elif lrc.get('plain'):
+            print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
+            consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
 
-    # Priority 2: Unison (community)
-    if not result or not result.get('synced'):
-        print(f"  [2/3] Trying Unison...")
-        for q in queries:
-            uni = fetch_unison(video_id, q['title'], q['artist'], duration)
-            if uni:
-                if uni.get('parsed'):
-                    print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
-                    if not result or not result.get('synced'):
-                        result = {'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}
-                        break
-                elif uni.get('synced'):
-                    print(f"  [OK] Unison: synced LRC lyrics found! (query: {q['title']})")
-                    parsed = parse_lrc(uni['synced'], duration)
-                    if not result or not result.get('synced'):
-                        result = {'lyrics': parsed, 'source': 'Unison', 'synced': True}
-                        break
-                elif uni.get('plain') and not result:
-                    print(f"  [WARN]️ Unison: plain lyrics only (query: {q['title']})")
-                    parsed = parse_plain(uni['plain'])
-                    result = {'lyrics': parsed, 'source': 'Unison', 'synced': False}
+    # Priority 3: Unison (community; TTML can carry word timing)
+    print(f"  [3/5] Trying Unison...")
+    for q in queries:
+        uni = fetch_unison(video_id, q['title'], q['artist'], duration)
+        if not uni:
+            continue
+        if uni.get('parsed'):
+            print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
+            consider({'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}, 'Unison TTML')
+        elif uni.get('synced'):
+            print(f"  [OK] Unison: synced LRC lyrics found! (query: {q['title']})")
+            consider({'lyrics': parse_lrc(uni['synced'], duration), 'source': 'Unison', 'synced': True}, 'Unison synced')
+        elif uni.get('plain'):
+            print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
+            consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
 
-    # Priority 3: YouTube Music lyrics
-    if not result:
-        print(f"  [3/3] Trying YouTube Music lyrics...")
+    # Priority 4: YouTube Music lyrics
+    print(f"  [4/5] Trying YouTube Music lyrics...")
+    try:
         yt = fetch_yt_lyrics(video_id)
         if yt and yt.get('plain'):
             print(f"  [OK] YouTube: plain lyrics found!")
-            parsed = parse_plain(yt['plain'])
-            result = {'lyrics': parsed, 'source': yt.get('source', 'YouTube Music'), 'synced': False}
+            consider({'lyrics': parse_plain(yt['plain']), 'source': yt.get('source', 'YouTube Music'), 'synced': False}, 'YouTube')
+    except Exception as e:
+        print(f"  [FAIL] YouTube error: {e}")
 
     # No lyrics found
     if not result:
@@ -186,6 +188,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     # Add song metadata
     result['song'] = title
     result['artist'] = artist
+    if result.get('wordSynced') is None:
+        result['wordSynced'] = any(l.get('wordSynced') for l in (result.get('lyrics') or []))
 
     # Translation
     if translate_to and result.get('lyrics'):

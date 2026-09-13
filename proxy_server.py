@@ -11,6 +11,7 @@ from server import routes_lyrics, playlist, routes_stream, routes_admin, routes_
 from server.app import SERVER_INSTANCE_ID, SERVER_START_TS, SERVER_LOG_FILE, CRASH_LOG_FILE  # noqa: F401
 from server.cache import clear_not_found_caches, get_cached, set_cached  # noqa: F401
 from server.pipeline import fetch_all_lyrics, fetch_fast_lyrics  # noqa: F401
+from server.logging_util import _log_crash  # noqa: F401
 
 if __name__ == '__main__':
     print("=" * 60)
