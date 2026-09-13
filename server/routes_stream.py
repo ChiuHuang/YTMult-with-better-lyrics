@@ -26,7 +26,7 @@ from .cache import get_cached, set_cached
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .race import (_lyrics_score, _race_cubey, _race_lrclib,
-    _race_unison, _race_yt, _sse_event)
+    _race_unison, _race_yt, _race_boidu, _race_binimum, _sse_event)
 from .translate import cohere_translate, google_translate_fast
 
 @app.route('/api/lyrics/stream', methods=['GET'])
@@ -92,11 +92,13 @@ def api_lyrics_stream():
 
         # --- Race all providers concurrently ---
         jobs = {}
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         try:
             if jwt_token:
                 jobs[pool.submit(_race_cubey, queries, video_id, duration, jwt_token, req_id)] = 'Cubey'
             jobs[pool.submit(_race_lrclib, queries, album, duration, req_id)] = 'LRCLIB'
+            jobs[pool.submit(_race_boidu, queries, album, duration, req_id)] = 'boidu'
+            jobs[pool.submit(_race_binimum, queries, album, duration, req_id)] = 'Binimum'
             jobs[pool.submit(_race_unison, queries, video_id, duration, req_id)] = 'Unison'
             jobs[pool.submit(_race_yt, video_id, req_id)] = 'YouTube'
 

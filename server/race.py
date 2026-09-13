@@ -25,6 +25,7 @@ from .providers_lrclib import fetch_lrclib
 from .providers_yt import fetch_yt_lyrics
 from .providers_cubey import fetch_cubey
 from .providers_unison import fetch_unison
+from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import cohere_translate, google_translate_fast
 
@@ -38,6 +39,8 @@ from .translate import cohere_translate, google_translate_fast
 
 _PROVIDER_RANK = {
     'Musixmatch': 40,
+    'bLyrics': 38,
+    'BiniLyrics': 37,
     'QQ': 36,
     'KuGou': 35,
     'NetEase': 33,
@@ -85,11 +88,17 @@ def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
             except Exception as e:
                 print(f"  [REQ {req_id}] [Race] Cubey query error: {e}")
                 continue
-            if cubey and cubey.get('synced'):
-                parsed = parse_lrc(cubey['synced'], duration)
-                sanitize_lyrics_parts(parsed)
-                print(f"  [REQ {req_id}] [Race] Cubey hit from {cubey.get('source')} ({(time_module.time()-t0)*1000:.0f}ms)")
-                return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
+            if cubey:
+                if cubey.get('parsed'):
+                    parsed = cubey['parsed']
+                    sanitize_lyrics_parts(parsed)
+                    print(f"  [REQ {req_id}] [Race] Cubey TTML hit from {cubey.get('source')} wbw={cubey.get('wordSynced')} ({(time_module.time()-t0)*1000:.0f}ms)")
+                    return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
+                if cubey.get('synced'):
+                    parsed = parse_lrc(cubey['synced'], duration)
+                    sanitize_lyrics_parts(parsed)
+                    print(f"  [REQ {req_id}] [Race] Cubey hit from {cubey.get('source')} ({(time_module.time()-t0)*1000:.0f}ms)")
+                    return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
     except Exception as e:
         print(f"  [REQ {req_id}] [Race] Cubey worker error: {e}")
     print(f"  [REQ {req_id}] [Race] Cubey miss ({(time_module.time()-t0)*1000:.0f}ms)")
@@ -178,6 +187,38 @@ def _race_yt(video_id, req_id='?'):
         print(f"  [REQ {req_id}] [Race] YouTube worker error: {e}")
     print(f"  [REQ {req_id}] [Race] YouTube miss ({(time_module.time()-t0)*1000:.0f}ms)")
     return None
+
+
+def _race_boidu(queries, album, duration, req_id='?'):
+    """bLyrics TTML + Portato QRC + Legato LRC direct (no JWT)."""
+    t0 = time_module.time()
+    try:
+        best = fetch_direct_best(queries, album, duration, sources=('ttml', 'qq', 'kugou'))
+        if best:
+            sanitize_lyrics_parts(best['lyrics'])
+            print(f"  [REQ {req_id}] [Race] boidu hit from {best.get('source')} wbw={best.get('wordSynced')} ({(time_module.time()-t0)*1000:.0f}ms)")
+            return best
+        print(f"  [REQ {req_id}] [Race] boidu miss ({(time_module.time()-t0)*1000:.0f}ms)")
+        return None
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] boidu worker error: {e}")
+        return None
+
+
+def _race_binimum(queries, album, duration, req_id='?'):
+    """BiniLyrics TTML direct (no JWT)."""
+    t0 = time_module.time()
+    try:
+        best = fetch_direct_best(queries, album, duration, sources=('binimum',))
+        if best:
+            sanitize_lyrics_parts(best['lyrics'])
+            print(f"  [REQ {req_id}] [Race] Binimum hit wbw={best.get('wordSynced')} ({(time_module.time()-t0)*1000:.0f}ms)")
+            return best
+        print(f"  [REQ {req_id}] [Race] Binimum miss ({(time_module.time()-t0)*1000:.0f}ms)")
+        return None
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] Binimum worker error: {e}")
+        return None
 
 
 def _sse_event(name, payload):

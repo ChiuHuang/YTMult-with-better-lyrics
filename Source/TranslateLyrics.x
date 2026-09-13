@@ -1384,13 +1384,18 @@ static void openLyricsFromViewController(UIViewController *parentVC);
     for (NSInteger i = 0; i < partCount; i++) {
         NSDictionary *p = parts[i];
         double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
-        double s = [p[@"startTimeMs"] doubleValue] - rawDur * 0.1;
-        double d = rawDur * 1.6;
+        // Exact per-word window [start, start+dur]: the old 0.1/1.6 stretch
+        // made each word's reveal trail ~50% into the next one (lag/jump).
+        // Floor at 120ms so ultra-short words are at least visible.
+        double s = [p[@"startTimeMs"] doubleValue];
+        double d = MAX(rawDur, 120.0);
         if (nowMs < s) { curWord = i; curFrac = 0.0; break; }
         if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
     }
     NSInteger fracQ = (NSInteger)(curFrac * 24.0); // quantized: stable key, smooth glide
-    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord, (long)fracQ, (double)width];
+    // Include the cell pointer so a recycled cell can never be skipped by a
+    // leftover lastColorKey from another cell with the same index/state.
+    NSString *key = [NSString stringWithFormat:@"%p:%ld:%ld:%ld:%.0f", cell, (long)index, (long)curWord, (long)fracQ, (double)width];
     if (!force && [key isEqualToString:self.lastColorKey]) return;
 
     UIFont *font = cell.wipeLabel.font;
