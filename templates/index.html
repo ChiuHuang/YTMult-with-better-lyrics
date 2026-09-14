@@ -446,11 +446,60 @@
                   </div>
                   <div style="display:flex; gap:8px; flex-wrap:wrap;">
                     <mdui-button variant="tonal" icon="sync" onclick="checkSelfUpdate()">Check for Update</mdui-button>
-                    <mdui-button variant="filled" icon="system_update" onclick="doSelfUpdate()">Update Now</mdui-button>
+                    <mdui-button variant="filled" icon="system_update" onclick="showUpdateModal()">Update Now</mdui-button>
                     <mdui-button variant="text" icon="refresh" onclick="checkSelfUpdate()">Refresh SHA</mdui-button>
                   </div>
                   <div id="selfUpdateMsg" style="font-size:12px; opacity:0.8; margin-top:8px;"></div>
                 </mdui-card>
+
+                <!-- Update Modal -->
+                <dialog id="updateModal" style="background:transparent; border:none; padding:0; max-width:520px; width:95vw;">
+                  <div style="background:rgb(var(--mdui-color-surface, 28 28 30)); border-radius:16px; padding:24px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                      <h3 style="margin:0; font-size:18px; font-weight:700;">Server Update</h3>
+                      <mdui-button-icon icon="close" onclick="closeUpdateModal()"></mdui-button-icon>
+                    </div>
+
+                    <div id="updateStep1" style="display:block;">
+                      <div style="font-size:12px; opacity:0.7; margin-bottom:12px;">
+                        <div>Local:  <span id="modalLocalSha" style="font-family:monospace;"></span></div>
+                        <div>Remote: <span id="modalRemoteSha" style="font-family:monospace;"></span></div>
+                        <div>Parent: <span id="modalParentSha" style="font-family:monospace;"></span></div>
+                      </div>
+                      <div style="display:flex; gap:8px; justify-content:flex-end;">
+                        <mdui-button variant="text" onclick="closeUpdateModal()">Cancel</mdui-button>
+                        <mdui-button variant="filled" icon="system_update" onclick="startUpdate()">Update Now</mdui-button>
+                      </div>
+                    </div>
+
+                    <div id="updateStep2" style="display:none;">
+                      <div style="margin-bottom:16px;">
+                        <div style="font-size:14px; font-weight:600; margin-bottom:8px;" id="updatePhase">Downloading update...</div>
+                        <mdui-linear-progress indeterminate id="updateProgress"></mdui-linear-progress>
+                      </div>
+                      <div style="font-size:12px; opacity:0.7;" id="updateDetail">Connecting to server...</div>
+                    </div>
+
+                    <div id="updateStep3" style="display:none;">
+                      <div style="text-align:center; padding:16px;">
+                        <mdui-circular-progress indeterminate style="width:48px; height:48px; margin:0 auto 16px;"></mdui-circular-progress>
+                        <div style="font-size:14px; font-weight:600;" id="waitingPhase">Waiting for server to restart...</div>
+                        <div style="font-size:12px; opacity:0.7; margin-top:8px;">This may take 10-30 seconds</div>
+                      </div>
+                    </div>
+
+                    <div id="updateStep4" style="display:none;">
+                      <div style="text-align:center; padding:16px;">
+                        <mdui-icon name="check_circle" style="font-size:48px; color:#3fb950; margin-bottom:12px;"></mdui-icon>
+                        <div style="font-size:14px; font-weight:600;">Update complete!</div>
+                        <div style="font-size:12px; opacity:0.7; margin-top:8px;" id="newVersionInfo"></div>
+                      </div>
+                      <div style="display:flex; gap:8px; justify-content:center; margin-top:16px;">
+                        <mdui-button variant="filled" icon="refresh" onclick="location.reload()">Reload to New Version</mdui-button>
+                      </div>
+                    </div>
+                  </div>
+                </dialog>
                 <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
                   <mdui-button variant="filled" icon="download" onclick="downloadLogs()">Download All Logs</mdui-button>
                   <mdui-button variant="tonal" icon="bug_report" onclick="downloadCrash()">Download Crash Log</mdui-button>
@@ -1118,23 +1167,99 @@
         mdui.snackbar({ message: 'Self-update check done' });
       } catch(e){ console.error(e); mdui.snackbar({ message: 'Check failed: '+e }); }
     }
-    async function doSelfUpdate() {
-      if (!confirm('Update server file from GitHub and restart? This will overwrite the current file.')) return;
-      try {
-        const res = await fetch('/api/admin/self_update/perform', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force:false})});
-        const data = await res.json();
-        const msgEl = document.getElementById('selfUpdateMsg');
-        if (data.ok) {
-          msgEl.textContent = data.message + ' - restarting...';
-          mdui.snackbar({ message: data.message });
-          setTimeout(()=>location.reload(), 3000);
-        } else {
-          msgEl.textContent = data.error || 'Update failed';
-          mdui.snackbar({ message: data.error || 'Update failed' });
-        }
-        checkSelfUpdate();
-      } catch(e){ mdui.snackbar({ message: 'Update failed: '+e }); }
+
+    function showUpdateModal() {
+      // Re-fetch to get latest info
+      fetch('/api/admin/self_update/check').then(r => r.json()).then(data => {
+        document.getElementById('modalLocalSha').textContent = data.local_sha || 'unknown';
+        document.getElementById('modalRemoteSha').textContent = data.remote_sha || 'unknown';
+        document.getElementById('modalParentSha').textContent = data.parent_sha || 'none';
+        // Reset modal steps
+        document.getElementById('updateStep1').style.display = 'block';
+        document.getElementById('updateStep2').style.display = 'none';
+        document.getElementById('updateStep3').style.display = 'none';
+        document.getElementById('updateStep4').style.display = 'none';
+        document.getElementById('updateModal').showModal();
+      }).catch(e => {
+        mdui.snackbar({ message: 'Failed to fetch update info: ' + e });
+      });
     }
+
+    function closeUpdateModal() {
+      document.getElementById('updateModal').close();
+    }
+
+    async function startUpdate() {
+      document.getElementById('updateStep1').style.display = 'none';
+      document.getElementById('updateStep2').style.display = 'block';
+      document.getElementById('updatePhase').textContent = 'Downloading update...';
+      document.getElementById('updateDetail').textContent = 'Fetching new version from GitHub...';
+
+      try {
+        const res = await fetch('/api/admin/self_update/perform', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: false })
+        });
+        const data = await res.json();
+
+        if (!data.ok) {
+          document.getElementById('updateStep2').style.display = 'none';
+          document.getElementById('updateStep1').style.display = 'block';
+          mdui.snackbar({ message: data.error || 'Update failed' });
+          return;
+        }
+
+        document.getElementById('updatePhase').textContent = 'Update applied, waiting for restart...';
+        document.getElementById('updateDetail').textContent = data.message || 'Server is restarting...';
+
+        // Wait a bit for server to start shutting down
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Now poll until server responds 200
+        document.getElementById('updateStep2').style.display = 'none';
+        document.getElementById('updateStep3').style.display = 'block';
+        document.getElementById('waitingPhase').textContent = 'Waiting for server to restart...';
+
+        let attempts = 0;
+        const maxAttempts = 60; // 60 * 2s = 120s max
+        let serverBack = false;
+
+        while (attempts < maxAttempts) {
+          attempts++;
+          document.getElementById('updateDetail').textContent = `Polling... attempt ${attempts}/${maxAttempts}`;
+          try {
+            const pingRes = await fetch('/api/admin/self_update/check', { cache: 'no-store' });
+            if (pingRes.ok) {
+              const pingData = await pingRes.json();
+              serverBack = true;
+              document.getElementById('newVersionInfo').textContent = `New version: ${(pingData.local_sha||'').slice(0,7)}`;
+              break;
+            }
+          } catch (e) {
+            // Server not ready yet
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        if (serverBack) {
+          document.getElementById('updateStep3').style.display = 'none';
+          document.getElementById('updateStep4').style.display = 'block';
+          mdui.snackbar({ message: 'Update complete! Click to reload.' });
+        } else {
+          document.getElementById('updateStep3').style.display = 'none';
+          document.getElementById('updateStep1').style.display = 'block';
+          document.getElementById('waitingPhase').textContent = 'Timeout - server did not respond';
+          mdui.snackbar({ message: 'Server did not come back in time. Check manually.' });
+        }
+
+      } catch (e) {
+        document.getElementById('updateStep2').style.display = 'none';
+        document.getElementById('updateStep1').style.display = 'block';
+        mdui.snackbar({ message: 'Update failed: ' + e });
+      }
+    }
+
     async function saveSelfUpdateConfig() {
       const v = document.getElementById('selfMainInput').value.trim();
       if (!v) { mdui.snackbar({ message: 'Enter a filename like app.py' }); return; }
