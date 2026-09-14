@@ -232,6 +232,11 @@ def admin_nodes_generate():
     import base64
     script_b64 = base64.b64encode(script.encode()).decode()
 
+    deploy_one_liner = (
+        f'curl -fsSL "{http_url}/deploy.sh" | bash -s -- '
+        f'--server="{http_url}" --password="YOUR_PASSWORD" --label="{label or "node"}"'
+    )
+
     return jsonify({
         'ok': True,
         'node_id': node_id,
@@ -240,16 +245,7 @@ def admin_nodes_generate():
         'server_url': http_url,
         'script_b64': script_b64,
         'filename': f'node_{node_id}.py',
-        'deploy_one_liner': (
-            f'curl -fsSL "{http_url}/api/admin/nodes/generate/{node_id}?key={node_key}" '
-            f'-o ~/ytmnode/node.py && pip3 install -q websocket-client requests '
-            f'&& sudo tee /etc/systemd/system/ytmu-node.service > /dev/null <<\'EOF\'\n'
-            f'[Unit]\nDescription=YTMusicUltimate Lyrics Node\nAfter=network.target\n\n'
-            f'[Service]\nType=simple\nWorkingDirectory=%h/ytmnode\n'
-            f'ExecStart=/usr/bin/python3 %h/ytmnode/node.py\nRestart=always\n'
-            f'RestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF\n'
-            f'sudo systemctl daemon-reload && sudo systemctl enable --now ytmu-node'
-        ),
+        'deploy_one_liner': deploy_one_liner,
     })
 
 
