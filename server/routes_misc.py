@@ -24,6 +24,20 @@ from .app import app, SERVER_INSTANCE_ID, CRASH_LOG_FILE, _crash_logs
 from .logging_util import _log_crash
 from .self_update import _get_local_sha
 
+@app.route('/deploy.sh')
+def serve_deploy_sh():
+    deploy_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'deploy.sh')
+    try:
+        with open(deploy_path, 'r', encoding='utf-8') as f:
+            script = f.read()
+        return Response(script, mimetype='text/x-shellscript', headers={
+            'Content-Disposition': 'inline; filename="deploy.sh"',
+            'Cache-Control': 'no-cache',
+        })
+    except FileNotFoundError:
+        return jsonify({'error': 'deploy.sh not found on server'}), 404
+
+
 @app.errorhandler(404)
 def handle_404(e):
     # log but not crash
