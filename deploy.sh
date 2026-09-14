@@ -1,110 +1,270 @@
 #!/bin/bash
-# YTMusicUltimate Node Deploy
-# Generates a lyrics node on the server and runs it.
+# YTMusicUltimate Node Setup (TUI + systemd)
+# Usage (non-interactive):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh) \
+#     --server=https://ytmtranslate.chiuhuang.dev --password=xxx --label=my-vps
 #
-# Usage:
-#   env YTMT_SERVER=https://ytmtranslate.chiuhuang.dev \
-#       YTMT_ADMIN_PASSWORD=yourpassword \
-#       YTMT_NODE_LABEL=my-vps \
-#       bash <(curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh)
-#
-# Env vars:
-#   YTMT_SERVER        - main server URL (required, e.g. https://ytmtranslate.chiuhuang.dev)
-#   YTMT_ADMIN_PASSWORD - admin panel password (required)
-#   YTMT_NODE_LABEL    - human-readable label for this node (default: hostname)
-#   YTMT_NODE_DIR      - directory to store node.py (default: ~/ytmnode)
-#   YTMT_JWT           - optional Cubey JWT to contribute to shared pool
+# Usage (interactive TUI):
+#   curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh -o deploy.sh && chmod +x deploy.sh && ./deploy.sh
 
 set -euo pipefail
 
-SERVER="${YTMT_SERVER:?YTMT_SERVER is required (e.g. https://ytmtranslate.chiuhuang.dev)}"
-PASSWORD="${YTMT_ADMIN_PASSWORD:?YTMT_ADMIN_PASSWORD is required}"
-LABEL="${YTMT_NODE_LABEL:-$(hostname)}"
+# --- Colors ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# --- Defaults ---
+SERVER="${YTMT_SERVER:-}"
+PASSWORD="${YTMT_ADMIN_PASSWORD:-}"
+LABEL="${YTMT_NODE_LABEL:-}"
 NODE_DIR="${YTMT_NODE_DIR:-$HOME/ytmnode}"
+JWT="${YTMT_JWT:-}"
+NON_INTERACTIVE=false
 
-echo "=== YTMusicUltimate Node Deploy ==="
-echo "Server:  $SERVER"
-echo "Label:   $LABEL"
-echo "Dir:     $NODE_DIR"
-echo ""
+# --- Parse args ---
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --server) SERVER="$2"; shift 2 ;;
+        --password) PASSWORD="$2"; shift 2 ;;
+        --label) LABEL="$2"; shift 2 ;;
+        --dir) NODE_DIR="$2"; shift 2 ;;
+        --jwt) JWT="$2"; shift 2 ;;
+        --non-interactive) NON_INTERACTIVE=true; shift ;;
+        -h|--help)
+            cat <<EOF
+YTMusicUltimate Node Setup
 
-# --- 1. Login to get session cookie ---
-echo "[1/4] Logging in..."
+Usage:
+  $0 [options]
+
+Options:
+  --server URL       Main server URL (e.g. https://ytmtranslate.chiuhuang.dev)
+  --password PASS    Admin panel password
+  --label NAME       Node label (default: hostname)
+  --dir PATH         Install directory (default: ~/ytmnode)
+  --jwt TOKEN        Optional Cubey JWT to contribute
+  --non-interactive  Skip prompts (requires --server and --password)
+  -h, --help         Show this help
+
+Environment variables (alternative to flags):
+  YTMT_SERVER, YTMT_ADMIN_PASSWORD, YTMT_NODE_LABEL, YTMT_NODE_DIR, YTMT_JWT
+
+One-liner (run on any VPS):
+  curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh | bash
+EOF
+            exit 0
+            ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+# --- Helper functions ---
+print_header() {
+    echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}${BOLD}║  YTMusicUltimate Lyrics Node Setup                           ║${NC}"
+    echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo
+}
+
+print_step() { echo -e "${BLUE}▶${NC} $1"; }
+print_ok() { echo -e "${GREEN}✓${NC} $1"; }
+print_warn() { echo -e "${YELLOW}⚠${NC} $1"; }
+print_err() { echo -e "${RED}✗${NC} $1"; }
+print_dim() { echo -e "${DIM}$1${NC}"; }
+
+prompt_input() {
+    local prompt="$1" var_name="$2" default="${3:-}" secret="${4:-false}"
+    local value=""
+    if [[ -n "${!var_name:-}" ]]; then
+        value="${!var_name}"
+        echo -e "${BLUE}▶${NC} $prompt: ${GREEN}(from env/args)${NC}"
+    else
+        if [[ "$secret" == "true" ]]; then
+            read -s -p "$(echo -e "${BLUE}▶${NC} $prompt: ")" value
+            echo
+        else
+            read -p "$(echo -e "${BLUE}▶${NC} $prompt [$default]: ")" value
+            value="${value:-$default}"
+        fi
+        eval "$var_name=\"$value\""
+    fi
+}
+
+# --- Main ---
+print_header
+
+# 1. Get config (interactive or from args/env)
+if [[ "$NON_INTERACTIVE" == "true" ]]; then
+    if [[ -z "$SERVER" || -z "$PASSWORD" ]]; then
+        print_err "Non-interactive mode requires --server and --password"
+        exit 1
+    fi
+    LABEL="${LABEL:-$(hostname)}"
+else
+    echo -e "${BOLD}Enter node configuration:${NC}"
+    echo
+    prompt_input "Server URL (e.g. https://ytmtranslate.chiuhuang.dev)" SERVER "" false
+    prompt_input "Admin password" PASSWORD "" true
+    prompt_input "Node label" LABEL "$(hostname)" false
+    prompt_input "Install directory" NODE_DIR "$HOME/ytmnode" false
+    prompt_input "Cubey JWT (optional)" JWT "" false
+    echo
+fi
+
+# Normalize server URL (remove trailing slash)
+SERVER="${SERVER%/}"
+
+# 2. Check dependencies
+print_step "Checking dependencies..."
+for cmd in curl python3 pip3; do
+    if ! command -v "$cmd" &>/dev/null; then
+        print_err "Missing dependency: $cmd"
+        exit 1
+    fi
+done
+print_ok "All dependencies found"
+
+# 3. Login to server
+print_step "Logging in to $SERVER..."
 COOKIE_JAR=$(mktemp)
 trap "rm -f '$COOKIE_JAR'" EXIT
 
-# Follow redirects, save cookies
-curl -fsSL -c "$COOKIE_JAR" -L \
+LOGIN_RESP=$(curl -fsSL -c "$COOKIE_JAR" -L \
     -d "password=$PASSWORD" \
-    "$SERVER/login" > /dev/null 2>&1 || true
+    -w "\n%{http_code}" \
+    "$SERVER/login" 2>/dev/null || true)
 
-# Verify we're logged in by hitting a protected endpoint
-if ! curl -fsSL -b "$COOKIE_JAR" -L "$SERVER/" | grep -q "dashboard\|admin\|logout" 2>/dev/null; then
-    echo "  [FAIL] Login failed. Check YTMT_ADMIN_PASSWORD."
+HTTP_CODE=$(echo "$LOGIN_RESP" | tail -1)
+if [[ "$HTTP_CODE" != "200" && "$HTTP_CODE" != "302" ]]; then
+    print_err "Login failed (HTTP $HTTP_CODE). Check password and server URL."
     exit 1
 fi
-echo "  [OK] Logged in"
+print_ok "Logged in"
 
-# --- 2. Generate node script ---
-echo "[2/4] Generating node..."
-NODE_SCRIPT=$(curl -fsSL -b "$COOKIE_JAR" -L \
-    -X POST \
-    -H "Content-Type: application/json" \
+# 4. Generate node
+print_step "Generating node..."
+GEN_RESP=$(curl -fsSL -b "$COOKIE_JAR" -L \
+    -X POST -H "Content-Type: application/json" \
     -d "{\"label\": \"$LABEL\"}" \
     "$SERVER/api/admin/nodes/generate")
 
-# Verify it looks like a Python script
-if ! echo "$NODE_SCRIPT" | head -1 | grep -q "#!/usr/bin/env python3"; then
-    echo "  [FAIL] Did not receive a valid node script"
-    echo "  Response: $(echo "$NODE_SCRIPT" | head -5)"
+if ! echo "$GEN_RESP" | grep -q '"ok":true'; then
+    print_err "Failed to generate node"
+    echo "$GEN_RESP" | head -5
     exit 1
 fi
 
-# Extract node_id from the script (embedded as NODE_ID = "...")
-NODE_ID=$(echo "$NODE_SCRIPT" | grep -oP 'NODE_ID\s*=\s*"\K[^"]+' || echo "unknown")
-echo "  [OK] Generated node $NODE_ID"
+# Parse JSON response (using python for robustness)
+NODE_DATA=$(python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+print(data['node_id'])
+print(data['node_key'])
+print(data['ws_url'])
+print(data['server_url'])
+print(data['script_b64'])
+print(data['filename'])
+print(data['deploy_one_liner'])
+" <<< "$GEN_RESP")
 
-# --- 3. Save and install ---
-echo "[3/4] Installing node..."
+NODE_ID=$(echo "$NODE_DATA" | sed -n '1p')
+NODE_KEY=$(echo "$NODE_DATA" | sed -n '2p')
+WS_URL=$(echo "$NODE_DATA" | sed -n '3p')
+SERVER_URL=$(echo "$NODE_DATA" | sed -n '4p')
+SCRIPT_B64=$(echo "$NODE_DATA" | sed -n '5p')
+FILENAME=$(echo "$NODE_DATA" | sed -n '6p')
+DEPLOY_ONE_LINER=$(echo "$NODE_DATA" | sed -n '7p')
+
+print_ok "Node created: $NODE_ID"
+
+# 5. Save node script
+print_step "Saving node script to $NODE_DIR..."
 mkdir -p "$NODE_DIR"
-echo "$NODE_SCRIPT" > "$NODE_DIR/node.py"
+echo "$SCRIPT_B64" | base64 -d > "$NODE_DIR/node.py"
 chmod +x "$NODE_DIR/node.py"
+print_ok "Saved $FILENAME"
 
-# Install deps if needed
+# 6. Install Python deps
+print_step "Installing Python dependencies..."
 pip3 install -q websocket-client requests 2>/dev/null || \
     pip install -q websocket-client requests 2>/dev/null || \
-    python3 -m pip install -q websocket-client requests 2>/dev/null || \
-    echo "  [WARN] Could not auto-install deps. Run: pip3 install websocket-client requests"
+    python3 -m pip install -q websocket-client requests 2>/dev/null
+print_ok "Dependencies installed"
 
-echo "  [OK] Saved to $NODE_DIR/node.py"
+# 7. Create systemd service
+print_step "Setting up systemd service..."
+SERVICE_FILE="/etc/systemd/system/ytmu-node.service"
 
-# --- 4. Kill old node and start ---
-echo "[4/4] Starting node..."
-pkill -f "python.*node.py" 2>/dev/null && sleep 1 || true
-
-cd "$NODE_DIR"
-if [ -n "${YTMT_JWT:-}" ]; then
-    export YTMU_JWT="$YTMT_JWT"
+# Check if we can use sudo
+if ! sudo -n true 2>/dev/null; then
+    print_warn "Need sudo for systemd setup. You may be prompted for password."
 fi
 
-nohup python3 node.py > "$NODE_DIR/node.log" 2>&1 &
-NEWPID=$!
+sudo tee "$SERVICE_FILE" > /dev/null <<EOF
+[Unit]
+Description=YTMusicUltimate Lyrics Node
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$NODE_DIR
+Environment="YTMU_JWT=${JWT}"
+ExecStart=/usr/bin/python3 $NODE_DIR/node.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+print_ok "Service file created: $SERVICE_FILE"
+
+# 8. Enable and start
+print_step "Enabling and starting service..."
+sudo systemctl daemon-reload
+sudo systemctl enable --now ytmu-node
+print_ok "Service enabled and started"
+
+# 9. Verify
 sleep 2
-
-if kill -0 "$NEWPID" 2>/dev/null; then
-    echo ""
-    echo "=== Node running ==="
-    echo "  PID:     $NEWPID"
-    echo "  Node ID: $NODE_ID"
-    echo "  Label:   $LABEL"
-    echo "  Log:     $NODE_DIR/node.log"
-    echo "  Server:  $SERVER"
-    echo ""
-    echo "  View logs: tail -f $NODE_DIR/node.log"
+if systemctl is-active --quiet ytmu-node; then
+    print_ok "Node is running!"
 else
-    echo ""
-    echo "=== Node failed to start ==="
-    echo "  Check: $NODE_DIR/node.log"
-    tail -20 "$NODE_DIR/node.log" 2>/dev/null || true
-    exit 1
+    print_warn "Service started but may have issues. Check logs:"
+    echo -e "  ${DIM}sudo journalctl -u ytmu-node -f${NC}"
 fi
+
+# 10. Show summary
+echo
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}${BOLD}║  Setup Complete                                               ║${NC}"
+echo -e "${CYAN}${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+echo
+echo -e "  ${BOLD}Node ID:${NC}      $NODE_ID"
+echo -e "  ${BOLD}Label:${NC}        $LABEL"
+echo -e "  ${BOLD}Directory:${NC}    $NODE_DIR"
+echo -e "  ${BOLD}Server:${NC}       $SERVER_URL"
+echo -e "  ${BOLD}WS URL:${NC}       $WS_URL"
+echo
+echo -e "  ${BOLD}Logs:${NC}"
+echo -e "    ${DIM}sudo journalctl -u ytmu-node -f${NC}"
+echo
+echo -e "  ${BOLD}Control:${NC}"
+echo -e "    ${DIM}sudo systemctl status ytmu-node${NC}"
+echo -e "    ${DIM}sudo systemctl restart ytmu-node${NC}"
+echo -e "    ${DIM}sudo systemctl stop ytmu-node${NC}"
+echo
+
+# Show the one-liner for next time
+echo -e "${BOLD}One-liner for future deploys:${NC}"
+echo -e "${DIM}curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh | bash -s -- --server=$SERVER_URL --password='***REDACTED***' --label=$LABEL${NC}"
+echo
+print_dim "Save your credentials securely. The node key is only in $NODE_DIR/node.py"
