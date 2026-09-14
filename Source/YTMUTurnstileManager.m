@@ -1,0 +1,105 @@
+#import "YTMUTurnstileManager.h"
+
+@implementation YTMUTurnstileManager
+
++ (instancetype)sharedManager {
+    static YTMUTurnstileManager *shared = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        shared = [[YTMUTurnstileManager alloc] init];
+    });
+    return shared;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        self.completionHandlers = [NSMutableArray array];
+
+        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+        [config.userContentController addScriptMessageHandler:self name:@"turnstile"];
+
+        self.webView = [[WKWebView alloc] initWithFrame:CGRectMake(-1000, -1000, 300, 300) configuration:config];
+        self.webView.hidden = YES;
+
+        void (^attachWebView)(void) = ^{
+            UIWindow *window = [UIApplication sharedApplication].keyWindow;
+            if (!window) {
+                for (UIWindow *w in [UIApplication sharedApplication].windows) {
+                    if (w.rootViewController) { window = w; break; }
+                }
+            }
+            if (window && !self.webView.superview) {
+                [window addSubview:self.webView];
+            }
+        };
+        dispatch_async(dispatch_get_main_queue(), attachWebView);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), attachWebView);
+    }
+    return self;
+}
+
+- (void)getJWTTokenWithCompletion:(void(^)(NSString *token))completion {
+    if (self.jwtToken) {
+        if (completion) completion(self.jwtToken);
+        return;
+    }
+
+    void (^safeCompletion)(NSString *) = completion ?: ^(NSString *token) {};
+    [self.completionHandlers addObject:[safeCompletion copy]];
+
+    if (self.completionHandlers.count == 1) {
+        NSString *html = @"<html><body style='margin:0;padding:0;'><iframe id='tframe' src='https://lyrics.api.dacubeking.com/challenge' style='width:100%;height:100%;border:none;'></iframe><script>window.addEventListener('message', function(e) { if(e.data && e.data.type) { window.webkit.messageHandlers.turnstile.postMessage(e.data); } });</script></body></html>";
+        [self.webView loadHTMLString:html baseURL:[NSURL URLWithString:@"https://lyrics.api.dacubeking.com/"]];
+    }
+}
+
+- (void)userContentController:(WKUserContentController *)userContentController didReceiveScriptMessage:(WKScriptMessage *)message {
+    if ([message.name isEqualToString:@"turnstile"]) {
+        NSDictionary *data = message.body;
+        NSString *type = data[@"type"];
+
+        if ([type isEqualToString:@"turnstile-token"]) {
+            NSString *token = data[@"token"];
+            NSLog(@"[YTMU-Turnstile] Got token: %@", token);
+            [self verifyTurnstileToken:token];
+        } else if ([type isEqualToString:@"turnstile-error"] || [type isEqualToString:@"turnstile-timeout"]) {
+            NSLog(@"[YTMU-Turnstile] Error: %@", data);
+            [self resolveHandlersWithToken:nil];
+        }
+    }
+}
+
+- (void)verifyTurnstileToken:(NSString *)token {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://lyrics.api.dacubeking.com/verify-turnstile"]];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSDictionary *body = @{@"token": token};
+    req.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (data) {
+            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            NSString *jwtField = json[@"jwt"] ?: json[@"jwtToken"];
+            if (jwtField) {
+                self.jwtToken = jwtField;
+                NSLog(@"[YTMU-Turnstile] Got JWT! (field=%@)", json[@"jwt"] ? @"jwt" : @"jwtToken");
+                [self resolveHandlersWithToken:self.jwtToken];
+                return;
+            }
+        }
+        NSLog(@"[YTMU-Turnstile] JWT verification failed: %@", error);
+        [self resolveHandlersWithToken:nil];
+    }] resume];
+}
+
+- (void)resolveHandlersWithToken:(NSString *)token {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSArray *handlers = [self.completionHandlers copy];
+        [self.completionHandlers removeAllObjects];
+        for (void(^handler)(NSString *) in handlers) {
+            handler(token);
+        }
+    });
+}
+@end
