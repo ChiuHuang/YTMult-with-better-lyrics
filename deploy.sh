@@ -1,130 +1,110 @@
 #!/bin/bash
-# YTMusicUltimate Server Deploy Script
-# Run ON the VPS:
-#   curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh | bash
+# YTMusicUltimate Node Deploy
+# Generates a lyrics node on the server and runs it.
 #
-# Or with env vars:
-#   env YTMT_SERVER=ytmtranslate.chiuhuang.dev \
-#       YTMT_CLIENT_SECRET=... YTMT_CLIENT_ID=... \
+# Usage:
+#   env YTMT_SERVER=https://ytmtranslate.chiuhuang.dev \
+#       YTMT_ADMIN_PASSWORD=yourpassword \
+#       YTMT_NODE_LABEL=my-vps \
 #       bash <(curl -fsSL https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/deploy.sh)
 #
-# Env vars (all optional, override config/admin_config.json):
-#   YTMT_SERVER        - server host (default: 0.0.0.0)
-#   YTMT_PORT          - server port (default: 20016)
-#   YTMT_CLIENT_SECRET - Cubey JWT client secret
-#   YTMT_CLIENT_ID     - Cubey JWT client ID
-#   YTMT_REPO          - git repo URL (default: https://github.com/ChiuHuang/YTMult-with-better-lyrics.git)
-#   YTMT_BRANCH        - git branch (default: main)
-#   YTMT_DIR           - install directory (default: ~/ytmusicultimate)
+# Env vars:
+#   YTMT_SERVER        - main server URL (required, e.g. https://ytmtranslate.chiuhuang.dev)
+#   YTMT_ADMIN_PASSWORD - admin panel password (required)
+#   YTMT_NODE_LABEL    - human-readable label for this node (default: hostname)
+#   YTMT_NODE_DIR      - directory to store node.py (default: ~/ytmnode)
+#   YTMT_JWT           - optional Cubey JWT to contribute to shared pool
 
 set -euo pipefail
 
-REPO="${YTMT_REPO:-https://github.com/ChiuHuang/YTMult-with-better-lyrics.git}"
-BRANCH="${YTMT_BRANCH:-main}"
-DIR="${YTMT_DIR:-$HOME/ytmusicultimate}"
-PORT="${YTMT_PORT:-20016}"
+SERVER="${YTMT_SERVER:?YTMT_SERVER is required (e.g. https://ytmtranslate.chiuhuang.dev)}"
+PASSWORD="${YTMT_ADMIN_PASSWORD:?YTMT_ADMIN_PASSWORD is required}"
+LABEL="${YTMT_NODE_LABEL:-$(hostname)}"
+NODE_DIR="${YTMT_NODE_DIR:-$HOME/ytmnode}"
 
-echo "=== YTMusicUltimate Server Deploy ==="
-echo "Repo:    $REPO"
-echo "Branch:  $BRANCH"
-echo "Dir:     $DIR"
-echo "Port:    $PORT"
+echo "=== YTMusicUltimate Node Deploy ==="
+echo "Server:  $SERVER"
+echo "Label:   $LABEL"
+echo "Dir:     $NODE_DIR"
 echo ""
 
-# --- 1. Clone or pull ---
-if [ -d "$DIR/.git" ]; then
-    echo "[1/5] Updating existing repo..."
-    cd "$DIR"
-    git fetch origin "$BRANCH"
-    git reset --hard "origin/$BRANCH"
-else
-    echo "[1/5] Cloning repo..."
-    rm -rf "$DIR"
-    git clone --branch "$BRANCH" "$REPO" "$DIR"
-    cd "$DIR"
+# --- 1. Login to get session cookie ---
+echo "[1/4] Logging in..."
+COOKIE_JAR=$(mktemp)
+trap "rm -f '$COOKIE_JAR'" EXIT
+
+# Follow redirects, save cookies
+curl -fsSL -c "$COOKIE_JAR" -L \
+    -d "password=$PASSWORD" \
+    "$SERVER/login" > /dev/null 2>&1 || true
+
+# Verify we're logged in by hitting a protected endpoint
+if ! curl -fsSL -b "$COOKIE_JAR" -L "$SERVER/" | grep -q "dashboard\|admin\|logout" 2>/dev/null; then
+    echo "  [FAIL] Login failed. Check YTMT_ADMIN_PASSWORD."
+    exit 1
 fi
-echo "  -> $(git log --oneline -1)"
+echo "  [OK] Logged in"
 
-# --- 2. Python venv + deps ---
-echo "[2/5] Setting up Python environment..."
-if [ ! -d .venv ]; then
-    python3 -m venv .venv
+# --- 2. Generate node script ---
+echo "[2/4] Generating node..."
+NODE_SCRIPT=$(curl -fsSL -b "$COOKIE_JAR" -L \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d "{\"label\": \"$LABEL\"}" \
+    "$SERVER/api/admin/nodes/generate")
+
+# Verify it looks like a Python script
+if ! echo "$NODE_SCRIPT" | head -1 | grep -q "#!/usr/bin/env python3"; then
+    echo "  [FAIL] Did not receive a valid node script"
+    echo "  Response: $(echo "$NODE_SCRIPT" | head -5)"
+    exit 1
 fi
-.venv/bin/pip install -q --upgrade pip
-.venv/bin/pip install -q -r requirements.txt 2>/dev/null || {
-    # No requirements.txt? Install known deps manually
-    .venv/bin/pip install -q flask flask-sock requests ytmusicapi cffi pycparser
-}
-echo "  -> venv ready"
 
-# --- 3. Write config ---
-echo "[3/5] Writing config..."
-mkdir -p config
-CFG="config/admin_config.json"
+# Extract node_id from the script (embedded as NODE_ID = "...")
+NODE_ID=$(echo "$NODE_SCRIPT" | grep -oP 'NODE_ID\s*=\s*"\K[^"]+' || echo "unknown")
+echo "  [OK] Generated node $NODE_ID"
 
-# Read existing config or start fresh
-EXISTING=""
-[ -f "$CFG" ] && EXISTING=$(cat "$CFG")
+# --- 3. Save and install ---
+echo "[3/4] Installing node..."
+mkdir -p "$NODE_DIR"
+echo "$NODE_SCRIPT" > "$NODE_DIR/node.py"
+chmod +x "$NODE_DIR/node.py"
 
-python3 -c "
-import json, os, hashlib, secrets
+# Install deps if needed
+pip3 install -q websocket-client requests 2>/dev/null || \
+    pip install -q websocket-client requests 2>/dev/null || \
+    python3 -m pip install -q websocket-client requests 2>/dev/null || \
+    echo "  [WARN] Could not auto-install deps. Run: pip3 install websocket-client requests"
 
-cfg_path = '$CFG'
-existing = {}
-if os.path.exists(cfg_path):
-    with open(cfg_path) as f:
-        existing = json.load(f)
+echo "  [OK] Saved to $NODE_DIR/node.py"
 
-# Auto-generate password hash if not set
-if 'password_hash' not in existing:
-    pw = secrets.token_urlsafe(16)
-    h = hashlib.sha256(pw.encode()).hexdigest()
-    existing['password_hash'] = h
-    print(f'  [SETUP] Generated admin password: {pw}')
-    print(f'  [SETUP] Login at https://{os.environ.get(\"YTMT_SERVER\", \"your-server\")}:${PORT}/')
+# --- 4. Kill old node and start ---
+echo "[4/4] Starting node..."
+pkill -f "python.*node.py" 2>/dev/null && sleep 1 || true
 
-# Auto-generate secret_key if not set
-if 'secret_key' not in existing:
-    existing['secret_key'] = secrets.token_hex(32)
+cd "$NODE_DIR"
+if [ -n "${YTMT_JWT:-}" ]; then
+    export YTMU_JWT="$YTMT_JWT"
+fi
 
-# Apply env var overrides
-client_secret = os.environ.get('YTMT_CLIENT_SECRET')
-client_id = os.environ.get('YTMT_CLIENT_ID')
-if client_secret:
-    existing['client_secret'] = client_secret
-    print(f'  [CONFIG] client_secret set')
-if client_id:
-    existing['client_id'] = client_id
-    print(f'  [CONFIG] client_id set')
-
-with open(cfg_path, 'w') as f:
-    json.dump(existing, f, indent=2)
-print('  -> config written')
-"
-
-# --- 4. Kill old server ---
-echo "[4/5] Stopping old server..."
-pkill -f "python.*proxy_server.py" 2>/dev/null && echo "  -> killed old process" || echo "  -> no old process found"
-sleep 1
-
-# --- 5. Start server ---
-echo "[5/5] Starting server on port $PORT..."
-cd "$DIR"
-nohup .venv/bin/python proxy_server.py > /dev/null 2>&1 &
+nohup python3 node.py > "$NODE_DIR/node.log" 2>&1 &
 NEWPID=$!
 sleep 2
 
 if kill -0 "$NEWPID" 2>/dev/null; then
     echo ""
-    echo "=== Server running ==="
+    echo "=== Node running ==="
     echo "  PID:     $NEWPID"
-    echo "  URL:     http://0.0.0.0:${PORT}"
-    echo "  Logs:    $DIR/logs/server.log"
-    echo "  Dashboard: https://${YTMT_SERVER:-your-server}:${PORT}/"
+    echo "  Node ID: $NODE_ID"
+    echo "  Label:   $LABEL"
+    echo "  Log:     $NODE_DIR/node.log"
+    echo "  Server:  $SERVER"
+    echo ""
+    echo "  View logs: tail -f $NODE_DIR/node.log"
 else
     echo ""
-    echo "=== Server failed to start ==="
-    echo "  Check: $DIR/logs/crash.log"
-    tail -20 "$DIR/logs/crash.log" 2>/dev/null || true
+    echo "=== Node failed to start ==="
+    echo "  Check: $NODE_DIR/node.log"
+    tail -20 "$NODE_DIR/node.log" 2>/dev/null || true
     exit 1
 fi
