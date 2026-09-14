@@ -1,519 +1,452 @@
 <!DOCTYPE html>
-<html lang="zh-TW" class="mdui-theme-dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTM Lyrics Server Dashboard</title>
-  <link rel="stylesheet" href="https://unpkg.com/mdui@2/mdui.css">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
-  <script src="https://unpkg.com/mdui@2/mdui.global.js"></script>
+  <title>YTM Lyrics Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'] } } } }
+  </script>
   <style>
-    :root {
-      --mdui-color-primary: 33 150 243;
-      --mdui-color-primary-dark: 158 202 255;
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      background-color: rgb(var(--mdui-color-surface));
-      color: rgb(var(--mdui-color-on-surface));
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    mdui-top-app-bar {
-      background: linear-gradient(135deg, rgba(33, 150, 243, 0.28), rgba(33, 150, 243, 0.06));
-    }
-    mdui-top-app-bar mdui-top-app-bar-title {
-      font-weight: 600;
-      letter-spacing: 0.2px;
-    }
-    .main-container {
-      max-width: 1300px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-    .grid-layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-top: 20px;
-    }
-    @media (max-width: 900px) {
-      .grid-layout {
-        grid-template-columns: 1fr;
-      }
-    }
-    .lyrics-container {
-      height: 520px;
-      overflow-y: auto;
-      background: rgba(0, 0, 0, 0.25);
-      border-radius: 16px;
-      padding: 24px 16px;
-      scroll-behavior: smooth;
-    }
-    .lyric-row {
-      padding: 12px 16px;
-      border-radius: 12px;
-      margin-bottom: 6px;
-      transition: all 0.25s ease;
-      cursor: pointer;
-      opacity: 0.35;
-    }
-    .lyric-row:hover {
-      opacity: 0.8;
-      background: rgba(255, 255, 255, 0.05);
-    }
-    .lyric-row.past {
-      opacity: 0.45;
-    }
-    .lyric-row.future {
-      opacity: 0.3;
-    }
-    .lyric-row.active {
-      opacity: 1;
-      background: rgba(33, 150, 243, 0.16);
-      box-shadow: inset 3px 0 0 rgb(33 150 243);
-    }
-    .lyric-row.active .orig-text {
-      color: #ffffff;
-      font-size: 18px;
-      font-weight: 700;
-    }
-    .lyric-row.active .trans-text {
-      opacity: 0.85;
-      color: rgba(255, 255, 255, 0.75);
-      font-weight: 400;
-      font-size: 14px;
-    }
-    .lyric-row .time-tag {
-      font-size: 11px;
-      opacity: 0.4;
-      font-family: monospace;
-      margin-bottom: 2px;
-    }
-    .lyric-row .orig-text {
-      font-size: 16px;
-      font-weight: 600;
-      line-height: 1.4;
-      color: rgba(255, 255, 255, 0.9);
-      transition: color 0.2s ease, font-size 0.2s ease;
-    }
-    .lyric-row .trans-text {
-      font-size: 13px;
-      opacity: 0.5;
-      color: rgba(255, 255, 255, 0.6);
-      margin-top: 3px;
-      transition: opacity 0.2s ease;
-    }
-    .log-box {
-      background: #0d1117;
-      border-radius: 12px;
-      padding: 8px;
-      height: 480px;
-      overflow-y: auto;
-    }
-    .log-box:empty::after {
-      content: 'No log entries yet';
-      display: block;
-      text-align: center;
-      padding: 120px 0;
-      opacity: 0.4;
-      font-size: 14px;
-      color: #c9d1d9;
-    }
-    .log-entry {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 6px 10px;
-      border-radius: 8px;
-      font-size: 13px;
-      line-height: 1.4;
-      animation: logFadeIn 0.25s ease;
-      transition: background 0.15s;
-    }
-    .log-entry:hover {
-      background: rgba(255,255,255,0.04);
-    }
-    .log-entry + .log-entry {
-      border-top: 1px solid rgba(255,255,255,0.04);
-    }
-    @keyframes logFadeIn {
-      from { opacity: 0; transform: translateY(-4px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .log-entry .log-ts {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 11px;
-      color: #6e7681;
-      min-width: 56px;
-      flex-shrink: 0;
-      padding-top: 1px;
-    }
-    .log-entry .log-icon {
-      font-size: 16px;
-      flex-shrink: 0;
-      width: 20px;
-      text-align: center;
-    }
-    .log-entry .log-msg {
-      color: #c9d1d9;
-      word-break: break-word;
-      flex: 1;
-    }
-    /* Level colors */
-    .log-entry[data-level="success"] .log-icon { color: #3fb950; }
-    .log-entry[data-level="success"] .log-msg  { color: #aff5b4; }
-    .log-entry[data-level="error"] .log-icon   { color: #f85149; }
-    .log-entry[data-level="error"] .log-msg    { color: #ffa198; }
-    .log-entry[data-level="warning"] .log-icon { color: #d29922; }
-    .log-entry[data-level="warning"] .log-msg  { color: #e3b341; }
-    .log-entry[data-level="request"] .log-icon { color: #a371f7; }
-    .log-entry[data-level="request"] .log-msg  { color: #d2a8ff; font-weight: 600; }
-    .log-entry[data-level="response"] .log-icon{ color: #79c0ff; }
-    .log-entry[data-level="response"] .log-msg { color: #a5d6ff; }
-    .log-entry[data-level="translate"] .log-icon{ color: #56d4dd; }
-    .log-entry[data-level="translate"] .log-msg { color: #7ee8ea; }
-    .log-entry[data-level="pending"] .log-icon { color: #d29922; }
-    .log-entry[data-level="pending"] .log-msg  { color: #e3b341; font-style: italic; }
-    .log-entry[data-level="detail"] .log-icon  { color: #484f58; }
-    .log-entry[data-level="detail"] .log-msg   { color: #8b949e; font-size: 12px; }
-    .log-entry[data-level="info"] .log-icon    { color: #8b949e; }
-    .cache-list-container {
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .badge-synced { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-    .badge-plain { background: rgba(255, 152, 0, 0.2); color: #ffb74d; }
-    .badge-none { background: rgba(244, 67, 54, 0.2); color: #e57373; }
-    .badge-online { background: rgba(76, 175, 80, 0.2); color: #81c784; }
-    .badge-offline { background: rgba(158, 158, 158, 0.2); color: #b0b0b0; }
-    .preview-player {
-      width: 1px;
-      height: 1px;
-      overflow: hidden;
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
+    * { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation: fadeIn .2s ease; }
+    .log-entry { animation: fadeIn .25s ease; }
+    .lyric-row { transition: all .25s ease; }
+    .lyric-row.active .orig-text { font-size:1.125rem; font-weight:700; color:#fff; }
+    .lyric-row.active .trans-text { opacity:.85; font-weight:400; }
+    .preview-player { width:1px; height:1px; overflow:hidden; position:absolute; opacity:0; pointer-events:none; }
+    .sidebar-link { transition: background .15s; }
+    .sidebar-link:hover { background: rgba(255,255,255,.08); }
+    .sidebar-link.active { background: rgba(59,130,246,.2); color: #60a5fa; border-right: 3px solid #3b82f6; }
+    pre { white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
-<body>
-  <mdui-layout>
-    <!-- App Bar -->
-    <mdui-top-app-bar variant="flat">
-      <mdui-button-icon icon="library_music"></mdui-button-icon>
-      <mdui-top-app-bar-title>YTM Lyrics Server Dashboard</mdui-top-app-bar-title>
-      <div style="flex-grow: 1"></div>
-      <mdui-chip icon="fingerprint" variant="elevated" id="instanceChip" title="Server instance ID">ID: ...</mdui-chip>
-      <mdui-chip icon="bolt" variant="elevated" id="statusChip">Online</mdui-chip>
-      <mdui-button-icon icon="refresh" id="refreshBtn" onclick="reloadAll()"></mdui-button-icon>
-      <mdui-button-icon icon="dark_mode" onclick="toggleTheme()"></mdui-button-icon>
-      <mdui-button-icon icon="logout" title="Sign out" onclick="fetch('/logout',{method:'POST'}).then(()=>location.href='/login')"></mdui-button-icon>
-    </mdui-top-app-bar>
+<body class="bg-base-200 text-base-content min-h-screen flex">
 
-    <mdui-layout-main>
-      <div class="main-container">
-        <!-- Live Search / Preview Header -->
-        <mdui-card variant="filled" style="padding: 16px; border-radius: 16px;">
-          <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-            <mdui-text-field
-              id="videoInput"
-              label="YouTube Video ID or URL"
-              placeholder="e.g. aT8UPGkEVeY, Mm87JgTx2Ao"
-              icon="search"
-              style="flex: 1; min-width: 260px;"
-              clearable>
-            </mdui-text-field>
-            <mdui-segmented-button-group id="modeSelect" value="full">
-              <mdui-segmented-button value="fast">Fast (LRCLIB)</mdui-segmented-button>
-              <mdui-segmented-button value="full">Pro (Cohere + Cubey)</mdui-segmented-button>
-            </mdui-segmented-button-group>
-            <mdui-checkbox id="forceReload">Force Fresh</mdui-checkbox>
-            <mdui-button variant="filled" icon="play_arrow" onclick="fetchLiveLyrics()">Search & Preview</mdui-button>
+  <!-- Sidebar -->
+  <aside class="w-60 bg-base-100 border-r border-base-300 flex flex-col shrink-0 h-screen sticky top-0 max-lg:hidden">
+    <div class="p-4 border-b border-base-300">
+      <div class="flex items-center gap-2 mb-1">
+        <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+        <span class="font-bold text-lg">YTM Lyrics</span>
+      </div>
+      <div class="text-xs opacity-50" id="instanceChip">ID: ...</div>
+    </div>
+    <nav class="flex-1 p-2 space-y-0.5 overflow-y-auto">
+      <a class="sidebar-link active flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="preview" onclick="switchTab('preview')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Live Preview
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="logs" onclick="switchTab('logs')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Live Logs
+        <span class="badge badge-sm badge-primary ml-auto" id="logCountBadge">0</span>
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="crash" onclick="switchTab('crash')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        Crash Logs
+        <span class="badge badge-sm badge-error ml-auto" id="crashBadge">0</span>
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="cache" onclick="switchTab('cache')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+        Cached Songs
+        <span class="badge badge-sm ml-auto" id="cacheBadge">0</span>
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="nodes" onclick="switchTab('nodes')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        Nodes
+        <span class="badge badge-sm ml-auto" id="nodesBadge">0/0</span>
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="files" onclick="switchTab('files')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+        All Files
+      </a>
+      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="system" onclick="switchTab('system')">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        Config & Update
+      </a>
+    </nav>
+    <div class="p-3 border-t border-base-300 space-y-1">
+      <div class="flex items-center gap-2 text-xs opacity-60 mb-2">
+        <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+        <span id="statusChip">Online</span>
+      </div>
+      <button class="btn btn-ghost btn-xs w-full justify-start gap-2" onclick="location.reload()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh</button>
+      <button class="btn btn-ghost btn-xs w-full justify-start gap-2" onclick="toggleTheme()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg><span id="themeLabel">Light Mode</span></button>
+      <button class="btn btn-ghost btn-xs w-full justify-start gap-2 text-error" onclick="fetch('/logout',{method:'POST'}).then(()=>location.href='/login')"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Mobile top bar -->
+  <div class="lg:hidden fixed top-0 inset-x-0 z-50 bg-base-100 border-b border-base-300 px-4 py-3 flex items-center gap-3">
+    <div class="drawer-content flex-1">
+      <label for="mobile-drawer" class="btn btn-ghost btn-sm btn-square">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </label>
+    </div>
+    <span class="font-bold">YTM Lyrics</span>
+    <span class="badge badge-sm badge-success" id="statusChipMobile">Online</span>
+  </div>
+
+  <!-- Mobile drawer -->
+  <input id="mobile-drawer" type="checkbox" class="drawer-toggle" />
+  <div class="drawer-side z-50 lg:hidden">
+    <label for="mobile-drawer" class="drawer-overlay"></label>
+    <aside class="menu bg-base-100 w-64 min-h-full p-3">
+      <li><a onclick="switchTab('preview');document.getElementById('mobile-drawer').checked=false">Live Preview</a></li>
+      <li><a onclick="switchTab('logs');document.getElementById('mobile-drawer').checked=false">Live Logs</a></li>
+      <li><a onclick="switchTab('crash');document.getElementById('mobile-drawer').checked=false">Crash Logs</a></li>
+      <li><a onclick="switchTab('cache');document.getElementById('mobile-drawer').checked=false">Cached Songs</a></li>
+      <li><a onclick="switchTab('nodes');document.getElementById('mobile-drawer').checked=false">Nodes</a></li>
+      <li><a onclick="switchTab('files');document.getElementById('mobile-drawer').checked=false">All Files</a></li>
+      <li><a onclick="switchTab('system');document.getElementById('mobile-drawer').checked=false">Config & Update</a></li>
+    </aside>
+  </div>
+
+  <!-- Main Content -->
+  <main class="flex-1 min-w-0 lg:h-screen lg:overflow-y-auto pt-14 lg:pt-0">
+    <div class="max-w-[1400px] mx-auto p-4 lg:p-6 space-y-4">
+
+      <!-- ======================== TAB: PREVIEW ======================== -->
+      <div id="tab-preview" class="tab-content">
+        <!-- Search Bar -->
+        <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
+          <div class="flex gap-3 items-center flex-wrap">
+            <input id="videoInput" type="text" placeholder="YouTube Video ID or URL (e.g. aT8UPGkEVeY)" class="input input-bordered flex-1 min-w-[260px]" />
+            <div class="join">
+              <input class="join-item btn btn-sm" type="radio" name="mode" value="fast" aria-label="Fast (LRCLIB)" />
+              <input class="join-item btn btn-sm" type="radio" name="mode" value="full" checked aria-label="Pro (Cubey)" />
+            </div>
+            <label class="cursor-pointer label gap-2">
+              <input id="forceReload" type="checkbox" class="checkbox checkbox-sm checkbox-primary" />
+              <span class="label-text text-xs">Force</span>
+            </label>
+            <button class="btn btn-primary btn-sm gap-2" onclick="fetchLiveLyrics()">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              Search
+            </button>
           </div>
-        </mdui-card>
+        </div>
 
-        <!-- Main Grid: Live Preview & Caches/Logs -->
-        <div class="grid-layout">
-          <!-- Left: Lyrics Preview & Song Details -->
-          <mdui-card variant="outlined" style="padding: 18px; border-radius: 16px;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+        <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
+          <!-- Lyrics Panel -->
+          <div class="xl:col-span-3 bg-base-100 rounded-2xl p-5 border border-base-300">
+            <div class="flex justify-between items-start mb-3">
               <div>
-                <h3 style="margin: 0; font-size: 18px;" id="songTitle">Ready to Search</h3>
-                <div style="font-size: 13px; opacity: 0.7; margin-top: 4px;" id="songArtist">Enter video ID above or choose from cached list</div>
+                <h2 class="text-lg font-bold" id="songTitle">Ready to Search</h2>
+                <p class="text-sm opacity-60" id="songArtist">Enter video ID above or choose from cached list</p>
               </div>
               <div id="sourceBadge"></div>
             </div>
-
-            <!-- YouTube playback controls -->
             <div id="youtubePlayer" class="preview-player" aria-hidden="true"></div>
-            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
-              <mdui-button-icon icon="play_circle" id="playSimBtn" title="Play preview" onclick="togglePlayback()"></mdui-button-icon>
-              <mdui-slider id="timeSlider" min="0" max="300" value="0" style="flex: 1;" oninput="onSeek(this.value)" disabled></mdui-slider>
-              <span id="timeDisplay" style="font-size: 12px; font-family: monospace; width: 65px; text-align: right;">0:00 / 0:00</span>
+            <div class="flex items-center gap-3 mb-4">
+              <button class="btn btn-ghost btn-sm btn-circle" id="playSimBtn" onclick="togglePlayback()">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </button>
+              <input id="timeSlider" type="range" min="0" max="300" value="0" class="range range-primary range-sm flex-1" oninput="onSeek(this.value)" disabled />
+              <span id="timeDisplay" class="text-xs font-mono w-20 text-right opacity-70">0:00 / 0:00</span>
             </div>
-
-            <!-- Lyrics List -->
-            <div class="lyrics-container" id="lyricsList">
-              <div style="text-align: center; padding-top: 120px; opacity: 0.5;">
-                <mdui-icon name="queue_music" style="font-size: 48px; margin-bottom: 8px;"></mdui-icon>
-                <div>No lyrics loaded yet</div>
+            <div class="bg-base-200 rounded-xl h-[480px] overflow-y-auto p-3 scroll-smooth" id="lyricsList">
+              <div class="text-center pt-24 opacity-40">
+                <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+                <div class="text-sm">No lyrics loaded yet</div>
               </div>
             </div>
-          </mdui-card>
+          </div>
 
-          <!-- Server Info Bar -->
-          <mdui-card variant="filled" style="padding: 12px 16px; border-radius: 12px; margin-top: 14px; display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
-            <mdui-icon name="fingerprint" style="font-size:20px;"></mdui-icon>
-            <div style="flex:1; min-width:200px;">
-              <div style="font-size:13px; font-weight:600;">Instance: <span id="instanceId">...</span></div>
-              <div style="font-size:12px; opacity:0.7;">Started: <span id="instanceStart">...</span> | Uptime: <span id="instanceUptime">...</span> | Logs: <span id="instanceLogs">...</span></div>
+          <!-- Server Info + Quick Actions -->
+          <div class="xl:col-span-2 space-y-4">
+            <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                  <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-semibold truncate">Instance: <span id="instanceId" class="font-mono">...</span></div>
+                  <div class="text-xs opacity-50">Started: <span id="instanceStart">...</span></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 text-xs opacity-50 mb-3">
+                <span>Uptime: <span id="instanceUptime">...</span></span>
+                <span>|</span>
+                <span>Logs: <span id="instanceLogs">...</span></span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button class="btn btn-outline btn-xs gap-1" onclick="downloadLogs()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Logs</button>
+                <button class="btn btn-outline btn-xs gap-1" onclick="switchTab('crash')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>Crash</button>
+                <button class="btn btn-outline btn-xs gap-1" onclick="switchTab('files')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>Files</button>
+              </div>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <mdui-button variant="tonal" icon="download" onclick="downloadLogs()">Download Logs</mdui-button>
-              <mdui-button variant="tonal" icon="bug_report" onclick="document.getElementById('rightTabs').value='crash'; loadCrashLogs()">Crash Logs</mdui-button>
-              <mdui-button variant="tonal" icon="description" onclick="document.getElementById('rightTabs').value='files'; loadFiles()">All Files</mdui-button>
+
+            <!-- Mini cached list -->
+            <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
+              <div class="flex justify-between items-center mb-3">
+                <span class="text-sm font-semibold">Recent Caches</span>
+                <button class="btn btn-ghost btn-xs" onclick="switchTab('cache')">View All</button>
+              </div>
+              <div id="miniCacheList" class="space-y-1 max-h-64 overflow-y-auto text-xs"></div>
             </div>
-          </mdui-card>
-
-          <!-- Right: Caches and Server Logs (Tabs) -->
-          <mdui-card variant="outlined" style="padding: 18px; border-radius: 16px;">
-            <mdui-tabs value="logs" id="rightTabs">
-              <mdui-tab value="logs" icon="terminal">Live Logs</mdui-tab>
-              <mdui-tab id="crashTab" value="crash" icon="bug_report">Crash Logs (0)</mdui-tab>
-              <mdui-tab id="cacheTab" value="cache" icon="folder_zip">Cached Songs (0)</mdui-tab>
-              <mdui-tab id="nodestab" value="nodes" icon="hub">Nodes (0/0)</mdui-tab>
-              <mdui-tab value="files" icon="folder">All Logs & Files</mdui-tab>
-              <mdui-tab value="system" icon="tune">Config & Stats</mdui-tab>
-
-              <mdui-tab-panel slot="panel" value="logs" style="padding-top: 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                  <span style="font-size: 12px; opacity: 0.7;">Real-time Server Activity <mdui-badge id="logCountBadge" style="margin-left: 6px;">0</mdui-badge></span>
-                  <div style="display: flex; gap: 4px; align-items: center;">
-                    <mdui-checkbox id="logAutoScroll" checked>Auto-scroll</mdui-checkbox>
-                    <mdui-button variant="text" icon="download" onclick="downloadLogs()">Download</mdui-button>
-                    <mdui-button variant="text" icon="clear_all" onclick="clearLogs()">Clear</mdui-button>
-                  </div>
-                </div>
-                <div class="log-box" id="logBox"></div>
-              </mdui-tab-panel>
-
-              <mdui-tab-panel slot="panel" value="crash" style="padding-top: 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                  <span style="font-size: 12px; opacity: 0.7;">Crash & Exception Logs <mdui-badge id="crashBadge" style="margin-left: 6px;">0</mdui-badge></span>
-                  <div style="display: flex; gap: 4px;">
-                    <mdui-button variant="text" icon="download" onclick="downloadCrash()">Download Crash</mdui-button>
-                    <mdui-button variant="text" icon="clear_all" onclick="clearCrash()">Clear</mdui-button>
-                  </div>
-                </div>
-                <div class="log-box" id="crashBox" style="height: 480px; overflow-y: auto; background:#1a0a0a;"></div>
-              </mdui-tab-panel>
-
-              <mdui-tab-panel slot="panel" value="cache" style="padding-top: 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                  <span style="font-size: 12px; opacity: 0.7;">Saved file caches (`cache/lyrics/*.json`)</span>
-                  <mdui-button variant="tonal" icon="delete_sweep" onclick="clearAllCaches()">Clear Not-Found</mdui-button>
-                </div>
-                <mdui-linear-progress id="cacheProgress" indeterminate style="margin-bottom: 12px; display: none;"></mdui-linear-progress>
-                <div class="cache-list-container">
-                  <mdui-list id="cacheList">
-                    <mdui-list-item>Loading caches...</mdui-list-item>
-                  </mdui-list>
-                </div>
-              </mdui-tab-panel>
-
-              <mdui-tab-panel slot="panel" value="nodes" style="padding-top: 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-                  <span style="font-size: 12px; opacity: 0.7;">Worker nodes -- run node.py elsewhere for cache sharing + IP-diverse fetches</span>
-                  <div style="display: flex; gap: 4px;">
-                    <mdui-button variant="text" icon="refresh" onclick="loadNodes()">Refresh</mdui-button>
-                    <mdui-button variant="filled" icon="add" onclick="promptNewNode()">New Node</mdui-button>
-                  </div>
-                </div>
-                <div class="cache-list-container">
-                  <mdui-list id="nodeList"><mdui-list-item>Loading nodes...</mdui-list-item></mdui-list>
-                </div>
-
-                <!-- Node Modal -->
-                <dialog id="nodeModal" style="background:transparent; border:none; padding:0; max-width:520px; width:95vw;">
-                  <div style="background:rgb(var(--mdui-color-surface, 28 28 30)); border-radius:16px; padding:24px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                      <h3 style="margin:0; font-size:18px; font-weight:700;">Node Created</h3>
-                      <mdui-button-icon icon="close" onclick="document.getElementById('nodeModal').close()"></mdui-button-icon>
-                    </div>
-
-                    <div style="margin-bottom:16px;">
-                      <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; opacity:0.5; font-weight:600;">Node ID</label>
-                      <div style="font-family:monospace; font-size:14px; margin-top:4px; word-break:break-all; padding:8px 12px; background:rgba(0,0,0,0.3); border-radius:8px;" id="modalNodeId"></div>
-                    </div>
-
-                    <div style="margin-bottom:16px;">
-                      <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; opacity:0.5; font-weight:600;">Server URL</label>
-                      <div style="font-family:monospace; font-size:14px; margin-top:4px; word-break:break-all; padding:8px 12px; background:rgba(0,0,0,0.3); border-radius:8px;" id="modalServerUrl"></div>
-                    </div>
-
-                    <div style="margin-bottom:20px;">
-                      <label style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; opacity:0.5; font-weight:600;">One-liner Deploy (copy & paste on VPS)</label>
-                      <div style="position:relative; margin-top:4px;">
-                        <pre id="modalOneLiner" style="font-size:12px; line-height:1.5; padding:12px; background:#0d1117; color:#c9d1d9; border-radius:8px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; margin:0; max-height:200px;"></pre>
-                        <mdui-button-icon icon="content_copy" title="Copy"
-                          onclick="navigator.clipboard.writeText(document.getElementById('modalOneLiner').textContent).then(()=>mdui.snackbar({message:'Copied!'}))"
-                          style="position:absolute; top:4px; right:4px; background:rgba(255,255,255,0.1); border-radius:8px;">
-                        </mdui-button-icon>
-                      </div>
-                    </div>
-
-                    <div style="display:flex; gap:8px; justify-content:flex-end;">
-                      <mdui-button variant="text" icon="close" onclick="document.getElementById('nodeModal').close()">Close</mdui-button>
-                      <mdui-button variant="filled" icon="download" id="modalDownloadBtn">Download node.py</mdui-button>
-                    </div>
-                  </div>
-                </dialog>
-
-                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
-                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Cubey JWT Pool</div>
-                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
-                    Contributed tokens the server falls back to when a request arrives without one.
-                    Auto-rechecked against Cubey, dead tokens evicted. Nodes contribute via YTMU_JWT.
-                  </div>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-                    <mdui-text-field id="jwtInput" label="Paste a Cubey JWT" style="flex:1; min-width:220px;"></mdui-text-field>
-                    <mdui-button variant="tonal" icon="key" onclick="contributeJwt()">Contribute</mdui-button>
-                    <mdui-button variant="text" icon="verified_user" onclick="checkJwtPool()">Re-check</mdui-button>
-                    <mdui-button variant="text" icon="refresh" onclick="loadJwtPool()">Refresh</mdui-button>
-                  </div>
-                  <div class="cache-list-container" style="max-height:180px;">
-                    <mdui-list id="jwtList"><mdui-list-item>No tokens yet</mdui-list-item></mdui-list>
-                  </div>
-                </mdui-card>
-
-                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
-                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Cache a public playlist in the background</div>
-                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
-                    Warms the cache for every track so later requests are instant. Runs as a background job -- this page doesn't need to stay open.
-                  </div>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-                    <mdui-text-field id="playlistInput" label="Playlist URL or ID" placeholder="https://music.youtube.com/playlist?list=..." style="flex:1; min-width:260px;"></mdui-text-field>
-                    <mdui-text-field id="playlistLang" label="Language" value="zh-TW" style="width:110px;"></mdui-text-field>
-                    <mdui-button variant="filled" icon="cloud_sync" onclick="startPlaylistCache()">Cache in Background</mdui-button>
-                  </div>
-                  <div id="playlistJobMsg" style="font-size:12px; opacity:0.8; margin-top:10px;"></div>
-                </mdui-card>
-              </mdui-tab-panel>
-
-              <mdui-tab-panel slot="panel" value="files" style="padding-top: 14px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                  <span style="font-size: 12px; opacity: 0.7;">Logs directory & other files</span>
-                  <mdui-button variant="text" icon="refresh" onclick="loadFiles()">Refresh</mdui-button>
-                </div>
-                <div class="cache-list-container">
-                  <mdui-list id="fileList"><mdui-list-item>Loading files...</mdui-list-item></mdui-list>
-                </div>
-              </mdui-tab-panel>
-
-              <mdui-tab-panel slot="panel" value="system" style="padding-top: 14px;">
-                <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">Instance: <span id="sysInstance">...</span> | Start: <span id="sysStart">...</span> | Uptime: <span id="sysUptime">...</span></div>
-                <mdui-list>
-                  <mdui-list-item headline="Provider 0: Cubey API" description="Musixmatch/NetEase/KuGou (Auto Cloudflare Turnstile JWT)"></mdui-list-item>
-                  <mdui-list-item headline="Provider 1: LRCLIB" description="Multi-query cleaned metadata + Synced LRC"></mdui-list-item>
-                  <mdui-list-item headline="Provider 2: Unison Community" description="Synced LRC / TTML / AMLL XML"></mdui-list-item>
-                  <mdui-list-item headline="Provider 3: YouTube Music" description="ytmusicapi fallback"></mdui-list-item>
-                  <mdui-list-item headline="Translation Engine" description="Cohere Command A Translate (Pro) / Google Translate (Fast)"></mdui-list-item>
-                  <mdui-list-item headline="Log Files" description="server.log, crash.log, UI_DUMP_*.txt in logs/"></mdui-list-item>
-                </mdui-list>
-                <mdui-card variant="outlined" style="padding:16px; border-radius:12px; margin-top:16px;">
-                  <div style="font-weight:600; font-size:14px; margin-bottom:8px;">Server Self-Update</div>
-                  <div style="font-size:12px; opacity:0.7; margin-bottom:8px;">
-                    Main file: <span id="selfMainFile" style="font-family:monospace; opacity:1;">...</span> |
-                    Local SHA: <span id="selfLocalSha" style="font-family:monospace;">...</span><br>
-                    Remote SHA: <span id="selfRemoteSha" style="font-family:monospace;">...</span> |
-                    Parent SHA: <span id="selfParentSha" style="font-family:monospace;">...</span> |
-                    <span id="selfUpdateStatus" style="font-weight:600;"></span>
-                  </div>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
-                    <mdui-text-field id="selfMainInput" label="Main file name" placeholder="proxy_server.py / app.py / main.py / bot.py" style="flex:1; min-width:180px;"></mdui-text-field>
-                    <mdui-button variant="tonal" icon="save" onclick="saveSelfUpdateConfig()">Save Name</mdui-button>
-                  </div>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <mdui-button variant="tonal" icon="sync" onclick="checkSelfUpdate()">Check for Update</mdui-button>
-                    <mdui-button variant="filled" icon="system_update" onclick="showUpdateModal()">Update Now</mdui-button>
-                    <mdui-button variant="text" icon="refresh" onclick="checkSelfUpdate()">Refresh SHA</mdui-button>
-                  </div>
-                  <div id="selfUpdateMsg" style="font-size:12px; opacity:0.8; margin-top:8px;"></div>
-                </mdui-card>
-
-                <!-- Update Modal -->
-                <dialog id="updateModal" style="background:transparent; border:none; padding:0; max-width:520px; width:95vw;">
-                  <div style="background:rgb(var(--mdui-color-surface, 28 28 30)); border-radius:16px; padding:24px; box-shadow:0 8px 32px rgba(0,0,0,0.5);">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-                      <h3 style="margin:0; font-size:18px; font-weight:700;">Server Update</h3>
-                      <mdui-button-icon icon="close" onclick="closeUpdateModal()"></mdui-button-icon>
-                    </div>
-
-                    <div id="updateStep1" style="display:block;">
-                      <div style="font-size:12px; opacity:0.7; margin-bottom:12px;">
-                        <div>Local:  <span id="modalLocalSha" style="font-family:monospace;"></span></div>
-                        <div>Remote: <span id="modalRemoteSha" style="font-family:monospace;"></span></div>
-                        <div>Parent: <span id="modalParentSha" style="font-family:monospace;"></span></div>
-                      </div>
-                      <div style="display:flex; gap:8px; justify-content:flex-end;">
-                        <mdui-button variant="text" onclick="closeUpdateModal()">Cancel</mdui-button>
-                        <mdui-button variant="filled" icon="system_update" onclick="startUpdate()">Update Now</mdui-button>
-                      </div>
-                    </div>
-
-                    <div id="updateStep2" style="display:none;">
-                      <div style="margin-bottom:16px;">
-                        <div style="font-size:14px; font-weight:600; margin-bottom:8px;" id="updatePhase">Downloading update...</div>
-                        <mdui-linear-progress indeterminate id="updateProgress"></mdui-linear-progress>
-                      </div>
-                      <div style="font-size:12px; opacity:0.7;" id="updateDetail">Connecting to server...</div>
-                    </div>
-
-                    <div id="updateStep3" style="display:none;">
-                      <div style="text-align:center; padding:16px;">
-                        <mdui-circular-progress indeterminate style="width:48px; height:48px; margin:0 auto 16px;"></mdui-circular-progress>
-                        <div style="font-size:14px; font-weight:600;" id="waitingPhase">Waiting for server to restart...</div>
-                        <div style="font-size:12px; opacity:0.7; margin-top:8px;">This may take 10-30 seconds</div>
-                      </div>
-                    </div>
-
-                    <div id="updateStep4" style="display:none;">
-                      <div style="text-align:center; padding:16px;">
-                        <mdui-icon name="check_circle" style="font-size:48px; color:#3fb950; margin-bottom:12px;"></mdui-icon>
-                        <div style="font-size:14px; font-weight:600;">Update complete!</div>
-                        <div style="font-size:12px; opacity:0.7; margin-top:8px;" id="newVersionInfo"></div>
-                      </div>
-                      <div style="display:flex; gap:8px; justify-content:center; margin-top:16px;">
-                        <mdui-button variant="filled" icon="refresh" onclick="location.reload()">Reload to New Version</mdui-button>
-                      </div>
-                    </div>
-                  </div>
-                </dialog>
-                <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
-                  <mdui-button variant="filled" icon="download" onclick="downloadLogs()">Download All Logs</mdui-button>
-                  <mdui-button variant="tonal" icon="bug_report" onclick="downloadCrash()">Download Crash Log</mdui-button>
-                  <mdui-button variant="tonal" icon="folder_zip" onclick="loadFiles()">Check Other Logs</mdui-button>
-                </div>
-              </mdui-tab-panel>
-            </mdui-tabs>
-          </mdui-card>
+          </div>
         </div>
       </div>
-    </mdui-layout-main>
-  </mdui-layout>
 
+      <!-- ======================== TAB: LOGS ======================== -->
+      <div id="tab-logs" class="tab-content hidden">
+        <div class="bg-base-100 rounded-2xl border border-base-300">
+          <div class="p-4 border-b border-base-300 flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold">Live Server Activity</h2>
+              <span class="badge badge-sm badge-primary" id="logCountBadge2">0</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="cursor-pointer label gap-1"><input id="logAutoScroll" type="checkbox" class="checkbox checkbox-xs checkbox-primary" checked /><span class="label-text text-xs">Auto-scroll</span></label>
+              <button class="btn btn-ghost btn-xs" onclick="downloadLogs()">Download</button>
+              <button class="btn btn-ghost btn-xs text-error" onclick="clearLogs()">Clear</button>
+            </div>
+          </div>
+          <div class="bg-[#0d1117] rounded-b-2xl p-2 h-[600px] overflow-y-auto font-mono text-xs" id="logBox"></div>
+        </div>
+      </div>
+
+      <!-- ======================== TAB: CRASH ======================== -->
+      <div id="tab-crash" class="tab-content hidden">
+        <div class="bg-base-100 rounded-2xl border border-base-300">
+          <div class="p-4 border-b border-base-300 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold">Crash & Exception Logs</h2>
+              <span class="badge badge-sm badge-error" id="crashBadge2">0</span>
+            </div>
+            <div class="flex gap-2">
+              <button class="btn btn-ghost btn-xs" onclick="downloadCrash()">Download</button>
+              <button class="btn btn-ghost btn-xs text-error" onclick="clearCrash()">Clear</button>
+            </div>
+          </div>
+          <div class="bg-[#1a0a0a] rounded-b-2xl p-2 h-[600px] overflow-y-auto font-mono text-xs" id="crashBox"></div>
+        </div>
+      </div>
+
+      <!-- ======================== TAB: CACHE ======================== -->
+      <div id="tab-cache" class="tab-content hidden">
+        <div class="bg-base-100 rounded-2xl border border-base-300">
+          <div class="p-4 border-b border-base-300 flex items-center justify-between">
+            <span class="text-sm font-semibold">Saved file caches (cache/lyrics/*.json)</span>
+            <button class="btn btn-outline btn-xs gap-1" onclick="clearAllCaches()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>Clear Not-Found</button>
+          </div>
+          <div id="cacheProgress" class="hidden p-4"><progress class="progress progress-primary w-full"></progress></div>
+          <div class="p-2 h-[600px] overflow-y-auto" id="cacheList">
+            <div class="text-center py-12 opacity-40 text-sm">Loading caches...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======================== TAB: NODES ======================== -->
+      <div id="tab-nodes" class="tab-content hidden">
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <!-- Node list -->
+          <div class="xl:col-span-2 bg-base-100 rounded-2xl border border-base-300">
+            <div class="p-4 border-b border-base-300 flex items-center justify-between">
+              <span class="text-sm font-semibold">Worker Nodes</span>
+              <div class="flex gap-2">
+                <button class="btn btn-ghost btn-xs" onclick="loadNodes()">Refresh</button>
+                <button class="btn btn-primary btn-xs gap-1" onclick="promptNewNode()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>New Node</button>
+              </div>
+            </div>
+            <div class="p-2 h-[500px] overflow-y-auto" id="nodeList">
+              <div class="text-center py-12 opacity-40 text-sm">Loading nodes...</div>
+            </div>
+          </div>
+
+          <!-- JWT Pool + Playlist Cache -->
+          <div class="space-y-4">
+            <div class="bg-base-100 rounded-2xl border border-base-300 p-4">
+              <h3 class="text-sm font-semibold mb-2">Cubey JWT Pool</h3>
+              <p class="text-xs opacity-50 mb-3">Contributed tokens for fallback. Auto-rechecked, dead tokens evicted.</p>
+              <div class="flex gap-2 mb-3">
+                <input id="jwtInput" type="text" placeholder="Paste Cubey JWT" class="input input-bordered input-sm flex-1" />
+                <button class="btn btn-primary btn-sm" onclick="contributeJwt()">Add</button>
+              </div>
+              <div class="flex gap-1 mb-2">
+                <button class="btn btn-ghost btn-xs" onclick="checkJwtPool()">Re-check</button>
+                <button class="btn btn-ghost btn-xs" onclick="loadJwtPool()">Refresh</button>
+              </div>
+              <div class="max-h-40 overflow-y-auto space-y-1" id="jwtList">
+                <div class="text-xs opacity-40 text-center py-2">No tokens</div>
+              </div>
+            </div>
+
+            <div class="bg-base-100 rounded-2xl border border-base-300 p-4">
+              <h3 class="text-sm font-semibold mb-2">Playlist Cache</h3>
+              <p class="text-xs opacity-50 mb-3">Warm cache for a public playlist. Runs in background.</p>
+              <div class="space-y-2">
+                <input id="playlistInput" type="text" placeholder="Playlist URL or ID" class="input input-bordered input-sm w-full" />
+                <div class="flex gap-2">
+                  <input id="playlistLang" type="text" value="zh-TW" class="input input-bordered input-sm w-24" />
+                  <button class="btn btn-primary btn-sm flex-1" onclick="startPlaylistCache()">Cache</button>
+                </div>
+              </div>
+              <div id="playlistJobMsg" class="text-xs opacity-70 mt-2"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======================== TAB: FILES ======================== -->
+      <div id="tab-files" class="tab-content hidden">
+        <div class="bg-base-100 rounded-2xl border border-base-300">
+          <div class="p-4 border-b border-base-300 flex items-center justify-between">
+            <span class="text-sm font-semibold">Logs & Files</span>
+            <button class="btn btn-ghost btn-xs" onclick="loadFiles()">Refresh</button>
+          </div>
+          <div class="p-2 h-[600px] overflow-y-auto" id="fileList">
+            <div class="text-center py-12 opacity-40 text-sm">Loading files...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======================== TAB: SYSTEM ======================== -->
+      <div id="tab-system" class="tab-content hidden">
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <!-- Providers -->
+          <div class="bg-base-100 rounded-2xl border border-base-300 p-5">
+            <h3 class="text-sm font-semibold mb-3">Providers</h3>
+            <div class="space-y-2 text-xs">
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-primary badge-sm">0</span><div><div class="font-semibold">Cubey API</div><div class="opacity-50">Musixmatch/NetEase/KuGou (Auto JWT)</div></div></div>
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-secondary badge-sm">1</span><div><div class="font-semibold">LRCLIB</div><div class="opacity-50">Multi-query cleaned metadata + Synced LRC</div></div></div>
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-accent badge-sm">2</span><div><div class="font-semibold">Unison Community</div><div class="opacity-50">Synced LRC / TTML / AMLL XML</div></div></div>
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-info badge-sm">3</span><div><div class="font-semibold">YouTube Music</div><div class="opacity-50">ytmusicapi fallback</div></div></div>
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-warning badge-sm">T</span><div><div class="font-semibold">Translation Engine</div><div class="opacity-50">Cohere Command A (Pro) / Google (Fast)</div></div></div>
+              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-ghost badge-sm">L</span><div><div class="font-semibold">Log Files</div><div class="opacity-50">server.log, crash.log, UI_DUMP_*.txt</div></div></div>
+            </div>
+            <div class="text-xs opacity-40 mt-3">Instance: <span id="sysInstance" class="font-mono">...</span> | Start: <span id="sysStart">...</span> | Uptime: <span id="sysUptime">...</span></div>
+          </div>
+
+          <!-- Self-Update -->
+          <div class="bg-base-100 rounded-2xl border border-base-300 p-5">
+            <h3 class="text-sm font-semibold mb-3">Server Self-Update</h3>
+            <div class="text-xs opacity-60 space-y-1 mb-4">
+              <div>Main: <span id="selfMainFile" class="font-mono opacity-100">...</span></div>
+              <div>Local: <span id="selfLocalSha" class="font-mono">...</span></div>
+              <div>Remote: <span id="selfRemoteSha" class="font-mono">...</span></div>
+              <div>Parent: <span id="selfParentSha" class="font-mono">...</span></div>
+              <div><span id="selfUpdateStatus" class="font-semibold"></span></div>
+            </div>
+            <div class="flex gap-2 mb-3">
+              <input id="selfMainInput" type="text" placeholder="proxy_server.py" class="input input-bordered input-sm flex-1" />
+              <button class="btn btn-outline btn-sm" onclick="saveSelfUpdateConfig()">Save</button>
+            </div>
+            <div class="flex gap-2 flex-wrap">
+              <button class="btn btn-outline btn-sm gap-1" onclick="checkSelfUpdate()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Check</button>
+              <button class="btn btn-primary btn-sm gap-1" onclick="showUpdateModal()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Update Now</button>
+            </div>
+            <div id="selfUpdateMsg" class="text-xs opacity-70 mt-3"></div>
+            <div class="divider my-2"></div>
+            <div class="flex gap-2 flex-wrap">
+              <button class="btn btn-outline btn-xs" onclick="downloadLogs()">Download All Logs</button>
+              <button class="btn btn-outline btn-xs" onclick="downloadCrash()">Download Crash Log</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ======================== MODALS ======================== -->
+
+  <!-- Node Modal -->
+  <dialog id="nodeModal" class="modal">
+    <div class="modal-box bg-base-100 border border-base-300 max-w-lg">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-bold text-lg">Node Created</h3>
+        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></form>
+      </div>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Node ID</label>
+          <div class="font-mono text-sm mt-1 p-2 bg-base-200 rounded-lg break-all" id="modalNodeId"></div>
+        </div>
+        <div>
+          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Server URL</label>
+          <div class="font-mono text-sm mt-1 p-2 bg-base-200 rounded-lg break-all" id="modalServerUrl"></div>
+        </div>
+        <div>
+          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Deploy Command</label>
+          <div class="relative mt-1">
+            <pre id="modalOneLiner" class="text-xs leading-relaxed p-3 bg-[#0d1117] text-[#c9d1d9] rounded-lg overflow-x-auto max-h-48"></pre>
+            <button class="btn btn-ghost btn-xs absolute top-1 right-1" title="Copy" onclick="navigator.clipboard.writeText(document.getElementById('modalOneLiner').textContent).then(()=>showToast('Copied!'))"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-action">
+        <form method="dialog"><button class="btn btn-ghost btn-sm">Close</button></form>
+        <button class="btn btn-primary btn-sm gap-1" id="modalDownloadBtn"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Download node.py</button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Update Modal -->
+  <dialog id="updateModal" class="modal">
+    <div class="modal-box bg-base-100 border border-base-300 max-w-lg">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="font-bold text-lg">Server Update</h3>
+        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></form>
+      </div>
+
+      <!-- Step 1: Confirm -->
+      <div id="updateStep1">
+        <div class="text-xs opacity-60 space-y-1 mb-4">
+          <div>Local:  <span id="modalLocalSha" class="font-mono"></span></div>
+          <div>Remote: <span id="modalRemoteSha" class="font-mono"></span></div>
+          <div>Parent: <span id="modalParentSha" class="font-mono"></span></div>
+        </div>
+        <div class="modal-action">
+          <form method="dialog"><button class="btn btn-ghost btn-sm">Cancel</button></form>
+          <button class="btn btn-primary btn-sm gap-1" onclick="startUpdate()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Update Now</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Downloading -->
+      <div id="updateStep2" class="hidden">
+        <div class="text-sm font-semibold mb-3" id="updatePhase">Downloading update...</div>
+        <progress class="progress progress-primary w-full"></progress>
+        <div class="text-xs opacity-60 mt-2" id="updateDetail">Connecting...</div>
+      </div>
+
+      <!-- Step 3: Waiting -->
+      <div id="updateStep3" class="hidden text-center py-6">
+        <span class="loading loading-spinner loading-lg text-primary"></span>
+        <div class="text-sm font-semibold mt-4" id="waitingPhase">Waiting for server to restart...</div>
+        <div class="text-xs opacity-50 mt-1">This may take 10-30 seconds</div>
+      </div>
+
+      <!-- Step 4: Done -->
+      <div id="updateStep4" class="hidden text-center py-6">
+        <svg class="w-16 h-16 mx-auto text-success mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <div class="text-sm font-semibold">Update complete!</div>
+        <div class="text-xs opacity-60 mt-1" id="newVersionInfo"></div>
+        <div class="modal-action justify-center">
+          <button class="btn btn-primary btn-sm gap-1" onclick="location.reload()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Reload to New Version</button>
+        </div>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  </dialog>
+
+  <!-- Toast -->
+  <div id="toast" class="toast toast-end hidden">
+    <div class="alert alert-success text-sm py-2"><span id="toastMsg"></span></div>
+  </div>
+
+  <!-- ======================== JAVASCRIPT ======================== -->
   <script>
+    // --- State ---
     let currentLyrics = [];
     let isPlaying = false;
     let currentSimTime = 0;
@@ -521,122 +454,131 @@
     let youtubePlayer = null;
     let pendingVideoId = '';
     let isSeeking = false;
+    let activeTab = 'preview';
 
+    // --- YouTube API ---
     const youtubeApiPromise = new Promise(resolve => {
-      window.onYouTubeIframeAPIReady = () => {
-        resolve();
-      };
-      const script = document.createElement('script');
-      script.src = 'https://www.youtube.com/iframe_api';
-      script.async = true;
-      document.head.appendChild(script);
+      window.onYouTubeIframeAPIReady = () => resolve();
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      s.async = true;
+      document.head.appendChild(s);
     });
 
-    function toggleTheme() {
-      const html = document.documentElement;
-      if (html.classList.contains('mdui-theme-dark')) {
-        html.classList.remove('mdui-theme-dark');
-        html.classList.add('mdui-theme-light');
-      } else {
-        html.classList.remove('mdui-theme-light');
-        html.classList.add('mdui-theme-dark');
-      }
+    // --- Tab switching ---
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      const panel = document.getElementById('tab-' + tab);
+      if (panel) panel.classList.remove('hidden');
+      document.querySelectorAll('.sidebar-link').forEach(el => {
+        el.classList.toggle('active', el.dataset.tab === tab);
+      });
+      if (tab === 'logs') loadLogs();
+      if (tab === 'crash') loadCrashLogs();
+      if (tab === 'cache') loadCaches();
+      if (tab === 'nodes') { loadNodes(); loadJwtPool(); }
+      if (tab === 'files') loadFiles();
+      if (tab === 'system') checkSelfUpdate();
     }
 
+    // --- Theme ---
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      document.getElementById('themeLabel').textContent = next === 'dark' ? 'Light Mode' : 'Dark Mode';
+    }
+
+    // --- Toast ---
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      document.getElementById('toastMsg').textContent = msg;
+      t.classList.remove('hidden');
+      setTimeout(() => t.classList.add('hidden'), 2500);
+    }
+
+    // --- Snackbar compat ---
+    function snackbar(msg) { showToast(msg); }
+    window.mdui = { snackbar: (o) => showToast(o.message || '') };
+
+    // --- Helpers ---
+    function escapeHtml(s) {
+      return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c] || c));
+    }
+    function formatTime(sec) {
+      const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    }
     function extractVideoId(input) {
       if (!input) return '';
       input = input.trim();
-      if (input.includes('youtube.com/watch?v=')) {
-        const url = new URL(input);
-        return url.searchParams.get('v') || input;
-      }
-      if (input.includes('youtu.be/')) {
-        return input.split('youtu.be/')[1].split('?')[0];
-      }
-      if (input.includes('music.youtube.com/watch?v=')) {
-        const url = new URL(input);
-        return url.searchParams.get('v') || input;
-      }
+      if (input.includes('youtube.com/watch?v=')) return new URL(input).searchParams.get('v') || input;
+      if (input.includes('youtu.be/')) return input.split('youtu.be/')[1].split('?')[0];
+      if (input.includes('music.youtube.com/watch?v=')) return new URL(input).searchParams.get('v') || input;
       return input;
     }
-
-    function formatTime(seconds) {
-      const m = Math.floor(seconds / 60);
-      const s = Math.floor(seconds % 60);
-      return `${m}:${s < 10 ? '0' : ''}${s}`;
+    function timeAgo(iso) {
+      if (!iso) return 'never';
+      const s = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s/60) + 'm ago';
+      if (s < 86400) return Math.floor(s/3600) + 'h ago';
+      return Math.floor(s/86400) + 'd ago';
+    }
+    function setTabCount(id, n) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = n;
     }
 
+    // --- Lyrics ---
     async function fetchLiveLyrics(vid) {
       const rawInput = vid || document.getElementById('videoInput').value;
       const videoId = extractVideoId(rawInput);
-      if (!videoId) {
-        mdui.snackbar({ message: 'Please enter a video ID' });
-        return;
-      }
-
-      const mode = document.getElementById('modeSelect').value;
+      if (!videoId) { snackbar('Please enter a video ID'); return; }
+      const mode = document.querySelector('input[name="mode"]:checked')?.value || 'full';
       const force = document.getElementById('forceReload').checked;
-
       document.getElementById('songTitle').textContent = `Fetching ${videoId}...`;
-      document.getElementById('songArtist').textContent = 'Querying lyrics providers...';
-      document.getElementById('lyricsList').innerHTML = '<div style="text-align:center; padding-top:100px;"><mdui-circular-progress></mdui-circular-progress></div>';
+      document.getElementById('songArtist').textContent = 'Querying providers...';
+      document.getElementById('lyricsList').innerHTML = '<div class="text-center pt-24"><span class="loading loading-spinner loading-lg"></span></div>';
       loadPreview(videoId);
-
       try {
         let url = `/api/lyrics?v=${videoId}&lang=zh-TW`;
         if (mode === 'fast') url += '&fast=1';
         if (force) url += '&force=1';
-
         const res = await fetch(url);
         const data = await res.json();
         renderLyrics(data);
         loadCaches();
-      } catch (err) {
-        mdui.snackbar({ message: 'Request failed: ' + err });
+      } catch (e) {
+        snackbar('Request failed: ' + e);
         document.getElementById('songTitle').textContent = 'Fetch Error';
-        document.getElementById('songArtist').textContent = err.message;
+        document.getElementById('songArtist').textContent = e.message;
       }
     }
 
     function renderLyrics(data) {
-      const titleEl = document.getElementById('songTitle');
-      const artistEl = document.getElementById('songArtist');
-      const badgeEl = document.getElementById('sourceBadge');
-      const listEl = document.getElementById('lyricsList');
-
-      titleEl.textContent = data.song || 'Unknown Song';
-      artistEl.textContent = data.artist || 'Unknown Artist';
-
-      const isSynced = data.synced;
-      const source = data.source || 'none';
-      badgeEl.innerHTML = `<span class="status-badge ${isSynced ? 'badge-synced' : (source !== 'none' ? 'badge-plain' : 'badge-none')}">
-        <mdui-icon name="${isSynced ? 'check_circle' : 'info'}" style="font-size:14px;"></mdui-icon>
-        ${source} ${isSynced ? '(Synced)' : ''}
-      </span>`;
-
+      document.getElementById('songTitle').textContent = data.song || 'Unknown Song';
+      document.getElementById('songArtist').textContent = data.artist || 'Unknown Artist';
+      const isSynced = data.synced, source = data.source || 'none';
+      const badgeClass = isSynced ? 'badge-success' : (source !== 'none' ? 'badge-warning' : 'badge-error');
+      document.getElementById('sourceBadge').innerHTML = `<span class="badge ${badgeClass} badge-sm gap-1">${source} ${isSynced ? '(Synced)' : ''}</span>`;
       currentLyrics = data.lyrics || [];
       if (!youtubePlayer) {
         songDuration = currentLyrics.length > 0 ? (currentLyrics[currentLyrics.length - 1].time + 10) : 0;
         document.getElementById('timeSlider').max = Math.ceil(songDuration || 1);
       }
-
-      if (!currentLyrics || currentLyrics.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center; padding-top:100px; opacity:0.6;">No lyrics lines returned</div>';
-        return;
-      }
-
+      const listEl = document.getElementById('lyricsList');
+      if (!currentLyrics.length) { listEl.innerHTML = '<div class="text-center py-24 opacity-40 text-sm">No lyrics lines returned</div>'; return; }
       listEl.innerHTML = currentLyrics.map((line, idx) => {
-        // Timing-part data is not reliably word-based (especially for CJK text).
-        // Render the provider's complete line instead of synthesizing karaoke spans.
-        const textHtml = escapeHtml(line.text || '');
-        return `
-        <div class="lyric-row" id="lyric-${idx}" onclick="seekToLine(${line.time}, ${idx})">
-          <div class="time-tag">${formatTime(line.time || 0)}</div>
-          <div class="orig-text">${textHtml}</div>
-          ${line.translated ? `<div class="trans-text">${escapeHtml(line.translated)}</div>` : ''}
-        </div>
-      `}).join('');
-
+        const text = escapeHtml(line.text || '');
+        return `<div class="lyric-row px-3 py-2 rounded-lg cursor-pointer opacity-30 hover:opacity-80 hover:bg-white/5 mb-1" id="lyric-${idx}" onclick="seekToLine(${line.time},${idx})">
+          <div class="text-[10px] opacity-40 font-mono mb-0.5">${formatTime(line.time || 0)}</div>
+          <div class="orig-text text-sm font-semibold leading-snug">${text}</div>
+          ${line.translated ? `<div class="trans-text text-xs opacity-50 mt-0.5">${escapeHtml(line.translated)}</div>` : ''}
+        </div>`;
+      }).join('');
       currentSimTime = 0;
       updatePlaybackUI();
     }
@@ -648,7 +590,6 @@
       highlightActiveLyric(idx);
       updatePlaybackUI();
     }
-
     function onSeek(val) {
       currentSimTime = parseFloat(val);
       isSeeking = true;
@@ -657,169 +598,84 @@
       if (youtubePlayer && youtubePlayer.seekTo) youtubePlayer.seekTo(currentSimTime, true);
       setTimeout(() => { isSeeking = false; }, 150);
     }
-
     function togglePlayback() {
-      if (!youtubePlayer) {
-        mdui.snackbar({ message: 'Load a YouTube video first' });
-        return;
-      }
-      if (isPlaying) youtubePlayer.pauseVideo();
-      else youtubePlayer.playVideo();
+      if (!youtubePlayer) { snackbar('Load a YouTube video first'); return; }
+      if (isPlaying) youtubePlayer.pauseVideo(); else youtubePlayer.playVideo();
     }
-
     async function loadPreview(videoId) {
       pendingVideoId = videoId;
       await youtubeApiPromise;
       if (pendingVideoId !== videoId) return;
-      if (youtubePlayer) {
-        youtubePlayer.loadVideoById(videoId);
-      } else {
+      if (youtubePlayer) { youtubePlayer.loadVideoById(videoId); }
+      else {
         youtubePlayer = new YT.Player('youtubePlayer', {
-          width: '1', height: '1', videoId,
-          playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0 },
+          width:'1', height:'1', videoId,
+          playerVars: { autoplay:0, controls:0, playsinline:1, rel:0 },
           events: {
-            onReady: event => {
+            onReady: e => {
               document.getElementById('timeSlider').disabled = false;
-              songDuration = event.target.getDuration() || 0;
+              songDuration = e.target.getDuration() || 0;
               document.getElementById('timeSlider').max = Math.ceil(songDuration || 1);
               updatePlaybackUI();
             },
-            onStateChange: event => {
-              isPlaying = event.data === YT.PlayerState.PLAYING;
-              const btn = document.getElementById('playSimBtn');
-              btn.icon = isPlaying ? 'pause_circle' : 'play_circle';
-              if (event.data === YT.PlayerState.ENDED) {
-                currentSimTime = songDuration;
-                updatePlaybackFromPlayer();
-              }
+            onStateChange: e => {
+              isPlaying = e.data === YT.PlayerState.PLAYING;
+              document.getElementById('playSimBtn').innerHTML = isPlaying
+                ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
+                : '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+              if (e.data === YT.PlayerState.ENDED) { currentSimTime = songDuration; updatePlaybackFromPlayer(); }
             },
-            onError: () => {
-              mdui.snackbar({ message: 'YouTube could not play this video' });
-              isPlaying = false;
-              document.getElementById('playSimBtn').icon = 'play_circle';
-            }
+            onError: () => { snackbar('YouTube could not play this video'); isPlaying = false; }
           }
         });
         setInterval(updatePlaybackFromPlayer, 250);
       }
     }
-
     function updatePlaybackFromPlayer() {
       if (!youtubePlayer || !youtubePlayer.getCurrentTime || isSeeking) return;
-      const duration = youtubePlayer.getDuration();
-      if (duration && isFinite(duration)) {
-        songDuration = duration;
-        document.getElementById('timeSlider').max = Math.ceil(duration);
-      }
-      const time = youtubePlayer.getCurrentTime();
-      if (isFinite(time)) {
-        currentSimTime = time;
-        document.getElementById('timeSlider').value = time;
-        syncActiveHighlight();
-        updatePlaybackUI();
-      }
+      const d = youtubePlayer.getDuration();
+      if (d && isFinite(d)) { songDuration = d; document.getElementById('timeSlider').max = Math.ceil(d); }
+      const t = youtubePlayer.getCurrentTime();
+      if (isFinite(t)) { currentSimTime = t; document.getElementById('timeSlider').value = t; syncActiveHighlight(); updatePlaybackUI(); }
     }
-
-    /* Kept as an alias for any existing dashboard integrations. */
-    function togglePlaySim() {
-      togglePlayback();
-    }
-
     function syncActiveHighlight() {
-      if (!currentLyrics || currentLyrics.length === 0) return;
-      let activeIdx = -1;
-      for (let i = 0; i < currentLyrics.length; i++) {
-        if (currentSimTime >= currentLyrics[i].time) {
-          activeIdx = i;
-        } else {
-          break;
-        }
-      }
-      highlightActiveLyric(activeIdx);
+      if (!currentLyrics.length) return;
+      let idx = -1;
+      for (let i = 0; i < currentLyrics.length; i++) { if (currentSimTime >= currentLyrics[i].time) idx = i; else break; }
+      highlightActiveLyric(idx);
     }
-
-    function scrollToLyric(row) {
-      const container = document.getElementById('lyricsList');
-      if (!container || !row) return;
-      const target = row.offsetTop - container.offsetTop - (container.clientHeight / 2) + (row.clientHeight / 2);
-      container.scrollTo({
-        top: Math.max(0, target),
-        behavior: 'smooth'
-      });
-    }
-
     function highlightActiveLyric(idx) {
-      const rows = document.querySelectorAll('.lyric-row');
-      rows.forEach((row, i) => {
-        if (i === idx) {
-          if (!row.classList.contains('active')) {
-            row.classList.add('active');
-            row.classList.remove('past', 'future');
-            scrollToLyric(row);
-          }
-        } else if (i < idx) {
-          row.classList.remove('active', 'future');
-          row.classList.add('past');
-        } else {
-          row.classList.remove('active', 'past');
-          row.classList.add('future');
-        }
+      document.querySelectorAll('.lyric-row').forEach((row, i) => {
+        row.classList.remove('active','past','future');
+        row.style.opacity = '';
+        if (i === idx) { row.classList.add('active'); row.style.opacity = '1'; }
+        else if (i < idx) { row.classList.add('past'); row.style.opacity = '0.45'; }
+        else { row.classList.add('future'); row.style.opacity = '0.3'; }
       });
+      const row = document.getElementById('lyric-' + idx);
+      if (row) {
+        const c = document.getElementById('lyricsList');
+        const target = row.offsetTop - c.offsetTop - (c.clientHeight / 2) + (row.clientHeight / 2);
+        c.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+      }
     }
-
     function updatePlaybackUI() {
       document.getElementById('timeDisplay').textContent = `${formatTime(currentSimTime)} / ${formatTime(songDuration)}`;
     }
 
-    // Rebuild a tab label as ONE text node. Mixing raw text + an inline span
-    // inside the mdui-tab slot made browsers scramble text runs on update
-    // (rendered as "Cached636) Songs ("). A single text node cannot reorder.
-    function setTabCount(tabId, label, n) {
-      const el = document.getElementById(tabId);
-      if (el) el.textContent = `${label} (${n})`;
-    }
-
-    async function loadCaches() {
-      const progressEl = document.getElementById('cacheProgress');
-      if (progressEl) progressEl.style.display = 'block';
-      try {
-        const res = await fetch('/api/admin/caches');
-        const list = await res.json();
-        setTabCount('cacheTab', 'Cached Songs', list.length);
-        const cacheListEl = document.getElementById('cacheList');
-        if (list.length === 0) {
-          cacheListEl.innerHTML = '<mdui-list-item>No cached songs</mdui-list-item>';
-          return;
-        }
-        cacheListEl.innerHTML = list.map(item => `
-          <mdui-list-item rounded onclick="fetchLiveLyrics('${item.video_id}')" style="cursor:pointer;">
-            <mdui-icon slot="icon" name="${item.synced ? 'music_note' : 'text_snippet'}"></mdui-icon>
-            <div style="font-weight:600;">${escapeHtml(item.song || item.video_id)}</div>
-            <div slot="description" style="font-size:12px; opacity:0.7;">
-              ${escapeHtml(item.artist || 'Unknown')} • ${item.source} (${item.lines} lines) • ${item.time_ago}
-            </div>
-            <mdui-button-icon slot="end-icon" icon="open_in_new"></mdui-button-icon>
-          </mdui-list-item>
-        `).join('');
-      } catch (e) {
-        console.error('Failed to load caches:', e);
-      } finally {
-        if (progressEl) progressEl.style.display = 'none';
-      }
-    }
-
+    // --- Logs ---
     let _logTotal = 0;
-
     function renderLogEntry(entry) {
-      const div = document.createElement('div');
-      div.className = 'log-entry';
-      div.setAttribute('data-level', entry.level || 'info');
-      div.innerHTML = `<span class="log-ts">${escapeHtml(entry.ts)}</span>`
-        + `<span class="log-icon material-icons">${escapeHtml(entry.icon || 'info')}</span>`
-        + `<span class="log-msg">${escapeHtml(entry.msg)}</span>`;
-      return div;
+      const colors = { success:'text-success', error:'text-error', warning:'text-warning', request:'text-primary', response:'text-info', translate:'text-accent', pending:'text-warning italic', detail:'text-base-content/40', info:'text-base-content/50' };
+      const icons = { success:'check_circle', error:'error', warning:'warning', request:'send', response:'download', translate:'translate', pending:'hourglass_empty', detail:'radio_button_checked', info:'info' };
+      const c = colors[entry.level] || 'text-base-content/50';
+      const ic = icons[entry.level] || 'info';
+      return `<div class="flex items-start gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 text-xs fade-in log-entry">
+        <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(entry.ts)}</span>
+        <span class="material-symbols-outlined ${c} text-sm w-5 shrink-0 text-center">${ic}</span>
+        <span class="${c} break-all flex-1">${escapeHtml(entry.msg)}</span>
+      </div>`;
     }
-
     async function loadLogs() {
       try {
         const res = await fetch('/api/admin/logs');
@@ -827,324 +683,234 @@
         const logBox = document.getElementById('logBox');
         const entries = data.logs || [];
         const total = data.total || 0;
-
-        if (_logTotal === 0 || total < _logTotal) {
-          // First load or server was cleared: full render
-          logBox.innerHTML = '';
-          entries.forEach(e => logBox.appendChild(renderLogEntry(e)));
-        } else if (total > _logTotal) {
-          // Incremental: only append new entries
-          const newCount = total - _logTotal;
-          const newEntries = entries.slice(-newCount);
-          newEntries.forEach(e => logBox.appendChild(renderLogEntry(e)));
-          // Cap DOM nodes to 300
-          while (logBox.children.length > 300) {
-            logBox.removeChild(logBox.firstChild);
-          }
-        }
+        if (_logTotal === 0 || total < _logTotal) { logBox.innerHTML = ''; entries.forEach(e => logBox.insertAdjacentHTML('beforeend', renderLogEntry(e))); }
+        else if (total > _logTotal) { entries.slice(-(total - _logTotal)).forEach(e => logBox.insertAdjacentHTML('beforeend', renderLogEntry(e))); while (logBox.children.length > 300) logBox.removeChild(logBox.firstChild); }
         _logTotal = total;
-
-        // Update badge
-        const badge = document.getElementById('logCountBadge');
-        if (badge) badge.textContent = total;
-
-        // Auto-scroll
-        const autoScroll = document.getElementById('logAutoScroll');
-        if (!autoScroll || autoScroll.checked) {
-          logBox.scrollTop = logBox.scrollHeight;
-        }
-      } catch (e) {
-        console.error('Failed to load logs:', e);
-      }
+        setTabCount('logCountBadge', total);
+        const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = total;
+        const auto = document.getElementById('logAutoScroll');
+        if (!auto || auto.checked) logBox.scrollTop = logBox.scrollHeight;
+      } catch(e) {}
     }
-
     async function clearLogs() {
-      await fetch('/api/admin/logs/clear', { method: 'POST' });
+      await fetch('/api/admin/logs/clear', { method:'POST' });
       document.getElementById('logBox').innerHTML = '';
       _logTotal = 0;
-      const badge = document.getElementById('logCountBadge');
-      if (badge) badge.textContent = '0';
-      mdui.snackbar({ message: 'Logs cleared' });
+      setTabCount('logCountBadge', '0');
+      const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = '0';
+      snackbar('Logs cleared');
     }
-
-    async function clearAllCaches() {
-      const res = await fetch('/api/admin/caches/clear_empty', { method: 'POST' });
-      const data = await res.json();
-      mdui.snackbar({ message: `Cleared ${data.cleared} not-found caches` });
-      loadCaches();
-    }
-
-    function timeAgo(iso) {
-      if (!iso) return 'never';
-      const s = (Date.now() - new Date(iso).getTime()) / 1000;
-      if (s < 60) return 'just now';
-      if (s < 3600) return Math.floor(s/60) + 'm ago';
-      if (s < 86400) return Math.floor(s/3600) + 'h ago';
-      return Math.floor(s/86400) + 'd ago';
-    }
-
-    async function loadNodes() {
-      try {
-        const res = await fetch('/api/admin/nodes');
-        const data = await res.json();
-        const list = data.nodes || [];
-        setTabCount('nodestab', 'Nodes', list.filter(n => n.online).length + '/' + list.length);
-        const el = document.getElementById('nodeList');
-        if (list.length === 0) {
-          el.innerHTML = '<mdui-list-item>No nodes yet -- click "New Node" to generate one</mdui-list-item>';
-          return;
-        }
-        el.innerHTML = list.map(n => `
-          <mdui-list-item rounded>
-            <mdui-icon slot="icon" name="${n.online ? 'lan' : 'lan_off'}"></mdui-icon>
-            <div style="font-weight:600;">${escapeHtml(n.label || n.node_id)}</div>
-            <div slot="description" style="font-size:12px; opacity:0.7;">
-              <span class="status-badge ${n.online ? 'badge-online' : 'badge-offline'}">${n.online ? 'online' : 'offline'}</span>
-              &nbsp;${escapeHtml(n.node_id)}${n.ip ? ' • ' + escapeHtml(n.ip) : ''} • last seen ${timeAgo(n.last_seen)}
-            </div>
-            <mdui-button-icon slot="end-icon" icon="delete" title="Revoke" onclick="revokeNode('${n.node_id}')"></mdui-button-icon>
-          </mdui-list-item>
-        `).join('');
-      } catch (e) {
-        console.error('Failed to load nodes:', e);
-      }
-    }
-
-    async function promptNewNode() {
-      const label = prompt('Label for this node (e.g. "tokyo-vps"):', '');
-      if (label === null) return;
-      try {
-        const res = await fetch('/api/admin/nodes/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label }),
-        });
-        if (!res.ok) {
-          mdui.snackbar({ message: 'Failed to generate node' });
-          return;
-        }
-        const data = await res.json();
-        if (!data.ok) {
-          mdui.snackbar({ message: 'Failed to generate node' });
-          return;
-        }
-        showNodeModal(data);
-        loadNodes();
-      } catch (e) {
-        mdui.snackbar({ message: 'Failed to generate node: ' + e });
-      }
-    }
-
-    function showNodeModal(data) {
-      const modal = document.getElementById('nodeModal');
-      document.getElementById('modalNodeId').textContent = data.node_id;
-      document.getElementById('modalServerUrl').textContent = data.server_url;
-      document.getElementById('modalOneLiner').textContent = data.deploy_one_liner;
-      document.getElementById('modalDownloadBtn').onclick = () => {
-        const byteChars = atob(data.script_b64);
-        const byteNumbers = new Array(byteChars.length);
-        for (let i = 0; i < byteChars.length; i++) {
-          byteNumbers[i] = byteChars.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: 'text/x-python' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = data.filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-        mdui.snackbar({ message: `Downloaded ${data.filename} -- this is the only copy of its key, keep it safe` });
-      };
-      modal.showModal();
-    }
-
-    async function revokeNode(nodeId) {
-      if (!confirm('Revoke this node? Its node.py will stop being able to reconnect.')) return;
-      try {
-        await fetch(`/api/admin/nodes/${nodeId}/revoke`, { method: 'POST' });
-        mdui.snackbar({ message: 'Node revoked' });
-        loadNodes();
-      } catch (e) {
-        mdui.snackbar({ message: 'Failed to revoke: ' + e });
-      }
-    }
-
-    async function loadJwtPool() {
-      try {
-        const res = await fetch('/api/admin/jwt/list');
-        const data = await res.json();
-        const el = document.getElementById('jwtList');
-        if (!el) return;
-        const list = data.jwt || [];
-        if (list.length === 0) {
-          el.innerHTML = '<mdui-list-item>No tokens in pool -- contribute one or set YTMU_JWT on a node</mdui-list-item>';
-          return;
-        }
-        el.innerHTML = list.map(j => `
-          <mdui-list-item rounded>
-            <mdui-icon slot="icon" name="${j.ok ? 'verified_user' : (j.live ? 'schedule' : 'key_off')}"></mdui-icon>
-            <div style="font-weight:600; font-family:monospace;">${escapeHtml(j.id)}</div>
-            <div slot="description" style="font-size:12px; opacity:0.7;">
-              ${j.live ? '[LIVE]' : '[record]'} ${j.ok ? '[OK]' : ''} ${j.node_id ? 'node ' + escapeHtml(j.node_id) : 'manual'}
-              &middot; ${escapeHtml(j.token_hash)}... &middot; added ${timeAgo(j.added)}
-            </div>
-          </mdui-list-item>
-        `).join('');
-      } catch (e) {
-        console.error('Failed to load jwt pool:', e);
-      }
-    }
-
-    async function contributeJwt() {
-      const token = document.getElementById('jwtInput').value.trim();
-      if (!token) { mdui.snackbar({ message: 'Paste a JWT first' }); return; }
-      try {
-        const res = await fetch('/api/admin/jwt/contribute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        const data = await res.json();
-        mdui.snackbar({ message: data.ok ? `Added ${data.id} (pool ${data.num_pool})` : (data.error || 'Contribute failed') });
-        document.getElementById('jwtInput').value = '';
-        loadJwtPool();
-      } catch (e) {
-        mdui.snackbar({ message: 'Contribute failed: ' + e });
-      }
-    }
-
-    async function checkJwtPool() {
-      try {
-        const res = await fetch('/api/admin/jwt/check', { method: 'POST' });
-        const data = await res.json();
-        mdui.snackbar({ message: `JWT re-check: ${data.ok} ok, ${data.dead} dead, ${data.unknown} unknown` });
-        loadJwtPool();
-      } catch (e) {
-        mdui.snackbar({ message: 'Check failed: ' + e });
-      }
-    }
-
-    let _playlistPollTimer = null;
-
-    async function startPlaylistCache() {
-      const playlist = document.getElementById('playlistInput').value.trim();
-      const lang = document.getElementById('playlistLang').value.trim() || 'zh-TW';
-      const msgEl = document.getElementById('playlistJobMsg');
-      if (!playlist) { mdui.snackbar({ message: 'Enter a playlist URL or ID' }); return; }
-      try {
-        const res = await fetch('/api/playlist/cache', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ playlist, lang }),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          msgEl.textContent = data.error || 'Failed to start job';
-          return;
-        }
-        mdui.snackbar({ message: 'Playlist caching started in the background' });
-        if (_playlistPollTimer) clearInterval(_playlistPollTimer);
-        _playlistPollTimer = setInterval(() => pollPlaylistJob(data.job_id), 2000);
-        pollPlaylistJob(data.job_id);
-      } catch (e) {
-        msgEl.textContent = 'Failed to start: ' + e;
-      }
-    }
-
-    async function pollPlaylistJob(jobId) {
-      const msgEl = document.getElementById('playlistJobMsg');
-      try {
-        const res = await fetch(`/api/playlist/cache/status/${jobId}`);
-        const job = await res.json();
-        if (job.error) { msgEl.textContent = job.error; clearInterval(_playlistPollTimer); return; }
-        msgEl.textContent = `${job.status}: ${job.done}/${job.total} done ` +
-          `(${job.newly_cached} newly cached, ${job.already_cached} already cached, ${job.failed} failed)`;
-        if (job.status === 'complete' || job.status === 'failed') {
-          clearInterval(_playlistPollTimer);
-          loadCaches();
-        }
-      } catch (e) {
-        console.error('Failed to poll playlist job:', e);
-      }
-    }
-
-    async function loadServerInfo() {
-      try {
-        const res = await fetch('/api/admin/server_info');
-        const data = await res.json();
-        document.getElementById('instanceId').textContent = data.instance_id.slice(0,8);
-        document.getElementById('instanceStart').textContent = new Date(data.start_time).toLocaleString();
-        document.getElementById('instanceUptime').textContent = data.uptime_human;
-        document.getElementById('instanceLogs').textContent = data.structured_logs + ' entries';
-        document.getElementById('instanceChip').textContent = 'ID: ' + data.instance_id.slice(0,8);
-        document.getElementById('instanceChip').title = data.instance_id;
-        // system tab
-        const sysId = document.getElementById('sysInstance');
-        if (sysId) sysId.textContent = data.instance_id;
-        const sysStart = document.getElementById('sysStart');
-        if (sysStart) sysStart.textContent = data.start_time;
-        const sysUp = document.getElementById('sysUptime');
-        if (sysUp) sysUp.textContent = data.uptime_human;
-      } catch(e){ console.error(e); }
-    }
-
-    function downloadLogs() {
-      window.location.href = '/api/admin/logs/download';
-    }
-    function downloadCrash() {
-      window.location.href = '/api/admin/files/download?file=crash.log';
-    }
-
+    function downloadLogs() { window.location.href = '/api/admin/logs/download'; }
     async function loadCrashLogs() {
       try {
         const res = await fetch('/api/admin/crash_logs');
         const data = await res.json();
         const box = document.getElementById('crashBox');
-        const badge2 = document.getElementById('crashBadge');
-        setTabCount('crashTab', 'Crash Logs', data.total);
-        if (badge2) badge2.textContent = data.total;
+        setTabCount('crashBadge', data.total);
+        const b2 = document.getElementById('crashBadge2'); if (b2) b2.textContent = data.total;
         box.innerHTML = '';
-        if (!data.logs || data.logs.length===0) {
-          box.innerHTML = '<div style="text-align:center; padding:40px; opacity:0.6;">No crash logs - server healthy</div>';
-          return;
-        }
-        data.logs.slice().reverse().forEach(e=>{
-          const div=document.createElement('div');
-          div.className='log-entry';
-          div.setAttribute('data-level','error');
-          div.innerHTML = `<span class="log-ts">${escapeHtml(e.ts||'')}</span><span class="log-icon material-icons">error</span><span class="log-msg">[${escapeHtml(e.type||'CRASH')}] ${escapeHtml(e.msg||'')}<br><small style="opacity:0.6; white-space:pre-wrap;">${escapeHtml((e.trace||'').slice(0,800))}</small></span>`;
-          box.appendChild(div);
+        if (!data.logs || !data.logs.length) { box.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No crash logs - server healthy</div>'; return; }
+        data.logs.slice().reverse().forEach(e => {
+          box.insertAdjacentHTML('beforeend', `<div class="flex items-start gap-2 px-3 py-1.5 text-xs fade-in text-error">
+            <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(e.ts||'')}</span>
+            <span class="material-symbols-outlined text-sm w-5 shrink-0 text-center">error</span>
+            <span class="break-all flex-1">[${escapeHtml(e.type||'CRASH')}] ${escapeHtml(e.msg||'')}<br><span class="opacity-50 whitespace-pre-wrap text-[11px]">${escapeHtml((e.trace||'').slice(0,800))}</span></span>
+          </div>`);
         });
-      } catch(e){ console.error(e); }
+      } catch(e) {}
     }
-    async function clearCrash() {
-      await fetch('/api/admin/crash_logs/clear', {method:'POST'});
-      document.getElementById('crashBox').innerHTML='';
-      mdui.snackbar({message:'Crash logs cleared'});
-      loadCrashLogs();
-    }
-    async function loadFiles() {
+    function downloadCrash() { window.location.href = '/api/admin/files/download?file=crash.log'; }
+    async function clearCrash() { await fetch('/api/admin/crash_logs/clear', {method:'POST'}); document.getElementById('crashBox').innerHTML=''; snackbar('Crash logs cleared'); loadCrashLogs(); }
+
+    // --- Caches ---
+    async function loadCaches() {
       try {
-        const res = await fetch('/api/admin/files');
-        const data = await res.json();
-        const listEl = document.getElementById('fileList');
-        if (!data.files || data.files.length===0) {
-          listEl.innerHTML='<mdui-list-item>No files</mdui-list-item>';
+        const res = await fetch('/api/admin/caches');
+        const list = await res.json();
+        setTabCount('cacheBadge', list.length);
+        const el = document.getElementById('cacheList');
+        const mini = document.getElementById('miniCacheList');
+        if (!list.length) {
+          el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No cached songs</div>';
+          mini.innerHTML = '<div class="text-center py-2 opacity-30">No caches</div>';
           return;
         }
-        listEl.innerHTML = data.files.map(f=>`
-          <mdui-list-item headline="${escapeHtml(f.name)}" description="${f.size_human} | ${f.modified}">
-            <mdui-icon slot="icon" name="${f.name.includes('crash')?'bug_report': f.name.includes('server')?'article': 'description'}"></mdui-icon>
-            <mdui-button slot="end-icon" icon="download" variant="text" onclick="window.location.href='/api/admin/files/download?file=${encodeURIComponent(f.name)}'"></mdui-button>
-          </mdui-list-item>
+        const html = list.map(item => `
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 cursor-pointer transition" onclick="fetchLiveLyrics('${item.video_id}')">
+            <span class="material-symbols-outlined text-sm ${item.synced ? 'text-success' : 'text-warning'}">${item.synced ? 'music_note' : 'text_snippet'}</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium truncate">${escapeHtml(item.song || item.video_id)}</div>
+              <div class="text-xs opacity-50">${escapeHtml(item.artist || '?')} &middot; ${item.source} &middot; ${item.lines} lines &middot; ${item.time_ago}</div>
+            </div>
+          </div>
         `).join('');
-      } catch(e){ console.error(e); }
+        el.innerHTML = html;
+        mini.innerHTML = list.slice(0, 12).map(item => `
+          <div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-base-200 cursor-pointer" onclick="fetchLiveLyrics('${item.video_id}');switchTab('preview')">
+            <span class="material-symbols-outlined text-xs ${item.synced ? 'text-success' : 'text-warning'}">${item.synced ? 'music_note' : 'text_snippet'}</span>
+            <div class="truncate flex-1">${escapeHtml(item.song || item.video_id)}</div>
+          </div>
+        `).join('');
+      } catch(e) {}
+    }
+    async function clearAllCaches() { const r = await (await fetch('/api/admin/caches/clear_empty',{method:'POST'})).json(); snackbar(`Cleared ${r.cleared} not-found`); loadCaches(); }
+
+    // --- Nodes ---
+    async function loadNodes() {
+      try {
+        const res = await fetch('/api/admin/nodes');
+        const data = await res.json();
+        const list = data.nodes || [];
+        const online = list.filter(n => n.online).length;
+        setTabCount('nodesBadge', online + '/' + list.length);
+        const el = document.getElementById('nodeList');
+        if (!list.length) { el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No nodes yet. Click "New Node" to generate one.</div>'; return; }
+        el.innerHTML = list.map(n => `
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200">
+            <span class="w-2 h-2 rounded-full ${n.online ? 'bg-success animate-pulse' : 'bg-base-300'} shrink-0"></span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium">${escapeHtml(n.label || n.node_id)}</div>
+              <div class="text-xs opacity-50 font-mono">${escapeHtml(n.node_id)}${n.ip ? ' &middot; ' + escapeHtml(n.ip) : ''} &middot; ${timeAgo(n.last_seen)}</div>
+            </div>
+            <span class="badge badge-sm ${n.online ? 'badge-success' : 'badge-ghost'}">${n.online ? 'online' : 'offline'}</span>
+            <button class="btn btn-ghost btn-xs text-error" onclick="revokeNode('${n.node_id}')" title="Revoke"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
+          </div>
+        `).join('');
+      } catch(e) {}
+    }
+    async function promptNewNode() {
+      const label = prompt('Label for this node (e.g. "tokyo-vps"):');
+      if (label === null) return;
+      try {
+        const res = await fetch('/api/admin/nodes/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label}) });
+        const data = await res.json();
+        if (!data.ok) { snackbar('Failed to generate node'); return; }
+        showNodeModal(data);
+        loadNodes();
+      } catch(e) { snackbar('Failed: ' + e); }
+    }
+    function showNodeModal(data) {
+      document.getElementById('modalNodeId').textContent = data.node_id;
+      document.getElementById('modalServerUrl').textContent = data.server_url;
+      document.getElementById('modalOneLiner').textContent = data.deploy_one_liner;
+      document.getElementById('modalDownloadBtn').onclick = () => {
+        const raw = atob(data.script_b64);
+        const arr = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        const blob = new Blob([arr], { type:'text/x-python' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = data.filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        snackbar(`Downloaded ${data.filename}`);
+      };
+      document.getElementById('nodeModal').showModal();
+    }
+    async function revokeNode(id) {
+      if (!confirm('Revoke this node?')) return;
+      await fetch(`/api/admin/nodes/${id}/revoke`, { method:'POST' });
+      snackbar('Node revoked');
+      loadNodes();
     }
 
+    // --- JWT Pool ---
+    async function loadJwtPool() {
+      try {
+        const res = await fetch('/api/admin/jwt/list');
+        const data = await res.json();
+        const el = document.getElementById('jwtList');
+        const list = data.jwt || [];
+        if (!list.length) { el.innerHTML = '<div class="text-xs opacity-40 text-center py-2">No tokens</div>'; return; }
+        el.innerHTML = list.map(j => `
+          <div class="flex items-center gap-2 px-2 py-1 rounded text-xs">
+            <span class="w-1.5 h-1.5 rounded-full ${j.ok ? 'bg-success' : (j.live ? 'bg-warning' : 'bg-error')} shrink-0"></span>
+            <span class="font-mono truncate flex-1">${escapeHtml(j.id)}</span>
+            <span class="opacity-40">${j.node_id ? 'node' : 'manual'} &middot; ${timeAgo(j.added)}</span>
+          </div>
+        `).join('');
+      } catch(e) {}
+    }
+    async function contributeJwt() {
+      const token = document.getElementById('jwtInput').value.trim();
+      if (!token) { snackbar('Paste a JWT first'); return; }
+      try {
+        const res = await fetch('/api/admin/jwt/contribute', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token}) });
+        const data = await res.json();
+        snackbar(data.ok ? `Added ${data.id}` : (data.error || 'Failed'));
+        document.getElementById('jwtInput').value = '';
+        loadJwtPool();
+      } catch(e) { snackbar('Failed: ' + e); }
+    }
+    async function checkJwtPool() { const r = await (await fetch('/api/admin/jwt/check',{method:'POST'})).json(); snackbar(`Re-check: ${r.ok} ok, ${r.dead} dead`); loadJwtPool(); }
+
+    // --- Playlist Cache ---
+    let _playlistPollTimer = null;
+    async function startPlaylistCache() {
+      const playlist = document.getElementById('playlistInput').value.trim();
+      const lang = document.getElementById('playlistLang').value.trim() || 'zh-TW';
+      const msgEl = document.getElementById('playlistJobMsg');
+      if (!playlist) { snackbar('Enter a playlist URL'); return; }
+      try {
+        const res = await fetch('/api/playlist/cache', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playlist, lang}) });
+        const data = await res.json();
+        if (!res.ok) { msgEl.textContent = data.error || 'Failed'; return; }
+        snackbar('Playlist caching started');
+        if (_playlistPollTimer) clearInterval(_playlistPollTimer);
+        _playlistPollTimer = setInterval(() => pollPlaylistJob(data.job_id), 2000);
+        pollPlaylistJob(data.job_id);
+      } catch(e) { msgEl.textContent = 'Failed: ' + e; }
+    }
+    async function pollPlaylistJob(id) {
+      const msgEl = document.getElementById('playlistJobMsg');
+      try {
+        const job = await (await fetch(`/api/playlist/cache/status/${id}`)).json();
+        if (job.error) { msgEl.textContent = job.error; clearInterval(_playlistPollTimer); return; }
+        msgEl.textContent = `${job.status}: ${job.done}/${job.total} (${job.newly_cached} new, ${job.failed} failed)`;
+        if (job.status === 'complete' || job.status === 'failed') { clearInterval(_playlistPollTimer); loadCaches(); }
+      } catch(e) {}
+    }
+
+    // --- Files ---
+    async function loadFiles() {
+      try {
+        const data = await (await fetch('/api/admin/files')).json();
+        const el = document.getElementById('fileList');
+        if (!data.files || !data.files.length) { el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No files</div>'; return; }
+        el.innerHTML = data.files.map(f => `
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200">
+            <span class="material-symbols-outlined text-sm opacity-50">${f.name.includes('crash') ? 'bug_report' : (f.name.includes('server') ? 'article' : 'description')}</span>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium truncate">${escapeHtml(f.name)}</div>
+              <div class="text-xs opacity-50">${f.size_human} &middot; ${f.modified}</div>
+            </div>
+            <a class="btn btn-ghost btn-xs" href="/api/admin/files/download?file=${encodeURIComponent(f.name)}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></a>
+          </div>
+        `).join('');
+      } catch(e) {}
+    }
+
+    // --- Server Info ---
+    async function loadServerInfo() {
+      try {
+        const data = await (await fetch('/api/admin/server_info')).json();
+        const id = data.instance_id.slice(0,8);
+        document.getElementById('instanceId').textContent = id;
+        document.getElementById('instanceChip').textContent = 'ID: ' + id;
+        document.getElementById('instanceChip').title = data.instance_id;
+        document.getElementById('instanceStart').textContent = new Date(data.start_time).toLocaleString();
+        document.getElementById('instanceUptime').textContent = data.uptime_human;
+        document.getElementById('instanceLogs').textContent = data.structured_logs + ' entries';
+        const si = document.getElementById('sysInstance'); if (si) si.textContent = data.instance_id;
+        const ss = document.getElementById('sysStart'); if (ss) ss.textContent = data.start_time;
+        const su = document.getElementById('sysUptime'); if (su) su.textContent = data.uptime_human;
+      } catch(e) {}
+    }
+
+    // --- Self-Update ---
     async function checkSelfUpdate() {
       try {
-        const res = await fetch('/api/admin/self_update/check');
-        const data = await res.json();
+        const data = await (await fetch('/api/admin/self_update/check')).json();
         document.getElementById('selfMainFile').textContent = data.main_file;
         document.getElementById('selfLocalSha').textContent = (data.local_sha||'').slice(0,7);
         document.getElementById('selfRemoteSha').textContent = (data.remote_sha||'').slice(0,7);
@@ -1153,168 +919,100 @@
         const status = document.getElementById('selfUpdateStatus');
         const msg = document.getElementById('selfUpdateMsg');
         if (data.update_available) {
-          status.textContent = 'Update available';
-          status.style.color = '#f85149';
-          msg.textContent = `Local ${data.local_sha.slice(0,7)} -> Remote ${data.remote_sha.slice(0,7)} (parent ${data.parent_sha ? data.parent_sha.slice(0,7) : 'none'})`;
+          status.textContent = 'Update available'; status.className = 'font-semibold text-error';
+          msg.textContent = `Local ${data.local_sha.slice(0,7)} -> Remote ${data.remote_sha.slice(0,7)}`;
         } else if (data.local_sha && data.remote_sha) {
-          status.textContent = 'Up to date';
-          status.style.color = '#3fb950';
+          status.textContent = 'Up to date'; status.className = 'font-semibold text-success';
           msg.textContent = `SHA ${data.local_sha.slice(0,7)} matches remote`;
         } else {
-          status.textContent = 'Unknown';
+          status.textContent = 'Unknown'; status.className = 'font-semibold text-warning';
           msg.textContent = 'Could not fetch remote SHA';
         }
-        mdui.snackbar({ message: 'Self-update check done' });
-      } catch(e){ console.error(e); mdui.snackbar({ message: 'Check failed: '+e }); }
+      } catch(e) {}
     }
-
     function showUpdateModal() {
-      // Re-fetch to get latest info
-      fetch('/api/admin/self_update/check').then(r => r.json()).then(data => {
-        document.getElementById('modalLocalSha').textContent = data.local_sha || 'unknown';
-        document.getElementById('modalRemoteSha').textContent = data.remote_sha || 'unknown';
+      fetch('/api/admin/self_update/check').then(r=>r.json()).then(data => {
+        document.getElementById('modalLocalSha').textContent = data.local_sha || '?';
+        document.getElementById('modalRemoteSha').textContent = data.remote_sha || '?';
         document.getElementById('modalParentSha').textContent = data.parent_sha || 'none';
-        // Reset modal steps
-        document.getElementById('updateStep1').style.display = 'block';
-        document.getElementById('updateStep2').style.display = 'none';
-        document.getElementById('updateStep3').style.display = 'none';
-        document.getElementById('updateStep4').style.display = 'none';
+        ['updateStep1','updateStep2','updateStep3','updateStep4'].forEach(id => document.getElementById(id).classList.add('hidden'));
+        document.getElementById('updateStep1').classList.remove('hidden');
         document.getElementById('updateModal').showModal();
-      }).catch(e => {
-        mdui.snackbar({ message: 'Failed to fetch update info: ' + e });
-      });
+      }).catch(e => snackbar('Failed: ' + e));
     }
-
-    function closeUpdateModal() {
-      document.getElementById('updateModal').close();
-    }
-
+    function closeUpdateModal() { document.getElementById('updateModal').close(); }
     async function startUpdate() {
-      document.getElementById('updateStep1').style.display = 'none';
-      document.getElementById('updateStep2').style.display = 'block';
+      document.getElementById('updateStep1').classList.add('hidden');
+      document.getElementById('updateStep2').classList.remove('hidden');
       document.getElementById('updatePhase').textContent = 'Downloading update...';
-      document.getElementById('updateDetail').textContent = 'Fetching new version from GitHub...';
-
+      document.getElementById('updateDetail').textContent = 'Fetching from GitHub...';
       try {
-        const res = await fetch('/api/admin/self_update/perform', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ force: false })
-        });
+        const res = await fetch('/api/admin/self_update/perform', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force:false}) });
         const data = await res.json();
-
-        if (!data.ok) {
-          document.getElementById('updateStep2').style.display = 'none';
-          document.getElementById('updateStep1').style.display = 'block';
-          mdui.snackbar({ message: data.error || 'Update failed' });
-          return;
-        }
-
-        document.getElementById('updatePhase').textContent = 'Update applied, waiting for restart...';
-        document.getElementById('updateDetail').textContent = data.message || 'Server is restarting...';
-
-        // Wait a bit for server to start shutting down
+        if (!data.ok) { document.getElementById('updateStep2').classList.add('hidden'); document.getElementById('updateStep1').classList.remove('hidden'); snackbar(data.error || 'Failed'); return; }
+        document.getElementById('updatePhase').textContent = 'Applied, waiting for restart...';
+        document.getElementById('updateDetail').textContent = data.message || 'Restarting...';
         await new Promise(r => setTimeout(r, 2000));
-
-        // Now poll until server responds 200
-        document.getElementById('updateStep2').style.display = 'none';
-        document.getElementById('updateStep3').style.display = 'block';
+        document.getElementById('updateStep2').classList.add('hidden');
+        document.getElementById('updateStep3').classList.remove('hidden');
         document.getElementById('waitingPhase').textContent = 'Waiting for server to restart...';
-
         let attempts = 0;
-        const maxAttempts = 60; // 60 * 2s = 120s max
-        let serverBack = false;
-
-        while (attempts < maxAttempts) {
+        while (attempts < 60) {
           attempts++;
-          document.getElementById('updateDetail').textContent = `Polling... attempt ${attempts}/${maxAttempts}`;
           try {
-            const pingRes = await fetch('/api/admin/self_update/check', { cache: 'no-store' });
-            if (pingRes.ok) {
-              const pingData = await pingRes.json();
-              serverBack = true;
-              document.getElementById('newVersionInfo').textContent = `New version: ${(pingData.local_sha||'').slice(0,7)}`;
-              break;
+            const r = await fetch('/api/admin/self_update/check', { cache:'no-store' });
+            if (r.ok) {
+              const d = await r.json();
+              document.getElementById('newVersionInfo').textContent = `New: ${(d.local_sha||'').slice(0,7)}`;
+              document.getElementById('updateStep3').classList.add('hidden');
+              document.getElementById('updateStep4').classList.remove('hidden');
+              snackbar('Update complete!');
+              return;
             }
-          } catch (e) {
-            // Server not ready yet
-          }
+          } catch(e) {}
           await new Promise(r => setTimeout(r, 2000));
         }
-
-        if (serverBack) {
-          document.getElementById('updateStep3').style.display = 'none';
-          document.getElementById('updateStep4').style.display = 'block';
-          mdui.snackbar({ message: 'Update complete! Click to reload.' });
-        } else {
-          document.getElementById('updateStep3').style.display = 'none';
-          document.getElementById('updateStep1').style.display = 'block';
-          document.getElementById('waitingPhase').textContent = 'Timeout - server did not respond';
-          mdui.snackbar({ message: 'Server did not come back in time. Check manually.' });
-        }
-
-      } catch (e) {
-        document.getElementById('updateStep2').style.display = 'none';
-        document.getElementById('updateStep1').style.display = 'block';
-        mdui.snackbar({ message: 'Update failed: ' + e });
+        document.getElementById('updateStep3').classList.add('hidden');
+        document.getElementById('updateStep1').classList.remove('hidden');
+        snackbar('Server did not come back in time');
+      } catch(e) {
+        document.getElementById('updateStep2').classList.add('hidden');
+        document.getElementById('updateStep1').classList.remove('hidden');
+        snackbar('Update failed: ' + e);
       }
     }
-
     async function saveSelfUpdateConfig() {
       const v = document.getElementById('selfMainInput').value.trim();
-      if (!v) { mdui.snackbar({ message: 'Enter a filename like app.py' }); return; }
+      if (!v) { snackbar('Enter a filename'); return; }
       try {
-        const res = await fetch('/api/admin/self_update/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({main_file: v})});
-        const data = await res.json();
-        if (data.ok) {
-          mdui.snackbar({ message: 'Saved as ' + data.detected });
-          checkSelfUpdate();
-        } else {
-          mdui.snackbar({ message: data.error || 'Save failed' });
-        }
-      } catch(e){ mdui.snackbar({ message: 'Save failed: '+e }); }
+        const data = await (await fetch('/api/admin/self_update/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({main_file:v}) })).json();
+        snackbar(data.ok ? 'Saved as ' + data.detected : (data.error || 'Failed'));
+        if (data.ok) checkSelfUpdate();
+      } catch(e) { snackbar('Failed: ' + e); }
     }
 
-    function reloadAll() {
-      _logTotal = 0;
-      loadCaches();
-      loadLogs();
-      loadCrashLogs();
-      loadFiles();
-      loadServerInfo();
-      loadNodes();
-      loadJwtPool();
-      checkSelfUpdate();
-      mdui.snackbar({ message: 'Refreshed logs and caches' });
-    }
+    // --- Reload All ---
+    function reloadAll() { _logTotal = 0; loadServerInfo(); loadLogs(); loadCrashLogs(); loadCaches(); loadNodes(); loadJwtPool(); loadFiles(); checkSelfUpdate(); snackbar('Refreshed'); }
 
-    function escapeHtml(str) {
-      return (str || '').replace(/[&<>'"]/g, 
-        tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
-      );
-    }
+    // --- Material Symbols font (replaces mdui-icon) ---
+    const msLink = document.createElement('link');
+    msLink.rel = 'stylesheet';
+    msLink.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap';
+    document.head.appendChild(msLink);
+    const msStyle = document.createElement('style');
+    msStyle.textContent = '.material-symbols-outlined { font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20; }';
+    document.head.appendChild(msStyle);
 
-    // Blue (Material 500) primary -- overrides the default pink across every
-    // mdui component; the :root --mdui-color-primary above covers plain CSS.
-    if (window.mdui && mdui.setColorScheme) {
-      mdui.setColorScheme('#2196f3');
-    }
-
-    // Auto poll logs (2s) and caches (10s)
+    // --- Init ---
+    loadServerInfo();
+    loadLogs();
+    loadCaches();
     setInterval(loadLogs, 2000);
     setInterval(loadCaches, 10000);
     setInterval(loadServerInfo, 10000);
     setInterval(loadCrashLogs, 5000);
     setInterval(loadNodes, 10000);
     setInterval(loadJwtPool, 15000);
-    loadCaches();
-    loadLogs();
-    loadServerInfo();
-    loadCrashLogs();
-    loadFiles();
-    loadNodes();
-    loadJwtPool();
-    checkSelfUpdate();
   </script>
 </body>
 </html>
