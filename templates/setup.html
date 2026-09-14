@@ -1,88 +1,37 @@
 ﻿<!DOCTYPE html>
-<html lang="en" class="mdui-theme-dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTM Dashboard - Setup</title>
-  <link rel="stylesheet" href="https://unpkg.com/mdui@2/mdui.css">
-  <script src="https://unpkg.com/mdui@2/mdui.global.js"></script>
-  <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: rgb(var(--mdui-color-surface));
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    .setup-card {
-      width: 100%;
-      max-width: 400px;
-      padding: 40px 36px 32px;
-      background: rgb(var(--mdui-color-surface-container));
-      border-radius: 28px;
-      box-shadow: 0 8px 32px rgba(0,0,0,.4);
-    }
-    h1 {
-      text-align: center;
-      font-size: 22px;
-      font-weight: 600;
-      color: rgb(var(--mdui-color-on-surface));
-      margin: 0 0 6px;
-    }
-    .subtitle {
-      text-align: center;
-      font-size: 13px;
-      color: rgb(var(--mdui-color-on-surface-variant));
-      margin-bottom: 32px;
-    }
-    .error-msg {
-      background: rgba(var(--mdui-color-error), 0.15);
-      color: rgb(var(--mdui-color-error));
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 13px;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    mdui-text-field { width: 100%; margin-bottom: 16px; }
-    mdui-button { width: 100%; margin-top: 8px; }
-  </style>
+  <title>YTM Lyrics - Setup</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <div class="setup-card">
-    <h1>Set Admin Password</h1>
-    <p class="subtitle">First time setup — choose a password to protect the dashboard.</p>
+<body class="bg-base-200 min-h-screen flex items-center justify-center p-4">
+  <div class="card bg-base-100 border border-base-300 shadow-xl w-full max-w-sm">
+    <div class="card-body">
+      <div class="text-center mb-4">
+        <svg class="w-12 h-12 mx-auto text-primary mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+        <h1 class="text-xl font-bold">Set Admin Password</h1>
+        <p class="text-sm opacity-50 mt-1">First time setup. Choose a password to protect the dashboard.</p>
+      </div>
 
-    {% if error %}
-    <div class="error-msg">
-      <mdui-icon name="error_outline"></mdui-icon>
-      {{ error }}
+      {% if error %}
+      <div class="alert alert-error mb-4 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        <span>{{ error }}</span>
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/setup">
+        <input type="password" name="password" placeholder="New password" autofocus class="input input-bordered w-full mb-3" />
+        <input type="password" name="password2" placeholder="Confirm password" class="input input-bordered w-full mb-4" />
+        <button type="submit" class="btn btn-primary w-full gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          Set Password
+        </button>
+      </form>
     </div>
-    {% endif %}
-
-    <form method="POST" action="/setup">
-      <mdui-text-field
-        type="password"
-        name="password"
-        label="New password"
-        autofocus
-        clearable
-      ></mdui-text-field>
-      <mdui-text-field
-        type="password"
-        name="password2"
-        label="Confirm password"
-        clearable
-      ></mdui-text-field>
-      <mdui-button type="submit" variant="filled">
-        <mdui-icon slot="icon" name="lock"></mdui-icon>
-        Set Password
-      </mdui-button>
-    </form>
   </div>
 </body>
 </html>
