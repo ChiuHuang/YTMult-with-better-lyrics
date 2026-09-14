@@ -224,9 +224,33 @@ def admin_nodes_generate():
 
     script = _render_node_script(node_id, node_key)
 
-    resp = Response(script, mimetype='text/x-python')
-    resp.headers['Content-Disposition'] = f'attachment; filename="node_{node_id}.py"'
-    return resp
+    xfp = request.headers.get('X-Forwarded-Proto', '')
+    scheme = 'wss' if (request.is_secure or xfp == 'https') else 'ws'
+    ws_url = f"{scheme}://{request.host}/ws/node"
+    http_url = f"{'https' if (request.is_secure or xfp == 'https') else 'http'}://{request.host}"
+
+    import base64
+    script_b64 = base64.b64encode(script.encode()).decode()
+
+    return jsonify({
+        'ok': True,
+        'node_id': node_id,
+        'node_key': node_key,
+        'ws_url': ws_url,
+        'server_url': http_url,
+        'script_b64': script_b64,
+        'filename': f'node_{node_id}.py',
+        'deploy_one_liner': (
+            f'curl -fsSL "{http_url}/api/admin/nodes/generate/{node_id}?key={node_key}" '
+            f'-o ~/ytmnode/node.py && pip3 install -q websocket-client requests '
+            f'&& sudo tee /etc/systemd/system/ytmu-node.service > /dev/null <<\'EOF\'\n'
+            f'[Unit]\nDescription=YTMusicUltimate Lyrics Node\nAfter=network.target\n\n'
+            f'[Service]\nType=simple\nWorkingDirectory=%h/ytmnode\n'
+            f'ExecStart=/usr/bin/python3 %h/ytmnode/node.py\nRestart=always\n'
+            f'RestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF\n'
+            f'sudo systemctl daemon-reload && sudo systemctl enable --now ytmu-node'
+        ),
+    })
 
 
 # Backwards-compat with node builds before 6b2ab34: they derived the
