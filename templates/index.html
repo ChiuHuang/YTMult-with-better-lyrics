@@ -1,1082 +1,268 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" class="mdui-theme-auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTM Lyrics Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = { theme: { extend: { fontFamily: { sans: ['-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'] } } } }
-  </script>
-  <style>
-    * { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
-    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
-    .fade-in { animation: fadeIn .2s ease; }
-    .log-entry { animation: fadeIn .25s ease; }
-    .lyric-row { transition: all .25s ease; }
-    .lyric-row.active .orig-text { font-size:1.125rem; font-weight:700; color:#fff; }
-    .lyric-row.active .trans-text { opacity:.85; font-weight:400; }
-    .preview-player { width:1px; height:1px; overflow:hidden; position:absolute; opacity:0; pointer-events:none; }
-    .sidebar-link { transition: background .15s; }
-    .sidebar-link:hover { background: rgba(255,255,255,.08); }
-    .sidebar-link.active { background: rgba(59,130,246,.2); color: #60a5fa; border-right: 3px solid #3b82f6; }
-    pre { white-space: pre-wrap; word-break: break-all; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YTMusicUltimate - Dashboard</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='mdui/mdui.css') }}">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='dash.css') }}">
 </head>
-<body class="bg-base-200 text-base-content min-h-screen flex">
+<body>
+<mdui-layout full-height>
 
-  <!-- Sidebar -->
-  <aside class="w-60 bg-base-100 border-r border-base-300 flex flex-col shrink-0 h-screen sticky top-0 max-lg:hidden">
-    <div class="p-4 border-b border-base-300">
-      <div class="flex items-center gap-2 mb-1">
-        <svg class="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
-        <span class="font-bold text-lg">YTM Lyrics</span>
-      </div>
-      <div class="text-xs opacity-50" id="instanceChip">ID: ...</div>
-    </div>
-    <nav class="flex-1 p-2 space-y-0.5 overflow-y-auto">
-      <a class="sidebar-link active flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="preview" onclick="switchTab('preview')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        Live Preview
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="logs" onclick="switchTab('logs')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-        Live Logs
-        <span class="badge badge-sm badge-primary ml-auto" id="logCountBadge">0</span>
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="crash" onclick="switchTab('crash')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-        Crash Logs
-        <span class="badge badge-sm badge-error ml-auto" id="crashBadge">0</span>
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="cache" onclick="switchTab('cache')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
-        Cached Songs
-        <span class="badge badge-sm ml-auto" id="cacheBadge">0</span>
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="nodes" onclick="switchTab('nodes')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-        Nodes
-        <span class="badge badge-sm ml-auto" id="nodesBadge">0/0</span>
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="files" onclick="switchTab('files')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-        All Files
-      </a>
-      <a class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-l-lg cursor-pointer text-sm font-medium" data-tab="system" onclick="switchTab('system')">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        Config & Update
-      </a>
-    </nav>
-    <div class="p-3 border-t border-base-300 space-y-1">
-      <div class="flex items-center gap-2 text-xs opacity-60 mb-2">
-        <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-        <span id="statusChip">Online</span>
-      </div>
-      <button class="btn btn-ghost btn-xs w-full justify-start gap-2" onclick="location.reload()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Refresh</button>
-      <button class="btn btn-ghost btn-xs w-full justify-start gap-2" onclick="toggleTheme()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg><span id="themeLabel">Light Mode</span></button>
-      <button class="btn btn-ghost btn-xs w-full justify-start gap-2 text-error" onclick="fetch('/logout',{method:'POST'}).then(()=>location.href='/login')"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>Sign Out</button>
-    </div>
-  </aside>
+  <mdui-top-app-bar id="topbar" variant="medium" scroll-behavior="shrink elevate">
+    <mdui-button-icon id="nav-drawer-btn" icon="menu"></mdui-button-icon>
+    <mdui-top-app-bar-title>
+      YTMusicUltimate<span class="topbar-sub">admin</span>
+      <span slot="label-large">YTMusicUltimate</span>
+    </mdui-top-app-bar-title>
+    <span class="spacer"></span>
+    <span class="instance-chip" id="instance-chip"><mdui-icon name="memory"></mdui-icon> connecting...</span>
+    <mdui-button-icon id="theme-btn" icon="brightness_auto"></mdui-button-icon>
+    <mdui-button-icon id="logout-btn" icon="logout"></mdui-button-icon>
+  </mdui-top-app-bar>
 
-  <!-- Mobile top bar -->
-  <div class="lg:hidden fixed top-0 inset-x-0 z-50 bg-base-100 border-b border-base-300 px-4 py-3 flex items-center gap-3">
-    <div class="drawer-content flex-1">
-      <label for="mobile-drawer" class="btn btn-ghost btn-sm btn-square">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-      </label>
-    </div>
-    <span class="font-bold">YTM Lyrics</span>
-    <span class="badge badge-sm badge-success" id="statusChipMobile">Online</span>
-  </div>
-
-  <!-- Mobile drawer -->
-  <input id="mobile-drawer" type="checkbox" class="drawer-toggle" />
-  <div class="drawer-side z-50 lg:hidden">
-    <label for="mobile-drawer" class="drawer-overlay"></label>
-    <aside class="menu bg-base-100 w-64 min-h-full p-3">
-      <li><a onclick="switchTab('preview');document.getElementById('mobile-drawer').checked=false">Live Preview</a></li>
-      <li><a onclick="switchTab('logs');document.getElementById('mobile-drawer').checked=false">Live Logs</a></li>
-      <li><a onclick="switchTab('crash');document.getElementById('mobile-drawer').checked=false">Crash Logs</a></li>
-      <li><a onclick="switchTab('cache');document.getElementById('mobile-drawer').checked=false">Cached Songs</a></li>
-      <li><a onclick="switchTab('nodes');document.getElementById('mobile-drawer').checked=false">Nodes</a></li>
-      <li><a onclick="switchTab('files');document.getElementById('mobile-drawer').checked=false">All Files</a></li>
-      <li><a onclick="switchTab('system');document.getElementById('mobile-drawer').checked=false">Config & Update</a></li>
-    </aside>
-  </div>
-
-  <!-- Main Content -->
-  <main class="flex-1 min-w-0 lg:h-screen lg:overflow-y-auto pt-14 lg:pt-0">
-    <div class="max-w-[1400px] mx-auto p-4 lg:p-6 space-y-4">
-
-      <!-- ======================== TAB: PREVIEW ======================== -->
-      <div id="tab-preview" class="tab-content">
-        <!-- Search Bar -->
-        <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
-          <div class="flex gap-3 items-center flex-wrap">
-            <input id="videoInput" type="text" placeholder="YouTube Video ID or URL (e.g. aT8UPGkEVeY)" class="input input-bordered flex-1 min-w-[260px]" />
-            <div class="join">
-              <input class="join-item btn btn-sm" type="radio" name="mode" value="fast" aria-label="Fast (LRCLIB)" />
-              <input class="join-item btn btn-sm" type="radio" name="mode" value="full" checked aria-label="Pro (Cubey)" />
-            </div>
-            <label class="cursor-pointer label gap-2">
-              <input id="forceReload" type="checkbox" class="checkbox checkbox-sm checkbox-primary" />
-              <span class="label-text text-xs">Force</span>
-            </label>
-            <button class="btn btn-primary btn-sm gap-2" onclick="fetchLiveLyrics()">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              Search
-            </button>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 xl:grid-cols-5 gap-4">
-          <!-- Lyrics Panel -->
-          <div class="xl:col-span-3 bg-base-100 rounded-2xl p-5 border border-base-300">
-            <div class="flex justify-between items-start mb-3">
-              <div>
-                <h2 class="text-lg font-bold" id="songTitle">Ready to Search</h2>
-                <p class="text-sm opacity-60" id="songArtist">Enter video ID above or choose from cached list</p>
-              </div>
-              <div id="sourceBadge"></div>
-            </div>
-            <div id="youtubePlayer" class="preview-player" aria-hidden="true"></div>
-            <div class="flex items-center gap-3 mb-4">
-              <button class="btn btn-ghost btn-sm btn-circle" id="playSimBtn" onclick="togglePlayback()">
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              </button>
-              <input id="timeSlider" type="range" min="0" max="300" value="0" class="range range-primary range-sm flex-1" oninput="onSeek(this.value)" disabled />
-              <span id="timeDisplay" class="text-xs font-mono w-20 text-right opacity-70">0:00 / 0:00</span>
-            </div>
-            <div class="bg-base-200 rounded-xl h-[480px] overflow-y-auto p-3 scroll-smooth" id="lyricsList">
-              <div class="text-center pt-24 opacity-40">
-                <svg class="w-12 h-12 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
-                <div class="text-sm">No lyrics loaded yet</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Server Info + Quick Actions -->
-          <div class="xl:col-span-2 space-y-4">
-            <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
-              <div class="flex items-center gap-3 mb-3">
-                <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm font-semibold truncate">Instance: <span id="instanceId" class="font-mono">...</span></div>
-                  <div class="text-xs opacity-50">Started: <span id="instanceStart">...</span></div>
-                </div>
-              </div>
-              <div class="flex items-center gap-2 text-xs opacity-50 mb-3">
-                <span>Uptime: <span id="instanceUptime">...</span></span>
-                <span>|</span>
-                <span>Logs: <span id="instanceLogs">...</span></span>
-              </div>
-              <div class="flex flex-wrap gap-2">
-                <button class="btn btn-outline btn-xs gap-1" onclick="downloadLogs()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Logs</button>
-                <button class="btn btn-outline btn-xs gap-1" onclick="switchTab('crash')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>Crash</button>
-                <button class="btn btn-outline btn-xs gap-1" onclick="switchTab('files')"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>Files</button>
-              </div>
-            </div>
-
-            <!-- Mini cached list -->
-            <div class="bg-base-100 rounded-2xl p-4 border border-base-300">
-              <div class="flex justify-between items-center mb-3">
-                <span class="text-sm font-semibold">Recent Caches</span>
-                <button class="btn btn-ghost btn-xs" onclick="switchTab('cache')">View All</button>
-              </div>
-              <div id="miniCacheList" class="space-y-1 max-h-64 overflow-y-auto text-xs"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: LOGS ======================== -->
-      <div id="tab-logs" class="tab-content hidden">
-        <div class="bg-base-100 rounded-2xl border border-base-300">
-          <div class="p-4 border-b border-base-300 flex items-center justify-between flex-wrap gap-2">
-            <div class="flex items-center gap-2">
-              <h2 class="text-sm font-semibold">Live Server Activity</h2>
-              <span class="badge badge-sm badge-primary" id="logCountBadge2">0</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <label class="cursor-pointer label gap-1"><input id="logAutoScroll" type="checkbox" class="checkbox checkbox-xs checkbox-primary" checked /><span class="label-text text-xs">Auto-scroll</span></label>
-              <button class="btn btn-ghost btn-xs" onclick="downloadLogs()">Download</button>
-              <button class="btn btn-ghost btn-xs text-error" onclick="clearLogs()">Clear</button>
-            </div>
-          </div>
-          <div class="bg-[#0d1117] rounded-b-2xl p-2 h-[600px] overflow-y-auto font-mono text-xs" id="logBox"></div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: CRASH ======================== -->
-      <div id="tab-crash" class="tab-content hidden">
-        <div class="bg-base-100 rounded-2xl border border-base-300">
-          <div class="p-4 border-b border-base-300 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <h2 class="text-sm font-semibold">Crash & Exception Logs</h2>
-              <span class="badge badge-sm badge-error" id="crashBadge2">0</span>
-            </div>
-            <div class="flex gap-2">
-              <button class="btn btn-ghost btn-xs" onclick="downloadCrash()">Download</button>
-              <button class="btn btn-ghost btn-xs text-error" onclick="clearCrash()">Clear</button>
-            </div>
-          </div>
-          <div class="bg-[#1a0a0a] rounded-b-2xl p-2 h-[600px] overflow-y-auto font-mono text-xs" id="crashBox"></div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: CACHE ======================== -->
-      <div id="tab-cache" class="tab-content hidden">
-        <div class="bg-base-100 rounded-2xl border border-base-300">
-          <div class="p-4 border-b border-base-300 flex items-center justify-between">
-            <span class="text-sm font-semibold">Saved file caches (cache/lyrics/*.json)</span>
-            <button class="btn btn-outline btn-xs gap-1" onclick="clearAllCaches()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>Clear Not-Found</button>
-          </div>
-          <div id="cacheProgress" class="hidden p-4"><progress class="progress progress-primary w-full"></progress></div>
-          <div class="p-2 h-[600px] overflow-y-auto" id="cacheList">
-            <div class="text-center py-12 opacity-40 text-sm">Loading caches...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: NODES ======================== -->
-      <div id="tab-nodes" class="tab-content hidden">
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <!-- Node list -->
-          <div class="xl:col-span-2 bg-base-100 rounded-2xl border border-base-300">
-            <div class="p-4 border-b border-base-300 flex items-center justify-between">
-              <span class="text-sm font-semibold">Worker Nodes</span>
-              <div class="flex gap-2">
-                <button class="btn btn-ghost btn-xs" onclick="loadNodes()">Refresh</button>
-                <button class="btn btn-primary btn-xs gap-1" onclick="promptNewNode()"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>New Node</button>
-              </div>
-            </div>
-            <div class="p-2 h-[500px] overflow-y-auto" id="nodeList">
-              <div class="text-center py-12 opacity-40 text-sm">Loading nodes...</div>
-            </div>
-          </div>
-
-          <!-- JWT Pool + Playlist Cache -->
-          <div class="space-y-4">
-            <div class="bg-base-100 rounded-2xl border border-base-300 p-4">
-              <h3 class="text-sm font-semibold mb-2">Cubey JWT Pool</h3>
-              <p class="text-xs opacity-50 mb-3">Contributed tokens for fallback. Auto-rechecked, dead tokens evicted.</p>
-              <div class="flex gap-2 mb-3">
-                <input id="jwtInput" type="text" placeholder="Paste Cubey JWT" class="input input-bordered input-sm flex-1" />
-                <button class="btn btn-primary btn-sm" onclick="contributeJwt()">Add</button>
-              </div>
-              <div class="flex gap-1 mb-2">
-                <button class="btn btn-ghost btn-xs" onclick="checkJwtPool()">Re-check</button>
-                <button class="btn btn-ghost btn-xs" onclick="loadJwtPool()">Refresh</button>
-              </div>
-              <div class="max-h-40 overflow-y-auto space-y-1" id="jwtList">
-                <div class="text-xs opacity-40 text-center py-2">No tokens</div>
-              </div>
-            </div>
-
-            <div class="bg-base-100 rounded-2xl border border-base-300 p-4">
-              <h3 class="text-sm font-semibold mb-2">Playlist Cache</h3>
-              <p class="text-xs opacity-50 mb-3">Warm cache for a public playlist. Runs in background.</p>
-              <div class="space-y-2">
-                <input id="playlistInput" type="text" placeholder="Playlist URL or ID" class="input input-bordered input-sm w-full" />
-                <div class="flex gap-2">
-                  <input id="playlistLang" type="text" value="zh-TW" class="input input-bordered input-sm w-24" />
-                  <button class="btn btn-primary btn-sm flex-1" onclick="startPlaylistCache()">Cache</button>
-                </div>
-              </div>
-              <div id="playlistJobMsg" class="text-xs opacity-70 mt-2"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: FILES ======================== -->
-      <div id="tab-files" class="tab-content hidden">
-        <div class="bg-base-100 rounded-2xl border border-base-300">
-          <div class="p-4 border-b border-base-300 flex items-center justify-between">
-            <span class="text-sm font-semibold">Logs & Files</span>
-            <button class="btn btn-ghost btn-xs" onclick="loadFiles()">Refresh</button>
-          </div>
-          <div class="p-2 h-[600px] overflow-y-auto" id="fileList">
-            <div class="text-center py-12 opacity-40 text-sm">Loading files...</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ======================== TAB: SYSTEM ======================== -->
-      <div id="tab-system" class="tab-content hidden">
-        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <!-- Providers -->
-          <div class="bg-base-100 rounded-2xl border border-base-300 p-5">
-            <h3 class="text-sm font-semibold mb-3">Providers</h3>
-            <div class="space-y-2 text-xs">
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-primary badge-sm">0</span><div><div class="font-semibold">Cubey API</div><div class="opacity-50">Musixmatch/NetEase/KuGou (Auto JWT)</div></div></div>
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-secondary badge-sm">1</span><div><div class="font-semibold">LRCLIB</div><div class="opacity-50">Multi-query cleaned metadata + Synced LRC</div></div></div>
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-accent badge-sm">2</span><div><div class="font-semibold">Unison Community</div><div class="opacity-50">Synced LRC / TTML / AMLL XML</div></div></div>
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-info badge-sm">3</span><div><div class="font-semibold">YouTube Music</div><div class="opacity-50">ytmusicapi fallback</div></div></div>
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-warning badge-sm">T</span><div><div class="font-semibold">Translation Engine</div><div class="opacity-50">Cohere Command A (Pro) / Google (Fast)</div></div></div>
-              <div class="flex items-center gap-3 p-2 rounded-lg bg-base-200"><span class="badge badge-ghost badge-sm">L</span><div><div class="font-semibold">Log Files</div><div class="opacity-50">server.log, crash.log, UI_DUMP_*.txt</div></div></div>
-            </div>
-            <div class="text-xs opacity-40 mt-3">Instance: <span id="sysInstance" class="font-mono">...</span> | Start: <span id="sysStart">...</span> | Uptime: <span id="sysUptime">...</span></div>
-          </div>
-
-          <!-- Self-Update -->
-          <div class="bg-base-100 rounded-2xl border border-base-300 p-5">
-            <h3 class="text-sm font-semibold mb-3">Server Self-Update</h3>
-            <div class="text-xs opacity-60 space-y-1 mb-4">
-              <div>Main: <span id="selfMainFile" class="font-mono opacity-100">...</span></div>
-              <div>Local: <span id="selfLocalSha" class="font-mono">...</span></div>
-              <div>Remote: <span id="selfRemoteSha" class="font-mono">...</span></div>
-              <div>Parent: <span id="selfParentSha" class="font-mono">...</span></div>
-              <div><span id="selfUpdateStatus" class="font-semibold"></span></div>
-            </div>
-            <div class="flex gap-2 mb-3">
-              <input id="selfMainInput" type="text" placeholder="proxy_server.py" class="input input-bordered input-sm flex-1" />
-              <button class="btn btn-outline btn-sm" onclick="saveSelfUpdateConfig()">Save</button>
-            </div>
-            <div class="flex gap-2 flex-wrap">
-              <button class="btn btn-outline btn-sm gap-1" onclick="checkSelfUpdate()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Check</button>
-              <button class="btn btn-primary btn-sm gap-1" onclick="showUpdateModal()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Update Now</button>
-            </div>
-            <div id="selfUpdateMsg" class="text-xs opacity-70 mt-3"></div>
-            <div class="divider my-2"></div>
-            <div class="flex gap-2 flex-wrap">
-              <button class="btn btn-outline btn-xs" onclick="downloadLogs()">Download All Logs</button>
-              <button class="btn btn-outline btn-xs" onclick="downloadCrash()">Download Crash Log</button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-    </div>
-  </main>
-
-  <!-- ======================== MODALS ======================== -->
-
-  <!-- Node Modal -->
-  <dialog id="nodeModal" class="modal">
-    <div class="modal-box bg-base-100 border border-base-300 max-w-lg">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-lg"><i class="fa-solid fa-server mr-2"></i>Node Created</h3>
-        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><i class="fa-solid fa-xmark"></i></button></form>
-      </div>
-      <div class="space-y-3">
-        <div>
-          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Node ID</label>
-          <div class="font-mono text-sm mt-1 p-2 bg-base-200 rounded-lg break-all" id="modalNodeId"></div>
-        </div>
-        <div>
-          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Server URL</label>
-          <div class="font-mono text-sm mt-1 p-2 bg-base-200 rounded-lg break-all" id="modalServerUrl"></div>
-        </div>
-        <div>
-          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Admin Password</label>
-          <input id="modalPassword" type="password" placeholder="Enter password to embed in command" class="input input-bordered input-sm w-full mt-1" oninput="updateDeployOneLiner()" />
-        </div>
-        <div>
-          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Deploy Command</label>
-          <div class="relative mt-1">
-            <pre id="modalOneLiner" class="text-xs leading-relaxed p-3 bg-[#0d1117] text-[#c9d1d9] rounded-lg overflow-x-auto max-h-48"></pre>
-            <button class="btn btn-ghost btn-xs absolute top-1 right-1" title="Copy" onclick="navigator.clipboard.writeText(document.getElementById('modalOneLiner').textContent).then(()=>showToast('Copied!'))"><i class="fa-regular fa-copy"></i></button>
-          </div>
-        </div>
-      </div>
-      <div class="modal-action">
-        <form method="dialog"><button class="btn btn-ghost btn-sm">Close</button></form>
-        <button class="btn btn-primary btn-sm gap-1" id="modalDownloadBtn"><i class="fa-solid fa-download"></i> Download node.py</button>
+  <mdui-navigation-drawer id="drawer" open close-on-esc close-on-overlay-click>
+    <div class="drawer-head">
+      <div class="drawer-logo">YT</div>
+      <div>
+        <div style="font-weight:600; font-size:14px;">YTMusicUltimate</div>
+        <div style="font-size:11.5px; color:rgb(var(--mdui-color-on-surface-variant));">admin console</div>
       </div>
     </div>
-    <form method="dialog" class="modal-backdrop"><button>close</button></form>
-  </dialog>
+    <mdui-list id="nav-list">
+      <mdui-list-item icon="dashboard" active data-page="overview">Overview</mdui-list-item>
+      <mdui-list-item icon="terminal" data-page="logs">Live Logs</mdui-list-item>
+      <mdui-list-item icon="storage" data-page="caches">Caches</mdui-list-item>
+      <mdui-list-item icon="hub" data-page="nodes">Nodes</mdui-list-item>
+      <mdui-list-item icon="key" data-page="jwt">JWT Pool</mdui-list-item>
+      <mdui-list-item icon="system_update" data-page="update">Self-Update</mdui-list-item>
+      <mdui-list-item icon="folder" data-page="files">Files</mdui-list-item>
+      <mdui-list-item icon="bug_report" data-page="crashes">Crashes</mdui-list-item>
+    </mdui-list>
+    <div class="drawer-foot">server dashboard</div>
+  </mdui-navigation-drawer>
 
-  <!-- Update Modal -->
-  <dialog id="updateModal" class="modal">
-    <div class="modal-box bg-base-100 border border-base-300 max-w-lg">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-lg">Server Update</h3>
-        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></form>
-      </div>
+  <mdui-layout-main>
+    <main id="main-content">
 
-      <!-- Step 1: Confirm -->
-      <div id="updateStep1">
-        <div class="text-xs opacity-60 space-y-1 mb-4">
-          <div>Local:  <span id="modalLocalSha" class="font-mono"></span></div>
-          <div>Remote: <span id="modalRemoteSha" class="font-mono"></span></div>
-          <div>Parent: <span id="modalParentSha" class="font-mono"></span></div>
+      <!-- ===================== overview ===================== -->
+      <section id="page-overview" class="page">
+        <div class="stat-grid stagger">
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="schedule"></mdui-icon>
+            <div>
+              <div class="stat-label">Uptime</div>
+              <div class="stat-value mono" id="stat-uptime">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="article"></mdui-icon>
+            <div>
+              <div class="stat-label">Structured logs</div>
+              <div class="stat-value mono" id="stat-logs">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="call_received"></mdui-icon>
+            <div>
+              <div class="stat-label">Recent requests</div>
+              <div class="stat-value mono" id="stat-req">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="bug_report"></mdui-icon>
+            <div>
+              <div class="stat-label">Crashes</div>
+              <div class="stat-value mono" id="stat-crash">--</div>
+            </div>
+          </mdui-card>
         </div>
-        <div class="modal-action">
-          <form method="dialog"><button class="btn btn-ghost btn-sm">Cancel</button></form>
-          <button class="btn btn-primary btn-sm gap-1" onclick="startUpdate()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Update Now</button>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Server</span>
+            <span class="pill pill-ok" id="info-instance"><span class="dot"></span> running</span>
+            <span class="spacer"></span>
+            <mdui-button id="info-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="server-kv" class="kv"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Recent lyrics requests</span>
+          </div>
+          <div class="panel-body">
+            <div id="recent-reqs" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== live logs ===================== -->
+      <section id="page-logs" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Live logs</span>
+            <span class="pill pill-warn" id="log-conn">connecting...</span>
+            <span class="spacer"></span>
+            <mdui-button id="log-pause" variant="text" icon="pause">Pause</mdui-button>
+            <mdui-button id="log-download" variant="text" icon="download">Download</mdui-button>
+            <mdui-button id="log-clear" variant="text" icon="delete">Clear</mdui-button>
+          </div>
+          <div id="log-list" class="log-list"></div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== caches ===================== -->
+      <section id="page-caches" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Lyrics cache</span>
+            <span class="spacer"></span>
+            <mdui-text-field id="cache-search" variant="outlined" icon="search" placeholder="Filter song / artist / id" style="width:220px;"></mdui-text-field>
+            <mdui-button id="cache-clear-empty" variant="tonal" icon="delete_sweep">Clear empty</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="list-head lh-cache">
+              <span>Song</span><span>Source</span><span>Sync</span><span>Lines</span><span>Age</span><span>ID</span>
+            </div>
+            <div id="cache-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== nodes ===================== -->
+      <section id="page-nodes" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Lyrics nodes</span>
+            <span class="spacer"></span>
+            <mdui-button id="node-generate" variant="filled" icon="add_circle">Generate node</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="list-head lh-node">
+              <span>Label</span><span>ID</span><span>Last seen</span><span>Status</span>
+            </div>
+            <div id="node-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== jwt ===================== -->
+      <section id="page-jwt" class="page">
+        <div class="stat-grid">
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="key"></mdui-icon>
+            <div>
+              <div class="stat-label">Pooled JWTs</div>
+              <div class="stat-value mono" id="jwt-count">--</div>
+            </div>
+          </mdui-card>
         </div>
-      </div>
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Token pool</span>
+            <span class="spacer"></span>
+            <mdui-button id="jwt-contribute" variant="tonal" icon="add">Contribute</mdui-button>
+            <mdui-button id="jwt-check" variant="text" icon="health_and_safety">Check dead tokens</mdui-button>
+          </div>
+          <div class="panel-body" style="font-size:13px; color:rgb(var(--mdui-color-on-surface-variant));">
+            Tokens are shared with the Cubey provider. Raw tokens are never exposed here.
+          </div>
+        </mdui-card>
+      </section>
 
-      <!-- Step 2: Downloading -->
-      <div id="updateStep2" class="hidden">
-        <div class="text-sm font-semibold mb-3" id="updatePhase">Downloading update...</div>
-        <progress class="progress progress-primary w-full"></progress>
-        <div class="text-xs opacity-60 mt-2" id="updateDetail">Connecting...</div>
-      </div>
+      <!-- ===================== self-update ===================== -->
+      <section id="page-update" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Self-update</span>
+            <span class="pill pill-mute" id="update-status">unknown</span>
+            <span class="spacer"></span>
+            <mdui-button id="update-config" variant="text" icon="settings">Configure</mdui-button>
+            <mdui-button id="update-check" variant="text" icon="refresh">Check for updates</mdui-button>
+            <mdui-button id="update-perform" variant="filled" icon="system_update">Update &amp; restart</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="update-kv" class="kv"></div>
+          </div>
+        </mdui-card>
+      </section>
 
-      <!-- Step 3: Waiting -->
-      <div id="updateStep3" class="hidden text-center py-6">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
-        <div class="text-sm font-semibold mt-4" id="waitingPhase">Waiting for server to restart...</div>
-        <div class="text-xs opacity-50 mt-1">This may take 10-30 seconds</div>
-      </div>
+      <!-- ===================== files ===================== -->
+      <section id="page-files" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Log files</span>
+            <span class="pill pill-ok" id="cache-counts">-</span>
+            <span class="spacer"></span>
+            <mdui-button id="files-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="list-head lh-file">
+              <span>Name</span><span>Size</span><span>Modified</span><span></span>
+            </div>
+            <div id="file-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
 
-      <!-- Step 4: Done -->
-      <div id="updateStep4" class="hidden text-center py-6">
-        <svg class="w-16 h-16 mx-auto text-success mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <div class="text-sm font-semibold">Update complete!</div>
-        <div class="text-xs opacity-60 mt-1" id="newVersionInfo"></div>
-        <div class="modal-action justify-center">
-          <button class="btn btn-primary btn-sm gap-1" onclick="location.reload()"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Reload to New Version</button>
-        </div>
+      <!-- ===================== crashes ===================== -->
+      <section id="page-crashes" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Crash logs</span>
+            <span class="spacer"></span>
+            <mdui-button id="crash-download" variant="text" icon="download">Download logs</mdui-button>
+            <mdui-button id="crash-clear" variant="text" icon="delete">Clear</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="crash-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+    </main>
+  </mdui-layout-main>
+
+  <!-- ===================== dialogs ===================== -->
+  <mdui-dialog id="gen-dialog" headline="Node generated" close-on-esc close-on-overlay-click>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div class="kv">
+        <div class="k">Node ID</div>
+        <div class="v mono" id="gen-node-id">-</div>
+        <div class="k">Node key</div>
+        <div class="v mono" id="gen-node-key">-</div>
+      </div>
+      <span class="pill pill-warn" style="align-self:flex-start;">Node key is shown once -- store it before closing</span>
+      <div class="code-block" id="gen-code-block">
+        <pre>loading...</pre>
+        <mdui-button-icon id="gen-copy-btn" variant="tonal" icon="content_copy" class="copy-btn"></mdui-button-icon>
       </div>
     </div>
-    <form method="dialog" class="modal-backdrop"><button>close</button></form>
-  </dialog>
+    <mdui-button id="gen-close" slot="action">Done</mdui-button>
+  </mdui-dialog>
 
-  <!-- Toast -->
-  <div id="toast" class="toast toast-end hidden">
-    <div class="alert alert-success text-sm py-2"><span id="toastMsg"></span></div>
-  </div>
+  <mdui-dialog id="updateDialog" headline="Updating server" close-on-esc close-on-overlay-click>
+    <div id="updateDialogBody">
+      <div id="updateStageLine">Starting...</div>
+      <mdui-linear-progress id="update-progress" indeterminate></mdui-linear-progress>
+      <div id="pingStatus"><span class="live-dot"></span> Ready</div>
+    </div>
+    <mdui-button id="update-close-btn" slot="action">Close</mdui-button>
+  </mdui-dialog>
 
-  <!-- ======================== JAVASCRIPT ======================== -->
-  <script>
-    // --- State ---
-    let currentLyrics = [];
-    let isPlaying = false;
-    let currentSimTime = 0;
-    let songDuration = 0;
-    let youtubePlayer = null;
-    let pendingVideoId = '';
-    let isSeeking = false;
-    let activeTab = 'preview';
-
-    // --- YouTube API ---
-    const youtubeApiPromise = new Promise(resolve => {
-      window.onYouTubeIframeAPIReady = () => resolve();
-      const s = document.createElement('script');
-      s.src = 'https://www.youtube.com/iframe_api';
-      s.async = true;
-      document.head.appendChild(s);
-    });
-
-    // --- Tab switching ---
-    function switchTab(tab) {
-      activeTab = tab;
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-      const panel = document.getElementById('tab-' + tab);
-      if (panel) panel.classList.remove('hidden');
-      document.querySelectorAll('.sidebar-link').forEach(el => {
-        el.classList.toggle('active', el.dataset.tab === tab);
-      });
-      if (tab === 'logs') loadLogs();
-      if (tab === 'crash') loadCrashLogs();
-      if (tab === 'cache') loadCaches();
-      if (tab === 'nodes') { loadNodes(); loadJwtPool(); }
-      if (tab === 'files') loadFiles();
-      if (tab === 'system') checkSelfUpdate();
-    }
-
-    // --- Theme ---
-    function toggleTheme() {
-      const html = document.documentElement;
-      const current = html.getAttribute('data-theme');
-      const next = current === 'dark' ? 'light' : 'dark';
-      html.setAttribute('data-theme', next);
-      document.getElementById('themeLabel').textContent = next === 'dark' ? 'Light Mode' : 'Dark Mode';
-    }
-
-    // --- Toast ---
-    function showToast(msg) {
-      const t = document.getElementById('toast');
-      document.getElementById('toastMsg').textContent = msg;
-      t.classList.remove('hidden');
-      setTimeout(() => t.classList.add('hidden'), 2500);
-    }
-
-    // --- Snackbar compat ---
-    function snackbar(msg) { showToast(msg); }
-    window.mdui = { snackbar: (o) => showToast(o.message || '') };
-
-    // --- Helpers ---
-    function escapeHtml(s) {
-      return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c] || c));
-    }
-    function formatTime(sec) {
-      const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-      return `${m}:${s < 10 ? '0' : ''}${s}`;
-    }
-    function extractVideoId(input) {
-      if (!input) return '';
-      input = input.trim();
-      if (input.includes('youtube.com/watch?v=')) return new URL(input).searchParams.get('v') || input;
-      if (input.includes('youtu.be/')) return input.split('youtu.be/')[1].split('?')[0];
-      if (input.includes('music.youtube.com/watch?v=')) return new URL(input).searchParams.get('v') || input;
-      return input;
-    }
-    function timeAgo(iso) {
-      if (!iso) return 'never';
-      const s = (Date.now() - new Date(iso).getTime()) / 1000;
-      if (s < 60) return 'just now';
-      if (s < 3600) return Math.floor(s/60) + 'm ago';
-      if (s < 86400) return Math.floor(s/3600) + 'h ago';
-      return Math.floor(s/86400) + 'd ago';
-    }
-    function setTabCount(id, n) {
-      const el = document.getElementById(id);
-      if (el) el.textContent = n;
-    }
-
-    // --- Lyrics ---
-    async function fetchLiveLyrics(vid) {
-      const rawInput = vid || document.getElementById('videoInput').value;
-      const videoId = extractVideoId(rawInput);
-      if (!videoId) { snackbar('Please enter a video ID'); return; }
-      const mode = document.querySelector('input[name="mode"]:checked')?.value || 'full';
-      const force = document.getElementById('forceReload').checked;
-      document.getElementById('songTitle').textContent = `Fetching ${videoId}...`;
-      document.getElementById('songArtist').textContent = 'Querying providers...';
-      document.getElementById('lyricsList').innerHTML = '<div class="text-center pt-24"><span class="loading loading-spinner loading-lg"></span></div>';
-      loadPreview(videoId);
-      try {
-        let url = `/api/lyrics?v=${videoId}&lang=zh-TW`;
-        if (mode === 'fast') url += '&fast=1';
-        if (force) url += '&force=1';
-        const res = await fetch(url);
-        const data = await res.json();
-        renderLyrics(data);
-        loadCaches();
-      } catch (e) {
-        snackbar('Request failed: ' + e);
-        document.getElementById('songTitle').textContent = 'Fetch Error';
-        document.getElementById('songArtist').textContent = e.message;
-      }
-    }
-
-    function renderLyrics(data) {
-      document.getElementById('songTitle').textContent = data.song || 'Unknown Song';
-      document.getElementById('songArtist').textContent = data.artist || 'Unknown Artist';
-      const isSynced = data.synced, source = data.source || 'none';
-      const badgeClass = isSynced ? 'badge-success' : (source !== 'none' ? 'badge-warning' : 'badge-error');
-      document.getElementById('sourceBadge').innerHTML = `<span class="badge ${badgeClass} badge-sm gap-1">${source} ${isSynced ? '(Synced)' : ''}</span>`;
-      currentLyrics = data.lyrics || [];
-      if (!youtubePlayer) {
-        songDuration = currentLyrics.length > 0 ? (currentLyrics[currentLyrics.length - 1].time + 10) : 0;
-        document.getElementById('timeSlider').max = Math.ceil(songDuration || 1);
-      }
-      const listEl = document.getElementById('lyricsList');
-      if (!currentLyrics.length) { listEl.innerHTML = '<div class="text-center py-24 opacity-40 text-sm">No lyrics lines returned</div>'; return; }
-      listEl.innerHTML = currentLyrics.map((line, idx) => {
-        const text = escapeHtml(line.text || '');
-        return `<div class="lyric-row px-3 py-2 rounded-lg cursor-pointer opacity-30 hover:opacity-80 hover:bg-white/5 mb-1" id="lyric-${idx}" onclick="seekToLine(${line.time},${idx})">
-          <div class="text-[10px] opacity-40 font-mono mb-0.5">${formatTime(line.time || 0)}</div>
-          <div class="orig-text text-sm font-semibold leading-snug">${text}</div>
-          ${line.translated ? `<div class="trans-text text-xs opacity-50 mt-0.5">${escapeHtml(line.translated)}</div>` : ''}
-        </div>`;
-      }).join('');
-      currentSimTime = 0;
-      updatePlaybackUI();
-    }
-
-    function seekToLine(time, idx) {
-      currentSimTime = time;
-      document.getElementById('timeSlider').value = currentSimTime;
-      if (youtubePlayer && youtubePlayer.seekTo) youtubePlayer.seekTo(time, true);
-      highlightActiveLyric(idx);
-      updatePlaybackUI();
-    }
-    function onSeek(val) {
-      currentSimTime = parseFloat(val);
-      isSeeking = true;
-      syncActiveHighlight();
-      updatePlaybackUI();
-      if (youtubePlayer && youtubePlayer.seekTo) youtubePlayer.seekTo(currentSimTime, true);
-      setTimeout(() => { isSeeking = false; }, 150);
-    }
-    function togglePlayback() {
-      if (!youtubePlayer) { snackbar('Load a YouTube video first'); return; }
-      if (isPlaying) youtubePlayer.pauseVideo(); else youtubePlayer.playVideo();
-    }
-    async function loadPreview(videoId) {
-      pendingVideoId = videoId;
-      await youtubeApiPromise;
-      if (pendingVideoId !== videoId) return;
-      if (youtubePlayer) { youtubePlayer.loadVideoById(videoId); }
-      else {
-        youtubePlayer = new YT.Player('youtubePlayer', {
-          width:'1', height:'1', videoId,
-          playerVars: { autoplay:0, controls:0, playsinline:1, rel:0 },
-          events: {
-            onReady: e => {
-              document.getElementById('timeSlider').disabled = false;
-              songDuration = e.target.getDuration() || 0;
-              document.getElementById('timeSlider').max = Math.ceil(songDuration || 1);
-              updatePlaybackUI();
-            },
-            onStateChange: e => {
-              isPlaying = e.data === YT.PlayerState.PLAYING;
-              document.getElementById('playSimBtn').innerHTML = isPlaying
-                ? '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
-                : '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
-              if (e.data === YT.PlayerState.ENDED) { currentSimTime = songDuration; updatePlaybackFromPlayer(); }
-            },
-            onError: () => { snackbar('YouTube could not play this video'); isPlaying = false; }
-          }
-        });
-        setInterval(updatePlaybackFromPlayer, 250);
-      }
-    }
-    function updatePlaybackFromPlayer() {
-      if (!youtubePlayer || !youtubePlayer.getCurrentTime || isSeeking) return;
-      const d = youtubePlayer.getDuration();
-      if (d && isFinite(d)) { songDuration = d; document.getElementById('timeSlider').max = Math.ceil(d); }
-      const t = youtubePlayer.getCurrentTime();
-      if (isFinite(t)) { currentSimTime = t; document.getElementById('timeSlider').value = t; syncActiveHighlight(); updatePlaybackUI(); }
-    }
-    function syncActiveHighlight() {
-      if (!currentLyrics.length) return;
-      let idx = -1;
-      for (let i = 0; i < currentLyrics.length; i++) { if (currentSimTime >= currentLyrics[i].time) idx = i; else break; }
-      highlightActiveLyric(idx);
-    }
-    function highlightActiveLyric(idx) {
-      document.querySelectorAll('.lyric-row').forEach((row, i) => {
-        row.classList.remove('active','past','future');
-        row.style.opacity = '';
-        if (i === idx) { row.classList.add('active'); row.style.opacity = '1'; }
-        else if (i < idx) { row.classList.add('past'); row.style.opacity = '0.45'; }
-        else { row.classList.add('future'); row.style.opacity = '0.3'; }
-      });
-      const row = document.getElementById('lyric-' + idx);
-      if (row) {
-        const c = document.getElementById('lyricsList');
-        const target = row.offsetTop - c.offsetTop - (c.clientHeight / 2) + (row.clientHeight / 2);
-        c.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
-      }
-    }
-    function updatePlaybackUI() {
-      document.getElementById('timeDisplay').textContent = `${formatTime(currentSimTime)} / ${formatTime(songDuration)}`;
-    }
-
-    // --- Logs ---
-    let _logTotal = 0;
-    function renderLogEntry(entry) {
-      const colors = { success:'text-success', error:'text-error', warning:'text-warning', request:'text-primary', response:'text-info', translate:'text-accent', pending:'text-warning italic', detail:'text-base-content/40', info:'text-base-content/50' };
-      const icons = { success:'fa-circle-check', error:'fa-circle-exclamation', warning:'fa-triangle-exclamation', request:'fa-paper-plane', response:'fa-download', translate:'fa-language', pending:'fa-hourglass-half', detail:'fa-circle-dot', info:'fa-circle-info' };
-      const c = colors[entry.level] || 'text-base-content/50';
-      const ic = icons[entry.level] || 'fa-circle-info';
-      return `<div class="flex items-start gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 text-xs fade-in log-entry">
-        <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(entry.ts)}</span>
-        <i class="fa-solid ${ic} ${c} text-sm w-5 shrink-0 text-center"></i>
-        <span class="${c} break-all flex-1">${escapeHtml(entry.msg)}</span>
-      </div>`;
-    }
-    async function loadLogs() {
-      try {
-        const res = await fetch('/api/admin/logs');
-        const data = await res.json();
-        const logBox = document.getElementById('logBox');
-        const entries = data.logs || [];
-        const total = data.total || 0;
-        if (_logTotal === 0 || total < _logTotal) { logBox.innerHTML = ''; entries.forEach(e => logBox.insertAdjacentHTML('beforeend', renderLogEntry(e))); }
-        else if (total > _logTotal) { entries.slice(-(total - _logTotal)).forEach(e => logBox.insertAdjacentHTML('beforeend', renderLogEntry(e))); while (logBox.children.length > 300) logBox.removeChild(logBox.firstChild); }
-        _logTotal = total;
-        setTabCount('logCountBadge', total);
-        const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = total;
-        const auto = document.getElementById('logAutoScroll');
-        if (!auto || auto.checked) logBox.scrollTop = logBox.scrollHeight;
-      } catch(e) {}
-    }
-    async function clearLogs() {
-      await fetch('/api/admin/logs/clear', { method:'POST' });
-      document.getElementById('logBox').innerHTML = '';
-      _logTotal = 0;
-      setTabCount('logCountBadge', '0');
-      const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = '0';
-      snackbar('Logs cleared');
-    }
-    function downloadLogs() { window.location.href = '/api/admin/logs/download'; }
-    async function loadCrashLogs() {
-      try {
-        const res = await fetch('/api/admin/crash_logs');
-        const data = await res.json();
-        const box = document.getElementById('crashBox');
-        setTabCount('crashBadge', data.total);
-        const b2 = document.getElementById('crashBadge2'); if (b2) b2.textContent = data.total;
-        box.innerHTML = '';
-        if (!data.logs || !data.logs.length) { box.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No crash logs - server healthy</div>'; return; }
-        data.logs.slice().reverse().forEach(e => {
-          box.insertAdjacentHTML('beforeend', `<div class="flex items-start gap-2 px-3 py-1.5 text-xs fade-in text-error">
-            <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(e.ts||'')}</span>
-            <i class="fa-solid fa-circle-exclamation text-sm w-5 shrink-0 text-center"></i>
-            <span class="break-all flex-1">[${escapeHtml(e.type||'CRASH')}] ${escapeHtml(e.msg||'')}<br><span class="opacity-50 whitespace-pre-wrap text-[11px]">${escapeHtml((e.trace||'').slice(0,800))}</span></span>
-          </div>`);
-        });
-      } catch(e) {}
-    }
-    function downloadCrash() { window.location.href = '/api/admin/files/download?file=crash.log'; }
-    async function clearCrash() { await fetch('/api/admin/crash_logs/clear', {method:'POST'}); document.getElementById('crashBox').innerHTML=''; snackbar('Crash logs cleared'); loadCrashLogs(); }
-
-    // --- Caches ---
-    async function loadCaches() {
-      try {
-        const res = await fetch('/api/admin/caches');
-        const list = await res.json();
-        setTabCount('cacheBadge', list.length);
-        const el = document.getElementById('cacheList');
-        const mini = document.getElementById('miniCacheList');
-        if (!list.length) {
-          el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No cached songs</div>';
-          mini.innerHTML = '<div class="text-center py-2 opacity-30">No caches</div>';
-          return;
-        }
-        const html = list.map(item => `
-          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 cursor-pointer transition" onclick="fetchLiveLyrics('${item.video_id}')">
-            <i class="fa-solid ${item.synced ? 'fa-music' : 'fa-file-lines'} text-sm ${item.synced ? 'text-success' : 'text-warning'}"></i>
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium truncate">${escapeHtml(item.song || item.video_id)}</div>
-              <div class="text-xs opacity-50">${escapeHtml(item.artist || '?')} &middot; ${item.source} &middot; ${item.lines} lines &middot; ${item.time_ago}</div>
-            </div>
-          </div>
-        `).join('');
-        el.innerHTML = html;
-        mini.innerHTML = list.slice(0, 12).map(item => `
-          <div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-base-200 cursor-pointer" onclick="fetchLiveLyrics('${item.video_id}');switchTab('preview')">
-            <i class="fa-solid ${item.synced ? 'fa-music' : 'fa-file-lines'} text-xs ${item.synced ? 'text-success' : 'text-warning'}"></i>
-            <div class="truncate flex-1">${escapeHtml(item.song || item.video_id)}</div>
-          </div>
-        `).join('');
-      } catch(e) {}
-    }
-    async function clearAllCaches() { const r = await (await fetch('/api/admin/caches/clear_empty',{method:'POST'})).json(); snackbar(`Cleared ${r.cleared} not-found`); loadCaches(); }
-
-    // --- Nodes ---
-    async function loadNodes() {
-      try {
-        const res = await fetch('/api/admin/nodes');
-        const data = await res.json();
-        const list = data.nodes || [];
-        const online = list.filter(n => n.online).length;
-        setTabCount('nodesBadge', online + '/' + list.length);
-        const el = document.getElementById('nodeList');
-        if (!list.length) { el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No nodes yet. Click "New Node" to generate one.</div>'; return; }
-        el.innerHTML = list.map(n => `
-          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200">
-            <span class="w-2 h-2 rounded-full ${n.online ? 'bg-success animate-pulse' : 'bg-base-300'} shrink-0"></span>
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium">${escapeHtml(n.label || n.node_id)}</div>
-              <div class="text-xs opacity-50 font-mono">${escapeHtml(n.node_id)}${n.ip ? ' &middot; ' + escapeHtml(n.ip) : ''} &middot; ${timeAgo(n.last_seen)}</div>
-            </div>
-            <span class="badge badge-sm ${n.online ? 'badge-success' : 'badge-ghost'}">${n.online ? 'online' : 'offline'}</span>
-            <button class="btn btn-ghost btn-xs text-error" onclick="revokeNode('${n.node_id}')" title="Revoke"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>
-          </div>
-        `).join('');
-      } catch(e) {}
-    }
-    async function promptNewNode() {
-      const label = prompt('Label for this node (e.g. "tokyo-vps"):');
-      if (label === null) return;
-      try {
-        const res = await fetch('/api/admin/nodes/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label}) });
-        const data = await res.json();
-        if (!data.ok) { snackbar('Failed to generate node'); return; }
-        showNodeModal(data);
-        loadNodes();
-      } catch(e) { snackbar('Failed: ' + e); }
-    }
-    let _nodeModalData = null;
-    function showNodeModal(data) {
-      _nodeModalData = data;
-      document.getElementById('modalNodeId').textContent = data.node_id;
-      document.getElementById('modalServerUrl').textContent = data.server_url;
-      document.getElementById('modalPassword').value = '';
-      updateDeployOneLiner();
-      document.getElementById('modalDownloadBtn').onclick = () => {
-        const raw = atob(data.script_b64);
-        const arr = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-        const blob = new Blob([arr], { type:'text/x-python' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = data.filename;
-        document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-        snackbar(`Downloaded ${data.filename}`);
-      };
-      document.getElementById('nodeModal').showModal();
-    }
-    function updateDeployOneLiner() {
-      if (!_nodeModalData) return;
-      const pw = document.getElementById('modalPassword').value.trim() || 'YOUR_PASSWORD';
-      const label = _nodeModalData.deploy_one_liner.match(/--label="([^"]*)"/)?.[1] || 'node';
-      const server = _nodeModalData.server_url;
-      document.getElementById('modalOneLiner').textContent =
-        `curl -fsSL "${server}/deploy.sh" | bash -s -- --server="${server}" --password="${pw}" --label="${label}"`;
-    }
-    async function revokeNode(id) {
-      if (!confirm('Revoke this node?')) return;
-      await fetch(`/api/admin/nodes/${id}/revoke`, { method:'POST' });
-      snackbar('Node revoked');
-      loadNodes();
-    }
-
-    // --- JWT Pool ---
-    async function loadJwtPool() {
-      try {
-        const res = await fetch('/api/admin/jwt/list');
-        const data = await res.json();
-        const el = document.getElementById('jwtList');
-        const list = data.jwt || [];
-        if (!list.length) { el.innerHTML = '<div class="text-xs opacity-40 text-center py-2">No tokens</div>'; return; }
-        el.innerHTML = list.map(j => `
-          <div class="flex items-center gap-2 px-2 py-1 rounded text-xs">
-            <span class="w-1.5 h-1.5 rounded-full ${j.ok ? 'bg-success' : (j.live ? 'bg-warning' : 'bg-error')} shrink-0"></span>
-            <span class="font-mono truncate flex-1">${escapeHtml(j.id)}</span>
-            <span class="opacity-40">${j.node_id ? 'node' : 'manual'} &middot; ${timeAgo(j.added)}</span>
-          </div>
-        `).join('');
-      } catch(e) {}
-    }
-    async function contributeJwt() {
-      const token = document.getElementById('jwtInput').value.trim();
-      if (!token) { snackbar('Paste a JWT first'); return; }
-      try {
-        const res = await fetch('/api/admin/jwt/contribute', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token}) });
-        const data = await res.json();
-        snackbar(data.ok ? `Added ${data.id}` : (data.error || 'Failed'));
-        document.getElementById('jwtInput').value = '';
-        loadJwtPool();
-      } catch(e) { snackbar('Failed: ' + e); }
-    }
-    async function checkJwtPool() { const r = await (await fetch('/api/admin/jwt/check',{method:'POST'})).json(); snackbar(`Re-check: ${r.ok} ok, ${r.dead} dead`); loadJwtPool(); }
-
-    // --- Playlist Cache ---
-    let _playlistPollTimer = null;
-    async function startPlaylistCache() {
-      const playlist = document.getElementById('playlistInput').value.trim();
-      const lang = document.getElementById('playlistLang').value.trim() || 'zh-TW';
-      const msgEl = document.getElementById('playlistJobMsg');
-      if (!playlist) { snackbar('Enter a playlist URL'); return; }
-      try {
-        const res = await fetch('/api/playlist/cache', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({playlist, lang}) });
-        const data = await res.json();
-        if (!res.ok) { msgEl.textContent = data.error || 'Failed'; return; }
-        snackbar('Playlist caching started');
-        if (_playlistPollTimer) clearInterval(_playlistPollTimer);
-        _playlistPollTimer = setInterval(() => pollPlaylistJob(data.job_id), 2000);
-        pollPlaylistJob(data.job_id);
-      } catch(e) { msgEl.textContent = 'Failed: ' + e; }
-    }
-    async function pollPlaylistJob(id) {
-      const msgEl = document.getElementById('playlistJobMsg');
-      try {
-        const job = await (await fetch(`/api/playlist/cache/status/${id}`)).json();
-        if (job.error) { msgEl.textContent = job.error; clearInterval(_playlistPollTimer); return; }
-        msgEl.textContent = `${job.status}: ${job.done}/${job.total} (${job.newly_cached} new, ${job.failed} failed)`;
-        if (job.status === 'complete' || job.status === 'failed') { clearInterval(_playlistPollTimer); loadCaches(); }
-      } catch(e) {}
-    }
-
-    // --- Files ---
-    async function loadFiles() {
-      try {
-        const data = await (await fetch('/api/admin/files')).json();
-        const el = document.getElementById('fileList');
-        if (!data.files || !data.files.length) { el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No files</div>'; return; }
-        el.innerHTML = data.files.map(f => `
-          <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200">
-            <i class="fa-solid ${f.name.includes('crash') ? 'fa-bug' : (f.name.includes('server') ? 'fa-file-lines' : 'fa-file-lines')} text-sm opacity-50"></i>
-            <div class="flex-1 min-w-0">
-              <div class="text-sm font-medium truncate">${escapeHtml(f.name)}</div>
-              <div class="text-xs opacity-50">${f.size_human} &middot; ${f.modified}</div>
-            </div>
-            <a class="btn btn-ghost btn-xs" href="/api/admin/files/download?file=${encodeURIComponent(f.name)}"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></a>
-          </div>
-        `).join('');
-      } catch(e) {}
-    }
-
-    // --- Server Info ---
-    async function loadServerInfo() {
-      try {
-        const data = await (await fetch('/api/admin/server_info')).json();
-        const id = data.instance_id.slice(0,8);
-        document.getElementById('instanceId').textContent = id;
-        document.getElementById('instanceChip').textContent = 'ID: ' + id;
-        document.getElementById('instanceChip').title = data.instance_id;
-        document.getElementById('instanceStart').textContent = new Date(data.start_time).toLocaleString();
-        document.getElementById('instanceUptime').textContent = data.uptime_human;
-        document.getElementById('instanceLogs').textContent = data.structured_logs + ' entries';
-        const si = document.getElementById('sysInstance'); if (si) si.textContent = data.instance_id;
-        const ss = document.getElementById('sysStart'); if (ss) ss.textContent = data.start_time;
-        const su = document.getElementById('sysUptime'); if (su) su.textContent = data.uptime_human;
-      } catch(e) {}
-    }
-
-    // --- Self-Update ---
-    async function checkSelfUpdate() {
-      try {
-        const data = await (await fetch('/api/admin/self_update/check')).json();
-        document.getElementById('selfMainFile').textContent = data.main_file;
-        document.getElementById('selfLocalSha').textContent = (data.local_sha||'').slice(0,7);
-        document.getElementById('selfRemoteSha').textContent = (data.remote_sha||'').slice(0,7);
-        document.getElementById('selfParentSha').textContent = (data.parent_sha||'').slice(0,7);
-        document.getElementById('selfMainInput').value = data.main_file ? data.main_file.split('/').pop() : '';
-        const status = document.getElementById('selfUpdateStatus');
-        const msg = document.getElementById('selfUpdateMsg');
-        if (data.update_available) {
-          status.textContent = 'Update available'; status.className = 'font-semibold text-error';
-          msg.textContent = `Local ${data.local_sha.slice(0,7)} -> Remote ${data.remote_sha.slice(0,7)}`;
-        } else if (data.local_sha && data.remote_sha) {
-          status.textContent = 'Up to date'; status.className = 'font-semibold text-success';
-          msg.textContent = `SHA ${data.local_sha.slice(0,7)} matches remote`;
-        } else {
-          status.textContent = 'Unknown'; status.className = 'font-semibold text-warning';
-          msg.textContent = 'Could not fetch remote SHA';
-        }
-      } catch(e) {}
-    }
-    function showUpdateModal() {
-      fetch('/api/admin/self_update/check').then(r=>r.json()).then(data => {
-        document.getElementById('modalLocalSha').textContent = data.local_sha || '?';
-        document.getElementById('modalRemoteSha').textContent = data.remote_sha || '?';
-        document.getElementById('modalParentSha').textContent = data.parent_sha || 'none';
-        ['updateStep1','updateStep2','updateStep3','updateStep4'].forEach(id => document.getElementById(id).classList.add('hidden'));
-        document.getElementById('updateStep1').classList.remove('hidden');
-        document.getElementById('updateModal').showModal();
-      }).catch(e => snackbar('Failed: ' + e));
-    }
-    function closeUpdateModal() { document.getElementById('updateModal').close(); }
-    async function startUpdate() {
-      document.getElementById('updateStep1').classList.add('hidden');
-      document.getElementById('updateStep2').classList.remove('hidden');
-      document.getElementById('updatePhase').textContent = 'Downloading update...';
-      document.getElementById('updateDetail').textContent = 'Fetching from GitHub...';
-      try {
-        const res = await fetch('/api/admin/self_update/perform', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({force:false}) });
-        const data = await res.json();
-        if (!data.ok) { document.getElementById('updateStep2').classList.add('hidden'); document.getElementById('updateStep1').classList.remove('hidden'); snackbar(data.error || 'Failed'); return; }
-        document.getElementById('updatePhase').textContent = 'Applied, waiting for restart...';
-        document.getElementById('updateDetail').textContent = data.message || 'Restarting...';
-        await new Promise(r => setTimeout(r, 2000));
-        document.getElementById('updateStep2').classList.add('hidden');
-        document.getElementById('updateStep3').classList.remove('hidden');
-        document.getElementById('waitingPhase').textContent = 'Waiting for server to restart...';
-        let attempts = 0;
-        while (attempts < 60) {
-          attempts++;
-          try {
-            const r = await fetch('/api/admin/self_update/check', { cache:'no-store' });
-            if (r.ok) {
-              const d = await r.json();
-              document.getElementById('newVersionInfo').textContent = `New: ${(d.local_sha||'').slice(0,7)}`;
-              document.getElementById('updateStep3').classList.add('hidden');
-              document.getElementById('updateStep4').classList.remove('hidden');
-              snackbar('Update complete!');
-              return;
-            }
-          } catch(e) {}
-          await new Promise(r => setTimeout(r, 2000));
-        }
-        document.getElementById('updateStep3').classList.add('hidden');
-        document.getElementById('updateStep1').classList.remove('hidden');
-        snackbar('Server did not come back in time');
-      } catch(e) {
-        document.getElementById('updateStep2').classList.add('hidden');
-        document.getElementById('updateStep1').classList.remove('hidden');
-        snackbar('Update failed: ' + e);
-      }
-    }
-    async function saveSelfUpdateConfig() {
-      const v = document.getElementById('selfMainInput').value.trim();
-      if (!v) { snackbar('Enter a filename'); return; }
-      try {
-        const data = await (await fetch('/api/admin/self_update/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({main_file:v}) })).json();
-        snackbar(data.ok ? 'Saved as ' + data.detected : (data.error || 'Failed'));
-        if (data.ok) checkSelfUpdate();
-      } catch(e) { snackbar('Failed: ' + e); }
-    }
-
-    // --- Reload All ---
-    function reloadAll() { _logTotal = 0; loadServerInfo(); loadLogs(); loadCrashLogs(); loadCaches(); loadNodes(); loadJwtPool(); loadFiles(); checkSelfUpdate(); snackbar('Refreshed'); }
-
-    // --- SSE: real-time push instead of polling ---
-    let _evtSource = null;
-    function connectSSE() {
-      if (_evtSource) { try { _evtSource.close(); } catch(e) {} }
-      _evtSource = new EventSource('/api/admin/events');
-      _evtSource.addEventListener('snapshot', e => {
-        try {
-          const d = JSON.parse(e.data);
-          _logTotal = d.total || 0;
-          const logBox = document.getElementById('logBox');
-          logBox.innerHTML = '';
-          (d.logs || []).forEach(entry => logBox.insertAdjacentHTML('beforeend', renderLogEntry(entry)));
-          setTabCount('logCountBadge', _logTotal);
-          const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = _logTotal;
-          logBox.scrollTop = logBox.scrollHeight;
-        } catch(err) {}
-      });
-      _evtSource.addEventListener('log', e => {
-        try {
-          const entry = JSON.parse(e.data);
-          const logBox = document.getElementById('logBox');
-          logBox.insertAdjacentHTML('beforeend', renderLogEntry(entry));
-          while (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
-          _logTotal++;
-          setTabCount('logCountBadge', _logTotal);
-          const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = _logTotal;
-          const auto = document.getElementById('logAutoScroll');
-          if (!auto || auto.checked) logBox.scrollTop = logBox.scrollHeight;
-        } catch(err) {}
-      });
-      _evtSource.addEventListener('crash', e => {
-        try {
-          const entry = JSON.parse(e.data);
-          const box = document.getElementById('crashBox');
-          box.insertAdjacentHTML('beforeend', `<div class="flex items-start gap-2 px-3 py-1.5 text-xs fade-in text-error">
-            <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(entry.ts||'')}</span>
-            <i class="fa-solid fa-circle-exclamation text-sm w-5 shrink-0 text-center"></i>
-            <span class="break-all flex-1">[${escapeHtml(entry.type||'CRASH')}] ${escapeHtml(entry.msg||'')}<br><span class="opacity-50 whitespace-pre-wrap text-[11px]">${escapeHtml((entry.trace||'').slice(0,800))}</span></span>
-          </div>`);
-          const cb = document.getElementById('crashBadge'); if (cb) cb.textContent = parseInt(cb.textContent||'0') + 1;
-          const cb2 = document.getElementById('crashBadge2'); if (cb2) cb2.textContent = parseInt(cb2.textContent||'0') + 1;
-        } catch(err) {}
-      });
-      _evtSource.addEventListener('cache', e => {
-        try { loadCaches(); } catch(err) {}
-      });
-      _evtSource.addEventListener('node', e => {
-        try { loadNodes(); } catch(err) {}
-      });
-      _evtSource.onerror = () => {
-        setTimeout(connectSSE, 5000);
-      };
-    }
-
-    // --- FontAwesome loaded via CDN in <head> ---
-
-    // --- Init ---
-    switchTab('preview');
-    loadServerInfo();
-    loadCaches();
-    loadNodes();
-    loadJwtPool();
-    loadFiles();
-    checkSelfUpdate();
-    connectSSE();
-    setInterval(loadServerInfo, 10000);
-    setInterval(loadJwtPool, 15000);
-  </script>
+</mdui-layout>
+<script src="{{ url_for('static', filename='mdui/mdui.global.js') }}"></script>
+<script>
+(function () {
+  if (mdui.setColorScheme) mdui.setColorScheme('#7C4DFF');
+})();
+</script>
+<script src="{{ url_for('static', filename='dash.js') }}"></script>
 </body>
 </html>

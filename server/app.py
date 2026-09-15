@@ -39,7 +39,9 @@ from urllib.parse import quote
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
-app = Flask(__name__, template_folder=os.path.join(_ROOT, 'templates'))
+app = Flask(__name__, template_folder=os.path.join(_ROOT, 'templates'),
+            static_folder=os.path.join(_ROOT, 'static'),
+            static_url_path='/static')
 
 # ============================================================
 # Admin config -- persisted to config/admin_config.json
