@@ -423,8 +423,8 @@ def admin_files_download():
     if not fname or '/' in fname or '\\' in fname or '..' in fname:
         return jsonify({'error': 'Invalid file'}), 400
     fpath = os.path.join(LOG_DIR, fname)
-    if not os.path.exists(fpath):
-        return jsonify({'error': 'Not found'}), 404
+    if not os.path.isfile(fpath):
+        return jsonify({'error': 'File not found', 'path': fpath}), 404
     from flask import send_file
     return send_file(fpath, as_attachment=True)
 

@@ -35,6 +35,7 @@
       <mdui-list-item icon="dashboard" active data-page="overview">Overview</mdui-list-item>
       <mdui-list-item icon="terminal" data-page="logs">Live Logs</mdui-list-item>
       <mdui-list-item icon="storage" data-page="caches">Caches</mdui-list-item>
+      <mdui-list-item icon="library_music" data-page="library">Library</mdui-list-item>
       <mdui-list-item icon="hub" data-page="nodes">Nodes</mdui-list-item>
       <mdui-list-item icon="key" data-page="jwt">JWT Pool</mdui-list-item>
       <mdui-list-item icon="system_update" data-page="update">Self-Update</mdui-list-item>
@@ -131,6 +132,71 @@
               <span>Song</span><span>Source</span><span>Sync</span><span>Lines</span><span>Age</span><span>ID</span>
             </div>
             <div id="cache-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== library ===================== -->
+      <section id="page-library" class="page">
+        <div class="stat-grid stagger">
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="title"></mdui-icon>
+            <div>
+              <div class="stat-label">Word-by-word</div>
+              <div class="stat-value mono" id="stat-wbw">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="view_headline"></mdui-icon>
+            <div>
+              <div class="stat-label">Line-synced</div>
+              <div class="stat-value mono" id="stat-line">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="article"></mdui-icon>
+            <div>
+              <div class="stat-label">Plain</div>
+              <div class="stat-value mono" id="stat-plain">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="block"></mdui-icon>
+            <div>
+              <div class="stat-label">No lyrics</div>
+              <div class="stat-value mono" id="stat-none">--</div>
+            </div>
+          </mdui-card>
+        </div>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Rebase library</span>
+            <mdui-segmented-button id="rebase-mode">
+              <mdui-segmented-button-item value="cached" selected>Cached</mdui-segmented-button-item>
+              <mdui-segmented-button-item value="unlyriced">Unlyriced</mdui-segmented-button-item>
+            </mdui-segmented-button>
+            <span class="spacer"></span>
+            <mdui-button id="rebase-start" variant="filled" icon="cached">Rebase all non-wbw</mdui-button>
+            <mdui-button id="rebase-stop" variant="tonal" icon="stop" style="display:none;">Stop</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+              <mdui-linear-progress id="rebase-progress" value="0" style="flex:1;"></mdui-linear-progress>
+              <span id="rebase-summary" style="font-size:13px; white-space:nowrap;"></span>
+            </div>
+            <div id="rebase-results" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Unlyriced songs</span>
+            <span class="spacer"></span>
+            <mdui-button id="unlyriced-retitle-all" variant="tonal" icon="edit">Retitle all with LLM</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="unlyricedList" class="list-grid"></div>
           </div>
         </mdui-card>
       </section>
@@ -254,6 +320,16 @@
       <div id="pingStatus"><span class="live-dot"></span> Ready</div>
     </div>
     <mdui-button id="update-close-btn" slot="action">Close</mdui-button>
+  </mdui-dialog>
+
+  <mdui-dialog id="preview-dialog" headline="Lyrics preview" close-on-esc close-on-overlay-click style="max-width:800px;">
+    <div id="prev-meta" style="font-size:13.5px; margin-bottom:12px; color:rgb(var(--mdui-color-on-surface-variant));"></div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+      <mdui-button-icon id="prev-play" icon="play_arrow"></mdui-button-icon>
+      <input type="range" id="prev-seek" min="0" max="100" value="0" step="0.1" style="flex:1;">
+      <span id="prev-time" style="font-size:12.5px; white-space:nowrap; font-family:Consolas,monospace;">0:00</span>
+    </div>
+    <div id="prev-lyrics" style="max-height:50vh; overflow-y:auto;"></div>
   </mdui-dialog>
 
 </mdui-layout>

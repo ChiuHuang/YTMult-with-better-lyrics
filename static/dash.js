@@ -11,7 +11,7 @@
   let logPaused = false;
   const logLines = [];
   const LOG_MAX = 300;
-  const POLL = { overview: 8000, logs: null, caches: 10000, nodes: 6000, jwt: 8000, update: 15000, files: 10000, crashes: 10000 };
+  const POLL = { overview: 8000, logs: null, caches: 10000, library: 6000, nodes: 6000, jwt: 8000, update: 15000, files: 10000, crashes: 10000 };
   const timers = {};
 
   const $ = s => document.querySelector(s);
@@ -179,6 +179,7 @@
   };
   const throttledRefresh = mdui.throttle(() => {
     if (activePage === 'caches') loadCaches();
+    if (activePage === 'library') loadLibrary();
     if (activePage === 'nodes') loadNodes();
     if (activePage === 'crashes') loadCrashes();
   }, 2000);
@@ -203,6 +204,8 @@
     const items = q ? cachesData.filter(c => `${c.song} ${c.artist} ${c.video_id}`.toLowerCase().includes(q)) : cachesData;
     if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No cached entries')); return; }
     items.forEach(c => {
+      const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': c.lang || ''});
+      pvBtn.addEventListener('click', () => openPreview(c.video_id, c.lang || ''));
       list.appendChild(el('div', {class:'list-row cache', style:'font-size:12.5px;'},
         el('span', {class:'truncate'}, `${c.artist} - ${c.song}`),
         el('span', {}, c.source),
@@ -210,6 +213,7 @@
         el('span', {class:'mono'}, fmt(c.lines)),
         el('span', {}, c.time_ago),
         el('span', {class:'truncate mono'}, c.video_id?.slice(0,6) || ''),
+        pvBtn,
       ));
     });
   };
@@ -423,8 +427,270 @@
     });
   };
 
+  /* ---- library ---- */
+  let rebaseFastTimer = null;
+  let rebaseMode = 'cached';
+  const loadLibrary = async () => {
+    try {
+      const [scan, status] = await Promise.all([
+        json('/api/admin/library/scan'),
+        json('/api/admin/library/rebase/status')
+      ]);
+      setVal('#stat-wbw', fmt(scan.buckets?.wbw));
+      setVal('#stat-line', fmt(scan.buckets?.line));
+      setVal('#stat-plain', fmt(scan.buckets?.plain));
+      setVal('#stat-none', fmt(scan.buckets?.none));
+      renderRebaseStatus(status);
+      try {
+        const unlyriced = await json('/api/admin/library/unlyriced');
+        renderUnlyriced(unlyriced.items || []);
+      } catch {}
+      if (status.state === 'running') startRebaseFastPoll(); else stopRebaseFastPoll();
+    } catch {}
+  };
+  const renderRebaseStatus = status => {
+    const startBtn = $('#rebase-start');
+    const stopBtn = $('#rebase-stop');
+    const progress = $('#rebase-progress');
+    const summary = $('#rebase-summary');
+    const results = $('#rebase-results');
+    const running = status.state === 'running';
+    if (startBtn) startBtn.disabled = running;
+    if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+    if (progress) {
+      if (running && status.total > 0) progress.value = Math.min(1, status.done / status.total);
+      else if (status.state === 'done') progress.value = 1;
+      else progress.value = 0;
+    }
+    if (summary) {
+      summary.textContent = (status.total > 0 || status.state === 'done')
+        ? `${fmt(status.done)}/${fmt(status.total)} upgraded=${fmt(status.upgraded)} same=${fmt(status.same)} failed=${fmt(status.failed)}`
+        : '';
+    }
+    if (results) {
+      results.innerHTML = '';
+      const items = status.results || [];
+      if (!items.length) return;
+      items.forEach(r => {
+        const cls = r.status === 'upgraded' ? 'rb-upgraded'
+          : r.status === 'same' ? 'rb-same'
+          : (r.status === 'failed' || r.status === 'error') ? 'rb-failed'
+          : 'rb-already';
+        results.appendChild(el('div', {class: `rebase-row ${cls}`},
+          `${r.song || '?'} - ${r.artist || '?'} | tier: ${r.from || '?'} -> ${r.to || '?'} | ${r.source || ''}`
+        ));
+      });
+    }
+  };
+  const renderUnlyriced = items => {
+    const list = $('#unlyricedList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No unlyriced songs')); return; }
+    items.forEach(item => {
+      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
+        el('span', {class:'truncate'}, `${item.song || ''} - ${item.artist || ''} (${item.video_id || ''})`)
+      );
+      const rebaseBtn = el('mdui-button', {variant:'tonal', icon:'cached'});
+      rebaseBtn.textContent = 'Rebase';
+      rebaseBtn.addEventListener('click', async () => {
+        rebaseBtn.loading = true;
+        try {
+          await API('/api/admin/library/rebase/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:'unlyriced'})});
+          mdui.snackbar({message:'Rebase started'});
+          loadLibrary();
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        rebaseBtn.loading = false;
+      });
+      row.appendChild(rebaseBtn);
+      const retitleBtn = el('mdui-button', {variant:'text', icon:'edit'});
+      retitleBtn.textContent = 'Retitle (LLM)';
+      retitleBtn.addEventListener('click', async () => {
+        retitleBtn.loading = true;
+        try {
+          const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({video_id: item.video_id})});
+          const d = await r.json();
+          mdui.snackbar({message: d.ok ? 'Retitled' : (d.error || 'Failed')});
+          loadLibrary();
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        retitleBtn.loading = false;
+      });
+      row.appendChild(retitleBtn);
+      list.appendChild(row);
+    });
+  };
+  const startRebase = async () => {
+    const startBtn = $('#rebase-start');
+    if (startBtn) startBtn.loading = true;
+    try {
+      await API('/api/admin/library/rebase/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode: rebaseMode})});
+      mdui.snackbar({message:'Rebase started'});
+      loadLibrary();
+    } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+    if (startBtn) startBtn.loading = false;
+  };
+  const stopRebase = async () => {
+    try {
+      await API('/api/admin/library/rebase/stop', {method:'POST'});
+      mdui.snackbar({message:'Rebase stopped'});
+      loadLibrary();
+    } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+  };
+  const retitleAll = async () => {
+    await mdui.confirm({
+      headline: 'Retitle all unlyriced',
+      description: 'Send all unlyriced songs through LLM retitle?',
+      cancelText: 'Cancel',
+      confirmText: 'Retitle all',
+      onConfirm: async () => {
+        try {
+          const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+          const d = await r.json();
+          mdui.snackbar({message: d.ok ? `Retitled ${d.retitled?.length || 0} song(s)` : (d.error || 'Failed')});
+          loadLibrary();
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+      }
+    });
+  };
+  const startRebaseFastPoll = () => {
+    if (rebaseFastTimer) return;
+    rebaseFastTimer = setInterval(() => { if (activePage === 'library') loadLibrary(); }, 2000);
+  };
+  const stopRebaseFastPoll = () => {
+    if (rebaseFastTimer) { clearInterval(rebaseFastTimer); rebaseFastTimer = null; }
+  };
+
+  /* ---- lyrics preview ---- */
+  let prevData = null;
+  let prevPlaying = false;
+  let prevPlayhead = 0;
+  let prevRafId = null;
+  let prevStartTime = 0;
+  let prevBaseTime = 0;
+  let prevLastAutoIndex = -1;
+  const stopPreviewPlayback = () => {
+    prevPlaying = false;
+    if (prevRafId) { cancelAnimationFrame(prevRafId); prevRafId = null; }
+  };
+  const openPreview = async (videoId, lang) => {
+    stopPreviewPlayback();
+    const dlg = $('#preview-dialog');
+    if (!dlg) return;
+    try {
+      const data = await json(`/api/admin/cache/preview?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`);
+      prevData = data;
+      prevPlayhead = 0;
+      prevLastAutoIndex = -1;
+      const meta = $('#prev-meta');
+      if (meta) meta.textContent = `${data.song || '?'} - ${data.artist || '?'} | ${data.source || ''}`;
+      const lines = data.lyrics || [];
+      const seek = $('#prev-seek');
+      let maxTime = 100;
+      if (lines.length) {
+        const last = lines[lines.length - 1];
+        const lastTime = last.time != null ? last.time : (last.startTimeMs != null ? last.startTimeMs / 1000 : 0);
+        let lastEnd = lastTime;
+        if (last.parts?.length) {
+          const p = last.parts[last.parts.length - 1];
+          lastEnd = Math.max(lastEnd, (p.startTimeMs || 0) / 1000 + (p.durationMs || 0) / 1000);
+        }
+        maxTime = Math.max(lastEnd, lastTime) + 5;
+      }
+      if (seek) { seek.max = maxTime; seek.value = 0; }
+      renderPrevLyrics();
+      updatePrevTime();
+      const playBtn = $('#prev-play');
+      if (playBtn) playBtn.setAttribute('icon', 'play_arrow');
+      dlg.open = true;
+    } catch (e) { mdui.snackbar({message:'Preview failed: '+e.message}); }
+  };
+  const renderPrevLyrics = () => {
+    const container = $('#prev-lyrics');
+    if (!container || !prevData) return;
+    container.innerHTML = '';
+    const lines = prevData.lyrics || [];
+    lines.forEach(line => {
+      const div = el('div', {class:'prev-line'});
+      if (line.parts && line.parts.length) {
+        line.parts.forEach((part, i) => {
+          if (i > 0) div.appendChild(document.createTextNode(' '));
+          div.appendChild(el('span', {class:'prev-word', 'data-start': (part.startTimeMs || 0) / 1000, 'data-dur': (part.durationMs || 0) / 1000}, part.text || ''));
+        });
+      } else {
+        div.appendChild(document.createTextNode(line.text || ''));
+      }
+      if (line.translated) div.appendChild(el('div', {class:'trans'}, line.translated));
+      container.appendChild(div);
+    });
+  };
+  const updatePrevTime = () => {
+    const t = Math.max(0, Math.floor(prevPlayhead));
+    const m = Math.floor(t / 60);
+    const s = t % 60;
+    const label = $('#prev-time');
+    if (label) label.textContent = `${m}:${s.toString().padStart(2,'0')}`;
+  };
+  const updatePrevHighlight = () => {
+    const container = $('#prev-lyrics');
+    if (!container || !prevData) return;
+    const lines = prevData.lyrics || [];
+    const lineEls = container.querySelectorAll('.prev-line');
+    let activeIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i].time != null ? lines[i].time : (lines[i].startTimeMs != null ? lines[i].startTimeMs / 1000 : 0);
+      if (prevPlayhead >= t) activeIdx = i; else break;
+    }
+    lineEls.forEach((lineEl, i) => {
+      lineEl.classList.toggle('prev-active', i === activeIdx);
+      const words = lineEl.querySelectorAll('.prev-word');
+      words.forEach(w => {
+        const start = parseFloat(w.dataset.start) || 0;
+        const dur = parseFloat(w.dataset.dur) || 0;
+        const active = i === activeIdx && prevPlayhead >= start && prevPlayhead < (start + dur);
+        w.classList.toggle('prev-word-active', active);
+      });
+    });
+    if (activeIdx >= 0 && activeIdx !== prevLastAutoIndex && lineEls[activeIdx]) {
+      prevLastAutoIndex = activeIdx;
+      const activeEl = lineEls[activeIdx];
+      const target = activeEl.offsetTop - (container.clientHeight / 2) + (activeEl.offsetHeight / 2);
+      container.scrollTop = Math.max(0, target);
+    }
+    const seek = $('#prev-seek');
+    if (seek) seek.value = prevPlayhead;
+    updatePrevTime();
+  };
+  const prevTick = () => {
+    if (!prevPlaying) return;
+    const elapsed = (performance.now() - prevStartTime) / 1000;
+    prevPlayhead = prevBaseTime + elapsed;
+    updatePrevHighlight();
+    prevRafId = requestAnimationFrame(prevTick);
+  };
+  const togglePreviewPlay = () => {
+    if (!prevData) return;
+    const btn = $('#prev-play');
+    if (prevPlaying) {
+      stopPreviewPlayback();
+      if (btn) btn.setAttribute('icon', 'play_arrow');
+    } else {
+      prevPlaying = true;
+      prevStartTime = performance.now();
+      prevBaseTime = prevPlayhead;
+      if (btn) btn.setAttribute('icon', 'pause');
+      prevRafId = requestAnimationFrame(prevTick);
+    }
+  };
+  const prevSeek = e => {
+    prevPlayhead = parseFloat(e.target.value) || 0;
+    prevBaseTime = prevPlayhead;
+    if (prevPlaying) prevStartTime = performance.now();
+    prevLastAutoIndex = -1;
+    updatePrevHighlight();
+  };
+
   /* ---- nav ---- */
-  const pages = ['overview','logs','caches','nodes','jwt','update','files','crashes'];
+  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes'];
   const switchPage = p => {
     if (!pages.includes(p)) return;
     activePage = p;
@@ -433,6 +699,7 @@
     if (p==='overview') loadOverview();
     else if (p==='logs') connectSSE();
     else if (p==='caches') loadCaches();
+    else if (p==='library') loadLibrary();
     else if (p==='nodes') loadNodes();
     else if (p==='jwt') loadJwt();
     else if (p==='update') loadUpdate();
@@ -441,7 +708,7 @@
   };
   const initNav = () => {
     $$('#nav-list mdui-list-item').forEach(item => {
-      item.addEventListener('click', () => { switchPage(item.dataset.page); try{$('#drawer').open=false;}catch{} });
+      item.addEventListener('click', () => { switchPage(item.dataset.page); });
     });
   };
 
@@ -449,7 +716,7 @@
   const startPolls = () => {
     Object.entries(POLL).forEach(([page, ms]) => {
       if (!ms) return;
-      timers[page] = setInterval(() => { if (activePage===page) { if (page==='overview') loadOverview(); else if (page==='caches') loadCaches(); else if (page==='nodes') loadNodes(); else if (page==='jwt') loadJwt(); else if (page==='update') loadUpdate(); else if (page==='files') loadFiles(); else if (page==='crashes') loadCrashes(); } }, ms);
+      timers[page] = setInterval(() => { if (activePage===page) { if (page==='overview') loadOverview(); else if (page==='caches') loadCaches(); else if (page==='library') loadLibrary(); else if (page==='nodes') loadNodes(); else if (page==='jwt') loadJwt(); else if (page==='update') loadUpdate(); else if (page==='files') loadFiles(); else if (page==='crashes') loadCrashes(); } }, ms);
     });
   };
 
@@ -513,6 +780,22 @@
 
     const infoRefreshBtn = $('#info-refresh');
     if (infoRefreshBtn) infoRefreshBtn.addEventListener('click', loadOverview);
+
+    const rebaseStartBtn = $('#rebase-start');
+    if (rebaseStartBtn) rebaseStartBtn.addEventListener('click', startRebase);
+    const rebaseStopBtn = $('#rebase-stop');
+    if (rebaseStopBtn) rebaseStopBtn.addEventListener('click', stopRebase);
+    const retitleAllBtn = $('#unlyriced-retitle-all');
+    if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
+    document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
+      item.addEventListener('click', () => { rebaseMode = item.getAttribute('value') || 'cached'; });
+    });
+    const prevPlayBtn = $('#prev-play');
+    if (prevPlayBtn) prevPlayBtn.addEventListener('click', togglePreviewPlay);
+    const prevSeekEl = $('#prev-seek');
+    if (prevSeekEl) prevSeekEl.addEventListener('input', prevSeek);
+    const prevDialog = $('#preview-dialog');
+    if (prevDialog) prevDialog.addEventListener('closed', stopPreviewPlayback);
   };
 
   document.addEventListener('DOMContentLoaded', init);
