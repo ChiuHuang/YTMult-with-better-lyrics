@@ -1,10 +1,14 @@
 #!/bin/bash
 # YTMusicUltimate Node Setup
 # Usage (non-interactive):
-#   bash <(curl -fsSL https://ytmtranslate.chiuhuang.dev/deploy.sh) --server=https://ytmtranslate.chiuhuang.dev --label=my-vps
+#   bash <(curl -fsSL https://ytmtranslate.chiuhuang.dev/deploy.sh) --server=https://ytmtranslate.chiuhuang.dev --label=my-vps --node-id=... --node-key=...
 #
 # Usage (interactive TUI):
 #   curl -fsSL https://ytmtranslate.chiuhuang.dev/deploy.sh -o deploy.sh && chmod +x deploy.sh && ./deploy.sh
+#
+# Auth: pass --node-id and --node-key from the dashboard's "Generate node"
+# dialog (shown once). No admin password is needed -- the node script is
+# fetched from the keyed /api/admin/nodes/generate/<id>?key=<key> endpoint.
 
 set -euo pipefail
 
@@ -13,6 +17,8 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CY
 SERVER=""
 PASSWORD=""
 LABEL=""
+NODE_ID=""
+NODE_KEY=""
 NODE_DIR="${YTMT_NODE_DIR:-$HOME/ytmnode}"
 JWT="${YTMT_JWT:-}"
 NON_INTERACTIVE=false
@@ -22,10 +28,12 @@ while [[ $# -gt 0 ]]; do
         --server) SERVER="$2"; shift 2 ;;
         --password) PASSWORD="$2"; shift 2 ;;
         --label) LABEL="$2"; shift 2 ;;
+        --node-id) NODE_ID="$2"; shift 2 ;;
+        --node-key) NODE_KEY="$2"; shift 2 ;;
         --dir) NODE_DIR="$2"; shift 2 ;;
         --jwt) JWT="$2"; shift 2 ;;
         --non-interactive) NON_INTERACTIVE=true; shift ;;
-        -h|--help) echo "Usage: $0 --server=URL --label=NAME [--password=PW] [--jwt=TOKEN]"; exit 0 ;;
+        -h|--help) echo "Usage: $0 --server=URL --label=NAME [--node-id=ID --node-key=KEY] [--password=PW (legacy)] [--jwt=TOKEN]"; exit 0 ;;
         *) echo "Unknown: $1"; exit 1 ;;
     esac
 done
@@ -49,9 +57,17 @@ if [[ "$NON_INTERACTIVE" != "true" ]]; then
     [[ -z "$SERVER" ]] && read -p "$(echo -e "${BLUE}▶${NC} Server URL: ")" SERVER
     [[ -z "$LABEL" ]] && read -p "$(echo -e "${BLUE}▶${NC} Label [$(hostname)]: ")" LABEL
     LABEL="${LABEL:-$(hostname)}"
-    read -s -p "$(echo -e "${BLUE}▶${NC} Admin password (optional, for JWT): ")" PW_INPUT
-    echo
-    [[ -n "$PW_INPUT" ]] && PASSWORD="$PW_INPUT"
+    if [[ -z "$NODE_ID" && -z "$NODE_KEY" ]]; then
+        read -p "$(echo -e "${BLUE}▶${NC} Node ID (from dashboard Generate node): ")" NODE_ID
+        read -s -p "$(echo -e "${BLUE}▶${NC} Node key (from dashboard Generate node): ")" NODE_KEY
+        echo
+    fi
+    # Legacy fallback: admin password to auto-generate a node
+    if [[ -z "$NODE_ID" || -z "$NODE_KEY" ]]; then
+        read -s -p "$(echo -e "${BLUE}▶${NC} Admin password (legacy, to generate a node): ")" PW_INPUT
+        echo
+        [[ -n "$PW_INPUT" ]] && PASSWORD="$PW_INPUT"
+    fi
     [[ -z "$NODE_DIR" || "$NODE_DIR" == "$HOME/ytmnode" ]] && read -p "$(echo -e "${BLUE}▶${NC} Install dir [$HOME/ytmnode]: ")" DIR_INPUT
     [[ -n "$DIR_INPUT" ]] && NODE_DIR="$DIR_INPUT"
 else
@@ -62,28 +78,72 @@ fi
 SERVER="${SERVER%/}"
 [[ -z "$LABEL" ]] && LABEL="$(hostname)"
 
-# 2. Check deps
+# 2. Check/install deps
 step "Checking dependencies..."
-for cmd in curl python3; do
+for cmd in curl; do
     command -v "$cmd" &>/dev/null || fail "Missing: $cmd"
 done
+
+if ! command -v python3 &>/dev/null; then
+    step "python3 not found -- installing..."
+    if command -v apt-get &>/dev/null; then
+        $SUDO apt-get update -y >/dev/null 2>&1 || true
+        $SUDO apt-get install -y python3 python3-pip python3-venv >/dev/null 2>&1
+    elif command -v apk &>/dev/null; then
+        $SUDO apk add --no-cache python3 py3-pip 2>/dev/null || $SUDO apk add --no-cache python3
+    elif command -v dnf &>/dev/null; then
+        $SUDO dnf install -y python3 python3-pip python3-libs 2>/dev/null || $SUDO dnf install -y python3
+    elif command -v yum &>/dev/null; then
+        $SUDO yum install -y python3 python3-pip 2>/dev/null || $SUDO yum install -y python3
+    else
+        fail "python3 missing and no supported package manager found"
+    fi
+fi
+command -v python3 &>/dev/null || fail "python3 still not available after install"
+# Debian needs python3-venv for venv module; make sure it exists
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    step "python3-venv missing -- installing..."
+    if command -v apt-get &>/dev/null; then
+        $SUDO apt-get install -y python3-venv >/dev/null 2>&1 || true
+    fi
+    python3 -m venv --help >/dev/null 2>&1 || warn "venv unavailable -- falling back to system pip"
+fi
 ok "Dependencies OK"
 
-# 3. Install pip packages if missing
+mkdir -p "$NODE_DIR"
+
+# 3. Install pip packages (into a venv when possible)
 step "Installing Python packages..."
-python3 -m pip install -q websocket-client requests 2>/dev/null || \
-    pip3 install -q websocket-client requests 2>/dev/null || \
-    pip install -q websocket-client requests 2>/dev/null || \
+PY=""
+if python3 -m venv --help >/dev/null 2>&1; then
+    if [[ ! -d "$NODE_DIR/venv" ]]; then
+        python3 -m venv "$NODE_DIR/venv" >/dev/null 2>&1 || true
+    fi
+    if [[ -x "$NODE_DIR/venv/bin/python" ]]; then
+        PY="$NODE_DIR/venv/bin/python"
+    elif [[ -x "$NODE_DIR/venv/Scripts/python.exe" ]]; then
+        PY="$NODE_DIR/venv/Scripts/python.exe"
+    fi
+fi
+PY="${PY:-$(command -v python3)}"
+"$PY" -m pip install -q --upgrade pip 2>/dev/null || true
+"$PY" -m pip install -q websocket-client requests 2>/dev/null || \
     warn "Could not auto-install pip packages (node may need them)"
-ok "Python packages ready"
+ok "Python packages ready ($PY)"
 
 # 4. Download node.py
 step "Downloading node script..."
-mkdir -p "$NODE_DIR"
-NODE_URL="$SERVER/deploy.sh"  # placeholder, replaced by generate API below
+NODE_URL="$SERVER/deploy.sh"  # placeholder
 
-# Generate node via API (needs login)
-if [[ -n "$PASSWORD" ]]; then
+if [[ -n "$NODE_ID" && -n "$NODE_KEY" ]]; then
+    # Keyed fetch: node_id + node_key authenticate, no password needed.
+    step "Fetching node script with node id/key..."
+    NODE_URL="$SERVER/api/admin/nodes/generate/$NODE_ID?key=$NODE_KEY"
+    if ! curl -fsSL "$NODE_URL" -o "$NODE_DIR/node.py"; then
+        fail "Could not fetch node script from $NODE_URL (check node id/key)"
+    fi
+    ok "Node script downloaded: $NODE_ID"
+elif [[ -n "$PASSWORD" ]]; then
     step "Logging in to $SERVER..."
     COOKIE_JAR=$(mktemp)
     trap "rm -f '$COOKIE_JAR'" EXIT
@@ -116,10 +176,12 @@ print(d['server_url']); print(d['script_b64']); print(d['filename'])
         fail "Cannot continue without node script"
     fi
 else
-    fail "Admin password required to generate node. Use --password=YOUR_PW"
+    fail "No credentials. Pass --node-id/--node-key from the dashboard, or --password for legacy generate"
 fi
 
 chmod +x "$NODE_DIR/node.py"
+
+WS_URL="${WS_URL:-$(echo "$SERVER" | sed 's#^http#ws#')/ws/node}"
 
 # 5. Create systemd service (or supervisor, or just run in background)
 step "Setting up auto-start..."
@@ -134,7 +196,7 @@ After=network.target
 Type=simple
 WorkingDirectory=$NODE_DIR
 Environment="YTMU_JWT=${JWT}"
-ExecStart=$(command -v python3) $NODE_DIR/node.py
+ExecStart="$PY" $NODE_DIR/node.py
 Restart=always
 RestartSec=5
 
@@ -155,14 +217,14 @@ elif command -v service &>/dev/null; then
     warn "systemd not found, using nohup background"
     $SUDO killall -q python3 2>/dev/null || true
     cd "$NODE_DIR"
-    nohup python3 node.py > "$NODE_DIR/node.log" 2>&1 &
+    nohup "$PY" node.py > "$NODE_DIR/node.log" 2>&1 &
     ok "Node started in background (PID $!)"
 else
     # No init system (Docker, etc.)
     warn "No init system found, running in background"
     $SUDO killall -q python3 2>/dev/null || true
     cd "$NODE_DIR"
-    nohup python3 node.py > "$NODE_DIR/node.log" 2>&1 &
+    nohup "$PY" node.py > "$NODE_DIR/node.log" 2>&1 &
     ok "Node started in background (PID $!). Add to your container startup."
 fi
 

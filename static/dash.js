@@ -62,15 +62,54 @@
     e.classList.add('pulse');
   };
 
-  /* ---- uptime ---- */
+  /* ---- uptime (per-digit flip clock) ---- */
   let startIso = null;
+  let uptimeClockBuilt = false;
+  const flipUptimeDigit = (digit, ch) => {
+    const old = digit.querySelector('.old');
+    const nw = digit.querySelector('.new');
+    if (!old || !nw || old.textContent === ch) return;
+    nw.textContent = ch;
+    digit.classList.add('flip');
+    clearTimeout(digit._flipT);
+    digit._flipT = setTimeout(() => {
+      old.textContent = ch;
+      digit.classList.remove('flip');
+      nw.textContent = ch;
+    }, 300);
+  };
   const tickUptime = () => {
     if (!startIso) return;
     const s = Math.max(0, Math.floor((Date.now() - new Date(startIso).getTime()) / 1000));
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
-    setVal('#stat-uptime', `${h}h ${m}m ${sec}s`);
+    const str = `${String(h).padStart(2,'0')}h ${String(m).padStart(2,'0')}m ${String(sec).padStart(2,'0')}s`;
+    const root = $('#stat-uptime');
+    if (!root) return;
+    if (!uptimeClockBuilt) {
+      root.innerHTML = '';
+      [...str].forEach(ch => {
+        if (/\d/.test(ch)) {
+          const d = el('span', {class:'digit'});
+          d.appendChild(el('span', {class:'old'}, ch));
+          d.appendChild(el('span', {class:'new'}, ch));
+          root.appendChild(d);
+        } else {
+          root.appendChild(el('span', {class:'up-char'}, ch));
+        }
+      });
+      uptimeClockBuilt = true;
+      return;
+    }
+    const digits = [...root.querySelectorAll('.digit')];
+    let di = 0;
+    [...str].forEach(ch => {
+      if (/\d/.test(ch)) {
+        const d = digits[di++];
+        if (d) flipUptimeDigit(d, ch);
+      }
+    });
   };
 
   /* ---- overview ---- */
@@ -82,6 +121,7 @@
       setVal('#stat-logs', fmt(info.structured_logs));
       setVal('#stat-req', fmt(info.recent_requests?.length));
       setVal('#stat-crash', fmt(info.crash_logs));
+      setVal('#stat-lyrics', fmt(info.lyrics_count));
       const kv = $('#server-kv');
       if (kv) {
         kv.innerHTML = '';
@@ -204,9 +244,10 @@
     const items = q ? cachesData.filter(c => `${c.song} ${c.artist} ${c.video_id}`.toLowerCase().includes(q)) : cachesData;
     if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No cached entries')); return; }
     items.forEach(c => {
-      const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': c.lang || ''});
-      pvBtn.addEventListener('click', () => openPreview(c.video_id, c.lang || ''));
-      list.appendChild(el('div', {class:'list-row cache', style:'font-size:12.5px;'},
+      const lang = c.lang || 'zh-TW';
+      const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': lang});
+      pvBtn.addEventListener('click', () => openPreview(c.video_id, lang));
+      list.appendChild(el('div', {class:'list-row cache', style:'font-size:13px;'},
         el('span', {class:'truncate'}, `${c.artist} - ${c.song}`),
         el('span', {}, c.source),
         el('span', {}, c.synced ? 'sync' : ''),
@@ -233,12 +274,24 @@
     list.innerHTML = '';
     if (!nodes.length) { list.appendChild(el('div', {class:'list-row'}, 'No nodes')); return; }
     nodes.forEach(n => {
-      list.appendChild(el('div', {class:'list-row node', style:'font-size:12.5px;'},
+      const row = el('div', {class:'list-row node', style:'font-size:13.5px;'},
         el('span', {}, n.label || '(unnamed)'),
         el('span', {class:'mono truncate'}, n.node_id || ''),
         el('span', {}, n.last_seen ? ago(n.last_seen)+' ago' : ''),
         el('span', {}, el('span', {class: n.online ? 'pill pill-ok' : 'pill pill-mute'}, el('span', {class:'dot'}), n.online ? 'online' : 'offline')),
-      ));
+        el('mdui-button-icon', {icon: 'delete', variant: 'text', style:'justify-self:end; color:rgb(var(--mdui-color-error));'})
+      );
+      const revokeBtn = row.lastElementChild;
+      revokeBtn.addEventListener('click', async () => {
+        await mdui.confirm({headline:'Revoke node', description:`Remove node ${n.node_id||''}? It will be disconnected and its key invalidated.`, cancelText:'Cancel', confirmText:'Revoke', onConfirm: async () => {
+          try {
+            await API(`/api/admin/nodes/${encodeURIComponent(n.node_id)}/revoke`, {method:'POST'});
+            mdui.snackbar({message:'Node revoked'});
+            loadNodes();
+          } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        }});
+      });
+      list.appendChild(row);
     });
   };
   const generateNode = async () => {
@@ -264,10 +317,42 @@
   };
 
   /* ---- jwt ---- */
+  const jwtStatus = t => {
+    if (t.ok) return el('span', {class:'pill pill-ok'}, el('span', {class:'dot'}), 'ok');
+    if (t.live) return el('span', {class:'pill pill-warn'}, el('span', {class:'dot'}), 'unverified');
+    return el('span', {class:'pill pill-mute'}, 'empty');
+  };
+  const renderJwt = tokens => {
+    const list = $('#jwt-list'); if (!list) return;
+    list.innerHTML = '';
+    if (!tokens.length) { list.appendChild(el('div', {class:'list-row'}, 'No pooled tokens')); return; }
+    tokens.forEach(t => {
+      const row = el('div', {class:'list-row jwt', style:'font-size:13px;'},
+        el('span', {class:'mono truncate'}, t.id || '--'),
+        el('span', {class:'truncate'}, t.node_id ? `${t.node_id.slice(0,10)}` : '--'),
+        el('span', {}, t.added ? ago(t.added)+' ago' : '--'),
+        el('span', {}, t.last_checked ? ago(t.last_checked)+' ago' : '--'),
+        jwtStatus(t),
+        el('mdui-button-icon', {icon: 'close', variant: 'text', style:'justify-self:end; color:rgb(var(--mdui-color-error));'})
+      );
+      const rmBtn = row.lastElementChild;
+      rmBtn.addEventListener('click', async () => {
+        rmBtn.loading = true;
+        try {
+          await API('/api/admin/jwt/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: t.id})});
+          mdui.snackbar({message:'Removed from pool'});
+          loadJwt();
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        rmBtn.loading = false;
+      });
+      list.appendChild(row);
+    });
+  };
   const loadJwt = async () => {
     try {
       const data = await json('/api/admin/jwt/list');
       setVal('#jwt-count', fmt(data.count));
+      renderJwt(data.jwt || []);
     } catch {}
   };
   const checkJwt = async (btn) => {
@@ -375,7 +460,7 @@
       const files = (data.files||[]).slice(0,80);
       if (!files.length) { list.appendChild(el('div', {class:'list-row'}, 'No log files')); return; }
       files.forEach(f => {
-        const row = el('div', {class:'list-row file', style:'font-size:12.5px;'},
+        const row = el('div', {class:'list-row file', style:'font-size:13px;'},
           el('span', {class:'truncate'}, f.name),
           el('span', {class:'mono'}, f.size_human),
           el('span', {}, f.modified ? new Date(f.modified).toLocaleString() : ''),
@@ -788,7 +873,12 @@
     const retitleAllBtn = $('#unlyriced-retitle-all');
     if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
-      item.addEventListener('click', () => { rebaseMode = item.getAttribute('value') || 'cached'; });
+      item.addEventListener('click', () => {
+        rebaseMode = item.getAttribute('value') || 'cached';
+        document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(other => {
+          try { other.selected = (other === item); } catch {}
+        });
+      });
     });
     const prevPlayBtn = $('#prev-play');
     if (prevPlayBtn) prevPlayBtn.addEventListener('click', togglePreviewPlay);

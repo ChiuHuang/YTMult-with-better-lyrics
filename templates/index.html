@@ -24,13 +24,6 @@
   </mdui-top-app-bar>
 
   <mdui-navigation-drawer id="drawer" open close-on-esc close-on-overlay-click>
-    <div class="drawer-head">
-      <div class="drawer-logo">YT</div>
-      <div>
-        <div style="font-weight:600; font-size:14px;">YTMusicUltimate</div>
-        <div style="font-size:11.5px; color:rgb(var(--mdui-color-on-surface-variant));">admin console</div>
-      </div>
-    </div>
     <mdui-list id="nav-list">
       <mdui-list-item icon="dashboard" active data-page="overview">Overview</mdui-list-item>
       <mdui-list-item icon="terminal" data-page="logs">Live Logs</mdui-list-item>
@@ -77,6 +70,13 @@
             <div>
               <div class="stat-label">Crashes</div>
               <div class="stat-value mono" id="stat-crash">--</div>
+            </div>
+          </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="music_note"></mdui-icon>
+            <div>
+              <div class="stat-label">Lyrics cached</div>
+              <div class="stat-value mono" id="stat-lyrics">--</div>
             </div>
           </mdui-card>
         </div>
@@ -211,7 +211,7 @@
           </div>
           <div class="panel-body">
             <div class="list-head lh-node">
-              <span>Label</span><span>ID</span><span>Last seen</span><span>Status</span>
+              <span>Label</span><span>ID</span><span>Last seen</span><span>Status</span><span></span>
             </div>
             <div id="node-list" class="list-grid"></div>
           </div>
@@ -236,8 +236,14 @@
             <mdui-button id="jwt-contribute" variant="tonal" icon="add">Contribute</mdui-button>
             <mdui-button id="jwt-check" variant="text" icon="health_and_safety">Check dead tokens</mdui-button>
           </div>
-          <div class="panel-body" style="font-size:13px; color:rgb(var(--mdui-color-on-surface-variant));">
-            Tokens are shared with the Cubey provider. Raw tokens are never exposed here.
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              Tokens are shared with the Cubey provider. Raw tokens are never exposed here -- only hashes.
+            </div>
+            <div class="list-head lh-jwt">
+              <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>Status</span><span></span>
+            </div>
+            <div id="jwt-list" class="list-grid"></div>
           </div>
         </mdui-card>
       </section>
