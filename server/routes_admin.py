@@ -28,7 +28,7 @@ from .app import (app, login_required, _admin_cfg, _save_admin_config,
     _sse_subscribers, _sse_subscribers_lock)
 from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
-from .jwt_pool import contribute_jwt, list_jwt, check_all as jwt_check_all
+from .jwt_pool import contribute_jwt, list_jwt, remove_jwt, check_all as jwt_check_all
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .cache import _cache_key_from_filename
@@ -130,9 +130,12 @@ def admin_caches():
                         time_ago = f"{int(diff // 86400)}d ago"
                 except Exception:
                     time_ago = 'unknown'
-                video_id = cache_key.split(':')[0]
+                parts = cache_key.split(':')
+                video_id = parts[0]
+                lang = parts[1] if len(parts) > 1 else ''
                 items.append({
                     'video_id': video_id,
+                    'lang': lang,
                     'cache_key': cache_key,
                     'song': data.get('song', ''),
                     'artist': data.get('artist', ''),
@@ -235,9 +238,12 @@ def admin_nodes_generate():
     import base64
     script_b64 = base64.b64encode(script.encode()).decode()
 
+    # No admin password needed: the node authenticates with its node_id +
+    # node_key via the keyed /generate endpoint (same as self-update does).
     deploy_one_liner = (
         f'curl -fsSL "{http_url}/deploy.sh" | bash -s -- '
-        f'--server="{http_url}" --password="YOUR_PASSWORD" --label="{label or "node"}"'
+        f'--server="{http_url}" --label="{label or "node"}" '
+        f'--node-id="{node_id}" --node-key="{node_key}"'
     )
 
     return jsonify({
@@ -313,6 +319,18 @@ def admin_jwt_list():
     return jsonify({'count': len(list_jwt()), 'jwt': list_jwt()})
 
 
+@app.route('/api/admin/jwt/remove', methods=['POST'])
+@login_required
+def admin_jwt_remove():
+    """Drop a single pooled token by its hash id."""
+    body = request.get_json(silent=True) or request.form.to_dict() or {}
+    jid = (body.get('id') or '').strip()
+    if not jid:
+        return jsonify({'ok': False, 'error': 'missing id'}), 400
+    removed = remove_jwt(jid)
+    return jsonify({'ok': True, 'removed': removed, 'count': len(list_jwt())})
+
+
 @app.route('/api/admin/jwt/check', methods=['POST'])
 @login_required
 def admin_jwt_check():
@@ -336,6 +354,15 @@ def admin_server_info():
                 mt = datetime.fromtimestamp(os.path.getmtime(fpath)).isoformat()
                 log_files.append({'name': fname, 'size': sz, 'modified': mt})
             except: pass
+    # cache dir stats
+    lyrics_count = 0
+    translate_count = 0
+    try:
+        if os.path.exists('cache/lyrics'):
+            lyrics_count = len([f for f in os.listdir('cache/lyrics') if f.endswith('.json')])
+        if os.path.exists('cache/translate'):
+            translate_count = len([f for f in os.listdir('cache/translate') if f.endswith('.json')])
+    except: pass
     return jsonify({
         'instance_id': SERVER_INSTANCE_ID,
         'start_time': SERVER_START_TS,
@@ -344,6 +371,8 @@ def admin_server_info():
         'structured_logs': len(_structured_logs),
         'recent_logs': len(_recent_logs),
         'crash_logs': len(_crash_logs),
+        'lyrics_count': lyrics_count,
+        'translate_count': translate_count,
         'recent_requests': list(_recent_requests)[-20:],
         'log_files': sorted(log_files, key=lambda x: x['modified'], reverse=True)[:20],
     })

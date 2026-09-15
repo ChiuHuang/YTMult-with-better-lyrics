@@ -274,8 +274,8 @@ def api_retitle():
 @login_required
 def api_cache_preview():
     video_id = request.args.get('v', '')
-    lang = request.args.get('lang', 'zh-TW')
-    if not video_id or not lang:
+    lang = request.args.get('lang') or 'zh-TW'
+    if not video_id:
         return jsonify({'error': 'Missing v or lang'}), 400
 
     full_key = f"{video_id}:{lang}"
