@@ -37,10 +37,48 @@ def _qrc_tag(ms, bracket=True):
     tag = f"{ms // 60000:02d}:{(ms % 60000) // 1000:02d}.{(ms % 1000) // 10:02d}"
     return f"[{tag}]" if bracket else f"<{tag}>"
 
+def _is_cjk_char(c):
+    # Mirrors is_cjk() in parsers_lrc.py, extended with Katakana Phonetic
+    # Extensions (31F0-31FF), Halfwidth Katakana (FF61-FF9F), CJK
+    # Symbols/Punctuation (3000-303F) and CJK Extension A (3400-4DBF).
+    o = ord(c)
+    return ((0x4E00 <= o <= 0x9FFF) or (0x3040 <= o <= 0x30FF) or
+            (0x31F0 <= o <= 0x31FF) or (0xFF61 <= o <= 0xFF9F) or
+            (0x3000 <= o <= 0x303F) or (0x3400 <= o <= 0x4DBF))
+
+
+def _qrc_join_words(words):
+    """CJK-aware join: no space when both boundary chars are CJK."""
+    out = ''
+    for i, w in enumerate(words):
+        if i > 0:
+            prev = out[-1] if out else ''
+            nxt = w[0] if w else ''
+            if not (prev and nxt and _is_cjk_char(prev) and _is_cjk_char(nxt)):
+                out += ' '
+        out += w
+    return out
+
+
+def _qrc_strip_cjk_spaces(text):
+    """Drop spaces sitting between two CJK chars; keep other spacing."""
+    res = []
+    n = len(text)
+    for i, ch in enumerate(text):
+        if ch == ' ':
+            prev = res[-1] if res else ''
+            nxt = text[i + 1] if i + 1 < n else ''
+            if prev and nxt and _is_cjk_char(prev) and _is_cjk_char(nxt):
+                continue
+        res.append(ch)
+    return ''.join(res)
+
+
 def _qrc_clean_text(text):
     text = re.sub(r'\s+([.,!?;:\'")\]}])', r'\1', text)
     text = re.sub(r'([(\["\'])\s+', r'\1', text)
-    return re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'\s+', ' ', text)
+    return _qrc_strip_cjk_spaces(text).strip()
 
 def parse_qrc_to_lrc(blob):
     """Convert QQ QRC payload to enhanced LRC. Returns LRC string or None."""
@@ -83,7 +121,7 @@ def parse_qrc_to_lrc(blob):
             words.append((txt, start, max(dur, 1)))
         if not words:
             continue
-        text = _qrc_clean_text(' '.join(w for w, _, _ in words))
+        text = _qrc_clean_text(_qrc_join_words([w for w, _, _ in words]))
         if not text:
             continue
         if ti_text and ti_text in text:
@@ -91,8 +129,12 @@ def parse_qrc_to_lrc(blob):
         if _QRC_CREDIT_RE.search(text):
             continue
         line = _qrc_tag(line_start)
-        for w, start, dur in words:
-            line += _qrc_tag(start, bracket=False) + w + ' '
+        for i, (w, start, dur) in enumerate(words):
+            line += _qrc_tag(start, bracket=False) + w
+            if i < len(words) - 1:
+                nxt = words[i + 1][0]
+                if nxt and w and not (_is_cjk_char(w[-1]) and _is_cjk_char(nxt[0])):
+                    line += ' '
         out_lines.append(line.rstrip())
     if not out_lines:
         return None
