@@ -1,37 +1,70 @@
-﻿<!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<!DOCTYPE html>
+<html lang="en" class="mdui-theme-auto">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YTM Lyrics - Setup</title>
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
-  <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YTMusicUltimate - Setup</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='mdui/mdui.css') }}">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='dash.css') }}">
+<style>
+.auth-wrap { min-height:100vh; display:grid; place-items:center; padding:24px; position:relative; overflow:hidden; }
+.auth-blob { position:absolute; width:420px; height:420px; border-radius:50%; filter: blur(80px); opacity:.35; pointer-events:none; }
+.blob-a { background: rgb(var(--mdui-color-primary)); top:-120px; right:-80px; animation: drift 9s ease-in-out infinite alternate; }
+.blob-b { background: rgb(var(--mdui-color-tertiary)); bottom:-140px; left:-100px; animation: drift 11s ease-in-out infinite alternate-reverse; }
+@keyframes drift { from { transform: translate(0,0) scale(1); } to { transform: translate(30px,20px) scale(1.15); } }
+.auth-card { width:100%; max-width:400px; position:relative; z-index:1; }
+.auth-card mdui-card { padding:28px; animation: rise .45s var(--mdui-motion-easing-emphasized-decelerate); }
+.auth-logo { width:56px; height:56px; border-radius:50%; display:grid; place-items:center; font-weight:700; font-size:22px; background: rgb(var(--mdui-color-primary)); color: rgb(var(--mdui-color-on-primary)); margin-bottom:10px; }
+.auth-title { font-size:22px; font-weight:500; }
+.auth-sub { font-size:13px; color: rgb(var(--mdui-color-on-surface-variant)); margin:2px 0 18px; }
+.auth-form { display:flex; flex-direction:column; gap:14px; }
+.auth-error { font-size:13px; color: rgb(var(--mdui-color-error)); background: rgba(var(--mdui-color-error-container),.5); padding:10px 12px; border-radius: var(--mdui-shape-corner-extra-small); }
+</style>
 </head>
-<body class="bg-base-200 min-h-screen flex items-center justify-center p-4">
-  <div class="card bg-base-100 border border-base-300 shadow-xl w-full max-w-sm">
-    <div class="card-body">
-      <div class="text-center mb-4">
-        <svg class="w-12 h-12 mx-auto text-primary mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-        <h1 class="text-xl font-bold">Set Admin Password</h1>
-        <p class="text-sm opacity-50 mt-1">First time setup. Choose a password to protect the dashboard.</p>
-      </div>
-
-      {% if error %}
-      <div class="alert alert-error mb-4 text-sm">
-        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-        <span>{{ error }}</span>
-      </div>
-      {% endif %}
-
-      <form method="POST" action="/setup">
-        <input type="password" name="password" placeholder="New password" autofocus class="input input-bordered w-full mb-3" />
-        <input type="password" name="password2" placeholder="Confirm password" class="input input-bordered w-full mb-4" />
-        <button type="submit" class="btn btn-primary w-full gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-          Set Password
-        </button>
+<body>
+<div class="auth-wrap">
+  <div class="auth-blob blob-a"></div>
+  <div class="auth-blob blob-b"></div>
+  <div class="auth-card">
+    <mdui-card variant="elevated">
+      <div class="auth-logo">YT</div>
+      <div class="auth-title">First run setup</div>
+      <div class="auth-sub">Set an admin password for the dashboard</div>
+      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+      <form class="auth-form" id="setup-form" method="post" action="/setup">
+        <mdui-text-field id="pw1" name="password" label="Password" type="password" variant="outlined" required></mdui-text-field>
+        <mdui-text-field id="pw2" name="password2" label="Confirm password" type="password" variant="outlined" required></mdui-text-field>
+        <mdui-button variant="filled" type="submit" icon="lock">Set password</mdui-button>
       </form>
-    </div>
+    </mdui-card>
   </div>
+</div>
+<script src="{{ url_for('static', filename='mdui/mdui.global.js') }}"></script>
+<script>
+(function () {
+  var form = document.getElementById('setup-form');
+  var pw1 = document.getElementById('pw1');
+  var pw2 = document.getElementById('pw2');
+  var btn = document.querySelector('#setup-form mdui-button');
+  if (pw1) pw1.focus();
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (pw1.value !== pw2.value) {
+      pw2.invalid = true;
+      return;
+    }
+    btn.loading = true;
+    fetch('/setup', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'password=' + encodeURIComponent(pw1.value) + '&password2=' + encodeURIComponent(pw2.value)
+    }).finally(function () {
+      window.location.reload();
+    });
+  });
+})();
+</script>
 </body>
 </html>

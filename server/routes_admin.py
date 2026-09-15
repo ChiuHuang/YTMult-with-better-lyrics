@@ -21,7 +21,8 @@ import traceback
 import atexit
 import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
-from .app import (app, login_required, _admin_cfg, SERVER_INSTANCE_ID,
+from .app import (app, login_required, _admin_cfg, _save_admin_config,
+    SERVER_INSTANCE_ID,
     SERVER_START_TIME, SERVER_START_TS, LOG_DIR, CRASH_LOG_FILE,
     _recent_logs, _structured_logs, _recent_requests, _crash_logs,
     _sse_subscribers, _sse_subscribers_lock)
