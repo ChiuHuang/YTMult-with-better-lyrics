@@ -11,6 +11,7 @@ import time as time_module
 import subprocess
 import threading
 import concurrent.futures
+import queue
 from collections import deque
 from datetime import datetime
 from urllib.parse import quote
@@ -88,6 +89,24 @@ _recent_logs = deque(maxlen=800)
 _structured_logs = deque(maxlen=500)
 _recent_requests = deque(maxlen=100)
 _crash_logs = deque(maxlen=100)
+
+# SSE subscriber management -- each entry is a queue.Queue
+_sse_subscribers = []
+_sse_subscribers_lock = threading.Lock()
+
+def _sse_broadcast(event_type, data):
+    """Push an SSE event to all connected dashboard clients."""
+    import json as _json
+    msg = f"event: {event_type}\ndata: {_json.dumps(data)}\n\n"
+    with _sse_subscribers_lock:
+        dead = []
+        for q in _sse_subscribers:
+            try:
+                q.put_nowait(msg)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            _sse_subscribers.remove(q)
 
 # Persistent log files
 LOG_DIR = "logs"

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import queue
 import requests
 import hashlib
 import time as time_module
@@ -22,7 +23,8 @@ import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import (app, login_required, _admin_cfg, SERVER_INSTANCE_ID,
     SERVER_START_TIME, SERVER_START_TS, LOG_DIR, CRASH_LOG_FILE,
-    _recent_logs, _structured_logs, _recent_requests, _crash_logs)
+    _recent_logs, _structured_logs, _recent_requests, _crash_logs,
+    _sse_subscribers, _sse_subscribers_lock)
 from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
 from .jwt_pool import contribute_jwt, list_jwt, check_all as jwt_check_all
@@ -529,4 +531,37 @@ def admin_self_update_perform():
         return jsonify({'ok': True, 'message': msg, 'local': local, 'remote': remote, 'parent': parent, 'restarting': True})
     else:
         return jsonify({'ok': False, 'error': msg, 'local': local, 'remote': remote}), 500
+
+
+# ============================================================
+# SSE: real-time push for dashboard
+# ============================================================
+@app.route('/api/admin/events')
+@login_required
+def admin_events():
+    """SSE stream that pushes log, crash, cache, and node events."""
+    q = queue.Queue(maxsize=200)
+    with _sse_subscribers_lock:
+        _sse_subscribers.append(q)
+
+    def generate():
+        try:
+            # Send initial snapshot so the client can render immediately
+            import json as _json
+            yield f"event: snapshot\ndata: {_json.dumps({'logs': list(_structured_logs)[-80:], 'total': len(_structured_logs)})}\n\n"
+            while True:
+                try:
+                    msg = q.get(timeout=30)
+                    yield msg
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            with _sse_subscribers_lock:
+                if q in _sse_subscribers:
+                    _sse_subscribers.remove(q)
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream',
+                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 

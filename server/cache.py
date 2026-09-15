@@ -106,6 +106,11 @@ def set_cached(video_id, data):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             json.dump({'data': data, 'ts': datetime.now().isoformat()}, f, ensure_ascii=False)
+        try:
+            from .app import _sse_broadcast
+            _sse_broadcast('cache', {'video_id': video_id, 'song': data.get('song', ''), 'artist': data.get('artist', ''), 'source': data.get('source', ''), 'synced': data.get('synced', False)})
+        except Exception:
+            pass
     except:
         pass
 
