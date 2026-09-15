@@ -271,7 +271,11 @@
             [self.view addSubview:own];
         }
         CGFloat btnW = 56.0, btnH = 32.0;
-        CGFloat topPad = 54.0; // below status bar + nav area
+        CGFloat safeTop = 0;
+        if (@available(iOS 11.0, *)) {
+            safeTop = self.view.safeAreaInsets.top;
+        }
+        CGFloat topPad = (safeTop > 0 ? safeTop + 6.0 : 46.0);
         own.frame = CGRectMake(self.view.bounds.size.width - btnW - 12.0, topPad, btnW, btnH);
         own.layer.cornerRadius = btnH / 2.0;
         own.hidden = NO;
@@ -300,7 +304,7 @@
     CGRect threeFrame = [threeDot.superview convertRect:threeDot.frame toView:btnContainer];
     CGFloat btnW = 56.0, btnH = 32.0;
     own.frame = CGRectMake(threeFrame.origin.x - btnW - 8.0,
-                           threeFrame.origin.y + (threeFrame.size.height - btnH) / 2.0,
+                           threeFrame.origin.y + (threeFrame.size.height - btnH) / 2.0 - 8.0,
                            btnW, btnH);
     own.layer.cornerRadius = btnH / 2.0;
     own.hidden = NO;

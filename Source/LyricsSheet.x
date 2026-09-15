@@ -1,5 +1,17 @@
 #import "LyricsShared.h"
 
+static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
+    return ((c >= 0x3040 && c <= 0x309F) ||
+            (c >= 0x30A0 && c <= 0x30FF) ||
+            (c >= 0x31F0 && c <= 0x31FF) ||
+            (c >= 0x3400 && c <= 0x4DBF) ||
+            (c >= 0x4E00 && c <= 0x9FFF) ||
+            (c >= 0xF900 && c <= 0xFAFF) ||
+            (c >= 0x3000 && c <= 0x303F) ||
+            (c >= 0xFF61 && c <= 0xFF9F) ||
+            (c >= 0xFF00 && c <= 0xFFEF));
+}
+
 %hook YTMLightweightMusicDescriptionShelfCell
 
 - (void)layoutSubviews {
@@ -761,11 +773,13 @@
 
     if (newLyrics.count > 0 && (self.isModal || YTMULyricsPreference(@"lyricsAlwaysOn", YES))) {
         self.view.hidden = NO;
-        UIView *contentContainer = self.view.superview;
-        if (contentContainer) {
-            [contentContainer bringSubviewToFront:self.view];
-            for (UIView *sub in contentContainer.subviews) {
-                if (sub.tag != 9999) sub.hidden = YES;
+        if (!self.isModal && self.view.tag == 9999) {
+            UIView *contentContainer = self.view.superview;
+            if (contentContainer) {
+                [contentContainer bringSubviewToFront:self.view];
+                for (UIView *sub in contentContainer.subviews) {
+                    if (sub != self.view && sub.tag != 9999) sub.hidden = YES;
+                }
             }
         }
     }
@@ -786,15 +800,35 @@
     for (NSString *t in tokens) {
         if (t.length > 0) [nonEmpty addObject:t];
     }
-    return [nonEmpty componentsJoinedByString:@" "];
+    NSString *joined = [nonEmpty componentsJoinedByString:@" "];
+    NSMutableString *out = [NSMutableString stringWithCapacity:joined.length];
+    for (NSUInteger i = 0; i < joined.length; i++) {
+        unichar c = [joined characterAtIndex:i];
+        if (c == ' ' && i > 0 && i + 1 < joined.length) {
+            unichar prev = [joined characterAtIndex:i - 1];
+            unichar next = [joined characterAtIndex:i + 1];
+            if (YTMUIsCJKChar(prev) && YTMUIsCJKChar(next)) continue;
+        }
+        [out appendFormat:@"%C", c];
+    }
+    return out;
 }
 
 - (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges {
     NSArray *parts = lyric[@"parts"];
+    NSCharacterSet *wsTrim = [NSCharacterSet whitespaceAndNewlineCharacterSet];
     NSMutableString *concat = [NSMutableString string];
     for (NSDictionary *p in parts) {
-        NSString *w = p[@"words"];
-        if (w) [concat appendString:w];
+        NSString *rawW = (NSString *)(p[@"words"] ?: @"");
+        NSString *w = [rawW stringByTrimmingCharactersInSet:wsTrim];
+        if (w.length == 0) continue;
+        if (concat.length > 0) {
+            unichar prev = [concat characterAtIndex:concat.length - 1];
+            unichar next = [w characterAtIndex:0];
+            NSString *sep = (YTMUIsCJKChar(prev) && YTMUIsCJKChar(next)) ? @"" : @" ";
+            [concat appendString:sep];
+        }
+        [concat appendString:w];
     }
     NSString *display = [self normalizedLyricText:([concat length] ? concat : lyric[@"text"])];
     if (outRanges) {
@@ -1052,6 +1086,57 @@
 @end
 
 
+static void __attribute__((unused)) YTMUAttemptFallbackPresent(NSString *resolvedVideoID, int attempt) {
+    if (isLyricsViewVisibleOnScreen()) {
+        sendDebugLog(@"[MUSIC] Native lyrics panel already visible on screen, skipping fallback");
+        return;
+    }
+
+    UIViewController *top = topMostViewController();
+    if (!top) return;
+
+    if ([top isKindOfClass:[YTMULyricsViewController class]] || [top.presentedViewController isKindOfClass:[YTMULyricsViewController class]]) {
+        YTMULyricsViewController *existing = [top isKindOfClass:[YTMULyricsViewController class]]
+            ? (YTMULyricsViewController *)top
+            : (YTMULyricsViewController *)top.presentedViewController;
+        NSString *existingVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
+        if (existingVideoID) [existing fetchLyricsForVideo:existingVideoID];
+        return;
+    }
+
+    if (attempt < 3) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            YTMUAttemptFallbackPresent(resolvedVideoID, attempt + 1);
+        });
+        return;
+    }
+
+    if (top.presentedViewController || top.isBeingPresented || top.isBeingDismissed) {
+        sendDebugLog(@"[WARN] fallback suppressed: top view controller is busy presenting");
+        return;
+    }
+
+    sendDebugLog(@"[MUSIC] Presenting fallback YTMULyricsViewController bottom sheet");
+    YTMULyricsViewController *lyricsVC = [[YTMULyricsViewController alloc] init];
+    lyricsVC.isModal = YES;
+    lyricsVC.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheet = lyricsVC.sheetPresentationController;
+        sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+        sheet.prefersGrabberVisible = YES;
+    }
+    NSString *tapVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
+    if (tapVideoID) {
+        [lyricsVC fetchLyricsForVideo:tapVideoID];
+    }
+    [top presentViewController:lyricsVC animated:YES completion:^{
+        if (!tapVideoID) {
+            UILabel *statusLabel = [lyricsVC.tableView.tableHeaderView viewWithTag:8888];
+            if (statusLabel) statusLabel.text = @"No video playing";
+        }
+    }];
+}
+
 void openLyricsFromViewController(UIViewController *parentVC) {
     sendDebugLog(@"[MUSIC] openLyricsFromViewController called");
     NSString *resolvedVideoID = YTMUResolveCurrentVideoID();
@@ -1077,42 +1162,5 @@ void openLyricsFromViewController(UIViewController *parentVC) {
         sendDebugLog(@"[WARN] openLyrics: no active engagement panel container captured, native panel path skipped entirely");
     }
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (isLyricsViewVisibleOnScreen()) {
-            sendDebugLog(@"[MUSIC] Native lyrics panel already visible on screen, skipping fallback");
-            return;
-        }
-
-        UIViewController *top = topMostViewController();
-        if (!top) return;
-
-        if ([top isKindOfClass:[YTMULyricsViewController class]] || [top.presentedViewController isKindOfClass:[YTMULyricsViewController class]]) {
-            YTMULyricsViewController *existing = [top isKindOfClass:[YTMULyricsViewController class]]
-                ? (YTMULyricsViewController *)top
-                : (YTMULyricsViewController *)top.presentedViewController;
-            NSString *existingVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
-            if (existingVideoID) [existing fetchLyricsForVideo:existingVideoID];
-            return;
-        }
-
-        sendDebugLog(@"[MUSIC] Presenting fallback YTMULyricsViewController bottom sheet");
-        YTMULyricsViewController *lyricsVC = [[YTMULyricsViewController alloc] init];
-        lyricsVC.isModal = YES;
-        lyricsVC.modalPresentationStyle = UIModalPresentationPageSheet;
-        if (@available(iOS 15.0, *)) {
-            UISheetPresentationController *sheet = lyricsVC.sheetPresentationController;
-            sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
-            sheet.prefersGrabberVisible = YES;
-        }
-        NSString *tapVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
-        if (tapVideoID) {
-            [lyricsVC fetchLyricsForVideo:tapVideoID];
-        }
-        [top presentViewController:lyricsVC animated:YES completion:^{
-            if (!tapVideoID) {
-                UILabel *statusLabel = [lyricsVC.tableView.tableHeaderView viewWithTag:8888];
-                if (statusLabel) statusLabel.text = @"No video playing";
-            }
-        }];
-    });
+    YTMUAttemptFallbackPresent(resolvedVideoID, 0);
 }

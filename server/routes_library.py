@@ -13,7 +13,7 @@ from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, rebase_cached,
     retitle_song,
 )
-from .cache import get_cached, _cache_filename, _cache_key_from_filename
+from .cache import get_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
 
 # Module-level rebase job state
 _rebase_job = {
@@ -293,12 +293,30 @@ def api_cache_preview():
                     import json as _json
                     with open(fpath, 'r', encoding='utf-8') as f:
                         entry = _json.load(f)
-                    data = entry.get('data', {})
+                    cand = entry.get('data', {})
+                    if is_not_found_result(cand):
+                        continue
+                    if cand and cand.get('lyrics'):
+                        sanitize_lyrics_parts(cand['lyrics'])
+                    data = cand
+                    print(f"[LIBRARY] [OK] cache preview raw fallback key={key}")
                     break
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[LIBRARY] [FAIL] cache preview fallback {key}: {e}")
 
     if data is None:
         return jsonify({'error': 'Not cached'}), 404
 
-    return jsonify(data)
+    lyrics = data.get('lyrics', []) or []
+    wbw = any(l.get('wordSynced') for l in lyrics)
+    if wbw:
+        tier = 'wbw'
+    elif data.get('synced'):
+        tier = 'line'
+    else:
+        tier = 'plain'
+    resp = dict(data)
+    if resp.get('wordSynced') is None:
+        resp['wordSynced'] = wbw
+    resp['tier'] = tier
+    return jsonify(resp)
