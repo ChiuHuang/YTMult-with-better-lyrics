@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>YTM Lyrics Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { theme: { extend: { fontFamily: { sans: ['-apple-system','BlinkMacSystemFont','Segoe UI','Roboto','sans-serif'] } } } }
@@ -363,8 +364,8 @@
   <dialog id="nodeModal" class="modal">
     <div class="modal-box bg-base-100 border border-base-300 max-w-lg">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-bold text-lg">Node Created</h3>
-        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></form>
+        <h3 class="font-bold text-lg"><i class="fa-solid fa-server mr-2"></i>Node Created</h3>
+        <form method="dialog"><button class="btn btn-ghost btn-sm btn-circle"><i class="fa-solid fa-xmark"></i></button></form>
       </div>
       <div class="space-y-3">
         <div>
@@ -376,16 +377,20 @@
           <div class="font-mono text-sm mt-1 p-2 bg-base-200 rounded-lg break-all" id="modalServerUrl"></div>
         </div>
         <div>
+          <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Admin Password</label>
+          <input id="modalPassword" type="password" placeholder="Enter password to embed in command" class="input input-bordered input-sm w-full mt-1" oninput="updateDeployOneLiner()" />
+        </div>
+        <div>
           <label class="text-xs font-semibold opacity-50 uppercase tracking-wider">Deploy Command</label>
           <div class="relative mt-1">
             <pre id="modalOneLiner" class="text-xs leading-relaxed p-3 bg-[#0d1117] text-[#c9d1d9] rounded-lg overflow-x-auto max-h-48"></pre>
-            <button class="btn btn-ghost btn-xs absolute top-1 right-1" title="Copy" onclick="navigator.clipboard.writeText(document.getElementById('modalOneLiner').textContent).then(()=>showToast('Copied!'))"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button>
+            <button class="btn btn-ghost btn-xs absolute top-1 right-1" title="Copy" onclick="navigator.clipboard.writeText(document.getElementById('modalOneLiner').textContent).then(()=>showToast('Copied!'))"><i class="fa-regular fa-copy"></i></button>
           </div>
         </div>
       </div>
       <div class="modal-action">
         <form method="dialog"><button class="btn btn-ghost btn-sm">Close</button></form>
-        <button class="btn btn-primary btn-sm gap-1" id="modalDownloadBtn"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Download node.py</button>
+        <button class="btn btn-primary btn-sm gap-1" id="modalDownloadBtn"><i class="fa-solid fa-download"></i> Download node.py</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop"><button>close</button></form>
@@ -667,12 +672,12 @@
     let _logTotal = 0;
     function renderLogEntry(entry) {
       const colors = { success:'text-success', error:'text-error', warning:'text-warning', request:'text-primary', response:'text-info', translate:'text-accent', pending:'text-warning italic', detail:'text-base-content/40', info:'text-base-content/50' };
-      const icons = { success:'check_circle', error:'error', warning:'warning', request:'send', response:'download', translate:'translate', pending:'hourglass_empty', detail:'radio_button_checked', info:'info' };
+      const icons = { success:'fa-circle-check', error:'fa-circle-exclamation', warning:'fa-triangle-exclamation', request:'fa-paper-plane', response:'fa-download', translate:'fa-language', pending:'fa-hourglass-half', detail:'fa-circle-dot', info:'fa-circle-info' };
       const c = colors[entry.level] || 'text-base-content/50';
-      const ic = icons[entry.level] || 'info';
+      const ic = icons[entry.level] || 'fa-circle-info';
       return `<div class="flex items-start gap-2 px-3 py-1.5 rounded-lg hover:bg-white/5 text-xs fade-in log-entry">
         <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(entry.ts)}</span>
-        <span class="material-symbols-outlined ${c} text-sm w-5 shrink-0 text-center">${ic}</span>
+        <i class="fa-solid ${ic} ${c} text-sm w-5 shrink-0 text-center"></i>
         <span class="${c} break-all flex-1">${escapeHtml(entry.msg)}</span>
       </div>`;
     }
@@ -713,7 +718,7 @@
         data.logs.slice().reverse().forEach(e => {
           box.insertAdjacentHTML('beforeend', `<div class="flex items-start gap-2 px-3 py-1.5 text-xs fade-in text-error">
             <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(e.ts||'')}</span>
-            <span class="material-symbols-outlined text-sm w-5 shrink-0 text-center">error</span>
+            <i class="fa-solid fa-circle-exclamation text-sm w-5 shrink-0 text-center"></i>
             <span class="break-all flex-1">[${escapeHtml(e.type||'CRASH')}] ${escapeHtml(e.msg||'')}<br><span class="opacity-50 whitespace-pre-wrap text-[11px]">${escapeHtml((e.trace||'').slice(0,800))}</span></span>
           </div>`);
         });
@@ -737,7 +742,7 @@
         }
         const html = list.map(item => `
           <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200 cursor-pointer transition" onclick="fetchLiveLyrics('${item.video_id}')">
-            <span class="material-symbols-outlined text-sm ${item.synced ? 'text-success' : 'text-warning'}">${item.synced ? 'music_note' : 'text_snippet'}</span>
+            <i class="fa-solid ${item.synced ? 'fa-music' : 'fa-file-lines'} text-sm ${item.synced ? 'text-success' : 'text-warning'}"></i>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium truncate">${escapeHtml(item.song || item.video_id)}</div>
               <div class="text-xs opacity-50">${escapeHtml(item.artist || '?')} &middot; ${item.source} &middot; ${item.lines} lines &middot; ${item.time_ago}</div>
@@ -747,7 +752,7 @@
         el.innerHTML = html;
         mini.innerHTML = list.slice(0, 12).map(item => `
           <div class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-base-200 cursor-pointer" onclick="fetchLiveLyrics('${item.video_id}');switchTab('preview')">
-            <span class="material-symbols-outlined text-xs ${item.synced ? 'text-success' : 'text-warning'}">${item.synced ? 'music_note' : 'text_snippet'}</span>
+            <i class="fa-solid ${item.synced ? 'fa-music' : 'fa-file-lines'} text-xs ${item.synced ? 'text-success' : 'text-warning'}"></i>
             <div class="truncate flex-1">${escapeHtml(item.song || item.video_id)}</div>
           </div>
         `).join('');
@@ -789,10 +794,13 @@
         loadNodes();
       } catch(e) { snackbar('Failed: ' + e); }
     }
+    let _nodeModalData = null;
     function showNodeModal(data) {
+      _nodeModalData = data;
       document.getElementById('modalNodeId').textContent = data.node_id;
       document.getElementById('modalServerUrl').textContent = data.server_url;
-      document.getElementById('modalOneLiner').textContent = data.deploy_one_liner;
+      document.getElementById('modalPassword').value = '';
+      updateDeployOneLiner();
       document.getElementById('modalDownloadBtn').onclick = () => {
         const raw = atob(data.script_b64);
         const arr = new Uint8Array(raw.length);
@@ -806,6 +814,14 @@
         snackbar(`Downloaded ${data.filename}`);
       };
       document.getElementById('nodeModal').showModal();
+    }
+    function updateDeployOneLiner() {
+      if (!_nodeModalData) return;
+      const pw = document.getElementById('modalPassword').value.trim() || 'YOUR_PASSWORD';
+      const label = _nodeModalData.deploy_one_liner.match(/--label="([^"]*)"/)?.[1] || 'node';
+      const server = _nodeModalData.server_url;
+      document.getElementById('modalOneLiner').textContent =
+        `curl -fsSL "${server}/deploy.sh" | bash -s -- --server="${server}" --password="${pw}" --label="${label}"`;
     }
     async function revokeNode(id) {
       if (!confirm('Revoke this node?')) return;
@@ -879,7 +895,7 @@
         if (!data.files || !data.files.length) { el.innerHTML = '<div class="text-center py-12 opacity-40 text-sm">No files</div>'; return; }
         el.innerHTML = data.files.map(f => `
           <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-base-200">
-            <span class="material-symbols-outlined text-sm opacity-50">${f.name.includes('crash') ? 'bug_report' : (f.name.includes('server') ? 'article' : 'description')}</span>
+            <i class="fa-solid ${f.name.includes('crash') ? 'fa-bug' : (f.name.includes('server') ? 'fa-file-lines' : 'fa-file-lines')} text-sm opacity-50"></i>
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium truncate">${escapeHtml(f.name)}</div>
               <div class="text-xs opacity-50">${f.size_human} &middot; ${f.modified}</div>
@@ -994,24 +1010,72 @@
     // --- Reload All ---
     function reloadAll() { _logTotal = 0; loadServerInfo(); loadLogs(); loadCrashLogs(); loadCaches(); loadNodes(); loadJwtPool(); loadFiles(); checkSelfUpdate(); snackbar('Refreshed'); }
 
-    // --- Material Symbols font (replaces mdui-icon) ---
-    const msLink = document.createElement('link');
-    msLink.rel = 'stylesheet';
-    msLink.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap';
-    document.head.appendChild(msLink);
-    const msStyle = document.createElement('style');
-    msStyle.textContent = '.material-symbols-outlined { font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 20; }';
-    document.head.appendChild(msStyle);
+    // --- SSE: real-time push instead of polling ---
+    let _evtSource = null;
+    function connectSSE() {
+      if (_evtSource) { try { _evtSource.close(); } catch(e) {} }
+      _evtSource = new EventSource('/api/admin/events');
+      _evtSource.addEventListener('snapshot', e => {
+        try {
+          const d = JSON.parse(e.data);
+          _logTotal = d.total || 0;
+          const logBox = document.getElementById('logBox');
+          logBox.innerHTML = '';
+          (d.logs || []).forEach(entry => logBox.insertAdjacentHTML('beforeend', renderLogEntry(entry)));
+          setTabCount('logCountBadge', _logTotal);
+          const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = _logTotal;
+          logBox.scrollTop = logBox.scrollHeight;
+        } catch(err) {}
+      });
+      _evtSource.addEventListener('log', e => {
+        try {
+          const entry = JSON.parse(e.data);
+          const logBox = document.getElementById('logBox');
+          logBox.insertAdjacentHTML('beforeend', renderLogEntry(entry));
+          while (logBox.children.length > 300) logBox.removeChild(logBox.firstChild);
+          _logTotal++;
+          setTabCount('logCountBadge', _logTotal);
+          const b2 = document.getElementById('logCountBadge2'); if (b2) b2.textContent = _logTotal;
+          const auto = document.getElementById('logAutoScroll');
+          if (!auto || auto.checked) logBox.scrollTop = logBox.scrollHeight;
+        } catch(err) {}
+      });
+      _evtSource.addEventListener('crash', e => {
+        try {
+          const entry = JSON.parse(e.data);
+          const box = document.getElementById('crashBox');
+          box.insertAdjacentHTML('beforeend', `<div class="flex items-start gap-2 px-3 py-1.5 text-xs fade-in text-error">
+            <span class="text-[10px] opacity-40 font-mono w-14 shrink-0 pt-0.5">${escapeHtml(entry.ts||'')}</span>
+            <i class="fa-solid fa-circle-exclamation text-sm w-5 shrink-0 text-center"></i>
+            <span class="break-all flex-1">[${escapeHtml(entry.type||'CRASH')}] ${escapeHtml(entry.msg||'')}<br><span class="opacity-50 whitespace-pre-wrap text-[11px]">${escapeHtml((entry.trace||'').slice(0,800))}</span></span>
+          </div>`);
+          const cb = document.getElementById('crashBadge'); if (cb) cb.textContent = parseInt(cb.textContent||'0') + 1;
+          const cb2 = document.getElementById('crashBadge2'); if (cb2) cb2.textContent = parseInt(cb2.textContent||'0') + 1;
+        } catch(err) {}
+      });
+      _evtSource.addEventListener('cache', e => {
+        try { loadCaches(); } catch(err) {}
+      });
+      _evtSource.addEventListener('node', e => {
+        try { loadNodes(); } catch(err) {}
+      });
+      _evtSource.onerror = () => {
+        setTimeout(connectSSE, 5000);
+      };
+    }
+
+    // --- FontAwesome loaded via CDN in <head> ---
 
     // --- Init ---
+    switchTab('preview');
     loadServerInfo();
-    loadLogs();
     loadCaches();
-    setInterval(loadLogs, 2000);
-    setInterval(loadCaches, 10000);
+    loadNodes();
+    loadJwtPool();
+    loadFiles();
+    checkSelfUpdate();
+    connectSSE();
     setInterval(loadServerInfo, 10000);
-    setInterval(loadCrashLogs, 5000);
-    setInterval(loadNodes, 10000);
     setInterval(loadJwtPool, 15000);
   </script>
 </body>
