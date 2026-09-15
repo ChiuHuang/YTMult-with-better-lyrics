@@ -358,6 +358,11 @@ def ws_node(ws):
         with _connected_nodes_lock:
             connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id), 'ip': real_ip}
         print(f"  [NODE] {node_id} ({record.get('label', '')}) connected")
+        try:
+            from .app import _sse_broadcast
+            _sse_broadcast('node', {'node_id': node_id, 'label': record.get('label', ''), 'online': True, 'ip': real_ip})
+        except Exception:
+            pass
         ws.send(json.dumps({'type': 'hello_ack', 'ok': True,
                             'code_sha': _node_template_sha(),
                             'server_sha': _current_server_sha()}))
@@ -402,6 +407,11 @@ def ws_node(ws):
             with _connected_nodes_lock:
                 connected_nodes.pop(node_id, None)
             print(f"  [NODE] {node_id} disconnected")
+            try:
+                from .app import _sse_broadcast
+                _sse_broadcast('node', {'node_id': node_id, 'online': False})
+            except Exception:
+                pass
 
 
 _ensure_node_workers()

@@ -36,59 +36,59 @@ def _classify_log(msg):
         return None, None
     if stripped.startswith(('Error', 'error', 'Traceback')):
         return 'error', 'error'
-    # Plain tag mapping (no emoji literals per style)
+    # Plain tag mapping (FontAwesome solid icons, no emoji literals per style)
     tag_map = {
-        '[OK]': ('success', 'check_circle'),
-        '[FAIL]': ('error', 'cancel'),
-        '[WARN]': ('warning', 'warning'),
-        '[WAIT]': ('pending', 'hourglass_empty'),
-        '[SEARCH]': ('info', 'person_search'),
-        '[TRANS]': ('translate', 'translate'),
-        '[SEND]': ('response', 'upload'),
-        '[REQ': ('request', 'search'),
-        '[CLEAN]': ('info', 'delete_sweep'),
-        '[DUMP]': ('info', 'upload_file'),
-        '[MUSIC]': ('info', 'music_note'),
-        '[iOS': ('device', 'phone_iphone'),
-        '[ALERT]': ('warning', 'notification_important'),
-        '[CRASH]': ('error', 'error'),
-        '[EXC]': ('error', 'error'),
+        '[OK]': ('success', 'fa-circle-check'),
+        '[FAIL]': ('error', 'fa-circle-xmark'),
+        '[WARN]': ('warning', 'fa-triangle-exclamation'),
+        '[WAIT]': ('pending', 'fa-hourglass-half'),
+        '[SEARCH]': ('info', 'fa-magnifying-glass'),
+        '[TRANS]': ('translate', 'fa-language'),
+        '[SEND]': ('response', 'fa-paper-plane'),
+        '[REQ': ('request', 'fa-search'),
+        '[CLEAN]': ('info', 'fa-broom'),
+        '[DUMP]': ('info', 'fa-file-arrow-up'),
+        '[MUSIC]': ('info', 'fa-music'),
+        '[iOS': ('device', 'fa-mobile-screen'),
+        '[ALERT]': ('warning', 'fa-bell'),
+        '[CRASH]': ('error', 'fa-circle-exclamation'),
+        '[EXC]': ('error', 'fa-circle-exclamation'),
     }
     for tag, (level, icon) in tag_map.items():
         if tag in stripped:
             return level, icon
     kw_map = [
-        ('[iOS Tweak]', 'device', 'phone_iphone'),
-        ('[REQ', 'request', 'search'),
-        ('[UI_DUMP]', 'device', 'phone_iphone'),
-        ('[CRASH]', 'error', 'error'),
-        ('[EXC]', 'error', 'error'),
-        ('Cache hit', 'success', 'cached'),
-        ('Cache miss', 'warning', 'cached'),
-        ('Got result from in-flight', 'success', 'cached'),
-        ('Returning', 'response', 'upload'),
-        ('Waiting for in-flight', 'pending', 'hourglass_empty'),
-        ('Looking up', 'info', 'person_search'),
-        ('Trying Cubey', 'info', 'cloud'),
-        ('Trying LRCLIB', 'info', 'cloud'),
-        ('Trying Unison', 'info', 'cloud'),
-        ('Trying YouTube', 'info', 'cloud'),
-        ('Translating', 'translate', 'translate'),
-        ('Cohere', 'translate', 'translate'),
-        ('Cleaned', 'info', 'delete_sweep'),
-        ('Saved to', 'success', 'save'),
-        ('Rate limited', 'warning', 'speed'),
-        ('All keys failed', 'error', 'vpn_key_off'),
-        ('[In-Flight]', 'pending', 'hourglass_empty'),
-        ('[Provider]', 'info', 'cloud'),
-        ('[Cache]', 'success', 'cached'),
+        ('[iOS Tweak]', 'device', 'fa-mobile-screen'),
+        ('[REQ', 'request', 'fa-search'),
+        ('[UI_DUMP]', 'device', 'fa-mobile-screen'),
+        ('[CRASH]', 'error', 'fa-circle-exclamation'),
+        ('[EXC]', 'error', 'fa-circle-exclamation'),
+        ('Cache hit', 'success', 'fa-database'),
+        ('Cache miss', 'warning', 'fa-database'),
+        ('Got result from in-flight', 'success', 'fa-database'),
+        ('Returning', 'response', 'fa-upload'),
+        ('Waiting for in-flight', 'pending', 'fa-hourglass-half'),
+        ('Looking up', 'info', 'fa-magnifying-glass'),
+        ('Trying Cubey', 'info', 'fa-cloud'),
+        ('Trying LRCLIB', 'info', 'fa-cloud'),
+        ('Trying Unison', 'info', 'fa-cloud'),
+        ('Trying YouTube', 'info', 'fa-cloud'),
+        ('Translating', 'translate', 'fa-language'),
+        ('Cohere', 'translate', 'fa-language'),
+        ('Cleaned', 'info', 'fa-broom'),
+        ('Saved to', 'success', 'fa-floppy-disk'),
+        ('Rate limited', 'warning', 'fa-gauge'),
+        ('All keys failed', 'error', 'fa-key'),
+        ('[In-Flight]', 'pending', 'fa-hourglass-half'),
+        ('[Provider]', 'info', 'fa-cloud'),
+        ('[Cache]', 'success', 'fa-database'),
     ]
     for keyword, level, icon in kw_map:
         if keyword in stripped:
             return level, icon
     if stripped.startswith('  '):
-        return 'detail', 'subdirectory_arrow_right'
-    return 'info', 'info'
+        return 'detail', 'fa-arrow-right'
+    return 'info', 'fa-circle-info'
 
 
 class LogTee:
@@ -124,12 +124,18 @@ class LogTee:
             if stripped and stripped != '=' * 60:
                 level, icon = _classify_log(stripped)
                 if level:
-                    _structured_logs.append({
+                    entry = {
                         'ts': datetime.now().strftime('%H:%M:%S'),
                         'level': level,
                         'icon': icon or 'info',
                         'msg': stripped,
-                    })
+                    }
+                    _structured_logs.append(entry)
+                    try:
+                        from .app import _sse_broadcast
+                        _sse_broadcast('log', entry)
+                    except Exception:
+                        pass
 
     def flush(self):
         try: self.original_stream.flush()
@@ -168,7 +174,14 @@ def _log_crash(exc_type, exc_val, exc_tb):
     try: print(f"[CRASH] {entry['type']}: {entry['msg']}")
     except: pass
     # also push to structured for UI
-    _structured_logs.append({'ts': datetime.now().strftime('%H:%M:%S'), 'level': 'error', 'icon': 'error', 'msg': f"[CRASH] {entry['type']}: {entry['msg']}"})
+    crash_entry = {'ts': datetime.now().strftime('%H:%M:%S'), 'level': 'error', 'icon': 'fa-circle-exclamation', 'msg': f"[CRASH] {entry['type']}: {entry['msg']}"}
+    _structured_logs.append(crash_entry)
+    try:
+        from .app import _sse_broadcast
+        _sse_broadcast('log', crash_entry)
+        _sse_broadcast('crash', entry)
+    except Exception:
+        pass
 
 # Global crash handlers - prevent silent death
 _old_excepthook = sys.excepthook
