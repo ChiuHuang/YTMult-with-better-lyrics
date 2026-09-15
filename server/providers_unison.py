@@ -41,6 +41,21 @@ def get_unison_key():
     return _unison_key
 
 
+def _unwrap_unison(raw):
+    """Unison API wraps responses as { success, data }. Unwrap and return
+    data on success, None on failure. Handles both old flat and new wrapped
+    formats for backwards compatibility."""
+    if not raw or not isinstance(raw, dict):
+        return None
+    # New format: { success: true, data: { ... } }
+    if 'success' in raw:
+        if not raw['success']:
+            return None
+        return raw.get('data')
+    # Old flat format (no 'success' key) -- return as-is
+    return raw
+
+
 def fetch_unison(video_id, title='', artist='', duration=0, via_node=None):
     """Fetch lyrics from Unison community API. via_node relays the GET through a
     connected node's outbound IP (same pattern as LRCLIB/Cubey) with a direct
@@ -58,7 +73,7 @@ def fetch_unison(video_id, title='', artist='', duration=0, via_node=None):
         if duration:
             params['duration'] = str(int(duration))
 
-        data = None
+        raw = None
         if via_node:
             relayed = relay_http_request(via_node, 'GET',
                                          f'https://unison.boidu.dev/lyrics?{urlencode(params)}',
@@ -67,19 +82,20 @@ def fetch_unison(video_id, title='', artist='', duration=0, via_node=None):
                 status, text = relayed
                 if status == 200:
                     try:
-                        data = json.loads(text)
+                        raw = json.loads(text)
                     except Exception:
                         pass
                 else:
                     print(f"  [FAIL] Unison via node {via_node}: HTTP {status}")
             else:
                 print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
-        if data is None:
+        if raw is None:
             resp = requests.get('https://unison.boidu.dev/lyrics',
                               params=params, headers=headers, timeout=8)
             if resp.status_code == 200:
-                data = resp.json()
+                raw = resp.json()
 
+        data = _unwrap_unison(raw)
         if data:
             fmt = data.get('format', '')
             lyrics_text = data.get('lyrics', '')

@@ -265,6 +265,19 @@ def api_lyrics():
     print(f"  [REQ {req_id}] Caching result to {cache_key} is_not_found={is_nf}")
     set_cached(cache_key, result)
 
+    # Record unlyriced for library rebase
+    if is_nf:
+        try:
+            from .library import record_unlyriced
+            record_unlyriced(
+                video_id,
+                song_info.get('title', ''),
+                song_info.get('artist', ''),
+                translate_to,
+            )
+        except Exception:
+            pass
+
     print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
     print("=" * 60)
 

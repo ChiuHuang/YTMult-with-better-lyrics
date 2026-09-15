@@ -110,8 +110,9 @@ def _sse_broadcast(event_type, data):
         for q in dead:
             _sse_subscribers.remove(q)
 
-# Persistent log files
-LOG_DIR = "logs"
+# Persistent log files -- absolute path so /api/admin/files/download works
+# regardless of the working directory (Render containers CWD != _ROOT).
+LOG_DIR = os.path.join(_ROOT, "logs")
 SERVER_LOG_FILE = os.path.join(LOG_DIR, "server.log")
 CRASH_LOG_FILE = os.path.join(LOG_DIR, "crash.log")
 UI_DUMP_DIR = LOG_DIR

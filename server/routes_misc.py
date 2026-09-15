@@ -20,7 +20,7 @@ import traceback
 import atexit
 import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
-from .app import app, SERVER_INSTANCE_ID, CRASH_LOG_FILE, _crash_logs
+from .app import app, SERVER_INSTANCE_ID, CRASH_LOG_FILE, _crash_logs, LOG_DIR
 from .logging_util import _log_crash
 from .self_update import _get_local_sha
 
@@ -72,7 +72,7 @@ def proxy_log():
             return jsonify({"status": "ok"})
 
         if req_type == "UI_DUMP":
-            os.makedirs("logs", exist_ok=True)
+            os.makedirs(LOG_DIR, exist_ok=True)
             timestamp = datetime.now().strftime("%H-%M-%S")
             dump_content = data.get('request_body', '')
             vc_count = dump_content.count('ViewController')
@@ -100,7 +100,7 @@ def proxy_log():
             if not has_lyrics_chip:
                 print(f"  [WARN] [UI_DUMP] No lyrics chip text detected - button may be hidden/locked or ASDisplayView (unlock failed)")
 
-            filepath = f"logs/UI_DUMP_{timestamp}.txt"
+            filepath = os.path.join(LOG_DIR, f"UI_DUMP_{timestamp}.txt")
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(dump_content)
             print(f"[OK] [UI_DUMP] Saved to {filepath} ({len(dump_content)} bytes)")
