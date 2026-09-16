@@ -416,7 +416,22 @@ def api_cache_preview():
                     print(f"[LIBRARY] [FAIL] cache preview fallback {key}: {e}")
 
     if data is None:
-        return jsonify({'error': 'Not cached'}), 404
+        # On-demand fetch: try pipeline if not cached
+        try:
+            from .pipeline import fetch_all_lyrics
+            from .jwt_pool import pick_jwt
+            jwt_token = pick_jwt()
+            print(f"[LIBRARY] [OK] cache preview on-demand fetch v={video_id} lang={lang}")
+            data = fetch_all_lyrics(video_id, lang=lang, jwt_token=jwt_token)
+            if data and data.get('lyrics') and not is_not_found_result(data):
+                from .cache import set_cached
+                set_cached(f"{video_id}:{lang}", data)
+                print(f"[LIBRARY] [OK] cache preview on-demand cached v={video_id}")
+            elif data is None or is_not_found_result(data):
+                return jsonify({'error': 'Not found for this video'}), 404
+        except Exception as e:
+            print(f"[LIBRARY] [FAIL] cache preview on-demand fetch v={video_id}: {e}")
+            return jsonify({'error': 'Not cached'}), 404
 
     lyrics = data.get('lyrics', []) or []
     wbw = any(l.get('wordSynced') for l in lyrics)
