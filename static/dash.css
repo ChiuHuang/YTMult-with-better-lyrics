@@ -134,12 +134,8 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
   .page.active, .log-row, .stagger > *, .stat-value.pulse, .live-dot::after, .skeleton, .list-row { animation: none !important; transition: none !important; }
 }
 
-/* ---- lyrics preview ---- */
-.prev-line { padding: 6px 10px; border-left: 3px solid transparent; border-radius: var(--mdui-shape-corner-extra-small); line-height: 1.55; }
-.prev-line .trans { font-size: 12.5px; color: rgb(var(--mdui-color-on-surface-variant)); margin-top: 2px; }
-.prev-line.prev-active { background: rgba(var(--mdui-color-primary),.16); border-left: 3px solid rgb(var(--mdui-color-primary)); font-weight: 700; }
-.prev-word { color: inherit; }
-.prev-word-active { color: rgb(var(--mdui-color-primary)); font-weight: 700; }
+/* ---- lyrics preview (braccato) ---- */
+#prev-lyrics { scrollbar-width: thin; }
 
 /* ---- rebase ---- */
 .rebase-list { display:flex; flex-direction:column; gap:4px; max-height: 40vh; overflow-y: auto; }
