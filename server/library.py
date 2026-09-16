@@ -212,7 +212,7 @@ def remove_unlyriced(video_id):
 # Background rebase
 # ------------------------------------------------------------
 def rebase_cached(job, on_result, cancel_event=None, max_workers=8,
-                   sleep_between=0.5):
+                   sleep_between=0.5, target_vid=None):
     """Re-race non-wbw cache entries in parallel and upgrade when possible.
 
     *job* is a mutable dict that gets its counters mutated in-place.
@@ -224,6 +224,9 @@ def rebase_cached(job, on_result, cancel_event=None, max_workers=8,
     except Exception as e:
         print(f"[REBASE] [FAIL] candidate scan: {e}")
         return
+
+    if target_vid:
+        candidates = [c for c in candidates if c['video_id'] == target_vid]
 
     total = len(candidates)
     job['total'] = total

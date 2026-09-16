@@ -208,6 +208,55 @@
     eventSource.addEventListener('node', () => throttledRefresh());
     eventSource.addEventListener('cache', () => throttledRefresh());
     eventSource.addEventListener('crash', () => throttledRefresh());
+    eventSource.addEventListener('rebase_progress', e => {
+      try {
+        const d = JSON.parse(e.data);
+        const results = $('#rebase-results');
+        if (!results) return;
+        const cls = d.status === 'upgraded' ? 'rb-upgraded'
+          : d.status === 'same' ? 'rb-same'
+          : (d.status === 'failed' || d.status === 'error') ? 'rb-failed'
+          : d.status === 'trying' ? 'rb-already'
+          : 'rb-already';
+        const text = d.status === 'trying'
+          ? `${d.song || '?'} - ${d.artist || '?'} | trying... | ${d.message || ''}`
+          : `${d.song || '?'} - ${d.artist || '?'} | tier: ${d.from_tier || '?'} -> ${d.to_tier || '?'} | ${d.source || ''}`;
+        results.appendChild(el('div', {class: `rebase-row ${cls}`}, text));
+        const summary = $('#rebase-summary');
+        if (summary && d.total) summary.textContent = `${d.done}/${d.total} upgraded=${d.upgraded||0} same=${d.same||0} failed=${d.failed||0}`;
+        results.scrollTop = results.scrollHeight;
+      } catch {}
+    });
+    eventSource.addEventListener('retitle_progress', e => {
+      try {
+        const d = JSON.parse(e.data);
+        const results = $('#retitle-results');
+        if (!results) return;
+        const isOk = d.status === 'retitled_and_cached';
+        const cls = isOk ? 'rb-upgraded' : d.status === 'retitled_no_lyrics' ? 'rb-failed' : d.status === 'retitling' || d.status === 'fetching' ? 'rb-already' : 'rb-same';
+        const oldText = `${d.song || '?'} - ${d.artist || '?'}`;
+        const newText = d.new_title ? `${d.new_title} - ${d.new_artist || '?'}` : '';
+        let text;
+        if (d.status === 'retitling' || d.status === 'fetching') {
+          text = `${oldText} | ${d.message || d.status}...`;
+        } else {
+          text = `old: ${oldText}`;
+          if (newText) text += `\nnew: ${newText}`;
+          text += `\n${d.status} | ${d.source || ''}`;
+        }
+        const row = el('div', {class: `rebase-row ${cls}`, style: (d.status !== 'retitling' && d.status !== 'fetching') ? 'display:flex; flex-direction:column; gap:2px;' : ''},
+          d.status !== 'retitling' && d.status !== 'fetching'
+            ? [el('span', {style:'font-size:11px; opacity:.6;'}, `old: ${oldText}`), el('span', {style:'font-weight:600;'}, newText ? `new: ${newText}` : ''), el('span', {style:'font-size:11px; opacity:.6;'}, `${d.status} | ${d.source || ''}`)]
+            : text
+        );
+        results.appendChild(row);
+        const summary = $('#retitle-summary');
+        if (summary && d.total) summary.textContent = `${d.done}/${d.total}`;
+        results.scrollTop = results.scrollHeight;
+      } catch {}
+    });
+    eventSource.addEventListener('rebase', e => { if (activePage === 'library') loadLibrary(); });
+    eventSource.addEventListener('retitle', e => { if (activePage === 'library') loadLibrary(); });
     eventSource.addEventListener('open', () => {
       const dot = $('#log-conn');
       if (dot) { dot.innerHTML = '<span class="live-dot"></span> connected'; dot.className = 'pill pill-ok'; }
@@ -515,22 +564,26 @@
   /* ---- library ---- */
   let rebaseFastTimer = null;
   let rebaseMode = 'cached';
+  let retitleFastTimer = null;
   const loadLibrary = async () => {
     try {
-      const [scan, status] = await Promise.all([
+      const [scan, status, retitleStatus] = await Promise.all([
         json('/api/admin/library/scan'),
-        json('/api/admin/library/rebase/status')
+        json('/api/admin/library/rebase/status'),
+        json('/api/admin/library/retitle/status').catch(() => ({state:'idle'})),
       ]);
       setVal('#stat-wbw', fmt(scan.buckets?.wbw));
       setVal('#stat-line', fmt(scan.buckets?.line));
       setVal('#stat-plain', fmt(scan.buckets?.plain));
       setVal('#stat-none', fmt(scan.buckets?.none));
       renderRebaseStatus(status);
+      renderRetitleStatus(retitleStatus);
       try {
         const unlyriced = await json('/api/admin/library/unlyriced');
         renderUnlyriced(unlyriced.items || []);
       } catch {}
       if (status.state === 'running') startRebaseFastPoll(); else stopRebaseFastPoll();
+      if (retitleStatus.state === 'running') startRetitleFastPoll(); else stopRetitleFastPoll();
     } catch {}
   };
   const renderRebaseStatus = status => {
@@ -581,8 +634,8 @@
       rebaseBtn.addEventListener('click', async () => {
         rebaseBtn.loading = true;
         try {
-          await API('/api/admin/library/rebase/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:'unlyriced'})});
-          mdui.snackbar({message:'Rebase started'});
+          await API('/api/admin/library/rebase/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode:'unlyriced', video_id: item.video_id})});
+          mdui.snackbar({message:`Rebase started for ${item.song || item.video_id}`});
           loadLibrary();
         } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
         rebaseBtn.loading = false;
@@ -595,8 +648,8 @@
         try {
           const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({video_id: item.video_id})});
           const d = await r.json();
-          mdui.snackbar({message: d.ok ? 'Retitled' : (d.error || 'Failed')});
-          loadLibrary();
+          if (d.ok) { mdui.snackbar({message:'Retitle started'}); openRetitleDialog(); }
+          else mdui.snackbar({message: d.error || 'Failed'});
         } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
         retitleBtn.loading = false;
       });
@@ -621,6 +674,46 @@
       loadLibrary();
     } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
   };
+
+  /* ---- retitle (background job + dialog) ---- */
+  const openRetitleDialog = () => {
+    const d = $('#retitle-dialog');
+    if (d) d.open = true;
+  };
+  const renderRetitleStatus = status => {
+    const progress = $('#retitle-progress');
+    const summary = $('#retitle-summary');
+    const results = $('#retitle-results');
+    const running = status.state === 'running';
+    if (progress) {
+      if (running && status.total > 0) progress.value = Math.min(1, status.done / status.total);
+      else if (status.state === 'done') progress.value = 1;
+      else progress.value = 0;
+    }
+    if (summary) {
+      summary.textContent = (status.total > 0 || status.state === 'done')
+        ? `${fmt(status.done)}/${fmt(status.total)}`
+        : '';
+    }
+    if (results) {
+      results.innerHTML = '';
+      const items = status.results || [];
+      if (!items.length && status.state === 'idle') return;
+      if (!items.length) { results.appendChild(el('div', {style:'font-size:13px; color:rgb(var(--mdui-color-on-surface-variant)); padding:8px 0;'}, 'No results yet...')); return; }
+      items.forEach(r => {
+        const isOk = r.status === 'retitled_and_cached';
+        const cls = isOk ? 'rb-upgraded' : r.status === 'retitled_no_lyrics' ? 'rb-failed' : 'rb-same';
+        const oldText = `${r.old?.title || '?'} - ${r.old?.artist || '?'}`;
+        const newText = `${r.new?.title || '?'} - ${r.new?.artist || '?'}`;
+        const row = el('div', {class: `rebase-row ${cls}`, style:'display:flex; flex-direction:column; gap:2px;'},
+          el('span', {style:'font-size:11px; opacity:.6;'}, `old: ${oldText}`),
+          el('span', {style:'font-weight:600;'}, `new: ${newText}`),
+          el('span', {style:'font-size:11px; opacity:.6;'}, `${r.status} | ${r.source || ''}`),
+        );
+        results.appendChild(row);
+      });
+    }
+  };
   const retitleAll = async () => {
     await mdui.confirm({
       headline: 'Retitle all unlyriced',
@@ -631,8 +724,8 @@
         try {
           const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
           const d = await r.json();
-          mdui.snackbar({message: d.ok ? `Retitled ${d.retitled?.length || 0} song(s)` : (d.error || 'Failed')});
-          loadLibrary();
+          if (d.ok) { mdui.snackbar({message:'Retitle started'}); openRetitleDialog(); }
+          else mdui.snackbar({message: d.error || 'Failed'});
         } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
       }
     });
@@ -643,6 +736,13 @@
   };
   const stopRebaseFastPoll = () => {
     if (rebaseFastTimer) { clearInterval(rebaseFastTimer); rebaseFastTimer = null; }
+  };
+  const startRetitleFastPoll = () => {
+    if (retitleFastTimer) return;
+    retitleFastTimer = setInterval(() => { if (activePage === 'library') loadLibrary(); }, 2000);
+  };
+  const stopRetitleFastPoll = () => {
+    if (retitleFastTimer) { clearInterval(retitleFastTimer); retitleFastTimer = null; }
   };
 
   /* ---- lyrics preview ---- */
@@ -920,6 +1020,8 @@
     if (rebaseStopBtn) rebaseStopBtn.addEventListener('click', stopRebase);
     const retitleAllBtn = $('#unlyriced-retitle-all');
     if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
+    const retitleCloseBtn = $('#retitle-close');
+    if (retitleCloseBtn) retitleCloseBtn.addEventListener('click', () => { try{$('#retitle-dialog').open=false;}catch{} });
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';
