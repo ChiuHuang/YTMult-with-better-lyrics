@@ -477,23 +477,37 @@
       if (closeBtn) closeBtn.disabled=false;
     }
   };
+  const PING_HISTORY_KEY = 'ymtu-update-ping-history';
+  const getPingHistory = () => {
+    try { return JSON.parse(localStorage.getItem(PING_HISTORY_KEY)) || []; } catch { return []; }
+  };
+  const savePingHistory = count => {
+    const hist = getPingHistory();
+    hist.push(count);
+    if (hist.length > 20) hist.shift();
+    try { localStorage.setItem(PING_HISTORY_KEY, JSON.stringify(hist)); } catch {}
+  };
   const pingLoop = async (progress, stage, pingEl, closeBtn) => {
     let attempt = 0;
     const tick = 1600;
+    const hist = getPingHistory();
+    const avg = hist.length > 0 ? Math.round(hist.reduce((a, b) => a + b, 0) / hist.length) : 8;
+    const maxEst = avg + 1;
     while (true) {
       attempt++;
-      if (progress) { progress.indeterminate = false; progress.value = Math.min(0.95, 0.15 + attempt*0.06); }
-      if (pingEl) pingEl.innerHTML = `<span class="live-dot"></span> Waiting for server (attempt ${attempt})`;
+      if (progress) { progress.indeterminate = false; progress.value = Math.min(0.95, 0.15 + (attempt / maxEst) * 0.8); }
+      if (pingEl) pingEl.innerHTML = `<span class="live-dot"></span> Waiting for server (${attempt}/${maxEst} est)`;
       await new Promise(res => setTimeout(res, tick));
       try {
         const r = await fetch('/api/admin/self_update/check');
         if (r.ok) {
           const data = await r.json();
+          savePingHistory(attempt);
           if (progress) { progress.indeterminate=false; progress.value=1; }
           if (stage) stage.textContent = `Updated -- now at ${shortSha(data.local_sha)}`;
-          if (pingEl) pingEl.innerHTML = 'Server is back';
+          if (pingEl) pingEl.innerHTML = 'Server is back -- reloading...';
           if (closeBtn) closeBtn.disabled = false;
-          setTimeout(()=>{ try{$('#updateDialog').open=false;}catch{} loadUpdate(); }, 1600);
+          setTimeout(()=>{ window.location.reload(); }, 1600);
           return;
         }
       } catch {}
