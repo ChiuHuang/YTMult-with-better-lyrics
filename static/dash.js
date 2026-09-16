@@ -768,10 +768,9 @@
     if (retitleFastTimer) { clearInterval(retitleFastTimer); retitleFastTimer = null; }
   };
 
-  /* ---- lyrics preview ---- */
+  /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
   let prevPlayhead = 0;
-  let prevLastAutoIndex = -1;
   let prevScrubbing = false;
   let prevMaxTime = 100;
   let ytPlayer = null;
@@ -779,6 +778,36 @@
   let ytPendingVideoId = null;
   let ytPendingAutoplay = false;
   let prevLastShownSecond = -1;
+  let prevYtPlaying = false;
+
+  const braccatoView = () => document.getElementById('braccato-view');
+
+  const toBraccatoLyrics = (lines, lang) => {
+    const starts = lines.map(l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0)));
+    return lines.map((l, i) => {
+      const startMs = Math.round(starts[i] * 1000);
+      let durMs = l.durationMs != null ? l.durationMs : (l.duration != null ? Math.round(l.duration * 1000) : 0);
+      if (!durMs || durMs <= 0) {
+        let next = Infinity;
+        starts.forEach((s, j) => { if (j !== i && s * 1000 > startMs && s * 1000 < next) next = s * 1000; });
+        durMs = next === Infinity ? 3000 : Math.max(Math.round(next - startMs), 500);
+      }
+      const parts = (l.parts || []).map(p => ({
+        startTimeMs: p.startTimeMs || 0,
+        durationMs: p.durationMs || 0,
+        words: (p.words != null ? p.words : p.text) || '',
+      }));
+      const out = {
+        startTimeMs: startMs,
+        durationMs: durMs,
+        words: l.text || parts.map(p => p.words).join(''),
+      };
+      if (parts.length > 1 && new Set(parts.map(p => p.startTimeMs)).size > 1) out.parts = parts;
+      if (l.translated) out.translation = { text: l.translated, lang: lang || 'zh-TW' };
+      if (l.isInstrumental) out.isInstrumental = true;
+      return out;
+    });
+  };
 
   window.onYouTubeIframeAPIReady = () => {
     if (ytPendingVideoId) {
@@ -823,8 +852,8 @@
           onStateChange: (e) => {
             const btn = $('#prev-play');
             if (!window.YT) return;
-            if (e.data === YT.PlayerState.PLAYING) { if (btn) btn.setAttribute('icon', 'pause'); startPrevLoop(); }
-            else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) { if (btn) btn.setAttribute('icon', 'play_arrow'); }
+            if (e.data === YT.PlayerState.PLAYING) { prevYtPlaying = true; if (btn) btn.setAttribute('icon', 'pause'); startPrevLoop(); }
+            else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) { prevYtPlaying = false; if (btn) btn.setAttribute('icon', 'play_arrow'); }
           }
         }
       });
@@ -841,7 +870,14 @@
     if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
       try { prevPlayhead = ytPlayer.getCurrentTime() || 0; } catch {}
     }
-    updatePrevHighlight();
+    const view = braccatoView();
+    if (view) {
+      try { view.currentTime = prevPlayhead; view.playing = prevYtPlaying; } catch {}
+    }
+    const seek = $('#prev-seek');
+    if (seek && !prevScrubbing) seek.value = Math.min(prevPlayhead, prevMaxTime);
+    const wholeSec = Math.floor(prevPlayhead);
+    if (wholeSec !== prevLastShownSecond) { prevLastShownSecond = wholeSec; updatePrevTime(); }
     prevRafId = requestAnimationFrame(prevLoop);
   };
 
@@ -861,7 +897,7 @@
       const data = await json(`/api/admin/cache/preview?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`);
       prevData = data;
       prevPlayhead = 0;
-      prevLastAutoIndex = -1;
+      prevYtPlaying = false;
       prevLastShownSecond = -1;
       const lines = data.lyrics || [];
       const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
@@ -905,49 +941,37 @@
             const t = parseFloat(seek.value) || 0;
             if (ytPlayer && typeof ytPlayer.seekTo === 'function') ytPlayer.seekTo(t, true);
             prevPlayhead = t;
-            prevLastAutoIndex = -1;
-            updatePrevHighlight();
+            const view = braccatoView();
+            if (view) { try { view.currentTime = t; } catch {} }
+            prevLastShownSecond = -1;
+            updatePrevTime();
           });
         }
       }
-      renderPrevLyrics();
+      const view = braccatoView();
+      if (view) {
+        if (!view.dataset.seekWired) {
+          view.dataset.seekWired = '1';
+          view.addEventListener('braccato:line-click', e => {
+            const t = (e.detail && e.detail.timeS) || 0;
+            if (ytPlayer && typeof ytPlayer.seekTo === 'function') { ytPlayer.seekTo(t, true); ytPlayer.playVideo(); }
+            prevPlayhead = t;
+          });
+        }
+        try {
+          view.currentTime = 0; view.playing = false;
+          const mapped = toBraccatoLyrics(lines, lang);
+          if (window.customElements && !customElements.get('braccato-lyrics')) {
+            customElements.whenDefined('braccato-lyrics').then(() => { try { view.lyrics = mapped; } catch {} });
+          } else {
+            view.lyrics = mapped;
+          }
+        } catch {}
+      }
       updatePrevTime();
       dlg.open = true;
       if (videoId) createYtPlayer(videoId, false);
     } catch (e) { mdui.snackbar({message:'Preview failed: '+e.message}); }
-  };
-  const renderPrevLyrics = () => {
-    const container = $('#prev-lyrics');
-    if (!container || !prevData) return;
-    container.innerHTML = '';
-    const lines = prevData.lyrics || [];
-    const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
-    lines.forEach(line => {
-      const div = el('div', {class:'prev-line'});
-      if (line.parts && line.parts.length) {
-        line.parts.forEach((part, i) => {
-          if (i > 0) div.appendChild(document.createTextNode(' '));
-          const span = el('span', {class:'prev-word', 'data-start': (part.startTimeMs || 0) / 1000, 'data-dur': (part.durationMs || 0) / 1000}, (part.words != null ? part.words : part.text) || '');
-          span.addEventListener('click', () => {
-            const t = (part.startTimeMs || 0) / 1000;
-            if (ytPlayer && typeof ytPlayer.seekTo === 'function') { ytPlayer.seekTo(t, true); ytPlayer.playVideo(); }
-            prevPlayhead = t; prevLastAutoIndex = -1; updatePrevHighlight();
-          });
-          div.appendChild(span);
-        });
-      } else {
-        const startTime = lineStart(line);
-        const wrap = el('div', {style:'cursor:pointer;'});
-        wrap.appendChild(document.createTextNode(line.text || ''));
-        wrap.addEventListener('click', () => {
-          if (ytPlayer && typeof ytPlayer.seekTo === 'function') { ytPlayer.seekTo(startTime, true); ytPlayer.playVideo(); }
-          prevPlayhead = startTime; prevLastAutoIndex = -1; updatePrevHighlight();
-        });
-        div.appendChild(wrap);
-      }
-      if (line.translated) div.appendChild(el('div', {class:'trans'}, line.translated));
-      container.appendChild(div);
-    });
   };
   const updatePrevTime = () => {
     const t = Math.max(0, Math.floor(prevPlayhead));
@@ -955,46 +979,6 @@
     const s = t % 60;
     const label = $('#prev-time');
     if (label) label.textContent = `${m}:${s.toString().padStart(2,'0')}`;
-  };
-  const updatePrevHighlight = () => {
-    const container = $('#prev-lyrics');
-    if (!container || !prevData) return;
-    const lines = prevData.lyrics || [];
-    const lineEls = container.querySelectorAll('.prev-line');
-    const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
-    const starts = lines.map(lineStart);
-    let best = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (prevPlayhead >= starts[i] && (best < 0 || starts[i] > starts[best])) best = i;
-    }
-    let activeIdxs = new Set();
-    if (best >= 0) {
-      activeIdxs.add(best);
-      for (let i = 0; i < lines.length; i++) {
-        if (i !== best && Math.abs(starts[i] - starts[best]) <= 0.05 && prevPlayhead >= starts[i]) activeIdxs.add(i);
-      }
-    }
-    lineEls.forEach((lineEl, i) => {
-      lineEl.classList.toggle('prev-active', activeIdxs.has(i));
-      const words = lineEl.querySelectorAll('.prev-word');
-      words.forEach(w => {
-        const ws = parseFloat(w.dataset.start) || 0;
-        const wd = Math.max(parseFloat(w.dataset.dur) || 0, 0.15);
-        w.classList.toggle('prev-word-active', activeIdxs.has(i) && prevPlayhead >= ws && prevPlayhead < (ws + wd));
-      });
-    });
-    if (activeIdxs.size > 0) {
-      const first = Math.min(...activeIdxs);
-      if (first !== prevLastAutoIndex && lineEls[first]) {
-        prevLastAutoIndex = first;
-        const target = lineEls[first].offsetTop - (container.clientHeight / 2) + (lineEls[first].offsetHeight / 2);
-        container.scrollTop = Math.max(0, target);
-      }
-    }
-    const seek = $('#prev-seek');
-    if (seek && !prevScrubbing) seek.value = Math.min(prevPlayhead, prevMaxTime);
-    const wholeSec = Math.floor(prevPlayhead);
-    if (wholeSec !== prevLastShownSecond) { prevLastShownSecond = wholeSec; updatePrevTime(); }
   };
   const togglePreviewPlay = () => {
     if (!ytPlayer) return;
@@ -1117,7 +1101,7 @@
     const prevPlayBtn = $('#prev-play');
     if (prevPlayBtn) prevPlayBtn.addEventListener('click', togglePreviewPlay);
     const prevDialog = $('#preview-dialog');
-    if (prevDialog) prevDialog.addEventListener('closed', () => { destroyYtPlayer(); });
+    if (prevDialog) prevDialog.addEventListener('closed', () => { destroyYtPlayer(); prevYtPlaying = false; const v = braccatoView(); if (v) { try { v.playing = false; v.lyrics = []; } catch {} } });
   };
 
   document.addEventListener('DOMContentLoaded', init);
