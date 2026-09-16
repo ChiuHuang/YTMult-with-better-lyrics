@@ -133,6 +133,7 @@ def admin_caches():
                 parts = cache_key.split(':')
                 video_id = parts[0]
                 lang = parts[1] if len(parts) > 1 else ''
+                is_fast = cache_key.endswith(':fast')
                 items.append({
                     'video_id': video_id,
                     'lang': lang,
@@ -143,10 +144,23 @@ def admin_caches():
                     'synced': data.get('synced', False),
                     'lines': len(data.get('lyrics', [])),
                     'time_ago': time_ago,
+                    '_is_fast': is_fast,
                 })
             except Exception:
                 pass
-    return jsonify(items)
+    best = {}
+    for item in items:
+        vid = item['video_id']
+        if vid not in best:
+            best[vid] = item
+            continue
+        prev = best[vid]
+        if prev['_is_fast'] and not item['_is_fast']:
+            best[vid] = item
+        elif prev['_is_fast'] == item['_is_fast'] and item['lines'] > prev['lines']:
+            best[vid] = item
+    result = [{k: v for k, v in item.items() if not k.startswith('_')} for item in best.values()]
+    return jsonify(result)
 
 
 @app.route('/api/admin/caches/clear_empty', methods=['POST'])
