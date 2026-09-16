@@ -338,6 +338,15 @@
     <div id="prev-lyrics" style="max-height:50vh; overflow-y:auto;"></div>
   </mdui-dialog>
 
+  <mdui-dialog id="retitle-dialog" headline="Retitling" close-on-esc close-on-overlay-click style="max-width:700px;">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+      <mdui-linear-progress id="retitle-progress" value="0" style="flex:1;"></mdui-linear-progress>
+      <span id="retitle-summary" style="font-size:13px; white-space:nowrap;"></span>
+    </div>
+    <div id="retitle-results" style="max-height:50vh; overflow-y:auto;"></div>
+    <mdui-button id="retitle-close" slot="action">Done</mdui-button>
+  </mdui-dialog>
+
 </mdui-layout>
 <script src="{{ url_for('static', filename='mdui/mdui.global.js') }}"></script>
 <script>

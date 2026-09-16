@@ -8,7 +8,7 @@ import threading
 import time as time_module
 
 from flask import request, jsonify
-from .app import app, login_required
+from .app import app, login_required, _sse_broadcast
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, rebase_cached,
     retitle_song,
@@ -31,6 +31,18 @@ _rebase_job = {
 }
 _rebase_lock = threading.Lock()
 _rebase_cancel = threading.Event()
+
+# Module-level retitle job state
+_retitle_job = {
+    'job_id': None,
+    'state': 'idle',
+    'total': 0,
+    'done': 0,
+    'current': None,
+    'results': [],
+}
+_retitle_lock = threading.Lock()
+_retitle_cancel = threading.Event()
 
 
 @app.route('/api/admin/library/scan', methods=['GET'])
@@ -63,6 +75,7 @@ def api_rebase_start():
             return jsonify({'ok': False, 'error': 'already running'})
         body = request.get_json(silent=True) or {}
         mode = body.get('mode', 'cached')
+        target_vid = body.get('video_id')
         _rebase_job['state'] = 'running'
         _rebase_job['job_id'] = str(int(time_module.time() * 1000))
         _rebase_job['total'] = 0
@@ -79,13 +92,14 @@ def api_rebase_start():
     def _run():
         try:
             if mode == 'unlyriced':
-                _run_rebase_unlyriced()
+                _run_rebase_unlyriced(target_vid)
             else:
-                _run_rebase_cached()
+                _run_rebase_cached(target_vid)
         finally:
             with _rebase_lock:
                 _rebase_job['state'] = 'done'
                 _rebase_job['current'] = None
+            _sse_broadcast('rebase', {'state': 'done', 'job_id': _rebase_job['job_id']})
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({'ok': True, 'job_id': _rebase_job['job_id'], 'mode': mode})
@@ -96,20 +110,38 @@ def _on_rebase_result(res):
     vid = res.get('video_id', '?')
     print(f"[REBASE] [{tag}] {vid} {res.get('from','?')}->{res.get('to','?')} "
           f"src={res.get('source','')} msg={res.get('message','')}")
+    _sse_broadcast('rebase_progress', {
+        'video_id': vid,
+        'song': res.get('song', ''),
+        'artist': res.get('artist', ''),
+        'from_tier': res.get('from', ''),
+        'to_tier': res.get('to', ''),
+        'status': res.get('status', ''),
+        'source': res.get('source', ''),
+        'message': res.get('message', ''),
+        'done': _rebase_job.get('done', 0),
+        'total': _rebase_job.get('total', 0),
+        'upgraded': _rebase_job.get('upgraded', 0),
+        'same': _rebase_job.get('same', 0),
+        'failed': _rebase_job.get('failed', 0),
+    })
 
 
-def _run_rebase_cached():
+def _run_rebase_cached(target_vid=None):
     rebase_cached(
         _rebase_job, _on_rebase_result,
-        cancel_event=_rebase_cancel, max_workers=8, sleep_between=0.5)
+        cancel_event=_rebase_cancel, max_workers=8, sleep_between=0.5,
+        target_vid=target_vid)
 
 
-def _run_rebase_unlyriced():
+def _run_rebase_unlyriced(target_vid=None):
     from .providers_yt import get_song_info
     from .pipeline import fetch_all_lyrics
     from .cache import set_cached, is_not_found_result
 
     items = list_unlyriced()
+    if target_vid:
+        items = [i for i in items if i['video_id'] == target_vid]
     total = len(items)
     _rebase_job['total'] = total
 
@@ -127,12 +159,20 @@ def _run_rebase_unlyriced():
             if not info:
                 _rebase_job['done'] = _rebase_job.get('done', 0) + 1
                 _rebase_job['failed'] = _rebase_job.get('failed', 0) + 1
-                _rebase_job['results'].append({
+                res = {
                     'video_id': vid, 'song': song, 'artist': artist,
                     'from': 'none', 'to': 'none', 'status': 'failed',
                     'source': '', 'message': 'get_song_info returned None',
-                })
+                }
+                _rebase_job['results'].append(res)
+                _on_rebase_result(res)
                 continue
+
+            _sse_broadcast('rebase_progress', {
+                'video_id': vid, 'song': song, 'artist': artist,
+                'status': 'trying', 'message': 'fetching lyrics...',
+                'done': _rebase_job.get('done', 0), 'total': total,
+            })
 
             result = fetch_all_lyrics(vid, info, lang)
             _rebase_job['done'] = _rebase_job.get('done', 0) + 1
@@ -142,27 +182,31 @@ def _run_rebase_unlyriced():
                 set_cached(full_key, result)
                 remove_unlyriced(vid)
                 _rebase_job['upgraded'] = _rebase_job.get('upgraded', 0) + 1
-                _rebase_job['results'].append({
+                res = {
                     'video_id': vid, 'song': song, 'artist': artist,
                     'from': 'none', 'to': 'line' if result.get('synced') else 'plain',
                     'status': 'upgraded', 'source': result.get('source', ''),
                     'message': f"fresh fetch: {result.get('source','')}",
-                })
+                }
             else:
                 _rebase_job['failed'] = _rebase_job.get('failed', 0) + 1
-                _rebase_job['results'].append({
+                res = {
                     'video_id': vid, 'song': song, 'artist': artist,
                     'from': 'none', 'to': 'none', 'status': 'failed',
                     'source': '', 'message': 'fetch_all_lyrics returned no lyrics',
-                })
+                }
+            _rebase_job['results'].append(res)
+            _on_rebase_result(res)
         except Exception as e:
             _rebase_job['done'] = _rebase_job.get('done', 0) + 1
             _rebase_job['error'] = _rebase_job.get('error', 0) + 1
-            _rebase_job['results'].append({
+            res = {
                 'video_id': vid, 'song': song, 'artist': artist,
                 'from': 'none', 'to': 'none', 'status': 'error',
                 'source': '', 'message': str(e),
-            })
+            }
+            _rebase_job['results'].append(res)
+            _on_rebase_result(res)
             print(f"[REBASE] [FAIL] unlyriced {vid}: {e}")
 
         time_module.sleep(0.5)
@@ -203,19 +247,59 @@ def api_rebase_stop():
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------
+# Retitle: background job with SSE progress
+# ---------------------------------------------------------------
 @app.route('/api/admin/library/retitle', methods=['POST'])
 @login_required
 def api_retitle():
-    body = request.get_json(silent=True) or {}
-    video_id = body.get('video_id')
-    song = body.get('song', '')
-    artist = body.get('artist', '')
+    with _retitle_lock:
+        if _retitle_job.get('state') == 'running':
+            return jsonify({'ok': False, 'error': 'already running'})
+        body = request.get_json(silent=True) or {}
+        video_id = body.get('video_id')
+        song = body.get('song', '')
+        artist = body.get('artist', '')
+        _retitle_job['state'] = 'running'
+        _retitle_job['job_id'] = str(int(time_module.time() * 1000))
+        _retitle_job['total'] = 0
+        _retitle_job['done'] = 0
+        _retitle_job['current'] = None
+        _retitle_job['results'] = []
+        _retitle_cancel.clear()
 
+    def _run():
+        try:
+            _run_retitle(video_id, song, artist)
+        finally:
+            with _retitle_lock:
+                _retitle_job['state'] = 'done'
+                _retitle_job['current'] = None
+            _sse_broadcast('retitle', {'state': 'done', 'job_id': _retitle_job['job_id']})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'ok': True, 'job_id': _retitle_job['job_id']})
+
+
+@app.route('/api/admin/library/retitle/status', methods=['GET'])
+@login_required
+def api_retitle_status():
+    with _retitle_lock:
+        return jsonify({
+            'ok': True,
+            'job_id': _retitle_job.get('job_id'),
+            'state': _retitle_job.get('state', 'idle'),
+            'total': _retitle_job.get('total', 0),
+            'done': _retitle_job.get('done', 0),
+            'current': _retitle_job.get('current'),
+            'results': _retitle_job.get('results', []),
+        })
+
+
+def _run_retitle(video_id, song, artist):
     from .pipeline import fetch_all_lyrics
     from .providers_yt import get_song_info as yt_get_song_info
     from .cache import set_cached, is_not_found_result
-
-    retitled = []
 
     if video_id:
         items = [i for i in list_unlyriced() if i['video_id'] == video_id]
@@ -224,11 +308,23 @@ def api_retitle():
     else:
         items = list_unlyriced()
 
+    total = len(items)
+    _retitle_job['total'] = total
+
     for item in items:
+        if _retitle_cancel.is_set():
+            break
         vid = item['video_id']
         orig_song = song or item.get('song', '')
         orig_artist = artist or item.get('artist', '')
         lang = item.get('lang', 'zh-TW')
+        _retitle_job['current'] = {'video_id': vid, 'song': orig_song, 'artist': orig_artist}
+
+        _sse_broadcast('retitle_progress', {
+            'video_id': vid, 'song': orig_song, 'artist': orig_artist,
+            'status': 'retitling', 'message': 'calling LLM...',
+            'done': _retitle_job.get('done', 0), 'total': total,
+        })
 
         cleaned = retitle_song(orig_song, orig_artist)
         new_title = cleaned.get('title', orig_song)
@@ -240,6 +336,13 @@ def api_retitle():
             'new': {'title': new_title, 'artist': new_artist},
             'status': 'retitle_only',
         }
+
+        _sse_broadcast('retitle_progress', {
+            'video_id': vid, 'song': orig_song, 'artist': orig_artist,
+            'new_title': new_title, 'new_artist': new_artist,
+            'status': 'fetching', 'message': f"trying with cleaned title...",
+            'done': _retitle_job.get('done', 0), 'total': total,
+        })
 
         try:
             fake_info = {
@@ -264,10 +367,18 @@ def api_retitle():
             entry['error'] = str(e)
             print(f"[LIBRARY] [FAIL] retitle fetch {vid}: {e}")
 
-        retitled.append(entry)
+        _retitle_job['done'] = _retitle_job.get('done', 0) + 1
+        _retitle_job['results'].append(entry)
+        _sse_broadcast('retitle_progress', {
+            'video_id': vid, 'song': orig_song, 'artist': orig_artist,
+            'new_title': new_title, 'new_artist': new_artist,
+            'status': entry['status'], 'source': entry.get('source', ''),
+            'done': _retitle_job.get('done', 0), 'total': total,
+        })
+
         time_module.sleep(0.5)
 
-    return jsonify({'ok': True, 'retitled': retitled})
+    print(f"[LIBRARY] [OK] retitle done: {len(_retitle_job.get('results',[]))} processed")
 
 
 @app.route('/api/admin/cache/preview', methods=['GET'])
