@@ -775,50 +775,81 @@
   let prevScrubbing = false;
   let prevMaxTime = 100;
   let ytPlayer = null;
-  let ytSyncTimer = null;
+  let prevRafId = null;
+  let ytPendingVideoId = null;
+  let ytPendingAutoplay = false;
+  let prevLastShownSecond = -1;
 
-  window.onYouTubeIframeAPIReady = () => {};
+  window.onYouTubeIframeAPIReady = () => {
+    if (ytPendingVideoId) {
+      const vid = ytPendingVideoId;
+      const auto = ytPendingAutoplay;
+      ytPendingVideoId = null;
+      createYtPlayer(vid, auto);
+    }
+  };
+
+  const stopPrevLoop = () => {
+    if (prevRafId) { cancelAnimationFrame(prevRafId); prevRafId = null; }
+  };
 
   const destroyYtPlayer = () => {
-    if (ytSyncTimer) { clearInterval(ytSyncTimer); ytSyncTimer = null; }
-    const container = document.getElementById('yt-player-container');
-    if (container) container.innerHTML = '';
+    stopPrevLoop();
+    ytPendingVideoId = null;
+    if (ytPlayer && typeof ytPlayer.destroy === 'function') {
+      try { ytPlayer.destroy(); } catch {}
+    } else if (ytPlayer && typeof ytPlayer.stopVideo === 'function') {
+      try { ytPlayer.stopVideo(); } catch {}
+    }
     ytPlayer = null;
+    const holder = document.getElementById('yt-player-hidden');
+    if (holder) holder.innerHTML = '';
   };
 
   const createYtPlayer = (videoId, autoplay) => {
     destroyYtPlayer();
-    if (!window.YT || !YT.Player) return;
-    const container = document.getElementById('yt-player-container');
-    if (!container) return;
-    container.innerHTML = '';
-    ytPlayer = new YT.Player(container, {
-      videoId,
-      playerVars: { autoplay: autoplay ? 1 : 0, controls: 1, modestbranding: 1, showinfo: 0, rel: 0, fs: 0, iv_load_policy: 3, playsinline: 1 },
-      events: {
-        onReady: () => { if (autoplay) ytPlayer.playVideo(); startYtSync(); },
-        onStateChange: (e) => {
-          const btn = $('#prev-play');
-          if (e.data === YT.PlayerState.PLAYING) { if (btn) btn.setAttribute('icon', 'pause'); }
-          else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) { if (btn) btn.setAttribute('icon', 'play_arrow'); }
+    const thumb = document.getElementById('prev-thumb');
+    if (thumb) { thumb.src = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`; thumb.alt = videoId; }
+    if (!window.YT || !YT.Player) { ytPendingVideoId = videoId; ytPendingAutoplay = autoplay; return; }
+    const holder = document.getElementById('yt-player-hidden');
+    if (!holder) return;
+    holder.innerHTML = '<div id="yt-player"></div>';
+    try {
+      ytPlayer = new YT.Player('yt-player', {
+        height: '2', width: '2', videoId,
+        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, modestbranding: 1, showinfo: 0, rel: 0, fs: 0, iv_load_policy: 3, playsinline: 1 },
+        events: {
+          onReady: () => { if (autoplay && ytPlayer) { try { ytPlayer.playVideo(); } catch {} } startPrevLoop(); },
+          onStateChange: (e) => {
+            const btn = $('#prev-play');
+            if (!window.YT) return;
+            if (e.data === YT.PlayerState.PLAYING) { if (btn) btn.setAttribute('icon', 'pause'); startPrevLoop(); }
+            else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) { if (btn) btn.setAttribute('icon', 'play_arrow'); }
+          }
         }
-      }
-    });
+      });
+      startPrevLoop();
+    } catch { ytPlayer = null; }
   };
 
-  const startYtSync = () => {
-    if (ytSyncTimer) clearInterval(ytSyncTimer);
-    ytSyncTimer = setInterval(() => {
-      if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
-      try { prevPlayhead = ytPlayer.getCurrentTime() || 0; updatePrevHighlight(); } catch {}
-    }, 250);
+  const startPrevLoop = () => {
+    stopPrevLoop();
+    prevRafId = requestAnimationFrame(prevLoop);
+  };
+
+  const prevLoop = () => {
+    if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+      try { prevPlayhead = ytPlayer.getCurrentTime() || 0; } catch {}
+    }
+    updatePrevHighlight();
+    prevRafId = requestAnimationFrame(prevLoop);
   };
 
   const stopPreviewPlayback = () => {
     if (ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
       try { ytPlayer.pauseVideo(); } catch {}
     }
-    if (ytSyncTimer) { clearInterval(ytSyncTimer); ytSyncTimer = null; }
+    stopPrevLoop();
     const btn = $('#prev-play');
     if (btn) btn.setAttribute('icon', 'play_arrow');
   };
@@ -831,6 +862,7 @@
       prevData = data;
       prevPlayhead = 0;
       prevLastAutoIndex = -1;
+      prevLastShownSecond = -1;
       const lines = data.lyrics || [];
       const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
       const lineDur = l => (l.durationMs != null ? l.durationMs / 1000 : (l.duration != null ? l.duration : 0)) || 0;
@@ -930,22 +962,16 @@
     const lines = prevData.lyrics || [];
     const lineEls = container.querySelectorAll('.prev-line');
     const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
-    const lineDur = l => (l.durationMs != null ? l.durationMs / 1000 : (l.duration != null ? l.duration : 0)) || 0;
     const starts = lines.map(lineStart);
-    const ends = lines.map((l, i) => {
-      const d = lineDur(l);
-      if (d > 0) return starts[i] + d;
-      let next = Infinity;
-      starts.forEach((s, j) => { if (j !== i && s > starts[i] && s < next) next = s; });
-      return next;
-    });
-    let activeIdxs = new Set();
+    let best = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (prevPlayhead >= starts[i] && prevPlayhead < ends[i]) activeIdxs.add(i);
+      if (prevPlayhead >= starts[i] && (best < 0 || starts[i] > starts[best])) best = i;
     }
-    if (activeIdxs.size === 0) {
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (prevPlayhead >= starts[i]) { activeIdxs.add(i); break; }
+    let activeIdxs = new Set();
+    if (best >= 0) {
+      activeIdxs.add(best);
+      for (let i = 0; i < lines.length; i++) {
+        if (i !== best && Math.abs(starts[i] - starts[best]) <= 0.05 && prevPlayhead >= starts[i]) activeIdxs.add(i);
       }
     }
     lineEls.forEach((lineEl, i) => {
@@ -967,7 +993,8 @@
     }
     const seek = $('#prev-seek');
     if (seek && !prevScrubbing) seek.value = Math.min(prevPlayhead, prevMaxTime);
-    updatePrevTime();
+    const wholeSec = Math.floor(prevPlayhead);
+    if (wholeSec !== prevLastShownSecond) { prevLastShownSecond = wholeSec; updatePrevTime(); }
   };
   const togglePreviewPlay = () => {
     if (!ytPlayer) return;
