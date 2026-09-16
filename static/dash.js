@@ -939,28 +939,31 @@
       starts.forEach((s, j) => { if (j !== i && s > starts[i] && s < next) next = s; });
       return next;
     });
-    let activeIdx = -1;
+    let activeIdxs = new Set();
     for (let i = 0; i < lines.length; i++) {
-      if (prevPlayhead >= starts[i] && prevPlayhead < ends[i]) { activeIdx = i; break; }
+      if (prevPlayhead >= starts[i] && prevPlayhead < ends[i]) activeIdxs.add(i);
     }
-    if (activeIdx < 0) {
+    if (activeIdxs.size === 0) {
       for (let i = lines.length - 1; i >= 0; i--) {
-        if (prevPlayhead >= starts[i]) { activeIdx = i; break; }
+        if (prevPlayhead >= starts[i]) { activeIdxs.add(i); break; }
       }
     }
     lineEls.forEach((lineEl, i) => {
-      lineEl.classList.toggle('prev-active', i === activeIdx);
+      lineEl.classList.toggle('prev-active', activeIdxs.has(i));
       const words = lineEl.querySelectorAll('.prev-word');
       words.forEach(w => {
         const ws = parseFloat(w.dataset.start) || 0;
         const wd = Math.max(parseFloat(w.dataset.dur) || 0, 0.15);
-        w.classList.toggle('prev-word-active', i === activeIdx && prevPlayhead >= ws && prevPlayhead < (ws + wd));
+        w.classList.toggle('prev-word-active', activeIdxs.has(i) && prevPlayhead >= ws && prevPlayhead < (ws + wd));
       });
     });
-    if (activeIdx >= 0 && activeIdx !== prevLastAutoIndex && lineEls[activeIdx]) {
-      prevLastAutoIndex = activeIdx;
-      const target = lineEls[activeIdx].offsetTop - (container.clientHeight / 2) + (lineEls[activeIdx].offsetHeight / 2);
-      container.scrollTop = Math.max(0, target);
+    if (activeIdxs.size > 0) {
+      const first = Math.min(...activeIdxs);
+      if (first !== prevLastAutoIndex && lineEls[first]) {
+        prevLastAutoIndex = first;
+        const target = lineEls[first].offsetTop - (container.clientHeight / 2) + (lineEls[first].offsetHeight / 2);
+        container.scrollTop = Math.max(0, target);
+      }
     }
     const seek = $('#prev-seek');
     if (seek && !prevScrubbing) seek.value = Math.min(prevPlayhead, prevMaxTime);
