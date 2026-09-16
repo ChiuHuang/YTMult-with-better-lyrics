@@ -595,10 +595,14 @@
       try {
         const unlyriced = await json('/api/admin/library/unlyriced');
         renderUnlyriced(unlyriced.items || []);
-      } catch {}
+      } catch (e) { renderUnlyriced([]); }
       if (status.state === 'running') startRebaseFastPoll(); else stopRebaseFastPoll();
       if (retitleStatus.state === 'running') startRetitleFastPoll(); else stopRetitleFastPoll();
-    } catch {}
+    } catch (e) {
+      console.error('[library] load failed:', e);
+      const results = $('#rebase-results');
+      if (results && !results.children.length) results.innerHTML = '<div style="font-size:12.5px;color:rgb(var(--mdui-color-error));padding:8px 0;">Failed to load library data</div>';
+    }
   };
   const renderRebaseStatus = status => {
     const startBtn = $('#rebase-start');
@@ -622,7 +626,12 @@
     if (results) {
       results.innerHTML = '';
       const items = status.results || [];
-      if (!items.length) return;
+      if (!items.length) {
+        const empty = el('div', {style:'font-size:12.5px; color:rgb(var(--mdui-color-outline)); padding:8px 0;'},
+          status.state === 'running' ? 'Processing...' : 'No rebase results yet. Click "Rebase" to start.');
+        results.appendChild(empty);
+        return;
+      }
       items.forEach(r => {
         const cls = r.status === 'upgraded' ? 'rb-upgraded'
           : r.status === 'same' ? 'rb-same'
@@ -761,20 +770,60 @@
 
   /* ---- lyrics preview ---- */
   let prevData = null;
-  let prevPlaying = false;
   let prevPlayhead = 0;
-  let prevRafId = null;
-  let prevStartTime = 0;
-  let prevBaseTime = 0;
   let prevLastAutoIndex = -1;
   let prevScrubbing = false;
   let prevMaxTime = 100;
+  let ytPlayer = null;
+  let ytSyncTimer = null;
+
+  window.onYouTubeIframeAPIReady = () => {};
+
+  const destroyYtPlayer = () => {
+    if (ytSyncTimer) { clearInterval(ytSyncTimer); ytSyncTimer = null; }
+    const container = document.getElementById('yt-player-container');
+    if (container) container.innerHTML = '';
+    ytPlayer = null;
+  };
+
+  const createYtPlayer = (videoId, autoplay) => {
+    destroyYtPlayer();
+    if (!window.YT || !YT.Player) return;
+    const container = document.getElementById('yt-player-container');
+    if (!container) return;
+    container.innerHTML = '';
+    ytPlayer = new YT.Player(container, {
+      videoId,
+      playerVars: { autoplay: autoplay ? 1 : 0, controls: 1, modestbranding: 1, showinfo: 0, rel: 0, fs: 0, iv_load_policy: 3, playsinline: 1 },
+      events: {
+        onReady: () => { if (autoplay) ytPlayer.playVideo(); startYtSync(); },
+        onStateChange: (e) => {
+          const btn = $('#prev-play');
+          if (e.data === YT.PlayerState.PLAYING) { if (btn) btn.setAttribute('icon', 'pause'); }
+          else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.ENDED) { if (btn) btn.setAttribute('icon', 'play_arrow'); }
+        }
+      }
+    });
+  };
+
+  const startYtSync = () => {
+    if (ytSyncTimer) clearInterval(ytSyncTimer);
+    ytSyncTimer = setInterval(() => {
+      if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') return;
+      try { prevPlayhead = ytPlayer.getCurrentTime() || 0; updatePrevHighlight(); } catch {}
+    }, 250);
+  };
+
   const stopPreviewPlayback = () => {
-    prevPlaying = false;
-    if (prevRafId) { cancelAnimationFrame(prevRafId); prevRafId = null; }
+    if (ytPlayer && typeof ytPlayer.pauseVideo === 'function') {
+      try { ytPlayer.pauseVideo(); } catch {}
+    }
+    if (ytSyncTimer) { clearInterval(ytSyncTimer); ytSyncTimer = null; }
+    const btn = $('#prev-play');
+    if (btn) btn.setAttribute('icon', 'play_arrow');
   };
   const openPreview = async (videoId, lang) => {
-    stopPreviewPlayback();
+    destroyYtPlayer();
     const dlg = $('#preview-dialog');
     if (!dlg) return;
     try {
@@ -819,14 +868,20 @@
           seek.dataset.prevWired = '1';
           seek.addEventListener('pointerdown', () => { prevScrubbing = true; });
           seek.addEventListener('pointerup', () => { prevScrubbing = false; });
-          seek.addEventListener('change', () => { prevScrubbing = false; });
+          seek.addEventListener('change', () => {
+            prevScrubbing = false;
+            const t = parseFloat(seek.value) || 0;
+            if (ytPlayer && typeof ytPlayer.seekTo === 'function') ytPlayer.seekTo(t, true);
+            prevPlayhead = t;
+            prevLastAutoIndex = -1;
+            updatePrevHighlight();
+          });
         }
       }
       renderPrevLyrics();
       updatePrevTime();
-      const playBtn = $('#prev-play');
-      if (playBtn) playBtn.setAttribute('icon', 'play_arrow');
       dlg.open = true;
+      if (videoId) createYtPlayer(videoId, false);
     } catch (e) { mdui.snackbar({message:'Preview failed: '+e.message}); }
   };
   const renderPrevLyrics = () => {
@@ -834,15 +889,29 @@
     if (!container || !prevData) return;
     container.innerHTML = '';
     const lines = prevData.lyrics || [];
+    const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
     lines.forEach(line => {
       const div = el('div', {class:'prev-line'});
       if (line.parts && line.parts.length) {
         line.parts.forEach((part, i) => {
           if (i > 0) div.appendChild(document.createTextNode(' '));
-          div.appendChild(el('span', {class:'prev-word', 'data-start': (part.startTimeMs || 0) / 1000, 'data-dur': (part.durationMs || 0) / 1000}, (part.words != null ? part.words : part.text) || ''));
+          const span = el('span', {class:'prev-word', 'data-start': (part.startTimeMs || 0) / 1000, 'data-dur': (part.durationMs || 0) / 1000}, (part.words != null ? part.words : part.text) || '');
+          span.addEventListener('click', () => {
+            const t = (part.startTimeMs || 0) / 1000;
+            if (ytPlayer && typeof ytPlayer.seekTo === 'function') { ytPlayer.seekTo(t, true); ytPlayer.playVideo(); }
+            prevPlayhead = t; prevLastAutoIndex = -1; updatePrevHighlight();
+          });
+          div.appendChild(span);
         });
       } else {
-        div.appendChild(document.createTextNode(line.text || ''));
+        const startTime = lineStart(line);
+        const wrap = el('div', {style:'cursor:pointer;'});
+        wrap.appendChild(document.createTextNode(line.text || ''));
+        wrap.addEventListener('click', () => {
+          if (ytPlayer && typeof ytPlayer.seekTo === 'function') { ytPlayer.seekTo(startTime, true); ytPlayer.playVideo(); }
+          prevPlayhead = startTime; prevLastAutoIndex = -1; updatePrevHighlight();
+        });
+        div.appendChild(wrap);
       }
       if (line.translated) div.appendChild(el('div', {class:'trans'}, line.translated));
       container.appendChild(div);
@@ -860,80 +929,50 @@
     if (!container || !prevData) return;
     const lines = prevData.lyrics || [];
     const lineEls = container.querySelectorAll('.prev-line');
-    const starts = lines.map(l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0)));
+    const lineStart = l => (l.time != null ? l.time : (l.startTimeMs != null ? l.startTimeMs / 1000 : 0));
+    const lineDur = l => (l.durationMs != null ? l.durationMs / 1000 : (l.duration != null ? l.duration : 0)) || 0;
+    const starts = lines.map(lineStart);
     const ends = lines.map((l, i) => {
-      const d = (l.durationMs != null ? l.durationMs / 1000 : (l.duration != null ? l.duration : 0)) || 0;
+      const d = lineDur(l);
       if (d > 0) return starts[i] + d;
       let next = Infinity;
       starts.forEach((s, j) => { if (j !== i && s > starts[i] && s < next) next = s; });
       return next;
     });
     let activeIdx = -1;
-    let activeStart = -Infinity;
     for (let i = 0; i < lines.length; i++) {
-      if (prevPlayhead >= starts[i] && prevPlayhead < ends[i] && starts[i] >= activeStart) { activeIdx = i; activeStart = starts[i]; }
+      if (prevPlayhead >= starts[i] && prevPlayhead < ends[i]) { activeIdx = i; break; }
     }
     if (activeIdx < 0) {
-      for (let i = 0; i < lines.length; i++) {
-        if (prevPlayhead >= starts[i] && starts[i] >= activeStart) { activeIdx = i; activeStart = starts[i]; }
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (prevPlayhead >= starts[i]) { activeIdx = i; break; }
       }
     }
     lineEls.forEach((lineEl, i) => {
       lineEl.classList.toggle('prev-active', i === activeIdx);
       const words = lineEl.querySelectorAll('.prev-word');
       words.forEach(w => {
-        const start = parseFloat(w.dataset.start) || 0;
-        const dur = Math.max(parseFloat(w.dataset.dur) || 0, 0.15);
-        const active = i === activeIdx && prevPlayhead >= start && prevPlayhead < (start + dur);
-        w.classList.toggle('prev-word-active', active);
+        const ws = parseFloat(w.dataset.start) || 0;
+        const wd = Math.max(parseFloat(w.dataset.dur) || 0, 0.15);
+        w.classList.toggle('prev-word-active', i === activeIdx && prevPlayhead >= ws && prevPlayhead < (ws + wd));
       });
     });
     if (activeIdx >= 0 && activeIdx !== prevLastAutoIndex && lineEls[activeIdx]) {
       prevLastAutoIndex = activeIdx;
-      const activeEl = lineEls[activeIdx];
-      const target = activeEl.offsetTop - (container.clientHeight / 2) + (activeEl.offsetHeight / 2);
+      const target = lineEls[activeIdx].offsetTop - (container.clientHeight / 2) + (lineEls[activeIdx].offsetHeight / 2);
       container.scrollTop = Math.max(0, target);
     }
     const seek = $('#prev-seek');
     if (seek && !prevScrubbing) seek.value = Math.min(prevPlayhead, prevMaxTime);
     updatePrevTime();
   };
-  const prevTick = () => {
-    if (!prevPlaying) return;
-    const elapsed = (performance.now() - prevStartTime) / 1000;
-    prevPlayhead = prevBaseTime + elapsed;
-    if (prevPlayhead >= prevMaxTime) {
-      prevPlayhead = prevMaxTime;
-      updatePrevHighlight();
-      stopPreviewPlayback();
-      const btn = $('#prev-play');
-      if (btn) btn.setAttribute('icon', 'play_arrow');
-      return;
-    }
-    updatePrevHighlight();
-    prevRafId = requestAnimationFrame(prevTick);
-  };
   const togglePreviewPlay = () => {
-    if (!prevData) return;
-    const btn = $('#prev-play');
-    if (prevPlaying) {
-      stopPreviewPlayback();
-      if (btn) btn.setAttribute('icon', 'play_arrow');
-    } else {
-      if (prevPlayhead >= prevMaxTime) { prevPlayhead = 0; prevBaseTime = 0; prevLastAutoIndex = -1; }
-      prevPlaying = true;
-      prevStartTime = performance.now();
-      prevBaseTime = prevPlayhead;
-      if (btn) btn.setAttribute('icon', 'pause');
-      prevRafId = requestAnimationFrame(prevTick);
-    }
-  };
-  const prevSeek = e => {
-    prevPlayhead = Math.min(Math.max(parseFloat(e.target.value) || 0, 0), prevMaxTime);
-    prevBaseTime = prevPlayhead;
-    if (prevPlaying) prevStartTime = performance.now();
-    prevLastAutoIndex = -1;
-    updatePrevHighlight();
+    if (!ytPlayer) return;
+    try {
+      const state = ytPlayer.getPlayerState();
+      if (state === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
+      else ytPlayer.playVideo();
+    } catch {}
   };
 
   /* ---- nav ---- */
@@ -1047,10 +1086,8 @@
     });
     const prevPlayBtn = $('#prev-play');
     if (prevPlayBtn) prevPlayBtn.addEventListener('click', togglePreviewPlay);
-    const prevSeekEl = $('#prev-seek');
-    if (prevSeekEl) prevSeekEl.addEventListener('input', prevSeek);
     const prevDialog = $('#preview-dialog');
-    if (prevDialog) prevDialog.addEventListener('closed', stopPreviewPlayback);
+    if (prevDialog) prevDialog.addEventListener('closed', () => { destroyYtPlayer(); });
   };
 
   document.addEventListener('DOMContentLoaded', init);
