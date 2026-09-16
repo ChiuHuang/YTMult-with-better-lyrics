@@ -924,7 +924,8 @@
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';
         document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(other => {
-          try { other.selected = (other === item); } catch {}
+          if (other === item) other.setAttribute('selected', '');
+          else other.removeAttribute('selected');
         });
       });
     });
