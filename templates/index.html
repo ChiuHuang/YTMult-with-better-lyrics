@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='mdui/mdui.css') }}">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='dash.css') }}">
+<script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
 <mdui-layout full-height>
@@ -330,12 +331,13 @@
 
   <mdui-dialog id="preview-dialog" headline="Lyrics preview" close-on-esc close-on-overlay-click style="max-width:800px;">
     <div id="prev-meta" style="font-size:13.5px; margin-bottom:12px; color:rgb(var(--mdui-color-on-surface-variant));"></div>
+    <div id="yt-player-container" style="width:100%; aspect-ratio:16/9; margin-bottom:12px; border-radius:12px; overflow:hidden; background:#000;"></div>
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
       <mdui-button-icon id="prev-play" icon="play_arrow"></mdui-button-icon>
       <input type="range" id="prev-seek" min="0" max="100" value="0" step="0.1" style="flex:1;">
       <span id="prev-time" style="font-size:12.5px; white-space:nowrap; font-family:Consolas,monospace;">0:00</span>
     </div>
-    <div id="prev-lyrics" style="max-height:50vh; overflow-y:auto;"></div>
+    <div id="prev-lyrics" style="max-height:40vh; overflow-y:auto;"></div>
   </mdui-dialog>
 
   <mdui-dialog id="retitle-dialog" headline="Retitling" close-on-esc close-on-overlay-click style="max-width:700px;">
