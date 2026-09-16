@@ -23,6 +23,13 @@ html, body { height: 100%; margin:0; }
 .stat-value.pulse { animation: statpulse .4s; }
 @keyframes statpulse { 0%{ transform:scale(1); } 40%{ transform:scale(1.12); } 100%{ transform:scale(1); } }
 
+/* ---- segmented button fix (MDUI v2 rendering) ---- */
+mdui-segmented-button { display: inline-flex; border: 1px solid rgb(var(--mdui-color-outline)); border-radius: var(--mdui-shape-corner-full); overflow: hidden; }
+mdui-segmented-button-item { display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer; border-right: 1px solid rgb(var(--mdui-color-outline)); white-space: nowrap; transition: background 0.2s, color 0.2s; }
+mdui-segmented-button-item:last-child { border-right: none; }
+mdui-segmented-button-item[selected], mdui-segmented-button-item[active] { background: rgb(var(--mdui-color-primary)); color: rgb(var(--mdui-color-on-primary)); }
+mdui-segmented-button-item:hover:not([selected]):not([active]) { background: rgba(var(--mdui-color-on-surface), 0.08); }
+
 /* ---- flip clock (uptime) ---- */
 #stat-uptime { display:inline-block; vertical-align:bottom; }
 #stat-uptime .digit { display:inline-block; position:relative; overflow:hidden; vertical-align:bottom; }

@@ -26,12 +26,19 @@ NON_INTERACTIVE=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --server) SERVER="$2"; shift 2 ;;
+        --server=*) SERVER="${1#*=}"; shift ;;
         --password) PASSWORD="$2"; shift 2 ;;
+        --password=*) PASSWORD="${1#*=}"; shift ;;
         --label) LABEL="$2"; shift 2 ;;
+        --label=*) LABEL="${1#*=}"; shift ;;
         --node-id) NODE_ID="$2"; shift 2 ;;
+        --node-id=*) NODE_ID="${1#*=}"; shift ;;
         --node-key) NODE_KEY="$2"; shift 2 ;;
+        --node-key=*) NODE_KEY="${1#*=}"; shift ;;
         --dir) NODE_DIR="$2"; shift 2 ;;
+        --dir=*) NODE_DIR="${1#*=}"; shift ;;
         --jwt) JWT="$2"; shift 2 ;;
+        --jwt=*) JWT="${1#*=}"; shift ;;
         --non-interactive) NON_INTERACTIVE=true; shift ;;
         -h|--help) echo "Usage: $0 --server=URL --label=NAME [--node-id=ID --node-key=KEY] [--password=PW (legacy)] [--jwt=TOKEN]"; exit 0 ;;
         *) echo "Unknown: $1"; exit 1 ;;
