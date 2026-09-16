@@ -259,20 +259,26 @@ def rebase_cached(job, on_result, cancel_event=None, max_workers=8,
                 'from': old_tier, 'to': old_tier, 'status': 'error',
                 'source': '', 'message': str(e),
             }
-        if upgraded is None:
-            return {
-                'video_id': vid, 'song': song, 'artist': artist,
-                'from': old_tier, 'to': old_tier, 'status': 'failed',
-                'source': '', 'message': '_rerace_video returned None',
-            }
-        new_tier_val = _tier(upgraded)
+        new_tier_val = _tier(upgraded) if upgraded else -1
         tier_map = {2: 'wbw', 1: 'line', 0: 'plain'}
         new_tier = tier_map.get(new_tier_val, 'none')
+        # If rerace got nothing better (same/plain/none), try LLM retitle
+        # + fresh fetch -- cleaned metadata helps Portato/BLyrics match.
+        if new_tier_val < 2 and new_tier_val <= _tier(old_data):
+            llm_res = _try_llm_retitle_fetch(vid, lang, old_data)
+            if llm_res is not None:
+                llm_tier = _tier(llm_res)
+                if llm_tier > _tier(old_data):
+                    new_tier = tier_map.get(llm_tier, 'none')
+                    upgraded = llm_res
+                    new_tier_val = llm_tier
+                    song = llm_res.get('song', song)
+                    artist = llm_res.get('artist', artist)
         if new_tier_val <= _tier(old_data):
             return {
                 'video_id': vid, 'song': song, 'artist': artist,
                 'from': old_tier, 'to': new_tier, 'status': 'same',
-                'source': upgraded.get('source', ''),
+                'source': (upgraded or old_data).get('source', ''),
                 'message': 'result not better',
             }
         full_key = f"{vid}:{lang}"
@@ -343,6 +349,40 @@ def rebase_cached(job, on_result, cancel_event=None, max_workers=8,
           f"error={job.get('error',0)}")
 
 
+def _try_llm_retitle_fetch(vid, lang, old_data):
+    """Try LLM retitle + fresh braccato fetch. Returns upgraded data or None.
+
+    Called when rerace gives same/plain -- cleaned metadata can help
+    Portato/BLyrics match a song the raw title missed."""
+    song = old_data.get('song') or ''
+    artist = old_data.get('artist') or ''
+    if not song and not artist:
+        return None
+    cleaned = retitle_song(song, artist)
+    new_song = cleaned.get('title', song)
+    new_artist = cleaned.get('artist', artist)
+    if new_song == song and new_artist == artist:
+        return None  # LLM didn't change anything
+    print(f"[REBASE] [LLM] retitling {vid}: {song!r}->{new_song!r} | {artist!r}->{new_artist!r}")
+    from .pipeline import fetch_all_lyrics
+    from .providers_yt import get_song_info
+    try:
+        info = get_song_info(vid)
+        if not info:
+            return None
+        info['title'] = new_song
+        info['artist'] = new_artist
+        result = fetch_all_lyrics(vid, info, lang)
+        if result and not is_not_found_result(result):
+            result['song'] = new_song
+            result['artist'] = new_artist
+            if _tier(result) > _tier(old_data):
+                return result
+    except Exception as e:
+        print(f"[REBASE] [LLM] fetch error {vid}: {e}")
+    return None
+
+
 def _cache_candidates_for_rebase():
     """Return all non-wbw cache entries, deduped per video (prefer full key)."""
     songs = scan_cache()
@@ -359,14 +399,14 @@ def _cache_candidates_for_rebase():
 # ------------------------------------------------------------
 _RETITLE_PROMPT_TEMPLATE = (
     "You are a song metadata cleaner. Given a YouTube video title and artist, "
-    "return a JSON object with cleaned \"title\" and \"artist\" fields.\n"
-    "Remove: \"official video\", \"official audio\", \"official lyric video\", "
-    "\"official mv\", \"lyrics\", \"mv\", \"(cover ...)\", "
-    "\"歌ってみた\", self cover tags, and YouTube noise.\n"
-    "If the title contains \"Title - Artist\" format, split them properly.\n"
+    "return a JSON object with cleaned title and artist fields.\n"
+    "Remove: official video, official audio, official lyric video, "
+    "official mv, lyrics, mv, (cover ...), "
+    "歌ってみた, self cover tags, and YouTube noise.\n"
+    "If the title contains Title - Artist format, split them properly.\n"
     "Keep (feat. ...) in the artist field only.\n"
     "Remove duplicated artist name embedded in the title.\n"
-    "Return ONLY valid JSON: {\"title\": \"...\", \"artist\": \"...\"}\n\n"
+    "Return ONLY valid JSON with keys title and artist.\n\n"
     "Title: {title}\nArtist: {artist}"
 )
 
