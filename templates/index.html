@@ -7,6 +7,16 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='mdui/mdui.css') }}">
 <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='dash.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='braccato/styles/variables.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='braccato/styles/lyrics.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='braccato/styles/instrumental.css') }}">
+<style>
+  braccato-lyrics { display: block; overflow-y: auto; }
+  braccato-lyrics .blyrics-container {
+    padding-top: var(--blyrics-padding-top, 2rem);
+    --blyrics-font-size: 1.35rem;
+  }
+</style>
 <script src="https://www.youtube.com/iframe_api"></script>
 </head>
 <body>
@@ -340,7 +350,9 @@
       <input type="range" id="prev-seek" min="0" max="100" value="0" step="0.1" style="flex:1;">
       <span id="prev-time" style="font-size:12.5px; white-space:nowrap; font-family:Consolas,monospace;">0:00</span>
     </div>
-    <div id="prev-lyrics" style="max-height:40vh; overflow-y:auto;"></div>
+    <div id="prev-lyrics" style="max-height:40vh; overflow-y:auto;">
+      <braccato-lyrics id="braccato-view"></braccato-lyrics>
+    </div>
   </mdui-dialog>
 
   <mdui-dialog id="retitle-dialog" headline="Retitling" close-on-esc close-on-overlay-click style="max-width:700px;">
@@ -360,5 +372,8 @@
 })();
 </script>
 <script src="{{ url_for('static', filename='dash.js') }}"></script>
+<script type="module">
+  import "{{ url_for('static', filename='braccato/element.js') }}";
+</script>
 </body>
 </html>
