@@ -422,6 +422,31 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     [self ytmu_refreshOffsetLabel];
 }
 
+- (void)ytmu_refreshOffsetLabel {
+    if (!self.offsetButton) return;
+    double offset = (g_currentVideoID.length) ? YTMULyricsOffsetForVideoID(g_currentVideoID) : 0.0;
+    if (fabs(offset) < 0.05) {
+        [self.offsetButton setTitle:@"±0.0s" forState:UIControlStateNormal];
+    } else {
+        [self.offsetButton setTitle:[NSString stringWithFormat:@"%+.1fs", offset] forState:UIControlStateNormal];
+    }
+}
+
+- (void)ytmu_nudgeOffset:(UIButton *)sender {
+    double delta = (sender.tag == 0) ? -0.5 : 0.5;
+    double offset = YTMULyricsOffsetForVideoID(g_currentVideoID);
+    offset += delta;
+    if (offset > 30.0) offset = 30.0;
+    if (offset < -30.0) offset = -30.0;
+    YTMULyricsSetOffsetForVideoID(g_currentVideoID, offset);
+    [self ytmu_refreshOffsetLabel];
+}
+
+- (void)ytmu_resetOffset {
+    YTMULyricsSetOffsetForVideoID(g_currentVideoID, 0.0);
+    [self ytmu_refreshOffsetLabel];
+}
+
 - (void)dismissModal {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
@@ -1024,7 +1049,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
         cell.lyricLabel.textColor = YTMUAdaptiveInk(0.2, 0.2);
 
         NSShadow *sh = [[NSShadow alloc] init];
-        sh.shadowColor = YTMUAdaptiveShadow().CGColor;
+        sh.shadowColor = YTMUAdaptiveShadow();
         sh.shadowOffset = CGSizeMake(0, 2);
         sh.shadowBlurRadius = 4;
         cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
