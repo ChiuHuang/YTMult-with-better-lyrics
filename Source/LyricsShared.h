@@ -74,6 +74,9 @@
 @property (nonatomic, strong) UILabel *fpsLabel;
 @property (nonatomic, strong) UIButton *offsetButton;
 @property (nonatomic, assign) NSInteger suppressWordSeekRow;
+@property (nonatomic, strong) UIView *landscapeArtPanel;
+@property (nonatomic, strong) UIImageView *landscapeArtImageView;
+@property (nonatomic, strong) UIView *landscapeRightPanel;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
 @property (nonatomic, assign) float lastVolume;
@@ -128,6 +131,8 @@ void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics);
 NSArray *YTMULyricsCacheLoad(NSString *videoID);
 NSDictionary *YTMULyricsCacheStats(void);
 void YTMULyricsCacheClearAll(void);
+NSString *YTMULyricsContentHash(NSString *videoID);
+NSArray  *YTMULyricsCacheEntries(void);
 void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull);
 NSString *YTMUResolveCurrentVideoID(void);
 UIViewController *topMostViewController(void);
