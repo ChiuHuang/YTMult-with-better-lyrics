@@ -82,6 +82,7 @@
 - (void)loadArtworkForVideo:(NSString *)videoID;
 - (void)forceReloadLyrics;
 - (void)dismissModal;
+- (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges;
 @end
 
 @interface YTPlayerViewController (YTMU_Lyrics)
