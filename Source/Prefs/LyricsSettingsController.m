@@ -1,4 +1,5 @@
 #import "LyricsSettingsController.h"
+#import "../LyricsShared.h"
 
 // Lightweight progress overlay for the cache sync feature. UIAlertController
 // doesn't officially support adding a UIProgressView, so this is a small
