@@ -135,6 +135,7 @@
     if (!d[@"lyricsAutoUpdate"]) d[@"lyricsAutoUpdate"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
     if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
+    if (!d[@"lyricsAutoZhConvert"]) d[@"lyricsAutoZhConvert"] = @YES;
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
     [self loadPreview];
 }
@@ -186,7 +187,7 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 9;
-    if (section == 1) return 2;
+    if (section == 1) return 3;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
     if (section == 4) return 3;
@@ -206,7 +207,7 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return @"Always show translated lyrics auto-opens the panel, storage is on-device, and debug uploads default to off.";
-    if (section == 1) return @"Server used to fetch and translate lyrics, and the language lyrics get translated into. Lines already in that Chinese script (Simplified or Traditional) are never sent to the translator — they just get their script normalized. Examples: zh-TW, zh-CN, en, ja, ko.";
+    if (section == 1) return @"Server used to fetch and translate lyrics, and the language lyrics get translated into. Lines already in that Chinese script (Simplified or Traditional) are never sent to the translator — they just get their script normalized. Auto-convert inlines the script change (e.g. zh-CN to zh-TW) right into the lyrics and skips the translate row; lines already in your language never show a duplicate translate row. Examples: zh-TW, zh-CN, en, ja, ko.";
     if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
     if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
     if (section == 4) return @"Sync pulls songs already translated on the server straight into your local cache — it never re-runs translation, so it's fast and free even for a large backlog.";
@@ -304,6 +305,17 @@
             tf.inputAccessoryView = [self KBToolbar:tf];
             cell.accessoryView = tf;
             cell.imageView.image = [UIImage systemImageNamed:@"character.book.closed"];
+            return cell;
+        }
+        if (indexPath.row == 2) {
+            cell.textLabel.text = @"Auto-convert zh-CN to zh-TW";
+            cell.detailTextLabel.text = @"Show Simplified lyrics as Traditional your language is already set to; no translate row";
+            cell.imageView.image = [UIImage systemImageNamed:@"textformat.alt"];
+            UISwitch *sw = [[UISwitch alloc] init];
+            sw.accessibilityIdentifier = @"lyricsAutoZhConvert";
+            sw.on = [dict[@"lyricsAutoZhConvert"] boolValue];
+            [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = sw;
             return cell;
         }
     }
@@ -604,8 +616,9 @@
                     overlay.itemLabel.text = display;
                 });
                 dispatch_semaphore_t done = dispatch_semaphore_create(0);
-                NSString *songURLStr = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@", base, vid,
-                                         [lang stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]]];
+                NSString *songURLStr = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@%@", base, vid,
+                                         [lang stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]],
+                                         YTMULyricsPreference(@"lyricsAutoZhConvert", YES) ? @"&az=1" : @""];
                 NSURL *songURL = [NSURL URLWithString:songURLStr];
                 __block BOOL ok = NO;
                 if (!songURL) {

@@ -54,6 +54,12 @@ NSString *YTMUTargetLang(void) {
     if (![lang isKindOfClass:[NSString class]] || !lang.length) return @"zh-TW";
     return lang;
 }
+NSString *YTMUAutoZhParam(void) {
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    id value = settings[@"lyricsAutoZhConvert"];
+    BOOL enabled = value ? [value boolValue] : YES;
+    return enabled ? @"&az=1" : @"";
+}
 NSString *YTMUUrlEncode(NSString *s) {
     return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: s;
 }
