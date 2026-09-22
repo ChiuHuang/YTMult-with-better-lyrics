@@ -29,25 +29,34 @@ def is_cjk(text):
             return True
     return False
 
-def sung_duration_ratio(line_duration_ms):
-    """Fraction of a line's duration that is actually sung (the rest is
-    trailing breath/gap before the next line). Mirrors the -400ms/0.88 rule
-    used by generate_interpolated_parts so the last word of a line ends
-    inside the sung region instead of being stretched to the next line."""
-    if line_duration_ms > 800:
-        return max(0.88, (line_duration_ms - 400) / line_duration_ms)
-    return 1.0
+def last_part_duration_ms(part_start, line_start, line_duration_ms, next_line_start=None, prior_parts=None):
+    """Estimate a natural duration for the final word of a line when untimed.
+    Never stretches across the inter-line gap to the next line's start."""
+    max_gap = None
+    if next_line_start is not None and next_line_start > part_start:
+        max_gap = next_line_start - part_start
+    elif line_duration_ms > 0:
+        max_gap = max((line_start + line_duration_ms) - part_start, 150)
 
-def line_sung_end(start_ms, line_duration_ms):
-    """Absolute end of the sung portion of a line."""
-    return start_ms + max(0, int(line_duration_ms * sung_duration_ratio(line_duration_ms)))
+    # Derive natural duration from preceding words in the same line
+    durs = [p.get('durationMs', 0) for p in (prior_parts or []) if (p.get('durationMs') or 0) > 0]
+    if durs:
+        avg_dur = sum(durs) / len(durs)
+        estimated = int(min(max(avg_dur * 1.25, 350), 1200))
+    elif prior_parts:
+        elapsed = part_start - line_start
+        if elapsed > 0:
+            avg_dur = elapsed / len(prior_parts)
+            estimated = int(min(max(avg_dur * 1.25, 350), 1200))
+        else:
+            estimated = 500
+    else:
+        estimated = 500
 
-def last_part_duration_ms(part_start, line_start, line_duration_ms, next_line_start=None):
-    """Duration for the final word of a line. Ends at the line's sung end
-    (never the next line's start), with a sane floor."""
-    sung_end = line_sung_end(line_start, line_duration_ms)
-    end = min(sung_end, next_line_start) if next_line_start is not None else sung_end
-    return max(end - part_start, 150)
+    if max_gap is not None:
+        estimated = min(estimated, max_gap)
+
+    return max(estimated, 150)
 
 def generate_interpolated_parts(text, start_ms, duration_ms):
     """Never fabricate fake word-by-word timestamps from line-by-line lyrics."""
@@ -257,8 +266,10 @@ def parse_lrc(lrc_text, duration_sec=0):
                     dur = p_list[pi+1]['startTimeMs'] - p_list[pi]['startTimeMs']
                     p_list[pi]['durationMs'] = max(dur, 0)
                 else:
+                    nxt = result[i + 1]['startTimeMs'] if i + 1 < len(result) else None
                     p_list[pi]['durationMs'] = last_part_duration_ms(
-                        p_list[pi]['startTimeMs'], result[i]['startTimeMs'], result[i]['durationMs'])
+                        p_list[pi]['startTimeMs'], result[i]['startTimeMs'], result[i]['durationMs'],
+                        next_line_start=nxt, prior_parts=p_list[:-1])
 
     return result
 

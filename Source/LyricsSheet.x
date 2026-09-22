@@ -1106,12 +1106,21 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
     NSInteger curWord = partCount;
-    double curFrac = 1.0;
+    double priorDurSum = 0;
+    NSInteger priorDurCount = 0;
     for (NSInteger i = 0; i < partCount; i++) {
         NSDictionary *p = parts[i];
         double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
         double s = [p[@"startTimeMs"] doubleValue];
         double d = MAX(rawDur, 120.0);
+        if (i == partCount - 1 && d > 1400.0) {
+            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+            d = MIN(d, MAX(avg * 1.5, 500.0));
+            d = MIN(d, 1400.0);
+        } else {
+            priorDurSum += d;
+            priorDurCount++;
+        }
         if (nowMs < s) { curWord = i; curFrac = 0.0; break; }
         if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
     }
@@ -1189,10 +1198,21 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     NSArray *parts = lyric[@"parts"];
     if ([lyric[@"wordSynced"] boolValue] && [parts count] > 0) {
         NSInteger n = [parts count];
+        double priorDurSum = 0;
+        NSInteger priorDurCount = 0;
         for (NSInteger i = 0; i < n; i++) {
             NSDictionary *p = parts[i];
             double s = [p[@"startTimeMs"] doubleValue];
-            double d = MAX([p[@"durationMs"] doubleValue], 1.0);
+            double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
+            double d = MAX(rawDur, 120.0);
+            if (i == n - 1 && d > 1400.0) {
+                double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+                d = MIN(d, MAX(avg * 1.5, 500.0));
+                d = MIN(d, 1400.0);
+            } else {
+                priorDurSum += d;
+                priorDurCount++;
+            }
             if (nowMs < s) return (CGFloat)i / (CGFloat)n;
             if (nowMs < s + d) {
                 double frac = (nowMs - s) / d;

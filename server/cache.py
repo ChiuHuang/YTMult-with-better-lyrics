@@ -64,16 +64,19 @@ def sanitize_lyrics_parts(lyrics):
                 p['startTimeMs'] = prev_ms + (0 if pi == 0 else 200)
             prev_ms = p['startTimeMs']
         # Preserve real provider durations; only synthesize missing ones
-        # (deltas between words, and the last word ends at line sung end).
+        # or clamp bloated last-word durations that stretch into the inter-line gap.
         for pi in range(len(parts)):
-            if parts[pi].get('durationMs'):
-                continue
             if pi < len(parts) - 1:
-                dur = parts[pi+1]['startTimeMs'] - parts[pi]['startTimeMs']
-                parts[pi]['durationMs'] = max(dur, 0)
+                if not parts[pi].get('durationMs'):
+                    dur = parts[pi+1]['startTimeMs'] - parts[pi]['startTimeMs']
+                    parts[pi]['durationMs'] = max(dur, 0)
             else:
-                parts[pi]['durationMs'] = last_part_duration_ms(
-                    parts[pi]['startTimeMs'], l_ms, l_dur)
+                raw_dur = parts[pi].get('durationMs', 0)
+                prior_durs = [p.get('durationMs', 0) for p in parts[:-1] if (p.get('durationMs') or 0) > 0]
+                avg_prior = (sum(prior_durs) / len(prior_durs)) if prior_durs else 400
+                if raw_dur <= 0 or (raw_dur > 2000 and raw_dur > avg_prior * 2.0):
+                    parts[pi]['durationMs'] = last_part_duration_ms(
+                        parts[pi]['startTimeMs'], l_ms, l_dur, prior_parts=parts[:-1])
 
 def _cache_filename(key):
     """Windows-safe on-disk name for a logical cache key. Logical keys are
@@ -231,14 +234,17 @@ def _fix_zero_durations(lyrics, duration_ms):
 
 
 def _fix_last_word_durations(lyrics):
-    """Fix 0-duration last words in each line (end at the line's sung end,
+    """Fix 0-duration or bloated last words in each line (end at natural singing duration,
     never stretched to the next line's start)."""
     for i, line in enumerate(lyrics):
         parts = line.get('parts')
         if not parts:
             continue
         last = parts[-1]
-        if (last.get('durationMs') or 0) > 0:
+        raw_dur = last.get('durationMs') or 0
+        prior_durs = [p.get('durationMs', 0) for p in parts[:-1] if (p.get('durationMs') or 0) > 0]
+        avg_prior = (sum(prior_durs) / len(prior_durs)) if prior_durs else 400
+        if raw_dur > 0 and not (raw_dur > 2000 and raw_dur > avg_prior * 2.0):
             continue
         line_start = line.get('startTimeMs') or 0
         if i + 1 < len(lyrics):
@@ -252,7 +258,7 @@ def _fix_last_word_durations(lyrics):
         if line_dur <= 0:
             last['durationMs'] = 150
         else:
-            last['durationMs'] = last_part_duration_ms(last_start, line_start, line_dur, next_start)
+            last['durationMs'] = last_part_duration_ms(last_start, line_start, line_dur, next_start, prior_parts=parts[:-1])
 
 
 def _insert_instrumental_gaps(lyrics, duration_ms):
