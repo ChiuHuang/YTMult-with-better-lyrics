@@ -1,5 +1,13 @@
 #import "LyricsShared.h"
 
+BOOL _safe_cache_component(NSString *s);
+
+@interface NSObject (YTMUQueuePrecache)
+- (NSArray *)queueItems;
+- (NSString *)videoId;
+- (NSString *)contentVideoId;
+@end
+
 double g_currentPlaybackTime = 0.0;
 NSString *g_currentVideoID = nil;
 __weak YTPlayerViewController *g_activePlayer = nil;
@@ -239,7 +247,7 @@ void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
     
     NSMutableArray *validVids = [NSMutableArray array];
     for (NSString *vid in videoIDs) {
-        if ([vid isKindOfClass:[NSString class]] && vid.length && [_safe_cache_component(vid)]) {
+        if ([vid isKindOfClass:[NSString class]] && vid.length && _safe_cache_component(vid)) {
             [validVids addObject:vid];
             if (validVids.count >= 20) break;
         }
@@ -282,7 +290,7 @@ void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
 BOOL _safe_cache_component(NSString *s) {
     if (!s || !s.length) return NO;
     NSCharacterSet *invalid = [NSCharacterSet characterSetWithCharactersInString:@":/\\?%*|\"<>"];
-    return s.rangeOfCharacterFromSet(invalid).location == NSNotFound;
+    return [s rangeOfCharacterFromSet:invalid].location == NSNotFound;
 }
 
 // Queue precache trigger - hook into queue model changes
@@ -315,7 +323,7 @@ BOOL _safe_cache_component(NSString *s) {
             @try { vid = [item contentVideoId]; } @catch (NSException *e) { vid = nil; }
         }
         
-        if (vid && vid.length && [_safe_cache_component(vid)]) {
+        if (vid && vid.length && _safe_cache_component(vid)) {
             // Skip currently playing
             if (![vid isEqualToString:g_currentVideoID]) {
                 [upNext addObject:vid];
