@@ -19,7 +19,7 @@ import uuid
 import traceback
 import atexit
 import logging
-from .parsers_lrc import generate_interpolated_parts
+from .parsers_lrc import generate_interpolated_parts, last_part_duration_ms
 
 # ============================================================
 # Cache
@@ -36,6 +36,10 @@ def is_not_found_result(data):
     if len(lyrics) == 1 and 'No lyrics found' in lyrics[0].get('text', ''):
         return True
     return False
+
+# Bump when parser/postprocess output format changes so stale on-disk
+# entries (mojibake, wrong last-word timing) are invalidated once.
+_CACHE_FORMAT_VERSION = 2
 
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces."""
@@ -56,12 +60,17 @@ def sanitize_lyrics_parts(lyrics):
                 if not p.get('startTimeMs') or p['startTimeMs'] < l_ms:
                     p['startTimeMs'] = prev_ms + (0 if pi == 0 else 200)
                 prev_ms = p['startTimeMs']
+            # Preserve real provider durations; only synthesize missing ones
+            # (deltas between words, and the last word ends at line sung end).
             for pi in range(len(parts)):
+                if parts[pi].get('durationMs'):
+                    continue
                 if pi < len(parts) - 1:
                     dur = parts[pi+1]['startTimeMs'] - parts[pi]['startTimeMs']
                     parts[pi]['durationMs'] = max(dur, 0)
                 else:
-                    parts[pi]['durationMs'] = max(l_ms + l_dur - parts[pi]['startTimeMs'], 200)
+                    parts[pi]['durationMs'] = last_part_duration_ms(
+                        parts[pi]['startTimeMs'], l_ms, l_dur)
 
 def _cache_filename(key):
     """Windows-safe on-disk name for a logical cache key. Logical keys are
@@ -85,6 +94,8 @@ def get_cached(video_id):
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 entry = json.load(f)
+            if entry.get('v') != _CACHE_FORMAT_VERSION:
+                return None
             data = entry.get('data')
             if is_not_found_result(data):
                 return None
@@ -107,7 +118,7 @@ def set_cached(video_id, data):
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'data': data, 'ts': datetime.now().isoformat()}, f, ensure_ascii=False)
+            json.dump({'v': _CACHE_FORMAT_VERSION, 'data': data, 'ts': datetime.now().isoformat()}, f, ensure_ascii=False)
         try:
             from .app import _sse_broadcast
             _sse_broadcast('cache', {'video_id': video_id, 'song': data.get('song', ''), 'artist': data.get('artist', ''), 'source': data.get('source', ''), 'synced': data.get('synced', False)})
@@ -217,7 +228,8 @@ def _fix_zero_durations(lyrics, duration_ms):
 
 
 def _fix_last_word_durations(lyrics):
-    """Fix 0-duration last words in each line."""
+    """Fix 0-duration last words in each line (end at the line's sung end,
+    never stretched to the next line's start)."""
     for i, line in enumerate(lyrics):
         parts = line.get('parts')
         if not parts:
@@ -225,15 +237,19 @@ def _fix_last_word_durations(lyrics):
         last = parts[-1]
         if (last.get('durationMs') or 0) > 0:
             continue
+        line_start = line.get('startTimeMs') or 0
         if i + 1 < len(lyrics):
             next_start = lyrics[i + 1].get('startTimeMs') or 0
-            last['durationMs'] = max(next_start - (last.get('startTimeMs') or 0), 150)
         else:
-            line_dur = line.get('durationMs') or 0
-            last_start = last.get('startTimeMs') or 0
-            line_start = line.get('startTimeMs') or 0
-            line_end = line_start + line_dur
-            last['durationMs'] = max(line_end - last_start, 150)
+            next_start = None
+        line_dur = line.get('durationMs') or 0
+        if line_dur <= 0 and next_start is not None:
+            line_dur = max(next_start - line_start, 3000)
+        last_start = last.get('startTimeMs') or 0
+        if line_dur <= 0:
+            last['durationMs'] = 150
+        else:
+            last['durationMs'] = last_part_duration_ms(last_start, line_start, line_dur, next_start)
 
 
 def _insert_instrumental_gaps(lyrics, duration_ms):
