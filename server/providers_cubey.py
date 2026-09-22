@@ -20,7 +20,6 @@ import traceback
 import atexit
 import logging
 from .nodes import relay_http_request
-from .parsers_qrc import parse_qrc_to_lrc
 from .parsers_ttml import parse_ttml_basic
 
 # ============================================================
@@ -99,11 +98,13 @@ def _apply_cubey_event(event_data, state):
             accept({"synced": results["synced"], "source": "Musixmatch", "wordSynced": False}, False)
     elif provider == "qq" and results.get("lyrics"):
         # QRC carries true word-by-word timing: outranks any
-        # line-sync best collected so far (e.g. Musixmatch LRC)
-        qrc_lrc = parse_qrc_to_lrc(results["lyrics"])
-        if qrc_lrc:
+        # line-sync best collected so far (e.g. Musixmatch LRC).
+        # Structured path keeps real word/line durations (no LRC round-trip).
+        from .parsers_qrc import parse_qrc_structured
+        qrc_entries = parse_qrc_structured(results["lyrics"])
+        if qrc_entries:
             print(f"  [OK] Cubey: QQ word-sync lyrics found!")
-            accept({"synced": qrc_lrc, "source": "QQ", "wordSynced": True}, True)
+            accept({"parsed": qrc_entries, "source": "QQ", "wordSynced": True}, True)
     elif provider == "golyrics" and results.get("lyrics"):
         # bLyrics TTML: word-synced spans are the syllable-rich source
         parsed = parse_ttml_payload(results["lyrics"])

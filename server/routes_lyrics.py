@@ -22,13 +22,14 @@ import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import app, SERVER_INSTANCE_ID, _recent_requests
 from .utils import _safe_cache_component
-from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename
+from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename, _CACHE_FORMAT_VERSION
 from .nodes import ask_nodes_for_cache
 from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .pipeline import fetch_fast_lyrics, fetch_all_lyrics, _in_flight, _in_flight_lock
 from .logging_util import _log_crash
+from .playlist import _playlist_jobs, _playlist_jobs_lock
 
 # ============================================================
 # API Endpoints
@@ -112,13 +113,10 @@ def api_lyrics():
     req_id = _secrets.token_hex(3)
     _recent_requests.append({'id': req_id, 'v': video_id, 'mode': 'fast' if fast_mode else 'full', 'ip': client_ip, 'ts': datetime.now().isoformat()})
 
-    print("=" * 60)
     mode_str = 'FAST' if fast_mode else ('JWT+Cohere' if jwt_token else 'Normal')
     if force_mode: mode_str += ' [FORCE]'
-    print(f"[REQ] [REQ {req_id}] Lyrics request: {video_id} [{mode_str}] lang={translate_to}")
-    print(f"  [REQ {req_id}] ip={client_ip} ua={ua}")
-    print(f"  [REQ {req_id}] args={all_args} has_jwt={bool(jwt_token)}")
-    print("=" * 60)
+    print(f"[REQ {req_id}] {video_id} [{mode_str}] lang={translate_to} jwt={bool(jwt_token)} ip={client_ip}")
+    print(f"[REQ {req_id}] {all_args}")
 
     # Cache keys — fast and full are stored separately
     full_cache_key = f"{video_id}:{translate_to}"
@@ -354,13 +352,23 @@ def api_lyrics_check():
     video_id = request.args.get('v', '')
     translate_to = request.args.get('lang', '') or 'zh-TW'
     client_tier = request.args.get('ct', '')
+    client_ver = request.args.get('cv', '0')
     if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
         return jsonify({'error': 'Invalid video ID or lang'}), 400
+    try:
+        client_ver = max(int(client_ver), 0)
+    except (TypeError, ValueError):
+        client_ver = 0
+    # A client cache stored under an older format (no real word durations /
+    # last-word timing) is stale regardless of tier -- tell the client to
+    # refetch so old on-device caches self-heal after the format bump.
+    format_stale = client_ver < _CACHE_FORMAT_VERSION
 
     from .race import _lyrics_score, _wbw_line_count
     data = get_cached(f"{video_id}:{translate_to}") or get_cached(f"{video_id}:{translate_to}:fast")
     if not data:
-        return jsonify({'found': False, 'upgrade': False})
+        print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=0 cv_stale={format_stale}")
+        return jsonify({'found': False, 'upgrade': format_stale, 'formatVersion': _CACHE_FORMAT_VERSION})
 
     if _wbw_line_count(data) > 0:
         srv_tier = 'wbw'
@@ -370,6 +378,8 @@ def api_lyrics_check():
         srv_tier = 'raw'
     if client_tier not in _TIER_RANK:
         client_tier = 'raw'
+    upgrade = (_TIER_RANK[srv_tier] > _TIER_RANK[client_tier]) or format_stale
+    print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=1 tier={srv_tier} upgrade={int(upgrade)}")
     return jsonify({
         'found': True,
         'tier': srv_tier,
@@ -377,8 +387,135 @@ def api_lyrics_check():
         'synced': bool(data.get('synced')),
         'wordSynced': srv_tier == 'wbw',
         'score': _lyrics_score(data),
-        'upgrade': _TIER_RANK[srv_tier] > _TIER_RANK[client_tier],
+        'upgrade': upgrade,
+        'formatVersion': _CACHE_FORMAT_VERSION,
+        'clientFormatVersion': client_ver,
     })
+
+
+@app.route('/api/lyrics/precache', methods=['POST'])
+def api_lyrics_precache():
+    """Precache lyrics for upcoming queue tracks.
+    
+    Accepts a list of video IDs and pre-fetches lyrics in the background.
+    Uses fast pipeline by default for speed; can use full pipeline with full=1.
+    Returns immediately with job status - check /api/lyrics/precache/status/<job_id>.
+    """
+    body = request.get_json(silent=True) or {}
+    video_ids = body.get('video_ids', [])
+    if not isinstance(video_ids, list) or not video_ids:
+        return jsonify({'error': 'video_ids list required'}), 400
+    
+    # Validate and limit
+    valid_vids = [v for v in video_ids if isinstance(v, str) and _safe_cache_component(v)][:20]
+    if not valid_vids:
+        return jsonify({'error': 'No valid video IDs'}), 400
+    
+    translate_to = (body.get('lang') or 'zh-TW').strip()
+    if not _safe_cache_component(translate_to):
+        return jsonify({'error': 'Invalid lang'}), 400
+    
+    use_full = body.get('full', False)
+    jwt_token = body.get('jwt')
+    if jwt_token:
+        from .jwt_pool import contribute_jwt as _pool_contribute
+        _pool_contribute(jwt_token, node_id='device')
+    
+    job_id = _secrets.token_hex(8)
+    job = {
+        'status': 'queued',
+        'total': len(valid_vids),
+        'done': 0,
+        'cached': 0,
+        'failed': 0,
+        'video_ids': valid_vids,
+        'lang': translate_to,
+        'full': use_full,
+        'started': datetime.now().isoformat(),
+    }
+    
+    with _playlist_jobs_lock:
+        _playlist_jobs[job_id] = job
+    
+    threading.Thread(
+        target=_run_precache_job,
+        args=(job_id, valid_vids, translate_to, use_full, jwt_token),
+        daemon=True
+    ).start()
+    
+    return jsonify({
+        'job_id': job_id,
+        'status_url': f'/api/lyrics/precache/status/{job_id}',
+        'queued': len(valid_vids)
+    })
+
+
+def _run_precache_job(job_id, video_ids, translate_to, use_full, jwt_token):
+    job = _playlist_jobs.get(job_id)
+    if not job:
+        return
+    
+    job['status'] = 'running'
+    
+    for video_id in video_ids:
+        full_cache_key = f"{video_id}:{translate_to}"
+        
+        # Skip if already cached
+        if get_cached(full_cache_key):
+            job['cached'] += 1
+            job['done'] += 1
+            continue
+        
+        # Try node cache first
+        node_data = ask_nodes_for_cache(full_cache_key, timeout=2.0)
+        if node_data:
+            set_cached(full_cache_key, node_data)
+            job['cached'] += 1
+            job['done'] += 1
+            continue
+        
+        # Fetch song info
+        try:
+            song_info = get_song_info(video_id)
+            if not song_info:
+                job['failed'] += 1
+                job['done'] += 1
+                continue
+        except Exception as e:
+            job['failed'] += 1
+            job['done'] += 1
+            print(f"  [PRECACHE] {video_id} song info failed: {e}")
+            continue
+        
+        # Fetch lyrics
+        try:
+            if use_full:
+                result = fetch_all_lyrics(video_id, song_info, translate_to, jwt_token)
+            else:
+                result = fetch_fast_lyrics(video_id, song_info, translate_to)
+            
+            if result and not is_not_found_result(result):
+                set_cached(full_cache_key, result)
+                job['cached'] += 1
+            else:
+                job['failed'] += 1
+        except Exception as e:
+            job['failed'] += 1
+            print(f"  [PRECACHE] {video_id} fetch failed: {e}")
+        
+        job['done'] += 1
+    
+    job['status'] = 'complete'
+    job['finished'] = datetime.now().isoformat()
+
+
+@app.route('/api/lyrics/precache/status/<job_id>', methods=['GET'])
+def api_precache_status(job_id):
+    with _playlist_jobs_lock:
+        job = _playlist_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(job)
 
 
 

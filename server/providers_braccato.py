@@ -14,7 +14,7 @@ import re
 import json
 import requests
 from urllib.parse import urlencode
-from .parsers_qrc import parse_qrc_to_lrc
+from .parsers_qrc import parse_qrc_structured
 from .parsers_ttml import parse_ttml_basic
 
 BOIDU_TTML_URL = "https://lyrics-api.boidu.dev/getLyrics"
@@ -44,7 +44,13 @@ def _retrieve(url, params, via_node=None):
         return None
     if resp.status_code != 200:
         return None
-    return resp.text
+    # Force UTF-8: these APIs serve UTF-8 bytes but often omit the charset,
+    # and requests would then guess ISO-8859-1 (the mojibake "Lyrics by\xef\xbc"
+    # in header rows). Content-Disposition/CT hints are ignored.
+    try:
+        return resp.content.decode('utf-8', errors='replace')
+    except Exception:
+        return resp.text
 
 
 def _peel_json_string(value):
@@ -115,10 +121,10 @@ def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
         data = json.loads(text)
         if not data.get('lyrics') or data.get('error'):
             return None
-        qrc_lrc = parse_qrc_to_lrc(_peel_json_string(data.get('lyrics')))
-        if not qrc_lrc:
+        entries = parse_qrc_structured(_peel_json_string(data.get('lyrics')))
+        if not entries:
             return None
-        return {'synced': qrc_lrc, 'source': 'QQ', 'wordSynced': True}
+        return {'parsed': entries, 'source': 'QQ', 'wordSynced': True}
     except Exception as e:
         print(f"[Portato] error: {e}")
         return None

@@ -156,9 +156,9 @@
     if (![own isKindOfClass:[UIButton class]]) {
         own = [UIButton buttonWithType:UIButtonTypeSystem];
         own.tag = 9777;
-        [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
         own.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-        own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+        own.backgroundColor = YTMUAdaptiveFill();
         own.layer.masksToBounds = YES;
         [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
         g_ytmuOwnLyricsButton = own;
@@ -262,9 +262,9 @@
             own = [UIButton buttonWithType:UIButtonTypeSystem];
             own.tag = 9778;
             [own setTitle:@"歌詞" forState:UIControlStateNormal];
-            [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
             own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-            own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+            own.backgroundColor = YTMUAdaptiveFill();
             own.layer.masksToBounds = YES;
             objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
@@ -293,9 +293,9 @@
         own = [UIButton buttonWithType:UIButtonTypeSystem];
         own.tag = 9778;
         [own setTitle:@"歌詞" forState:UIControlStateNormal];
-        [own setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
         own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-        own.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+        own.backgroundColor = YTMUAdaptiveFill();
         own.layer.masksToBounds = YES;
         objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];

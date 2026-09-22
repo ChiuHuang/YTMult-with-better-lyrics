@@ -230,6 +230,12 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     if ([node respondsToSelector:@selector(key)]) {
         @try { key = [node key]; } @catch (NSException *e) { key = nil; }
     }
+
+    // TODO: Replace with exact key from device logs (like music_download_badge_1 in Downloading.x)
+    // if (![key isEqualToString:@"EXACT_LYRICS_ELM_KEY_HERE"]) {
+    //     return %orig;
+    // }
+
     NSString *nodeDesc = [node description] ?: @"";
     BOOL keyMatch = key.length > 0 && [key.lowercaseString containsString:@"lyric"];
     BOOL descMatch = [nodeDesc containsString:@"lyric"] || [nodeDesc containsString:@"format_quote"] || [nodeDesc containsString:@"queue_music"];

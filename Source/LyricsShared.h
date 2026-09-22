@@ -72,6 +72,8 @@
 @property (nonatomic, strong) NSDate *loadingSince;
 @property (nonatomic, copy) NSString *artworkVideoID;
 @property (nonatomic, strong) UILabel *fpsLabel;
+@property (nonatomic, strong) UIButton *offsetButton;
+@property (nonatomic, assign) NSInteger suppressWordSeekRow;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
 @property (nonatomic, assign) float lastVolume;
@@ -105,6 +107,8 @@ extern __weak id g_activeEngagementPanelContainer;
 
 void YTMUReleaseGlobalFetch(void);
 BOOL YTMULyricsPreference(NSString *key, BOOL fallback);
+double YTMULyricsOffsetForVideoID(NSString *videoID);
+void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset);
 NSString *YTMUApiBase(void);
 NSString *YTMUTargetLang(void);
 NSString *YTMUUrlEncode(NSString *s);
@@ -116,14 +120,22 @@ NSString *YTMULyricsCachePathForVideoID(NSString *vid);
 BOOL YTMULyricsCacheEnabled(void);
 NSInteger YTMULyricsCacheMaxCount(void);
 NSInteger YTMULyricsCacheMaxSizeMB(void);
+NSInteger YTMULyricsCacheFormatVersion(void);
+NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID);
 void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics);
 NSArray *YTMULyricsCacheLoad(NSString *videoID);
 NSDictionary *YTMULyricsCacheStats(void);
 void YTMULyricsCacheClearAll(void);
+void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull);
 NSString *YTMUResolveCurrentVideoID(void);
 UIViewController *topMostViewController(void);
 BOOL isLyricsEngagementPanel(UIViewController *vc);
 BOOL isLyricsViewVisibleOnScreen(void);
 void openLyricsFromViewController(UIViewController *parentVC);
+
+UIColor *YTMUAdaptiveInk(CGFloat darkAlpha, CGFloat lightAlpha);
+UIColor *YTMUAdaptiveFill(void);
+UIColor *YTMUAdaptiveShadow(void);
+BOOL YTMUInterfaceIsLight(UIView *v);
 
 #endif
