@@ -130,6 +130,8 @@
     if (!d[@"sendDebugLogsToServer"]) d[@"sendDebugLogsToServer"] = @NO;
     if (!d[@"debugLogLevel"]) d[@"debugLogLevel"] = @0;
     if (!d[@"lyricsFpsMeter"]) d[@"lyricsFpsMeter"] = @YES;
+    if (!d[@"lyricsPrecacheQueue"]) d[@"lyricsPrecacheQueue"] = @YES;
+    if (!d[@"lyricsAutoUpdate"]) d[@"lyricsAutoUpdate"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
     if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
@@ -179,14 +181,15 @@
 
 #pragma mark - Table
 
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 5; }
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 6; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 7;
+    if (section == 0) return 9;
     if (section == 1) return 2;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
     if (section == 4) return 3;
+    if (section == 5) return 1;
     return 0;
 }
 
@@ -196,6 +199,7 @@
     if (section == 2) return @"Client Cache";
     if (section == 3) return @"Preview (most recent cached)";
     if (section == 4) return @"Actions";
+    if (section == 5) return @"Timing Offset";
     return nil;
 }
 
@@ -205,6 +209,7 @@
     if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
     if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
     if (section == 4) return @"Sync pulls songs already translated on the server straight into your local cache — it never re-runs translation, so it's fast and free even for a large backlog.";
+    if (section == 5) return @"Per-song timing offset in seconds. Positive = lyrics ahead of audio. Range: -30 to +30 seconds. Applies to current song only.";
     return nil;
 }
 
@@ -230,7 +235,7 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
     if (indexPath.section == 0) {
-        if (indexPath.row == 6) {
+        if (indexPath.row == 7) {
             cell.textLabel.text = @"Log level";
             cell.detailTextLabel.text = @"Off = no uploads, Errors = failures only, All = info + warnings + errors";
             cell.imageView.image = [UIImage systemImageNamed:@"waveform.badge.exclamationmark"];
@@ -246,13 +251,17 @@
             @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"key": @"lyricsCacheEnabled"},
             @{@"title": @"Selectable lyrics", @"desc": @"Allow selecting / copying text inside the lyrics panel", @"key": @"selectableLyrics"},
             @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
+            @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"key": @"lyricsPrecacheQueue"},
+            @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"key": @"lyricsAutoUpdate"},
             @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
             @{@"title": @"Send screenshot debug data", @"desc": @"Upload a UI hierarchy only after you take a screenshot", @"key": @"sendLyricsScreenshotDebug"}
         ];
-        NSDictionary *it = items[indexPath.row];
+        NSInteger idx = indexPath.row;
+        if (idx > 6) idx -= 1; // rows past the Log level segment shift down one
+        NSDictionary *it = items[idx];
         cell.textLabel.text = it[@"title"];
         cell.detailTextLabel.text = it[@"desc"];
-        cell.imageView.image = [UIImage systemImageNamed:(indexPath.row==0?@"quote.bubble": indexPath.row==1?@"internaldrive": indexPath.row==2?@"textformat.abc": indexPath.row==3?@"speedometer": indexPath.row==4?@"antenna.radiowaves.left.and.right":@"ladybug")];
+        cell.imageView.image = [UIImage systemImageNamed:@[@"quote.bubble", @"internaldrive", @"textformat.abc", @"speedometer", @"arrow.triangle.2.circlepath", @"arrow.2.circlepath", @"antenna.radiowaves.left.and.right", @"ladybug"][idx]];
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = it[@"key"];
         sw.on = [dict[it[@"key"]] boolValue];
@@ -378,6 +387,23 @@
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
+    }
+    if (indexPath.section == 5) {
+        cell.textLabel.text = @"Current song offset";
+        cell.detailTextLabel.text = @"Adjust lyrics timing for this song only";
+        cell.imageView.image = [UIImage systemImageNamed:@"clock.arrow.circlepath"];
+        UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
+        NSString *vid = g_currentVideoID ?: @"";
+        double offset = YTMULyricsOffsetForVideoID(vid);
+        tf.text = [NSString stringWithFormat:@"%.1f", offset];
+        tf.borderStyle = UITextBorderStyleRoundedRect;
+        tf.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+        tf.textAlignment = NSTextAlignmentRight;
+        tf.accessibilityIdentifier = [NSString stringWithFormat:@"lyricsOffset_%@", vid];
+        tf.delegate = self;
+        tf.inputAccessoryView = [self KBToolbar:tf];
+        cell.accessoryView = tf;
+        return cell;
     }
     return cell;
 }
@@ -590,7 +616,7 @@
                             NSDictionary *songRoot = [NSJSONSerialization JSONObjectWithData:songData options:0 error:nil];
                             NSArray *lyrics = [songRoot isKindOfClass:[NSDictionary class]] ? songRoot[@"lyrics"] : nil;
                             if ([lyrics isKindOfClass:[NSArray class]] && lyrics.count > 0) {
-                                NSDictionary *toSave = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": vid};
+                                NSDictionary *toSave = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": vid, @"cv": @(YTMULyricsCacheFormatVersion())};
                                 NSData *out = [NSJSONSerialization dataWithJSONObject:toSave options:0 error:nil];
                                 NSString *path = [weakSelf ytmu_cachePathForVideoID:vid];
                                 ok = out && path && [out writeToFile:path atomically:YES];
@@ -652,6 +678,16 @@
         d[key] = lang;
         [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
         textField.text = lang;
+        return;
+    }
+
+    if ([key hasPrefix:@"lyricsOffset_"]) {
+        NSString *vid = [key substringFromIndex:13];
+        double offset = [textField.text doubleValue];
+        if (offset > 30.0) offset = 30.0;
+        if (offset < -30.0) offset = -30.0;
+        YTMULyricsSetOffsetForVideoID(vid, offset);
+        textField.text = [NSString stringWithFormat:@"%.1f", offset];
         return;
     }
 

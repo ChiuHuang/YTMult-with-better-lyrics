@@ -29,17 +29,62 @@ def is_cjk(text):
             return True
     return False
 
+def sung_duration_ratio(line_duration_ms):
+    """Fraction of a line's duration that is actually sung (the rest is
+    trailing breath/gap before the next line). Mirrors the -400ms/0.88 rule
+    used by generate_interpolated_parts so the last word of a line ends
+    inside the sung region instead of being stretched to the next line."""
+    if line_duration_ms > 800:
+        return max(0.88, (line_duration_ms - 400) / line_duration_ms)
+    return 1.0
+
+def line_sung_end(start_ms, line_duration_ms):
+    """Absolute end of the sung portion of a line."""
+    return start_ms + max(0, int(line_duration_ms * sung_duration_ratio(line_duration_ms)))
+
+def last_part_duration_ms(part_start, line_start, line_duration_ms, next_line_start=None):
+    """Duration for the final word of a line. Ends at the line's sung end
+    (never the next line's start), with a sane floor."""
+    sung_end = line_sung_end(line_start, line_duration_ms)
+    end = min(sung_end, next_line_start) if next_line_start is not None else sung_end
+    return max(end - part_start, 150)
+
 def generate_interpolated_parts(text, start_ms, duration_ms):
     """Generate proportional word/character timestamps across line duration when provider lacks word-sync."""
     if not text or duration_ms <= 200:
         return []
     text = text.strip()
     if is_cjk(text):
-        tokens = [c for c in text if c.strip()]
-        if not tokens: return []
+        # Mixed CJK/Latin lines: CJK chars become their own tokens (no
+        # space), Latin runs stay whole words with trailing space so English
+        # spacing is never lost.
+        tokens = []
+        buf = ''
+        for c in text:
+            if c.strip() == '':
+                if buf:
+                    tokens.append(buf)
+                    buf = ''
+                continue
+            if is_cjk(c):
+                if buf:
+                    tokens.append(buf)
+                    buf = ''
+                tokens.append(c)
+            else:
+                buf += c
+        if buf:
+            tokens.append(buf)
+        tokens = [t.rstrip() for t in tokens if t and t.strip()]
+        if not tokens:
+            return []
         parts = []
-        for c in tokens:
-            parts.append({'words': c, 'weight': 1})
+        for i, t in enumerate(tokens):
+            if len(t) == 1 and is_cjk(t):
+                parts.append({'words': t, 'weight': 1})
+            else:
+                display = t + (' ' if i < len(tokens) - 1 else '')
+                parts.append({'words': display, 'weight': max(len(t), 1)})
     else:
         words = text.split()
         if not words: return []
@@ -52,8 +97,12 @@ def generate_interpolated_parts(text, start_ms, duration_ms):
     sung_dur = max(duration_ms * 0.88, duration_ms - 400) if duration_ms > 800 else duration_ms
     curr_ms = start_ms
     res = []
-    for p in parts:
+    n = len(parts)
+    for i, p in enumerate(parts):
         p_dur = max(100, int(sung_dur * (p['weight'] / total_weight)))
+        if i == n - 1:
+            # Clamp the last word so the line never overshoots its sung end
+            p_dur = max(100, min(p_dur, start_ms + int(sung_dur) - curr_ms))
         res.append({
             'startTimeMs': curr_ms,
             'words': p['words'],
@@ -208,7 +257,8 @@ def parse_lrc(lrc_text, duration_sec=0):
                     dur = p_list[pi+1]['startTimeMs'] - p_list[pi]['startTimeMs']
                     p_list[pi]['durationMs'] = max(dur, 0)
                 else:
-                    p_list[pi]['durationMs'] = max(result[i]['startTimeMs'] + result[i]['durationMs'] - p_list[pi]['startTimeMs'], 200)
+                    p_list[pi]['durationMs'] = last_part_duration_ms(
+                        p_list[pi]['startTimeMs'], result[i]['startTimeMs'], result[i]['durationMs'])
 
     return result
 

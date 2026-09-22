@@ -22,6 +22,25 @@ BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     return value ? [value boolValue] : fallback;
 }
 
+static NSString *YTMULyricsOffsetKey(NSString *videoID) {
+    return [NSString stringWithFormat:@"lyricsTimingOffset_%@", videoID];
+}
+double YTMULyricsOffsetForVideoID(NSString *videoID) {
+    if (!videoID.length) return 0.0;
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    return [settings[YTMULyricsOffsetKey(videoID)] doubleValue];
+}
+void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset) {
+    if (!videoID.length) return;
+    if (offset > 30.0) offset = 30.0;
+    if (offset < -30.0) offset = -30.0;
+    NSMutableDictionary *d = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"] mutableCopy];
+    if (!d) d = [NSMutableDictionary dictionary];
+    if (offset == 0.0) [d removeObjectForKey:YTMULyricsOffsetKey(videoID)];
+    else d[YTMULyricsOffsetKey(videoID)] = @(offset);
+    [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+}
+
 NSString *YTMUApiBase(void) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     NSString *base = settings[@"lyricsApiEndpoint"];
@@ -100,11 +119,27 @@ NSInteger YTMULyricsCacheMaxSizeMB(void) {
     NSInteger v = [s[@"lyricsCacheMaxSizeMB"] integerValue];
     return v > 0 ? v : 50;
 }
+NSInteger YTMULyricsCacheFormatVersion(void) {
+    // Bump when the lyrics array shape changes in a way that makes old cached
+    // data invalid (real per-word durations / last-word timing). Sent to the
+    // server as `cv` on /api/lyrics/check; older values make the server answer
+    // upgrade=1 so the client refetches and self-heals.
+    return 2;
+}
+NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID) {
+    if (!videoID.length) return 0;
+    NSString *path = YTMULyricsCachePathForVideoID(videoID);
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (!data) return 0;
+    NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![dict isKindOfClass:[NSDictionary class]]) return 0;
+    return [dict[@"cv"] integerValue];
+}
 void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics) {
     if (!YTMULyricsCacheEnabled() || !videoID.length || !lyrics) return;
     NSString *path = YTMULyricsCachePathForVideoID(videoID);
     if (!path) return;
-    NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID};
+    NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID, @"cv": @(YTMULyricsCacheFormatVersion())};
     NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
     if (data) [data writeToFile:path atomically:YES];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
@@ -186,6 +221,111 @@ void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     if (g_lyricsCache) [g_lyricsCache removeAllObjects];
 }
+
+void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
+    if (!videoIDs || videoIDs.count == 0) return;
+    if (!lang.length) lang = YTMUTargetLang();
+    
+    NSString *apiBase = YTMUApiBase();
+    NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/precache", apiBase];
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) return;
+    
+    NSMutableArray *validVids = [NSMutableArray array];
+    for (NSString *vid in videoIDs) {
+        if ([vid isKindOfClass:[NSString class]] && vid.length && [_safe_cache_component(vid)]) {
+            [validVids addObject:vid];
+            if (validVids.count >= 20) break;
+        }
+    }
+    if (validVids.count == 0) return;
+    
+    NSMutableDictionary *body = [NSMutableDictionary dictionary];
+    body[@"video_ids"] = validVids;
+    body[@"lang"] = lang;
+    if (useFull) body[@"full"] = @YES;
+    
+    NSString *jwt = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"][@"ytmuJwtToken"];
+    if (jwt && jwt.length) body[@"jwt"] = jwt;
+    
+    NSData *jsonBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    if (!jsonBody) return;
+    
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = jsonBody;
+    req.timeoutInterval = 10.0;
+    
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error) {
+            sendDebugLog([NSString stringWithFormat:@"[PRECACHE] Request failed: %@", error.localizedDescription]);
+            return;
+        }
+        NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+        if (http.statusCode != 200) {
+            sendDebugLog([NSString stringWithFormat:@"[PRECACHE] HTTP %ld", (long)http.statusCode]);
+            return;
+        }
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (!json) return;
+        sendDebugLog([NSString stringWithFormat:@"[PRECACHE] Queued %@ videos (job: %@)", @(validVids.count), json[@"job_id"] ?: @"?"]);
+    }] resume];
+}
+
+BOOL _safe_cache_component(NSString *s) {
+    if (!s || !s.length) return NO;
+    NSCharacterSet *invalid = [NSCharacterSet characterSetWithCharactersInString:@":/\\?%*|\"<>"];
+    return s.rangeOfCharacterFromSet(invalid).location == NSNotFound;
+}
+
+// Queue precache trigger - hook into queue model changes
+%hook YTMQueueConfigImpl
+
+- (void)setQueueModel:(id)queueModel {
+    %orig(queueModel);
+    
+    // Extract up-next video IDs for precaching
+    if (!YTMULyricsPreference(@"lyricsPrecacheQueue", YES)) return;
+    
+    NSArray *items = nil;
+    if ([queueModel respondsToSelector:@selector(items)]) {
+        items = [queueModel items];
+    } else if ([queueModel respondsToSelector:@selector(queueItems)]) {
+        items = [queueModel queueItems];
+    }
+    
+    if (!items || items.count <= 1) return; // Only current playing
+    
+    NSMutableArray *upNext = [NSMutableArray array];
+    NSInteger maxPrecache = 5; // Next 5 songs
+    for (id item in items) {
+        if ([upNext count] >= maxPrecache) break;
+        
+        NSString *vid = nil;
+        if ([item respondsToSelector:@selector(videoId)]) {
+            @try { vid = [item videoId]; } @catch (NSException *e) { vid = nil; }
+        } else if ([item respondsToSelector:@selector(contentVideoId)]) {
+            @try { vid = [item contentVideoId]; } @catch (NSException *e) { vid = nil; }
+        }
+        
+        if (vid && vid.length && [_safe_cache_component(vid)]) {
+            // Skip currently playing
+            if (![vid isEqualToString:g_currentVideoID]) {
+                [upNext addObject:vid];
+            }
+        }
+    }
+    
+    if ([upNext count] > 0) {
+        // Use fast pipeline for speed
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            YTMULyricsPrecacheQueue(upNext, YTMUTargetLang(), NO);
+        });
+    }
+}
+
+%end
 
 NSString *YTMUResolveCurrentVideoID(void) {
     if (g_currentVideoID.length) return g_currentVideoID;

@@ -12,6 +12,33 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
             (c >= 0xFF00 && c <= 0xFFEF));
 }
 
+// Dynamic ink: white in dark mode, black in light mode. Deployment target is
+// iOS 13 so colorWithDynamicProvider is always available at runtime.
+UIColor *YTMUAdaptiveInk(CGFloat darkAlpha, CGFloat lightAlpha) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
+            return [[UIColor blackColor] colorWithAlphaComponent:lightAlpha];
+        return [[UIColor whiteColor] colorWithAlphaComponent:darkAlpha];
+    }];
+}
+UIColor *YTMUAdaptiveFill(void) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
+            return [[UIColor blackColor] colorWithAlphaComponent:0.10];
+        return [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+    }];
+}
+UIColor *YTMUAdaptiveShadow(void) {
+    return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
+            return [[UIColor darkGrayColor] colorWithAlphaComponent:0.35];
+        return [[UIColor blackColor] colorWithAlphaComponent:0.8];
+    }];
+}
+BOOL YTMUInterfaceIsLight(UIView *v) {
+    return v.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
+}
+
 %hook YTMLightweightMusicDescriptionShelfCell
 
 - (void)layoutSubviews {
@@ -109,8 +136,8 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
         self.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.45];
-        self.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.lyricLabel.textColor = YTMUAdaptiveInk(0.45, 0.55);
+        self.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         self.lyricLabel.layer.shadowRadius = 4.0;
         self.lyricLabel.layer.masksToBounds = NO;
@@ -120,17 +147,24 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.wipeLabel.textColor = [UIColor whiteColor];
-        self.wipeLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.wipeLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
+        self.wipeLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
         self.wipeLabel.layer.shadowRadius = 4.0;
         self.wipeLabel.layer.shadowOpacity = 0.75;
         self.wipeLabel.layer.masksToBounds = NO;
         self.wipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        self.wipeLabel.userInteractionEnabled = YES;
         [self.contentView addSubview:self.wipeLabel];
 
+        // Word-level tap-to-seek gesture
+        UITapGestureRecognizer *tapGR = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_handleWordTap:)];
+        [self.wipeLabel addGestureRecognizer:tapGR];
+
         self.wipeMask = [CAShapeLayer layer];
-        self.wipeMask.fillColor = [UIColor whiteColor].CGColor;
+        self.wipeMask.fillColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+            return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor blackColor] : [UIColor whiteColor];
+        }].CGColor;
         self.wipeMask.frame = CGRectZero;
         self.wipeLabel.layer.mask = self.wipeMask;
         _wipeProgress = 0.0;
@@ -138,8 +172,8 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
         self.transLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-        self.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.32];
-        self.transLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        self.transLabel.textColor = YTMUAdaptiveInk(0.32, 0.5);
+        self.transLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.transLabel.layer.shadowRadius = 2.0;
         self.transLabel.layer.shadowOpacity = 0.35;
@@ -194,6 +228,44 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     self.lyricLabel.attributedText = nil;
 }
 
+- (void)ytmu_handleWordTap:(UITapGestureRecognizer *)gesture {
+    CGPoint point = [gesture locationInView:self.wipeLabel];
+    YTMULyricsViewController *vc = (YTMULyricsViewController *)[self _viewControllerForAncestor];
+    if (!vc || !vc.isSynced) return;
+    NSIndexPath *indexPath = [vc.tableView indexPathForCell:self];
+    if (!indexPath) return;
+    NSDictionary *lyric = vc.lyrics[indexPath.row];
+    NSArray *parts = lyric[@"parts"];
+    if (![lyric[@"wordSynced"] boolValue] || parts.count == 0) return;
+    UIFont *font = self.wipeLabel.font;
+    if (!font) font = [UIFont boldSystemFontOfSize:22];
+    NSArray *ranges = nil;
+    NSString *display = [vc wbwDisplayTextForLyric:lyric ranges:&ranges];
+    if (ranges.count == 0) return;
+    
+    NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
+    NSLayoutManager *lm = [[NSLayoutManager alloc] init];
+    NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:self.wipeLabel.bounds.size];
+    tc.lineFragmentPadding = 0;
+    tc.maximumNumberOfLines = 0;
+    tc.lineBreakMode = NSLineBreakByWordWrapping;
+    [lm addTextContainer:tc];
+    [ts addLayoutManager:lm];
+    [lm ensureLayoutForTextContainer:tc];
+    
+    NSInteger charIndex = [lm characterIndexForPoint:point inTextContainer:tc fractionOfDistanceBetweenInsertionPoints:NULL];
+    for (NSInteger i = 0; i < ranges.count; i++) {
+        NSRange r = [ranges[i] rangeValue];
+        if (r.location != NSNotFound && r.length > 0 && NSLocationInRange(charIndex, r)) {
+            NSDictionary *part = parts[i];
+            double startMs = [part[@"startTimeMs"] doubleValue];
+            double seekTime = startMs / 1000.0;
+            [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSeekToTime" object:@(seekTime)];
+            break;
+        }
+    }
+}
+
 @end
 
 
@@ -203,7 +275,10 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     [super viewDidLoad];
 
     self.currentIndex = -1;
-    self.view.backgroundColor = [UIColor blackColor];
+    self.suppressWordSeekRow = -1;
+    self.view.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor systemBackgroundColor] : [[UIColor blackColor] colorWithAlphaComponent:0.95];
+    }];
 
     self.artworkImageView = [[UIImageView alloc] initWithFrame:self.view.bounds];
     self.artworkImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -211,14 +286,18 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     self.artworkImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.artworkImageView atIndex:0];
 
-    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:UIBlurEffectStyleDark];
+    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:(YTMUInterfaceIsLight(self.view) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark)];
     self.blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
     self.blurView.frame = self.view.bounds;
     self.blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.blurView aboveSubview:self.artworkImageView];
 
     self.darkOverlay = [[UIView alloc] initWithFrame:self.view.bounds];
-    self.darkOverlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.48];
+    self.darkOverlay.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
+            return [[UIColor blackColor] colorWithAlphaComponent:0.30];
+        return [[UIColor blackColor] colorWithAlphaComponent:0.48];
+    }];
     self.darkOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.darkOverlay aboveSubview:self.blurView];
 
@@ -235,12 +314,12 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     self.tableView.contentInset = UIEdgeInsetsMake(20, 0, 350, 0);
     [self.tableView registerClass:[YTMULyricsCell class] forCellReuseIdentifier:@"YTMULyricsCell"];
 
-    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 50)];
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 94)];
     header.autoresizingMask = UIViewAutoresizingFlexibleWidth;
 
     UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, self.view.bounds.size.width, 36)];
     statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    statusLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.7];
+    statusLabel.textColor = YTMUAdaptiveInk(0.7, 0.75);
     statusLabel.textAlignment = NSTextAlignmentCenter;
     statusLabel.font = [UIFont systemFontOfSize:14];
     statusLabel.tag = 8888;
@@ -250,11 +329,11 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     reloadBtn.frame = CGRectMake(self.view.bounds.size.width - 105, 10, 85, 34);
     reloadBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     [reloadBtn setTitle:@"Reload" forState:UIControlStateNormal];
-    [reloadBtn setTitleColor:[[UIColor whiteColor] colorWithAlphaComponent:0.9] forState:UIControlStateNormal];
+    [reloadBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
     reloadBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
     reloadBtn.titleLabel.adjustsFontSizeToFitWidth = YES;
     reloadBtn.titleLabel.minimumScaleFactor = 0.7;
-    reloadBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+    reloadBtn.backgroundColor = YTMUAdaptiveFill();
     reloadBtn.layer.cornerRadius = 17;
     [reloadBtn addTarget:self action:@selector(forceReloadLyrics) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:reloadBtn];
@@ -263,13 +342,50 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         closeBtn.frame = CGRectMake(16, 10, 36, 36);
         [closeBtn setTitle:@"X" forState:UIControlStateNormal];
-        [closeBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [closeBtn setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
         closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-        closeBtn.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+        closeBtn.backgroundColor = YTMUAdaptiveFill();
         closeBtn.layer.cornerRadius = 18;
         [closeBtn addTarget:self action:@selector(dismissModal) forControlEvents:UIControlEventTouchUpInside];
         [header addSubview:closeBtn];
     }
+
+    CGFloat hw = self.view.bounds.size.width;
+    UIButton *decBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    decBtn.frame = CGRectMake(16, 54, 56, 32);
+    decBtn.autoresizingMask = UIViewAutoresizingFlexibleRightMargin;
+    [decBtn setTitle:@"-0.5" forState:UIControlStateNormal];
+    [decBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+    decBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    decBtn.backgroundColor = YTMUAdaptiveFill();
+    decBtn.layer.cornerRadius = 16;
+    decBtn.tag = 0;
+    [decBtn addTarget:self action:@selector(ytmu_nudgeOffset:) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:decBtn];
+
+    UIButton *offBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    offBtn.frame = CGRectMake(80, 54, hw - 160, 32);
+    offBtn.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [offBtn setTitle:@"±0.0s" forState:UIControlStateNormal];
+    [offBtn setTitleColor:YTMUAdaptiveInk(0.8, 0.8) forState:UIControlStateNormal];
+    offBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    offBtn.backgroundColor = YTMUAdaptiveFill();
+    offBtn.layer.cornerRadius = 16;
+    [offBtn addTarget:self action:@selector(ytmu_resetOffset) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:offBtn];
+    self.offsetButton = offBtn;
+
+    UIButton *incBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    incBtn.frame = CGRectMake(hw - 72, 54, 56, 32);
+    incBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [incBtn setTitle:@"+0.5" forState:UIControlStateNormal];
+    [incBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+    incBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    incBtn.backgroundColor = YTMUAdaptiveFill();
+    incBtn.layer.cornerRadius = 16;
+    incBtn.tag = 1;
+    [incBtn addTarget:self action:@selector(ytmu_nudgeOffset:) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:incBtn];
 
     self.tableView.tableHeaderView = header;
 
@@ -277,7 +393,7 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
 
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
-    self.fpsLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.7];
+    self.fpsLabel.textColor = YTMUAdaptiveInk(0.7, 0.75);
     self.fpsLabel.hidden = YES;
     self.fpsLabel.autoresizingMask = UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
     [self.view addSubview:self.fpsLabel];
@@ -298,6 +414,12 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         self.displayLink.preferredFramesPerSecond = 120;
     }
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+
+    UITapGestureRecognizer *wordTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_handleWordTap:)];
+    wordTap.cancelsTouchesInView = NO;
+    [self.tableView addGestureRecognizer:wordTap];
+
+    [self ytmu_refreshOffsetLabel];
 }
 
 - (void)dismissModal {
@@ -493,6 +615,7 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
 
 - (void)ytmuCheckServerUpgradeForVideoID:(NSString *)videoID {
     if (!videoID.length) return;
+    if (!YTMULyricsPreference(@"lyricsAutoUpdate", YES)) return;
     NSArray *tierLyrics = g_lyricsCache[videoID] ?: YTMULyricsCacheLoad(videoID);
     if (!tierLyrics) return;
     static NSMutableDictionary *g_upgradeLastCheck = nil;
@@ -505,8 +628,9 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     g_upgradeLastCheck[videoID] = [NSDate date];
 
     NSString *tier = YTMULyricsTier(tierLyrics);
-    NSString *url = [NSString stringWithFormat:@"%@/api/lyrics/check?v=%@&lang=%@&ct=%@",
-                     YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), tier];
+    NSInteger cacheVersion = YTMULyricsCacheVersionForVideoID(videoID);
+    NSString *url = [NSString stringWithFormat:@"%@/api/lyrics/check?v=%@&lang=%@&ct=%@&cv=%ld",
+                     YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), tier, (long)cacheVersion];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:url]
         completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -650,6 +774,14 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         g_currentPlaybackTime = currentTime;
     } else {
         currentTime = g_currentPlaybackTime;
+    }
+
+    // Apply per-song timing offset
+    if (g_currentVideoID.length) {
+        double offset = YTMULyricsOffsetForVideoID(g_currentVideoID);
+        if (offset != 0.0) {
+            currentTime += offset;
+        }
     }
 
     if (currentTime <= 0) return;
@@ -889,14 +1021,14 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     if (![layoutKey isEqualToString:self.cachedWordLayoutKey]) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = display;
-        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
+        cell.lyricLabel.textColor = YTMUAdaptiveInk(0.2, 0.2);
 
         NSShadow *sh = [[NSShadow alloc] init];
-        sh.shadowColor = [[UIColor blackColor] colorWithAlphaComponent:0.8];
+        sh.shadowColor = YTMUAdaptiveShadow().CGColor;
         sh.shadowOffset = CGSizeMake(0, 2);
         sh.shadowBlurRadius = 4;
         cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
-            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: [UIColor whiteColor], NSShadowAttributeName: sh}];
+            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: YTMUAdaptiveInk(1.0, 1.0), NSShadowAttributeName: sh}];
 
         NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
         NSLayoutManager *lm = [[NSLayoutManager alloc] init];
@@ -993,40 +1125,40 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     if (!self.isSynced) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = [UIColor whiteColor];
-        cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        cell.lyricLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
+        cell.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         cell.lyricLabel.layer.shadowRadius = 4.0;
         cell.lyricLabel.layer.shadowOpacity = 0.7;
         cell.lyricLabel.layer.masksToBounds = NO;
         [cell clearWipe];
 
-        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.75];
+        cell.transLabel.textColor = YTMUAdaptiveInk(0.75, 0.75);
     } else if (isActive) {
         if (hasWords) {
             [self applyWordColorsToCell:cell lyric:lyric index:index currentTime:currentTime force:YES];
         } else {
             cell.lyricLabel.attributedText = nil;
             cell.lyricLabel.text = displayText;
-            cell.lyricLabel.textColor = [UIColor whiteColor];
+            cell.lyricLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
             [cell clearWipe];
         }
 
-        cell.lyricLabel.layer.shadowColor = [UIColor blackColor].CGColor;
+        cell.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         cell.lyricLabel.layer.shadowRadius = 4.0;
         cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
-        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.7];
+        cell.transLabel.textColor = YTMUAdaptiveInk(0.7, 0.7);
     } else {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.2];
+        cell.lyricLabel.textColor = YTMUAdaptiveInk(0.2, 0.2);
         cell.lyricLabel.layer.shadowOpacity = 0.32;
         [cell clearWipe];
 
-        cell.transLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.25];
+        cell.transLabel.textColor = YTMUAdaptiveInk(0.25, 0.25);
     }
 
     NSString *translated = lyric[@"translated"];
@@ -1049,6 +1181,14 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
         currentTime = g_currentPlaybackTime;
     }
 
+    // Apply per-song timing offset
+    if (g_currentVideoID.length) {
+        double offset = YTMULyricsOffsetForVideoID(g_currentVideoID);
+        if (offset != 0.0) {
+            currentTime += offset;
+        }
+    }
+
     BOOL isActive = self.isSynced && (indexPath.row == self.currentIndex);
     [self configureCell:cell atIndex:indexPath.row isActive:isActive currentTime:currentTime];
 
@@ -1064,11 +1204,19 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     NSNumber *time = lyric[@"time"];
 
     if (time && [time doubleValue] >= 0) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSeekToTime" object:time];
+        double seekTime = [time doubleValue];
+        // Adjust for per-song offset
+        if (g_currentVideoID.length) {
+            double offset = YTMULyricsOffsetForVideoID(g_currentVideoID);
+            if (offset != 0.0) {
+                seekTime -= offset;
+            }
+        }
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSeekToTime" object:@(seekTime)];
 
         NSInteger oldIndex = self.currentIndex;
         self.currentIndex = indexPath.row;
-        g_currentPlaybackTime = [time doubleValue];
+        g_currentPlaybackTime = seekTime;
 
         if (oldIndex >= 0 && oldIndex < self.lyrics.count && oldIndex != indexPath.row) {
             YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:oldIndex inSection:0]];
