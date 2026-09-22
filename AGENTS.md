@@ -15,6 +15,13 @@
 - Commit + push when a fix/feature is done (CI builds the tweak).
 
 ## Environment traps (Windows host, PowerShell 5.1)
+- GitHub work: use `gh` CLI (authenticated as ChiuHuang) — prefer
+  `gh api repos/OWNER/REPO/commits/SHA` for commits/compare info. Avoid bare
+  `github.com/.../compare/...` webfetches, and NEVER render them with the
+  WebFetch tool. PowerShell gotchas: redirecting `gh` output with `>` writes
+  UTF-16 (read it back with Python `encoding='utf-8-sig'`), and quoting a long
+  `--jq` inline in PS 5.1 breaks — write the jq to a file or parse the JSON
+  with `.venv\Scripts\python` instead.
 - PowerShell 5.1: NO `&&` chaining, NO `head`/`grep`/`cat`. Use `;`, `Select-String`,
   `Get-Content`. `default.bash` runs PowerShell, not bash.
 - Python: `.venv\Scripts\python` (has deps) or `py -3`. `flask` is only in `.venv`.
