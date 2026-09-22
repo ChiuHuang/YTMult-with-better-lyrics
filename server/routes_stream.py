@@ -28,7 +28,7 @@ from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .race import (_lyrics_score, _wbw_line_count, _race_cubey, _race_lrclib,
     _race_unison, _race_yt, _race_boidu, _race_binimum, _sse_event)
-from .translate import cohere_translate, google_translate_fast
+from .translate import cohere_translate, google_translate_fast, apply_display_transforms
 
 @app.route('/api/lyrics/stream', methods=['GET'])
 def api_lyrics_stream():
@@ -55,8 +55,20 @@ def api_lyrics_stream():
     if jwt_token:
         _pool_contribute(jwt_token, node_id='device')
     force_mode = request.args.get('force', '0') == '1'
+    auto_zh = request.args.get('az', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)
+
+    import copy as _copy
+
+    def stream_payload(data):
+        """Deep-copied payload with per-display transforms applied, so the
+        canonical `best`/cached object is never mutated by the transform."""
+        payload = dict(data)
+        if isinstance(payload.get('lyrics'), list):
+            payload['lyrics'] = _copy.deepcopy(payload['lyrics'])
+            apply_display_transforms(payload['lyrics'], translate_to, auto_zh)
+        return payload
 
     print("=" * 60)
     print(f"[REQ] [REQ {req_id}] Lyrics STREAM: {video_id} [{'JWT' if jwt_token else 'Normal'}] lang={translate_to}")
@@ -68,7 +80,7 @@ def api_lyrics_stream():
             cached = get_cached(full_cache_key)
             if cached:
                 print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
-                payload = dict(cached)
+                payload = stream_payload(cached)
                 payload['stage'] = 'cached'
                 yield _sse_event('lyrics', payload)
                 yield _sse_event('done', {'ok': True, 'source': cached.get('source'), 'synced': cached.get('synced'), 'stages': ['cached']})
@@ -136,7 +148,7 @@ def api_lyrics_stream():
                         best['song'] = title
                         best['artist'] = artist
                         best['wbw_lines'] = _wbw_line_count(best)
-                        payload = dict(best)
+                        payload = stream_payload(best)
                         payload['stage'] = 'raw'
                         payload['elapsed_ms'] = elapsed
                         stages.append(f"raw:{best.get('source')}")
@@ -164,7 +176,7 @@ def api_lyrics_stream():
                         for i, lyric in enumerate(best['lyrics']):
                             if i < len(machine) and machine[i]:
                                 lyric['translated'] = machine[i]
-                        payload = dict(best)
+                        payload = stream_payload(best)
                         payload['stage'] = 'machine'
                         payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
                         stages.append('machine:google')
@@ -188,7 +200,7 @@ def api_lyrics_stream():
                         if i < len(final_trans):
                             lyric['translated'] = final_trans[i]
                 sanitize_lyrics_parts(best['lyrics'])
-                payload = dict(best)
+                payload = stream_payload(best)
                 payload['stage'] = 'final'
                 payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
                 stages.append('final:cohere')

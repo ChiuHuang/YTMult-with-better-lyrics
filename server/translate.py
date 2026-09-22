@@ -260,6 +260,52 @@ def _cohere_translate_raw(texts, target_lang):
     return texts
 
 
+def apply_display_transforms(lyrics, target_lang='zh-TW', auto_zh=False):
+    """Presentation-only, response-time post-processing (never applied to what
+    gets persisted). Two rules:
+
+      1. Always: a 'translated' row identical to the line 'text' is redundant
+         -- the line already reads in (or collapsed onto) the user's preferred
+         language, e.g. a zh-TW song served with lang=zh-TW. Drop the row so
+         the client stops showing a duplicate translate line.
+
+      2. auto_zh only: with a Chinese target and OpenCC installed, a Han-script
+         line from the other script variant (zh-CN -> zh-TW etc.) gets the
+         script-converted string inlined as the main 'text' (plus its per-word
+         parts converted), dropping the translate row. Non-Chinese lines
+         (Japanese kana, Hangul, Latin scat) keep their real translation.
+
+    Mutates the lyric dicts in place; callers must not hand in the exact object
+    they are about to cache.
+    """
+    if not lyrics:
+        return
+    chinese_target = _is_chinese_target(target_lang)
+    norm = (target_lang or '').lower().replace('_', '-')
+    converter = None
+    if norm in ('zh-tw', 'zh-hant'):
+        converter = _opencc_s2t
+    elif norm in ('zh-cn', 'zh-hans'):
+        converter = _opencc_t2s
+    for line in lyrics:
+        if not isinstance(line, dict):
+            continue
+        text = line.get('text') or ''
+        translated = line.get('translated')
+        if not translated:
+            continue
+        if translated == text:
+            line.pop('translated', None)
+            continue
+        if (auto_zh and chinese_target and converter
+                and text.strip() and _line_is_already_chinese(text)):
+            line['text'] = translated
+            for part in (line.get('parts') or []):
+                if isinstance(part, dict) and part.get('words'):
+                    part['words'] = converter.convert(part['words'])
+            line.pop('translated', None)
+
+
 def google_translate_fast(texts, target_lang='zh-TW'):
     """Fast Google translate - no API key needed, for immediate results."""
     if not texts:

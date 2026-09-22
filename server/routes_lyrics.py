@@ -28,6 +28,7 @@ from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .pipeline import fetch_fast_lyrics, fetch_all_lyrics, _in_flight, _in_flight_lock
+from .translate import apply_display_transforms
 from .logging_util import _log_crash
 from .playlist import _playlist_jobs, _playlist_jobs_lock
 
@@ -95,6 +96,7 @@ def api_lyrics():
     translate_to = request.args.get('lang', 'zh-TW')
     if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
         return jsonify({"error": "Invalid video ID or lang"}), 400
+    auto_zh = request.args.get('az', '0') == '1'
     jwt_token = request.args.get('jwt')
     if jwt_token:
         # Auto opt-in: a real bootstrapped device carries a Turnstile-verified
@@ -104,6 +106,14 @@ def api_lyrics():
         _pool_contribute(jwt_token, node_id='device')
     fast_mode = request.args.get('fast', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
+
+    def serve(data):
+        """Apply per-display transforms to an outgoing lyrics payload. Safe to
+        mutate in place: primary results were already written to disk by
+        `set_cached`, and cache-hit loads are fresh reads from disk."""
+        if isinstance(data, dict) and isinstance(data.get('lyrics'), list):
+            apply_display_transforms(data['lyrics'], translate_to, auto_zh)
+        return jsonify(data)
 
     client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
     ua = request.headers.get('User-Agent', '')[:120]
@@ -153,7 +163,7 @@ def api_lyrics():
             print(f"[OK] [REQ {req_id}] Got result from in-flight wait source={cached.get('source')} lines={len(cached.get('lyrics',[]))} synced={cached.get('synced')}")
             print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight)")
             print("=" * 60)
-            return jsonify(cached)
+            return serve(cached)
         # Fell through (timeout or no cache) — return empty
         print(f"[WARN] [REQ {req_id}] [In-Flight] No cache after wait (timeout or miss) - returning none")
         print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight miss)")
@@ -192,7 +202,7 @@ def api_lyrics():
                         _in_flight[dedup_key].set()
                         del _in_flight[dedup_key]
             print("=" * 60)
-            return jsonify(cached)
+            return serve(cached)
         else:
             print(f"  [REQ {req_id}] [Cache] miss for both full and fast keys")
             node_data = ask_nodes_for_cache(full_cache_key, timeout=2.0)
@@ -206,7 +216,7 @@ def api_lyrics():
                             del _in_flight[dedup_key]
                 print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (node cache)")
                 print("=" * 60)
-                return jsonify(node_data)
+                return serve(node_data)
     else:
         print(f"  [REQ {req_id}] [Cache] bypassed (force mode)")
 
@@ -279,7 +289,7 @@ def api_lyrics():
     print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
     print("=" * 60)
 
-    return jsonify(result)
+    return serve(result)
 
 
 @app.route('/api/cache/list', methods=['GET'])
