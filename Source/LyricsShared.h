@@ -112,6 +112,7 @@ void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset);
 NSString *YTMUApiBase(void);
 NSString *YTMUTargetLang(void);
 NSString *YTMUUrlEncode(NSString *s);
+NSString *YTMUAutoZhParam(void);
 NSString *YTMULyricsTier(NSArray *lyrics);
 void sendDebugLog(NSString *msg);
 void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload);

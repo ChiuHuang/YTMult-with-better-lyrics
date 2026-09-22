@@ -97,7 +97,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 
     sendDebugLog([NSString stringWithFormat:@"準備向伺服器要歌詞: %@", videoID]);
 
-    NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
+    NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
     NSURLRequest *request = [NSURLRequest requestWithURL:[NSURL URLWithString:serverURL]];
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -567,7 +567,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
         return;
     }
 
-    NSString *fullURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
+    NSString *fullURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
     if (force) {
         fullURL = [fullURL stringByAppendingString:@"&force=1"];
     }
@@ -715,7 +715,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 
     [self loadArtworkForVideo:videoID];
 
-    NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang())];
+    NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (![self.loadingVideoID isEqualToString:videoID]) return;
@@ -1162,7 +1162,8 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     }
 
     NSString *translated = lyric[@"translated"];
-    if (translated && translated.length > 0) {
+    NSString *rawText = [lyric[@"text"] isKindOfClass:[NSString class]] ? lyric[@"text"] : @"";
+    if (translated && translated.length > 0 && ![translated isEqualToString:rawText]) {
         cell.transLabel.text = translated;
         cell.transLabel.hidden = NO;
     } else {
