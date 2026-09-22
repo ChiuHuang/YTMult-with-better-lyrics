@@ -391,6 +391,26 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 
     [self.view addSubview:self.tableView];
 
+    // --- Landscape split-view panels ---
+    // Left panel: solid dark background + artwork (aspect-fit, no blur-stretch)
+    self.landscapeArtPanel = [[UIView alloc] initWithFrame:CGRectZero];
+    self.landscapeArtPanel.backgroundColor = [UIColor blackColor];
+    self.landscapeArtPanel.clipsToBounds = YES;
+    self.landscapeArtPanel.hidden = YES;
+    [self.view addSubview:self.landscapeArtPanel];
+
+    self.landscapeArtImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
+    self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFit;
+    self.landscapeArtImageView.clipsToBounds = YES;
+    [self.landscapeArtPanel addSubview:self.landscapeArtImageView];
+
+    // Right panel: semi-transparent tint behind the table in landscape
+    self.landscapeRightPanel = [[UIView alloc] initWithFrame:CGRectZero];
+    self.landscapeRightPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.45];
+    self.landscapeRightPanel.clipsToBounds = YES;
+    self.landscapeRightPanel.hidden = YES;
+    [self.view addSubview:self.landscapeRightPanel];
+
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
     self.fpsLabel.textColor = YTMUAdaptiveInk(0.7, 0.75);
@@ -454,26 +474,85 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
+    CGFloat W = self.view.bounds.size.width;
+    CGFloat H = self.view.bounds.size.height;
+    BOOL landscape = (W > H);
+
+    if (landscape) {
+        // --- Landscape: left artwork panel + right lyrics panel ---
+        // Hide full-screen portrait background layers
+        self.artworkImageView.hidden = YES;
+        self.blurView.hidden = YES;
+        self.darkOverlay.hidden = YES;
+
+        // Show landscape panels
+        self.landscapeArtPanel.hidden = NO;
+        self.landscapeRightPanel.hidden = NO;
+
+        // Sync artwork image
+        if (self.artworkImageView.image && !self.landscapeArtImageView.image) {
+            self.landscapeArtImageView.image = self.artworkImageView.image;
+        }
+
+        // Left panel: 44% of width, full height
+        CGFloat leftW = roundf(W * 0.44f);
+        CGFloat rightW = W - leftW;
+        self.landscapeArtPanel.frame = CGRectMake(0, 0, leftW, H);
+        self.landscapeArtImageView.frame = self.landscapeArtPanel.bounds;
+
+        // Right panel behind table
+        self.landscapeRightPanel.frame = CGRectMake(leftW, 0, rightW, H);
+
+        // tableView occupies right panel
+        self.tableView.frame = CGRectMake(leftW, 0, rightW, H);
+        [self.view bringSubviewToFront:self.tableView];
+        [self.view bringSubviewToFront:self.fpsLabel];
+
+        // Smaller bottom inset in landscape (less scroll space needed)
+        CGFloat bottomPad = MAX(120.0, H * 0.30f);
+        UIEdgeInsets current = self.tableView.contentInset;
+        if (fabs(current.bottom - bottomPad) > 1.0) {
+            self.tableView.contentInset = UIEdgeInsetsMake(current.top, 0, bottomPad, 0);
+            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, bottomPad, 0);
+        }
+        UIView *footer = self.tableView.tableFooterView;
+        if (!footer || fabs(footer.frame.size.height - bottomPad) > 1.0) {
+            UIView *f = [[UIView alloc] initWithFrame:CGRectMake(0, 0, rightW, bottomPad)];
+            f.backgroundColor = [UIColor clearColor];
+            self.tableView.tableFooterView = f;
+        }
+    } else {
+        // --- Portrait: full-screen blurred artwork background ---
+        self.artworkImageView.hidden = NO;
+        self.blurView.hidden = NO;
+        self.darkOverlay.hidden = NO;
+        self.landscapeArtPanel.hidden = YES;
+        self.landscapeRightPanel.hidden = YES;
+
+        // Restore tableView to full bounds
+        self.tableView.frame = self.view.bounds;
+
+        CGFloat visibleHeight = H;
+        CGFloat bottomPad = MAX(350.0, visibleHeight * 0.60);
+
+        UIEdgeInsets current = self.tableView.contentInset;
+        if (fabs(current.bottom - bottomPad) > 1.0) {
+            self.tableView.contentInset = UIEdgeInsetsMake(current.top, 0, bottomPad, 0);
+            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, bottomPad, 0);
+        }
+        UIView *existingFooter = self.tableView.tableFooterView;
+        if (!existingFooter || fabs(existingFooter.frame.size.height - bottomPad) > 1.0) {
+            UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, bottomPad)];
+            footer.backgroundColor = [UIColor clearColor];
+            self.tableView.tableFooterView = footer;
+        }
+    }
+
+    // Header width sync (both orientations)
     UIView *header = self.tableView.tableHeaderView;
     if (header && fabs(header.frame.size.width - self.tableView.bounds.size.width) > 1.0) {
         header.frame = CGRectMake(0, 0, self.tableView.bounds.size.width, 50);
         self.tableView.tableHeaderView = header;
-    }
-
-    CGFloat visibleHeight = self.view.bounds.size.height;
-    CGFloat bottomPad = MAX(350.0, visibleHeight * 0.60);
-
-    UIEdgeInsets current = self.tableView.contentInset;
-    if (fabs(current.bottom - bottomPad) > 1.0) {
-        self.tableView.contentInset = UIEdgeInsetsMake(current.top, 0, bottomPad, 0);
-        self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, bottomPad, 0);
-    }
-
-    UIView *existingFooter = self.tableView.tableFooterView;
-    if (!existingFooter || fabs(existingFooter.frame.size.height - bottomPad) > 1.0) {
-        UIView *footer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, bottomPad)];
-        footer.backgroundColor = [UIColor clearColor];
-        self.tableView.tableFooterView = footer;
     }
 }
 
@@ -557,6 +636,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
                         [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
                             self.artworkImageView.image = img;
                         } completion:nil];
+                        self.landscapeArtImageView.image = img;
                         self.artworkVideoID = videoID;
                     }
                 });
@@ -573,6 +653,7 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
                             [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
                                 self.artworkImageView.image = img2;
                             } completion:nil];
+                            self.landscapeArtImageView.image = img2;
                             self.artworkVideoID = videoID;
                         }
                     });
