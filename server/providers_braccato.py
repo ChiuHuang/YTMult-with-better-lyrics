@@ -169,7 +169,7 @@ def fetch_binimum(song, artist, duration=0, album='', via_node=None):
         lyrics = _parse_ttml(ttml_text)
         if not lyrics:
             return None
-        syllable = selected.get('timing_type') == 'syllable' or any(l.get('wordSynced') for l in lyrics)
+        syllable = any(l.get('wordSynced') for l in lyrics)
         return {'parsed': lyrics, 'source': 'BiniLyrics', 'wordSynced': syllable}
     except Exception as e:
         print(f"[Binimum] error: {e}")

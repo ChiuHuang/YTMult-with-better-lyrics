@@ -22,7 +22,7 @@ import logging
 # ============================================================
 # Basic TTML Parser
 # ============================================================
-from .parsers_lrc import is_cjk, generate_interpolated_parts
+from .parsers_lrc import is_cjk
 
 def parse_ttml_basic(ttml_text, duration_sec=0):
     """Basic TTML parser - extracts timed lines from TTML/AMLL XML."""
@@ -99,19 +99,19 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                 continue
 
             line_duration_ms = end_ms - start_ms
-            if not parts or len(parts) == 0:
-                parts = generate_interpolated_parts(full_text, start_ms, line_duration_ms)
 
             entry = {
                 'time': round(start_ms / 1000.0, 3),
                 'startTimeMs': start_ms,
                 'text': full_text,
                 'durationMs': line_duration_ms,
-                'duration': round(line_duration_ms / 1000.0, 3)
+                'duration': round(line_duration_ms / 1000.0, 3),
+                'wordSynced': False
             }
-            if parts:
+            # Only genuine word-by-word timestamps count; never fabricate fake wbw from line-by-line
+            if parts and len(parts) > 1 and len({p.get('startTimeMs') for p in parts}) > 1:
                 entry['parts'] = parts
-                entry['wordSynced'] = bool(spans)
+                entry['wordSynced'] = True
 
             results.append(entry)
 
