@@ -20,8 +20,8 @@ import traceback
 import atexit
 import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
-from .app import app, SERVER_INSTANCE_ID, _recent_requests
-from .utils import _safe_cache_component
+from .app import app, SERVER_INSTANCE_ID, _recent_requests, _sse_broadcast
+from .utils import _safe_cache_component, lyrics_content_hash
 from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename, _CACHE_FORMAT_VERSION
 from .nodes import ask_nodes_for_cache
 from .jwt_pool import contribute_jwt as _pool_contribute
@@ -526,6 +526,208 @@ def api_precache_status(job_id):
     if not job:
         return jsonify({'error': 'not found'}), 404
     return jsonify(job)
+
+
+# ============================================================
+# Batch Sync: hash reconciliation + download + optional regen
+# ============================================================
+_sync_jobs = {}
+_sync_jobs_lock = threading.Lock()
+_sync_job_counter = 0
+
+
+def _next_sync_job_id():
+    global _sync_job_counter
+    with _sync_jobs_lock:
+        _sync_job_counter += 1
+        return f"sync_{int(time_module.time() * 1000)}_{_sync_job_counter}"
+
+
+def _compute_server_hash_for_vid_lang(video_id, translate_to, auto_zh):
+    """Load server cache entry (full key), apply display transforms, return hash."""
+    full_key = f"{video_id}:{translate_to}"
+    data = get_cached(full_key)
+    if not data:
+        return None
+    # Apply same transforms as serve() so hash matches client's stored data
+    if isinstance(data, dict) and isinstance(data.get('lyrics'), list):
+        apply_display_transforms(data['lyrics'], translate_to, auto_zh)
+    return lyrics_content_hash(data.get('lyrics', []))
+
+
+def _prepare_entry_for_download(data, video_id, translate_to):
+    """Apply transforms and return a dict ready for client to store."""
+    if not data:
+        return None
+    entry = dict(data)
+    if isinstance(entry.get('lyrics'), list):
+        apply_display_transforms(entry['lyrics'], translate_to, True)
+    # Ensure required fields for client cache
+    entry['videoID'] = video_id
+    entry['cv'] = _CACHE_FORMAT_VERSION
+    entry['ts'] = datetime.now().isoformat()
+    return entry
+
+
+@app.route('/api/lyrics/sync', methods=['POST'])
+def api_lyrics_sync():
+    """Batch hash reconciliation.
+    Request: {lang, auto_zh?, entries: [{video_id, hash, cv, tier}], max_items?, regenerate?, jwt?}
+    Response: {processed, ok_count, need: [{video_id, data, hash}], missing: [], job_id?, compression?}
+    """
+    body = request.get_json(silent=True) or {}
+    translate_to = (body.get('lang') or 'zh-TW').strip()
+    auto_zh = body.get('auto_zh', False)
+    entries = body.get('entries', [])
+    max_items = min(int(body.get('max_items', 500)), 2000)
+    regenerate = bool(body.get('regenerate', True))
+    jwt_token = body.get('jwt')
+    if jwt_token:
+        _pool_contribute(jwt_token, node_id='device')
+
+    if not _safe_cache_component(translate_to) or not entries:
+        return jsonify({'error': 'Invalid lang or empty entries'}), 400
+
+    req_id = _secrets.token_hex(3)
+    print(f"[SYNC {req_id}] {len(entries)} entries lang={translate_to} auto_zh={auto_zh} regen={regenerate}")
+
+    need = []
+    missing = []
+    ok_count = 0
+    regen_vids = []
+
+    for entry in entries:
+        vid = entry.get('video_id', '').strip()
+        client_hash = entry.get('hash', '').strip()
+        client_cv = int(entry.get('cv', 0))
+        if not _safe_cache_component(vid) or not client_hash:
+            continue
+
+        # Stale format version forces upgrade regardless of hash
+        if client_cv < _CACHE_FORMAT_VERSION:
+            server_hash = _compute_server_hash_for_vid_lang(vid, translate_to, auto_zh)
+            if server_hash:
+                need.append({'video_id': vid, 'hash': server_hash})
+            else:
+                missing.append(vid)
+                if regenerate:
+                    regen_vids.append(vid)
+            continue
+
+        server_hash = _compute_server_hash_for_vid_lang(vid, translate_to, auto_zh)
+        if server_hash is None:
+            missing.append(vid)
+            if regenerate:
+                regen_vids.append(vid)
+        elif server_hash != client_hash:
+            need.append({'video_id': vid, 'hash': server_hash})
+        else:
+            ok_count += 1
+
+    # Prepare downloadable payload for needed entries (up to max_items)
+    download = []
+    for item in need[:max_items]:
+        vid = item['video_id']
+        full_key = f"{vid}:{translate_to}"
+        data = get_cached(full_key)
+        if data:
+            entry_data = _prepare_entry_for_download(data, vid, translate_to)
+            if entry_data:
+                download.append(entry_data)
+
+    # Start background regen job if there are missing videos to regenerate
+    job_id = None
+    if regen_vids:
+        job_id = _next_sync_job_id()
+        job = {
+            'job_id': job_id,
+            'state': 'running',
+            'total': len(regen_vids),
+            'done': 0,
+            'succeeded': 0,
+            'failed': 0,
+            'results': [],
+            'lang': translate_to,
+            'auto_zh': auto_zh,
+            'jwt': jwt_token,
+            'started': datetime.now().isoformat(),
+        }
+        with _sync_jobs_lock:
+            _sync_jobs[job_id] = job
+        threading.Thread(target=_run_sync_regen_job, args=(job_id, regen_vids, translate_to, auto_zh, jwt_token), daemon=True).start()
+
+    return jsonify({
+        'processed': len(entries),
+        'ok_count': ok_count,
+        'need': download,
+        'missing': missing,
+        'regenerating': regen_vids,
+        'job_id': job_id,
+        'compression': 'none',
+    })
+
+
+def _run_sync_regen_job(job_id, video_ids, translate_to, auto_zh, jwt_token):
+    job = _sync_jobs.get(job_id)
+    if not job:
+        return
+
+    for vid in video_ids:
+        if job.get('state') == 'stopped':
+            break
+        full_key = f"{vid}:{translate_to}"
+        # Re-check cache in case it appeared while job was queued
+        if get_cached(full_key):
+            job['done'] = job.get('done', 0) + 1
+            job['succeeded'] = job.get('succeeded', 0) + 1
+            job['results'].append({'video_id': vid, 'status': 'already_cached'})
+            _sse_broadcast('sync_progress', {'job_id': job_id, 'video_id': vid, 'status': 'already_cached', 'done': job['done'], 'total': job['total']})
+            continue
+
+        try:
+            song_info = get_song_info(vid)
+            if not song_info:
+                raise ValueError('get_song_info returned None')
+            result = fetch_all_lyrics(vid, song_info, translate_to, jwt_token)
+            if result and not is_not_found_result(result):
+                set_cached(full_key, result)
+                job['succeeded'] = job.get('succeeded', 0) + 1
+                job['results'].append({'video_id': vid, 'status': 'regenerated', 'source': result.get('source', '')})
+                _sse_broadcast('sync_progress', {'job_id': job_id, 'video_id': vid, 'status': 'regenerated', 'source': result.get('source', ''), 'done': job['done'] + 1, 'total': job['total']})
+            else:
+                job['failed'] = job.get('failed', 0) + 1
+                job['results'].append({'video_id': vid, 'status': 'no_lyrics'})
+                _sse_broadcast('sync_progress', {'job_id': job_id, 'video_id': vid, 'status': 'no_lyrics', 'done': job['done'] + 1, 'total': job['total']})
+        except Exception as e:
+            job['failed'] = job.get('failed', 0) + 1
+            job['results'].append({'video_id': vid, 'status': 'error', 'error': str(e)})
+            _sse_broadcast('sync_progress', {'job_id': job_id, 'video_id': vid, 'status': 'error', 'error': str(e), 'done': job['done'] + 1, 'total': job['total']})
+            print(f"  [SYNC REGEN] {vid} failed: {e}")
+
+        job['done'] = job.get('done', 0) + 1
+        time_module.sleep(0.3)
+
+    job['state'] = 'complete'
+    job['finished'] = datetime.now().isoformat()
+    _sse_broadcast('sync_progress', {'job_id': job_id, 'state': 'complete', 'succeeded': job.get('succeeded', 0), 'failed': job.get('failed', 0)})
+
+
+@app.route('/api/lyrics/sync/status/<job_id>', methods=['GET'])
+def api_sync_status(job_id):
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(job)
+
+
+@app.route('/api/lyrics/sync/stop/<job_id>', methods=['POST'])
+def api_sync_stop(job_id):
+    with _sync_jobs_lock:
+        job = _sync_jobs.get(job_id)
+        if job and job.get('state') == 'running':
+            job['state'] = 'stopped'
+    return jsonify({'ok': True})
 
 
 

@@ -190,7 +190,7 @@
     if (section == 1) return 3;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
-    if (section == 4) return 3;
+    if (section == 4) return 5;
     if (section == 5) return 1;
     return 0;
 }
@@ -400,6 +400,22 @@
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
+        if (indexPath.row == 3) {
+            cell.textLabel.text = @"Sync & download (batch)";
+            cell.detailTextLabel.text = @"Hash local cache, fetch missing/upgraded lyrics in one request";
+            cell.textLabel.textColor = [UIColor systemBlueColor];
+            cell.imageView.image = [UIImage systemImageNamed:@"arrow.2.squarepath"];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
+        if (indexPath.row == 4) {
+            cell.textLabel.text = @"Sync a YouTube Music playlist";
+            cell.detailTextLabel.text = @"Fetch lyrics for all tracks in a playlist, tag unlyriced";
+            cell.textLabel.textColor = [UIColor systemPurpleColor];
+            cell.imageView.image = [UIImage systemImageNamed:@"music.note.list"];
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            return cell;
+        }
     }
     if (indexPath.section == 5) {
         cell.textLabel.text = @"Current song offset";
@@ -454,6 +470,12 @@
     }
     if (indexPath.section == 4 && indexPath.row == 2) {
         [self startCacheSync];
+    }
+    if (indexPath.section == 4 && indexPath.row == 3) {
+        [self startBatchSync];
+    }
+    if (indexPath.section == 4 && indexPath.row == 4) {
+        [self startPlaylistSync];
     }
 }
 
@@ -667,9 +689,406 @@
     [listTask resume];
 }
 
+// ============================================================
+// Batch sync: hash local cache -> POST /api/lyrics/sync -> save need[]
+// -> poll regen job if server is regenerating missing lyrics.
+// ============================================================
+
+- (void)startBatchSync {
+    NSString *base   = [self ytmu_apiBase];
+    NSString *lang   = [self ytmu_targetLang];
+    BOOL autoZh      = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
+    NSInteger cv     = YTMULyricsCacheFormatVersion();
+
+    // Collect all cache entries (video_id + hash + cv) from LyricsCore.
+    NSArray *cacheEntries = YTMULyricsCacheEntries();
+    if (!cacheEntries.count) {
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Nothing to sync"
+            message:@"Local lyrics cache is empty." preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+        return;
+    }
+
+    YTMUSyncProgressOverlay *overlay = [[YTMUSyncProgressOverlay alloc] initWithFrame:self.view.bounds];
+    overlay.titleLabel.text  = @"Batch sync";
+    overlay.itemLabel.text   = [NSString stringWithFormat:@"Hashing %lu cached songs…", (unsigned long)cacheEntries.count];
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    overlay.alpha = 0.0;
+    [self.view addSubview:overlay];
+    [UIView animateWithDuration:0.15 animations:^{ overlay.alpha = 1.0; }];
+
+    __block BOOL cancelled = NO;
+    __weak YTMUSyncProgressOverlay *weakOverlay = overlay;
+    __weak typeof(self) weakSelf = self;
+    overlay.onCancel = ^{
+        cancelled = YES;
+        [weakOverlay dismissAnimated];
+    };
+
+    // Build entries array for the POST body.
+    NSMutableArray *entries = [NSMutableArray arrayWithCapacity:cacheEntries.count];
+    for (NSDictionary *e in cacheEntries) {
+        NSString *vid  = e[@"video_id"];
+        NSString *hash = e[@"hash"];
+        if (!vid.length || !hash.length) continue;
+        NSInteger entryCV = [e[@"cv"] integerValue] ?: cv;
+        [entries addObject:@{@"video_id": vid, @"hash": hash, @"cv": @(entryCV), @"tier": e[@"tier"] ?: @""}];
+    }
+
+    NSDictionary *body = @{
+        @"lang":       lang,
+        @"auto_zh":    @(autoZh),
+        @"entries":    entries,
+        @"regenerate": @YES,
+        @"max_items":  @500,
+    };
+    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    if (!bodyData) {
+        [overlay dismissAnimated];
+        return;
+    }
+
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/lyrics/sync", base]];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = bodyData;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        weakOverlay.itemLabel.text = @"Uploading hashes…";
+    });
+
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (cancelled) return;
+        if (!data || error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakOverlay dismissAnimated];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Sync failed"
+                    message:error.localizedDescription ?: @"No response from server."
+                    preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [weakSelf presentViewController:a animated:YES completion:nil];
+            });
+            return;
+        }
+        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![root isKindOfClass:[NSDictionary class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakOverlay dismissAnimated];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Sync failed"
+                    message:@"Unexpected response from server." preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [weakSelf presentViewController:a animated:YES completion:nil];
+            });
+            return;
+        }
+
+        NSArray *need      = root[@"need"]      ?: @[];
+        NSArray *missing   = root[@"missing"]   ?: @[];
+        NSString *jobID    = root[@"job_id"];
+        NSInteger okCount  = [root[@"ok_count"] integerValue];
+
+        // Save all need[] entries to local cache.
+        NSInteger saved = 0;
+        for (NSDictionary *entry in need) {
+            NSString *vid    = entry[@"videoID"];
+            NSArray  *lyrics = entry[@"lyrics"];
+            if (!vid.length || ![lyrics isKindOfClass:[NSArray class]] || !lyrics.count) continue;
+            NSString *path = [weakSelf ytmu_cachePathForVideoID:vid];
+            if (!path) continue;
+            NSDictionary *toSave = @{
+                @"lyrics":  lyrics,
+                @"ts":      @([[NSDate date] timeIntervalSince1970]),
+                @"videoID": vid,
+                @"cv":      entry[@"cv"] ?: @(cv),
+            };
+            NSData *out = [NSJSONSerialization dataWithJSONObject:toSave options:0 error:nil];
+            if (out && [out writeToFile:path atomically:YES]) saved++;
+        }
+
+        if (!jobID || !jobID.length || missing.count == 0) {
+            // No regen job needed — show summary and done.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakOverlay dismissAnimated];
+                NSString *msg = [NSString stringWithFormat:@"Up-to-date: %ld  Updated: %ld  Missing (no server data): %ld",
+                                 (long)okCount, (long)saved, (long)missing.count];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Batch sync complete"
+                    message:msg preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [weakSelf presentViewController:a animated:YES completion:nil];
+                [weakSelf loadPreview];
+                [weakSelf.tableView reloadData];
+            });
+            return;
+        }
+
+        // Poll the regen job.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            weakOverlay.itemLabel.text = [NSString stringWithFormat:@"Server regenerating %lu missing…", (unsigned long)missing.count];
+            weakOverlay.progressView.progress = 0.0;
+            weakOverlay.countLabel.text       = [NSString stringWithFormat:@"0 of %lu", (unsigned long)missing.count];
+        });
+
+        NSString *statusURLStr = [NSString stringWithFormat:@"%@/api/lyrics/sync/status/%@", base, jobID];
+        NSURL *statusURL = [NSURL URLWithString:statusURLStr];
+        NSString *stopURLStr   = [NSString stringWithFormat:@"%@/api/lyrics/sync/stop/%@", base, jobID];
+        NSURL *stopURL = [NSURL URLWithString:stopURLStr];
+
+        // Register cancel: also stop the server-side job.
+        weakOverlay.onCancel = ^{
+            cancelled = YES;
+            if (stopURL) {
+                NSMutableURLRequest *stopReq = [NSMutableURLRequest requestWithURL:stopURL];
+                stopReq.HTTPMethod = @"POST";
+                [[NSURLSession sharedSession] dataTaskWithRequest:stopReq completionHandler:nil];
+            }
+            [weakOverlay dismissAnimated];
+        };
+
+        __block NSInteger regenSaved = saved;
+        // Recursive poll block (runs on a background queue).
+        dispatch_queue_t bgQ = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+        __block void (^poll)(void);
+        poll = ^{
+            if (cancelled) return;
+            [[NSURLSession sharedSession] dataTaskWithURL:statusURL
+                completionHandler:^(NSData *sd, NSURLResponse *sr, NSError *se) {
+                if (cancelled) return;
+                NSDictionary *status = nil;
+                if (sd) status = [NSJSONSerialization JSONObjectWithData:sd options:0 error:nil];
+                NSString *state   = status[@"state"] ?: @"running";
+                NSInteger done    = [status[@"done"] integerValue];
+                NSInteger total2  = [status[@"total"] integerValue] ?: (NSInteger)missing.count;
+                NSInteger succ    = [status[@"succeeded"] integerValue];
+
+                // Fetch and save any newly completed items we haven't stored yet.
+                NSArray *results  = status[@"results"] ?: @[];
+                for (NSDictionary *r in results) {
+                    if (![r[@"status"] isEqualToString:@"regenerated"]) continue;
+                    NSString *vid2 = r[@"video_id"];
+                    if (!vid2.length) continue;
+                    NSString *path2 = [weakSelf ytmu_cachePathForVideoID:vid2];
+                    if (!path2 || [[NSFileManager defaultManager] fileExistsAtPath:path2]) continue;
+                    // Pull full entry from server.
+                    NSString *lURLStr = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@%@",
+                                         base, vid2,
+                                         [lang stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]],
+                                         autoZh ? @"&az=1" : @""];
+                    NSURL *lURL = [NSURL URLWithString:lURLStr];
+                    if (!lURL) continue;
+                    dispatch_semaphore_t sem2 = dispatch_semaphore_create(0);
+                    [[NSURLSession sharedSession] dataTaskWithURL:lURL
+                        completionHandler:^(NSData *ld, NSURLResponse *lr, NSError *le) {
+                        if (ld && !le) {
+                            NSDictionary *lRoot = [NSJSONSerialization JSONObjectWithData:ld options:0 error:nil];
+                            NSArray *ly2 = [lRoot isKindOfClass:[NSDictionary class]] ? lRoot[@"lyrics"] : nil;
+                            if ([ly2 isKindOfClass:[NSArray class]] && ly2.count) {
+                                NSDictionary *ts = @{@"lyrics": ly2, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": vid2, @"cv": @(cv)};
+                                NSData *out2 = [NSJSONSerialization dataWithJSONObject:ts options:0 error:nil];
+                                if (out2 && [out2 writeToFile:path2 atomically:YES]) regenSaved++;
+                            }
+                        }
+                        dispatch_semaphore_signal(sem2);
+                    }] resume];
+                    dispatch_semaphore_wait(sem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+                }
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    weakOverlay.progressView.progress = total2 > 0 ? (float)done / (float)total2 : 1.0;
+                    weakOverlay.countLabel.text = [NSString stringWithFormat:@"%ld of %ld done (%ld saved)", (long)done, (long)total2, (long)regenSaved];
+                });
+
+                if ([state isEqualToString:@"complete"] || [state isEqualToString:@"stopped"]) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [weakOverlay dismissAnimated];
+                        NSString *msg = [NSString stringWithFormat:@"Up-to-date: %ld  Downloaded: %ld  Regenerated+saved: %ld  Missing: %ld",
+                                         (long)okCount, (long)saved, (long)succ, (long)(missing.count - succ)];
+                        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Batch sync complete"
+                            message:msg preferredStyle:UIAlertControllerStyleAlert];
+                        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [weakSelf presentViewController:a animated:YES completion:nil];
+                        [weakSelf loadPreview];
+                        [weakSelf.tableView reloadData];
+                    });
+                    return;
+                }
+                // Still running — wait 2s then poll again.
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, poll);
+            }] resume];
+        };
+        dispatch_async(bgQ, poll);
+    }];
+    [task resume];
+}
+
+// ============================================================
+// Playlist sync: prompt for URL/ID -> POST /api/playlist/sync
+// -> poll status -> show found list, hide unlyriced.
+// ============================================================
+
+- (void)startPlaylistSync {
+    NSString *base = [self ytmu_apiBase];
+    NSString *lang = [self ytmu_targetLang];
+    BOOL autoZh    = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
+
+    UIAlertController *prompt = [UIAlertController alertControllerWithTitle:@"Sync playlist"
+        message:@"Paste a YouTube Music playlist URL or ID:"
+        preferredStyle:UIAlertControllerStyleAlert];
+    [prompt addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"PLxxxxxxxx or https://music.youtube.com/playlist?list=PL…";
+        tf.keyboardType = UIKeyboardTypeURL;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    __weak typeof(self) weakSelf = self;
+    [prompt addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [prompt addAction:[UIAlertAction actionWithTitle:@"Sync" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+        NSString *input = [prompt.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (!input.length) return;
+        [weakSelf _doPlaylistSync:input base:base lang:lang autoZh:autoZh];
+    }]];
+    [self presentViewController:prompt animated:YES completion:nil];
+}
+
+- (void)_doPlaylistSync:(NSString *)playlistInput base:(NSString *)base lang:(NSString *)lang autoZh:(BOOL)autoZh {
+    YTMUSyncProgressOverlay *overlay = [[YTMUSyncProgressOverlay alloc] initWithFrame:self.view.bounds];
+    overlay.titleLabel.text  = @"Playlist sync";
+    overlay.itemLabel.text   = @"Contacting server…";
+    overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    overlay.alpha = 0.0;
+    [self.view addSubview:overlay];
+    [UIView animateWithDuration:0.15 animations:^{ overlay.alpha = 1.0; }];
+
+    __block BOOL cancelled = NO;
+    __weak YTMUSyncProgressOverlay *weakOverlay = overlay;
+    __weak typeof(self) weakSelf = self;
+
+    NSDictionary *body = @{
+        @"playlist_id": playlistInput,
+        @"lang":        lang,
+        @"auto_zh":     @(autoZh),
+    };
+    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    if (!bodyData) { [overlay dismissAnimated]; return; }
+
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/playlist/sync", base]];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = bodyData;
+    req.timeoutInterval = 30;
+
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
+        completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (cancelled) return;
+        if (!data || error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakOverlay dismissAnimated];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync failed"
+                    message:error.localizedDescription ?: @"No response." preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [weakSelf presentViewController:a animated:YES completion:nil];
+            });
+            return;
+        }
+        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        NSString *jobID = [root isKindOfClass:[NSDictionary class]] ? root[@"job_id"] : nil;
+        if (!jobID.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakOverlay dismissAnimated];
+                NSString *errMsg = root[@"error"] ?: @"Server did not return a job_id.";
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync failed"
+                    message:errMsg preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [weakSelf presentViewController:a animated:YES completion:nil];
+            });
+            return;
+        }
+
+        NSURL *statusURL = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/playlist/sync/status/%@", base, jobID]];
+        NSURL *stopURL   = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/playlist/sync/stop/%@", base, jobID]];
+        weakOverlay.onCancel = ^{
+            cancelled = YES;
+            if (stopURL) {
+                NSMutableURLRequest *sr = [NSMutableURLRequest requestWithURL:stopURL];
+                sr.HTTPMethod = @"POST";
+                [[NSURLSession sharedSession] dataTaskWithRequest:sr completionHandler:nil];
+            }
+            [weakOverlay dismissAnimated];
+        };
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            weakOverlay.itemLabel.text = @"Fetching playlist tracks…";
+        });
+
+        dispatch_queue_t bgQ = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
+        __block void (^poll)(void);
+        poll = ^{
+            if (cancelled) return;
+            [[NSURLSession sharedSession] dataTaskWithURL:statusURL
+                completionHandler:^(NSData *sd, NSURLResponse *sr2, NSError *se) {
+                if (cancelled) return;
+                NSDictionary *st = nil;
+                if (sd) st = [NSJSONSerialization JSONObjectWithData:sd options:0 error:nil];
+                NSString *state   = st[@"state"]  ?: @"running";
+                NSInteger done    = [st[@"done"]   integerValue];
+                NSInteger total   = [st[@"total"]  integerValue];
+                NSInteger found   = [st[@"found"]  integerValue];
+                NSString *current = st[@"current"] ?: @"";
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    weakOverlay.itemLabel.text = current.length ? current : state;
+                    if (total > 0) {
+                        weakOverlay.progressView.progress = (float)done / (float)total;
+                        weakOverlay.countLabel.text = [NSString stringWithFormat:@"%ld / %ld tracks  •  %ld found", (long)done, (long)total, (long)found];
+                    }
+                });
+
+                if ([state isEqualToString:@"complete"] || [state isEqualToString:@"stopped"]) {
+                    // Collect found (has lyrics) and unlyriced (no lyrics) lists.
+                    NSArray *tracks   = st[@"tracks"]    ?: @[];
+                    NSMutableArray *foundList    = [NSMutableArray array];
+                    NSMutableArray *unlyricedList = [NSMutableArray array];
+                    for (NSDictionary *t in tracks) {
+                        NSString *tag = t[@"tag"] ?: @"";
+                        NSString *title = t[@"title"] ?: t[@"video_id"] ?: @"";
+                        if ([tag isEqualToString:@"found"]) [foundList addObject:title];
+                        else if ([tag isEqualToString:@"unlyriced"]) [unlyricedList addObject:title];
+                    }
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [weakOverlay dismissAnimated];
+                        NSMutableString *msg = [NSMutableString string];
+                        [msg appendFormat:@"%ld found, %ld unlyriced, %ld errors.\n",
+                             (long)foundList.count, (long)unlyricedList.count,
+                             (long)([st[@"error_count"] integerValue])];
+                        if (foundList.count > 0 && foundList.count <= 10) {
+                            [msg appendString:@"\nFound:\n"];
+                            for (NSString *s in foundList) [msg appendFormat:@"  %@\n", s];
+                        }
+                        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync complete"
+                            message:msg preferredStyle:UIAlertControllerStyleAlert];
+                        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [weakSelf presentViewController:a animated:YES completion:nil];
+                        [weakSelf loadPreview];
+                        [weakSelf.tableView reloadData];
+                    });
+                    return;
+                }
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, poll);
+            }] resume];
+        };
+        dispatch_async(bgQ, poll);
+    }];
+    [task resume];
+}
+
+
 - (void)textFieldDidEndEditing:(UITextField *)textField {
     NSString *key = textField.accessibilityIdentifier;
     if (!key.length) return;
+
 
     if ([key isEqualToString:@"lyricsApiEndpoint"]) {
         NSString *urlStr = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
