@@ -1,6 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "YTMNowPlayingViewController.h"
-#import "Headers/MDCButton.h"
+#import "MDCButton.h"
 
 @interface YTMActionRowView : UIView {
 	UIScrollView *_scrollView;
