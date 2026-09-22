@@ -842,18 +842,23 @@
             if (stopURL) {
                 NSMutableURLRequest *stopReq = [NSMutableURLRequest requestWithURL:stopURL];
                 stopReq.HTTPMethod = @"POST";
-                [[NSURLSession sharedSession] dataTaskWithRequest:stopReq completionHandler:nil];
+                NSURLSessionDataTask *stopTask = [[NSURLSession sharedSession] dataTaskWithRequest:stopReq
+                    completionHandler:^(NSData *d, NSURLResponse *r, NSError *e){}];
+                [stopTask resume];
             }
             [weakOverlay dismissAnimated];
         };
 
         __block NSInteger regenSaved = saved;
         // Recursive poll block (runs on a background queue).
+        // Use weak/strong pair to avoid ARC retain cycle (-Warc-retain-cycles).
         dispatch_queue_t bgQ = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-        __block void (^poll)(void);
-        poll = ^{
+        __block __weak void (^weakPoll)(void);
+        void (^strongPoll)(void);
+        weakPoll = strongPoll = ^{
             if (cancelled) return;
-            [[NSURLSession sharedSession] dataTaskWithURL:statusURL
+            void (^localPoll)(void) = weakPoll; // keep alive for the duration
+            NSURLSessionDataTask *pollTask = [[NSURLSession sharedSession] dataTaskWithURL:statusURL
                 completionHandler:^(NSData *sd, NSURLResponse *sr, NSError *se) {
                 if (cancelled) return;
                 NSDictionary *status = nil;
@@ -871,7 +876,6 @@
                     if (!vid2.length) continue;
                     NSString *path2 = [weakSelf ytmu_cachePathForVideoID:vid2];
                     if (!path2 || [[NSFileManager defaultManager] fileExistsAtPath:path2]) continue;
-                    // Pull full entry from server.
                     NSString *lURLStr = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@%@",
                                          base, vid2,
                                          [lang stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]],
@@ -879,19 +883,20 @@
                     NSURL *lURL = [NSURL URLWithString:lURLStr];
                     if (!lURL) continue;
                     dispatch_semaphore_t sem2 = dispatch_semaphore_create(0);
-                    [[NSURLSession sharedSession] dataTaskWithURL:lURL
+                    NSURLSessionDataTask *lTask = [[NSURLSession sharedSession] dataTaskWithURL:lURL
                         completionHandler:^(NSData *ld, NSURLResponse *lr, NSError *le) {
                         if (ld && !le) {
                             NSDictionary *lRoot = [NSJSONSerialization JSONObjectWithData:ld options:0 error:nil];
                             NSArray *ly2 = [lRoot isKindOfClass:[NSDictionary class]] ? lRoot[@"lyrics"] : nil;
                             if ([ly2 isKindOfClass:[NSArray class]] && ly2.count) {
-                                NSDictionary *ts = @{@"lyrics": ly2, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": vid2, @"cv": @(cv)};
-                                NSData *out2 = [NSJSONSerialization dataWithJSONObject:ts options:0 error:nil];
+                                NSDictionary *ts2 = @{@"lyrics": ly2, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": vid2, @"cv": @(cv)};
+                                NSData *out2 = [NSJSONSerialization dataWithJSONObject:ts2 options:0 error:nil];
                                 if (out2 && [out2 writeToFile:path2 atomically:YES]) regenSaved++;
                             }
                         }
                         dispatch_semaphore_signal(sem2);
-                    }] resume];
+                    }];
+                    [lTask resume];
                     dispatch_semaphore_wait(sem2, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
                 }
 
@@ -915,10 +920,11 @@
                     return;
                 }
                 // Still running — wait 2s then poll again.
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, poll);
-            }] resume];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, localPoll);
+            }];
+            [pollTask resume];
         };
-        dispatch_async(bgQ, poll);
+        dispatch_async(bgQ, strongPoll);
     }];
     [task resume];
 }
@@ -1014,7 +1020,9 @@
             if (stopURL) {
                 NSMutableURLRequest *sr = [NSMutableURLRequest requestWithURL:stopURL];
                 sr.HTTPMethod = @"POST";
-                [[NSURLSession sharedSession] dataTaskWithRequest:sr completionHandler:nil];
+                NSURLSessionDataTask *stopTask2 = [[NSURLSession sharedSession] dataTaskWithRequest:sr
+                    completionHandler:^(NSData *d, NSURLResponse *r, NSError *e){}];
+                [stopTask2 resume];
             }
             [weakOverlay dismissAnimated];
         };
@@ -1024,10 +1032,12 @@
         });
 
         dispatch_queue_t bgQ = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-        __block void (^poll)(void);
-        poll = ^{
+        __block __weak void (^weakPoll2)(void);
+        void (^strongPoll2)(void);
+        weakPoll2 = strongPoll2 = ^{
             if (cancelled) return;
-            [[NSURLSession sharedSession] dataTaskWithURL:statusURL
+            void (^localPoll2)(void) = weakPoll2;
+            NSURLSessionDataTask *pollTask2 = [[NSURLSession sharedSession] dataTaskWithURL:statusURL
                 completionHandler:^(NSData *sd, NSURLResponse *sr2, NSError *se) {
                 if (cancelled) return;
                 NSDictionary *st = nil;
@@ -1047,14 +1057,13 @@
                 });
 
                 if ([state isEqualToString:@"complete"] || [state isEqualToString:@"stopped"]) {
-                    // Collect found (has lyrics) and unlyriced (no lyrics) lists.
-                    NSArray *tracks   = st[@"tracks"]    ?: @[];
-                    NSMutableArray *foundList    = [NSMutableArray array];
+                    NSArray *tracks       = st[@"tracks"]   ?: @[];
+                    NSMutableArray *foundList     = [NSMutableArray array];
                     NSMutableArray *unlyricedList = [NSMutableArray array];
                     for (NSDictionary *t in tracks) {
-                        NSString *tag = t[@"tag"] ?: @"";
+                        NSString *tag   = t[@"tag"]   ?: @"";
                         NSString *title = t[@"title"] ?: t[@"video_id"] ?: @"";
-                        if ([tag isEqualToString:@"found"]) [foundList addObject:title];
+                        if ([tag isEqualToString:@"found"])     [foundList addObject:title];
                         else if ([tag isEqualToString:@"unlyriced"]) [unlyricedList addObject:title];
                     }
                     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1076,10 +1085,11 @@
                     });
                     return;
                 }
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, poll);
-            }] resume];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), bgQ, localPoll2);
+            }];
+            [pollTask2 resume];
         };
-        dispatch_async(bgQ, poll);
+        dispatch_async(bgQ, strongPoll2);
     }];
     [task resume];
 }
