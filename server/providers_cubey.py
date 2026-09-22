@@ -116,8 +116,8 @@ def _apply_cubey_event(event_data, state):
         # BiniLyrics TTML: timingType tells us whether parts are syllables
         parsed = parse_ttml_payload(results["lyrics"])
         if parsed:
-            wbw = (results.get("timingType") == "syllable") or any(l.get('wordSynced') for l in parsed)
-            print(f"  [OK] Cubey: BiniLyrics TTML found (timingType={results.get('timingType')})")
+            wbw = any(l.get('wordSynced') for l in parsed)
+            print(f"  [OK] Cubey: BiniLyrics TTML found (wordSynced={wbw} timingType={results.get('timingType')})")
             accept({"parsed": parsed, "source": "BiniLyrics", "wordSynced": wbw}, wbw)
     elif provider == "netease" and results.get("synced"):
         accept({"synced": results["synced"], "source": "NetEase", "wordSynced": False}, False)

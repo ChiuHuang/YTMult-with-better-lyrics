@@ -19,7 +19,7 @@ import uuid
 import traceback
 import atexit
 import logging
-from .parsers_lrc import generate_interpolated_parts, last_part_duration_ms
+from .parsers_lrc import last_part_duration_ms
 
 # ============================================================
 # Cache
@@ -38,11 +38,12 @@ def is_not_found_result(data):
     return False
 
 # Bump when parser/postprocess output format changes so stale on-disk
-# entries (mojibake, wrong last-word timing) are invalidated once.
-_CACHE_FORMAT_VERSION = 2
+# entries (mojibake, wrong last-word timing, fake wbw) are invalidated once.
+_CACHE_FORMAT_VERSION = 3
 
 def sanitize_lyrics_parts(lyrics):
-    """Ensure every line has valid, monotonically increasing parts with proper durations and spaces."""
+    """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.
+    Never interpolate fake wbw parts from line-by-line (LBL) lyrics."""
     if not lyrics:
         return
     for l in lyrics:
@@ -51,26 +52,28 @@ def sanitize_lyrics_parts(lyrics):
         l_ms = int(l.get('startTimeMs', l.get('time', 0) * 1000))
         l_dur = int(l.get('durationMs', l.get('duration', 0) * 1000))
         parts = l.get('parts')
-        if not parts or len(parts) == 0:
-            if l_dur > 0:
-                l['parts'] = generate_interpolated_parts(l['text'], l_ms, l_dur)
-        else:
-            prev_ms = l_ms
-            for pi, p in enumerate(parts):
-                if not p.get('startTimeMs') or p['startTimeMs'] < l_ms:
-                    p['startTimeMs'] = prev_ms + (0 if pi == 0 else 200)
-                prev_ms = p['startTimeMs']
-            # Preserve real provider durations; only synthesize missing ones
-            # (deltas between words, and the last word ends at line sung end).
-            for pi in range(len(parts)):
-                if parts[pi].get('durationMs'):
-                    continue
-                if pi < len(parts) - 1:
-                    dur = parts[pi+1]['startTimeMs'] - parts[pi]['startTimeMs']
-                    parts[pi]['durationMs'] = max(dur, 0)
-                else:
-                    parts[pi]['durationMs'] = last_part_duration_ms(
-                        parts[pi]['startTimeMs'], l_ms, l_dur)
+        # If line is not genuinely word-synced, do not attach or retain parts
+        if not l.get('wordSynced') or not parts or len(parts) <= 1:
+            l.pop('parts', None)
+            l['wordSynced'] = False
+            continue
+
+        prev_ms = l_ms
+        for pi, p in enumerate(parts):
+            if not p.get('startTimeMs') or p['startTimeMs'] < l_ms:
+                p['startTimeMs'] = prev_ms + (0 if pi == 0 else 200)
+            prev_ms = p['startTimeMs']
+        # Preserve real provider durations; only synthesize missing ones
+        # (deltas between words, and the last word ends at line sung end).
+        for pi in range(len(parts)):
+            if parts[pi].get('durationMs'):
+                continue
+            if pi < len(parts) - 1:
+                dur = parts[pi+1]['startTimeMs'] - parts[pi]['startTimeMs']
+                parts[pi]['durationMs'] = max(dur, 0)
+            else:
+                parts[pi]['durationMs'] = last_part_duration_ms(
+                    parts[pi]['startTimeMs'], l_ms, l_dur)
 
 def _cache_filename(key):
     """Windows-safe on-disk name for a logical cache key. Logical keys are
