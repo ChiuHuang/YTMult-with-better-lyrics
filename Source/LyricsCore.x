@@ -1,4 +1,5 @@
 #import "LyricsShared.h"
+#import <CommonCrypto/CommonDigest.h>
 
 BOOL _safe_cache_component(NSString *s);
 
@@ -234,6 +235,94 @@ void __attribute__((unused)) YTMULyricsCacheClearAll(void) {
     [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     if (g_lyricsCache) [g_lyricsCache removeAllObjects];
+}
+
+#pragma mark - Canonical lyrics hashing (matches server lyrics_content_hash)
+
+typedef NSMutableData *MutableDataRef;
+
+static void _append_int32_be(MutableDataRef buf, int32_t v) {
+    uint8_t bytes[4] = { (v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF };
+    [buf appendBytes:bytes length:4];
+}
+static void _append_int8(MutableDataRef buf, int8_t v) {
+    [buf appendBytes:&v length:1];
+}
+
+
+static NSData *YTMULyricsCanonicalData(NSArray *lyrics) {
+    if (!lyrics || lyrics.count == 0) return [NSData data];
+    // Sort by startTimeMs
+    NSArray *sorted = [lyrics sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        int64_t aStart = [a[@"startTimeMs"] longLongValue] ?: (int64_t)round([a[@"time"] doubleValue] * 1000);
+        int64_t bStart = [b[@"startTimeMs"] longLongValue] ?: (int64_t)round([b[@"time"] doubleValue] * 1000);
+        return aStart < bStart ? NSOrderedAscending : (aStart > bStart ? NSOrderedDescending : NSOrderedSame);
+    }];
+    MutableDataRef buf = [NSMutableData data];
+    for (NSDictionary *line in sorted) {
+        int64_t start = [line[@"startTimeMs"] longLongValue] ?: (int64_t)round([line[@"time"] doubleValue] * 1000);
+        int64_t dur = [line[@"durationMs"] longLongValue] ?: (int64_t)round([line[@"duration"] doubleValue] * 1000);
+        NSString *text = line[@"text"] ?: @"";
+        NSString *trans = line[@"translated"] ?: @"";
+        int8_t ws = [line[@"wordSynced"] boolValue] ? 1 : 0;
+        NSArray *parts = line[@"parts"] ?: @[];
+        NSData *textData = [text dataUsingEncoding:NSUTF8StringEncoding];
+        NSData *transData = [trans dataUsingEncoding:NSUTF8StringEncoding];
+        _append_int32_be(buf, (int32_t)start);
+        _append_int32_be(buf, (int32_t)dur);
+        _append_int32_be(buf, (int32_t)textData.length);
+        [buf appendData:textData];
+        _append_int32_be(buf, (int32_t)transData.length);
+        [buf appendData:transData];
+        _append_int8(buf, ws);
+        _append_int32_be(buf, (int32_t)parts.count);
+        for (NSDictionary *p in parts) {
+            NSString *words = p[@"words"] ?: @"";
+            NSData *wordsData = [words dataUsingEncoding:NSUTF8StringEncoding];
+            int64_t pStart = [p[@"startTimeMs"] longLongValue];
+            int64_t pDur = [p[@"durationMs"] longLongValue];
+            _append_int32_be(buf, (int32_t)wordsData.length);
+            [buf appendData:wordsData];
+            _append_int32_be(buf, (int32_t)pStart);
+            _append_int32_be(buf, (int32_t)pDur);
+        }
+    }
+    return [buf copy];
+}
+
+NSString *YTMULyricsContentHash(NSString *videoID) {
+    NSArray *lyrics = YTMULyricsCacheLoad(videoID);
+    if (!lyrics) return nil;
+    NSData *canon = YTMULyricsCanonicalData(lyrics);
+    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(canon.bytes, (CC_LONG)canon.length, digest);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+        [hex appendFormat:@"%02x", digest[i]];
+    }
+    return hex;
+}
+
+NSArray *YTMULyricsCacheEntries(void) {
+    NSMutableArray *entries = [NSMutableArray array];
+    NSString *dir = YTMULyricsCacheDirectory();
+    NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
+    for (NSString *f in files) {
+        if (![f hasSuffix:@".json"]) continue;
+        NSString *vid = [f stringByDeletingPathExtension];
+        NSArray *lyrics = YTMULyricsCacheLoad(vid);
+        if (!lyrics) continue;
+        NSData *data = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:f]];
+        NSInteger cv = 0;
+        if (data) {
+            NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            cv = [dict[@"cv"] integerValue];
+        }
+        NSString *hash = YTMULyricsContentHash(vid);
+        NSString *tier = YTMULyricsTier(lyrics);
+        [entries addObject:@{@"video_id": vid, @"hash": hash ?: @"", @"cv": @(cv), @"tier": tier}];
+    }
+    return [entries copy];
 }
 
 void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
