@@ -50,9 +50,8 @@ def last_part_duration_ms(part_start, line_start, line_duration_ms, next_line_st
     return max(end - part_start, 150)
 
 def generate_interpolated_parts(text, start_ms, duration_ms):
-    """Generate proportional word/character timestamps across line duration when provider lacks word-sync."""
-    if not text or duration_ms <= 200:
-        return []
+    """Never fabricate fake word-by-word timestamps from line-by-line lyrics."""
+    return []
     text = text.strip()
     if is_cjk(text):
         # Mixed CJK/Latin lines: CJK chars become their own tokens (no
@@ -238,12 +237,13 @@ def parse_lrc(lrc_text, duration_sec=0):
             result[i]['durationMs'] = max(int(duration_ms - result[i]['startTimeMs']), 3000)
         result[i]['duration'] = round(result[i]['durationMs'] / 1000.0, 3)
 
-        # Keep generated parts for layout consumers, but mark them as
-        # non-authoritative so clients do not fake word-by-word highlighting.
-        if not result[i].get('parts') or len(result[i]['parts']) == 0:
-            result[i]['parts'] = generate_interpolated_parts(result[i]['text'], result[i]['startTimeMs'], result[i]['durationMs'])
+        # Only true word-synced entries (e.g. Enhanced LRC <mm:ss.xx>) have parts.
+        # Plain line-by-line (LBL) LRC must NEVER have fake parts interpolated.
+        if not result[i].get('parts') or len(result[i]['parts']) <= 1:
+            result[i].pop('parts', None)
             result[i]['wordSynced'] = False
         else:
+            result[i]['wordSynced'] = True
             # Sanitize existing parts
             p_list = result[i]['parts']
             l_start = result[i]['startTimeMs']

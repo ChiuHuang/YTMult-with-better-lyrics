@@ -198,9 +198,6 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     # Add song metadata
     result['song'] = title
     result['artist'] = artist
-    if result.get('wordSynced') is None:
-        result['wordSynced'] = any(l.get('wordSynced') for l in (result.get('lyrics') or []))
-
     # Translation
     if translate_to and result.get('lyrics'):
         print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
@@ -213,6 +210,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
 
     if result and result.get('lyrics'):
         sanitize_lyrics_parts(result['lyrics'])
+
+    result['wordSynced'] = any(l.get('wordSynced') for l in (result.get('lyrics') or []))
 
     return result
 

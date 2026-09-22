@@ -148,6 +148,7 @@ def api_lyrics_stream():
                         best['song'] = title
                         best['artist'] = artist
                         best['wbw_lines'] = _wbw_line_count(best)
+                        best['wordSynced'] = best['wbw_lines'] > 0
                         payload = stream_payload(best)
                         payload['stage'] = 'raw'
                         payload['elapsed_ms'] = elapsed
