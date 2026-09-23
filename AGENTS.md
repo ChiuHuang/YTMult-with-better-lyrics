@@ -52,12 +52,25 @@
   `providers_yt`/`providers_cubey`/`providers_unison`/`providers_braccato`
   (boidu + binimum direct, no JWT), `translate`
   (Cohere + Google), `metadata`, `cache`, `pipeline` (fast/full fetch),
-  `race` (parallel race + SSE helpers), `playlist`, `routes_lyrics`,
+  `race` (parallel race + SSE helpers), `playlist` (sync job via
+  `routes_library` too), `routes_lyrics`,
   `routes_stream`, `routes_admin`, `routes_misc`, `utils`
   (`_safe_cache_component`). Run: `python proxy_server.py` or
   `.venv\Scripts\python -c "from server import main; main()"`.
   DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
   providers/translate/cache; routes->all, nothing imports routes.
+  Dashboard refetch-from-URL feature: `pipeline.probe_providers()` fetches
+  EVERY provider independently (Cubey/jwt, bLyrics/ttml, QQ, KuGou,
+  BiniLyrics/binimum, LRCLib, Unison, YouTube) -> candidates best-first,
+  nothing excluded; manual rename store in `library.py` (`cache/rename.json`,
+  `get_rename`/`save_rename`, custom > saved > fetched); endpoints
+  `POST /api/admin/library/probe` {url|video_id, lang, title?, artist?,
+  source?} and `/probe/apply` {video_id, lang, source, data, title?, artist?}
+  (translate + cache + drop from unlyriced + SSE `rebase`). UI: Library page
+  "Refetch from URL" + "Playlist refetch" panels in `templates/index.html`,
+  `static/dash.js` (`probeRefetch`, `renderProbeCandidates`,
+  `startPlaylistSyncWeb` -> polls `/api/playlist/sync/status/<job_id>`);
+  `openPreview(videoId, lang, inlineData)` renders uncached candidates.
 - `Source/TranslateLyrics.x`: player hooks, `YTMULyricsViewController`
   (fallback sheet + engagement-panel embed tag 9999), sliding wipe highlight,
   client file cache (`YTMU_LyricsCache`, count+size limits), ELM tap hijack,
@@ -84,7 +97,24 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
-- `54fe344` wbw-first rank parity with braccato: Cubey events golyrics
+- `66b8405` dashboard refetch-from-URL: `pipeline.probe_providers()` (all 8
+  providers, best-first, nothing excluded), manual rename store in
+  `library.py` (`cache/rename.json`), `POST /api/admin/library/probe` +
+  `/probe/apply`, Library page "Refetch from URL" (custom title/artist,
+  per-provider Preview/Save) + "Playlist refetch" panels. Verified via Flask
+  test client with module-level provider mocks
+  (`providers_braccato._DIRECT_FETCHERS[k]`, `providers_lrclib.fetch_lrclib`,
+  `providers_unison.fetch_unison`, `providers_yt.fetch_yt_lyrics`,
+  `pipeline.fetch_yt_lyrics` + `routes_library.*` fns); copied to
+  `tmp/` and deleted after. Lesson: `_extract_video_id` regex is exactly
+  11 chars — a 12-char test ID silently got a prefix captured; test with a
+  real 11-char ID.
+- `2f1be3f` server half of playlist sync (`server/playlist.py`): the iOS
+  feature landed in `9ce33ad`; contract `playlist_id`/`lang`/`auto_zh`,
+  returns `job_id` + `status_url`, status has `state`/`done`/`total`/
+  `found`/`unlyriced`/`error_count`/`current`/`tracks[]` (tag found/
+  unlyriced/error/invalid_id), `POST /api/playlist/sync/stop/<job_id>`.
+- `5ddef6c` wbw-first rank parity with braccato: Cubey events golyrics
   (bLyrics TTML) + binimum (syllable TTML); new `providers_braccato.py`
   direct boidu (TTML/QRC/LRC) + binimum hunt, raced as its own jobs (pool
   -> 8); `_lyrics_score` applied uniformly in pipeline (plain never beats
