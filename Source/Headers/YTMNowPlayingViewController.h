@@ -7,6 +7,8 @@
 - (void)didTapPrevButton;
 - (void)didTapSeekForwardButton;
 - (void)didTapSeekBackwardButton;
+- (void)didTapPlayPauseButton;
+- (void)togglePlayPause;
 - (void)longPressPrev:(UILongPressGestureRecognizer *)gesture;
 - (void)longPressNext:(UILongPressGestureRecognizer *)gesture;
 - (void)ytmu_keepLyricsButtonActive;
