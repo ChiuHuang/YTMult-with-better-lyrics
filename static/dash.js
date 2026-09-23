@@ -1014,7 +1014,8 @@
       return;
     }
     const renamed = d.renamed ? ' (saved rename applied)' : '';
-    meta.textContent = `${d.song || '?'} - ${d.artist || '?'} | ${d.duration || 0}s | ${d.candidates.length} candidate(s)${renamed}`;
+    const notes = (d.notes && d.notes.length) ? ' | ' + d.notes.join('; ') : '';
+    meta.textContent = `${d.song || '?'} - ${d.artist || '?'} | ${d.duration || 0}s | ${d.candidates.length} candidate(s)${renamed}${notes}`;
     d.candidates.forEach((c, i) => {
       const rowCls = i === 0 ? 'rb-upgraded' : 'rb-same';
       const previewBtn = el('mdui-button', {variant:'tonal', icon:'visibility'}, 'Preview');

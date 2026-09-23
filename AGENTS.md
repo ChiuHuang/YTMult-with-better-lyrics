@@ -97,6 +97,14 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- node relay UTF-8 fix (`node.py handle_task`): `resp.text` guesses
+  ISO-8859-1 when lyrics SSE omits charset -> Japanese came back mojibake
+  through Cubey-via-node (same bug class as the braccato forced-UTF-8
+  comment). Now `content.decode('utf-8')` first, `resp.text` fallback.
+  Nodes self-update from the server template, so connected nodes pick it
+  up automatically. Probe now returns `notes` (e.g. `Cubey skipped (no JWT
+  in pool)`) shown in the refetch meta line, so a missing wbw candidate is
+  explained instead of silent.
 - bulk refetch-all: `server/bulk_refetch.py` job (admin options scope
   all|non-wbw|unlyriced, mode fresh|rerace, lang, fetch threads, cpu workers,
   translate toggle; never downgrades cache, removes unlyriced on upgrade);

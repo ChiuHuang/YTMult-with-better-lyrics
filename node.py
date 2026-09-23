@@ -189,7 +189,14 @@ def handle_task(msg):
             headers=msg.get('headers') or {},
             timeout=20,
         )
-        return {'status': resp.status_code, 'text': resp.text}
+        raw = resp.content
+        # Force UTF-8: lyrics SSE/JSON APIs serve UTF-8 bytes but usually omit
+        # the charset, and resp.text would then guess ISO-8859-1 (mojibake).
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            text = resp.text
+        return {'status': resp.status_code, 'text': text}
     except Exception as e:
         return {'error': str(e)}
 
