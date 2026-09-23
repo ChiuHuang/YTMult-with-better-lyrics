@@ -249,6 +249,10 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
     }
 
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] Lyrics ELM tap key=%@ vc=%@", key ?: @"(nil)", NSStringFromClass([vc class])]);
+    if (YTMUIsInterfaceLandscape()) {
+        sendDebugLog(@"[MUSIC] Lyrics ELM tap ignored in landscape (auto-open path)");
+        return;
+    }
     openLyricsFromViewController(vc);
     return;
 }

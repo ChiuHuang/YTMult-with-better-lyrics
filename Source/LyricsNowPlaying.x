@@ -4,6 +4,7 @@
 
 - (void)viewDidLayoutSubviews {
     %orig;
+    g_activeNowPlayingVC = self;
     [self ytmuPlaceLyricsBesideThreeDot];
     for (UIView *sub in self.view.subviews) {
         [self ytmu_makeLyricsViewClickable:sub];
@@ -12,6 +13,7 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     %orig;
+    g_activeNowPlayingVC = self;
     [self ytmu_keepLyricsButtonActive];
 }
 
@@ -179,12 +181,21 @@
 
 %new
 - (void)ytmu_didTapLyricsButtonAction:(id)sender {
+    // Landscape auto-opens lyrics on rotation; button must not re-trigger there.
+    if (YTMUIsInterfaceLandscape()) {
+        sendDebugLog(@"[MUSIC] Lyrics button ignored in landscape (auto-open path)");
+        return;
+    }
     sendDebugLog(@"[MUSIC] Lyrics button tapped via UIControl");
     openLyricsFromViewController((UIViewController *)self);
 }
 
 %new
 - (void)ytmu_didTapLyricsBar:(UITapGestureRecognizer *)gesture {
+    if (YTMUIsInterfaceLandscape()) {
+        sendDebugLog(@"[MUSIC] Lyrics chip ignored in landscape (auto-open path)");
+        return;
+    }
     sendDebugLog(@"[MUSIC] Lyrics chip tapped via UITapGestureRecognizer");
     openLyricsFromViewController((UIViewController *)self);
 }
