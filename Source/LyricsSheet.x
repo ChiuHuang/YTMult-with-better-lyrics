@@ -556,10 +556,6 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
-    UITapGestureRecognizer *wordTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_handleWordTap:)];
-    wordTap.cancelsTouchesInView = NO;
-    [self.tableView addGestureRecognizer:wordTap];
-
     [self ytmu_refreshOffsetLabel];
 }
 
@@ -1416,6 +1412,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
     NSInteger curWord = partCount;
+    double curFrac = 1.0;
     double priorDurSum = 0;
     NSInteger priorDurCount = 0;
     for (NSInteger i = 0; i < partCount; i++) {
