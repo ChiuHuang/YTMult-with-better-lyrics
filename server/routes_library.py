@@ -66,10 +66,35 @@ def api_library_scan():
 def api_library_unlyriced():
     try:
         items = list_unlyriced()
+        for it in items:
+            rn = get_rename(it.get('video_id')) or {}
+            if (rn.get('title') or '').strip() or (rn.get('artist') or '').strip():
+                it['rename'] = {'title': rn.get('title', ''), 'artist': rn.get('artist', '')}
         return jsonify({'ok': True, 'count': len(items), 'items': items})
     except Exception as e:
         print(f"[LIBRARY] [FAIL] list_unlyriced: {e}")
         return jsonify({'ok': False, 'error': str(e)}), 500
+
+
+@app.route('/api/admin/library/rename', methods=['POST'])
+@login_required
+def api_library_rename():
+    """Save or clear a manual title/artist rename for one video.
+    Body: {video_id? or url?, title?, artist?}. Empty title+artist clears
+    the saved rename."""
+    from .library import clear_rename
+    body = request.get_json(silent=True) or {}
+    video_id = _extract_video_id(body.get('url') or body.get('video_id') or '')
+    if not video_id:
+        return jsonify({'ok': False, 'error': 'Missing or invalid video URL/ID'}), 400
+    title = (body.get('title') or '').strip()
+    artist = (body.get('artist') or '').strip()
+    if title or artist:
+        save_rename(video_id, title, artist)
+        return jsonify({'ok': True, 'video_id': video_id, 'renamed': True,
+                        'title': title, 'artist': artist})
+    clear_rename(video_id)
+    return jsonify({'ok': True, 'video_id': video_id, 'renamed': False})
 
 
 @app.route('/api/admin/library/rebase/start', methods=['POST'])
@@ -172,6 +197,8 @@ def _run_rebase_unlyriced(target_vid=None):
                 _rebase_job['results'].append(res)
                 _on_rebase_result(res)
                 continue
+
+            info = _info_with_rename(vid, info)
 
             _sse_broadcast('rebase_progress', {
                 'video_id': vid, 'song': song, 'artist': artist,
