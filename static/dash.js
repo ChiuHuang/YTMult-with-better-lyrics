@@ -296,13 +296,18 @@
       const lang = c.lang || 'zh-TW';
       const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': lang});
       pvBtn.addEventListener('click', () => openPreview(c.video_id, lang));
+      const rnBtn = el('mdui-button-icon', {icon:'edit', variant:'text'});
+      rnBtn.title = c.rename ? 'Edit saved rename' : 'Rename to improve fetching';
+      rnBtn.addEventListener('click', () => openRenameDialog({video_id: c.video_id, song: c.song, artist: c.artist, rename: c.rename}));
       list.appendChild(el('div', {class:'list-row cache', style:'font-size:13px;'},
-        el('span', {class:'truncate'}, `${c.artist} - ${c.song}`),
+        el('span', {class:'truncate'}, `${c.artist} - ${c.song}`,
+          c.rename ? el('span', {class:'rename-tag'}, ` renamed: ${c.rename.title || ''} - ${c.rename.artist || ''}`) : null),
         el('span', {}, c.source),
         el('span', {}, c.synced ? 'sync' : ''),
         el('span', {class:'mono'}, fmt(c.lines)),
         el('span', {}, c.time_ago),
         el('span', {class:'truncate mono'}, c.video_id?.slice(0,6) || ''),
+        rnBtn,
         pvBtn,
       ));
     });
@@ -649,8 +654,9 @@
     list.innerHTML = '';
     if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No unlyriced songs')); return; }
     items.forEach(item => {
-      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
-        el('span', {class:'truncate'}, `${item.song || ''} - ${item.artist || ''} (${item.video_id || ''})`)
+      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto auto;'},
+        el('span', {class:'truncate'}, `${item.song || ''} - ${item.artist || ''} (${item.video_id || ''})`,
+          item.rename ? el('span', {class:'rename-tag'}, ` renamed: ${item.rename.title || ''} - ${item.rename.artist || ''}`) : null)
       );
       const rebaseBtn = el('mdui-button', {variant:'tonal', icon:'cached'});
       rebaseBtn.textContent = 'Rebase';
@@ -664,6 +670,10 @@
         rebaseBtn.loading = false;
       });
       row.appendChild(rebaseBtn);
+      const renameBtn = el('mdui-button', {variant:'tonal', icon:'edit'});
+      renameBtn.textContent = 'Rename';
+      renameBtn.addEventListener('click', () => openRenameDialog(item));
+      row.appendChild(renameBtn);
       const retitleBtn = el('mdui-button', {variant:'text', icon:'edit'});
       retitleBtn.textContent = 'Retitle (LLM)';
       retitleBtn.addEventListener('click', async () => {
@@ -1017,8 +1027,6 @@
             body: JSON.stringify({
               video_id: d.video_id, lang: d.lang, source: c.source,
               data: c.data,
-              title: ($('#refetch-title') && $('#refetch-title').value) || undefined,
-              artist: ($('#refetch-artist') && $('#refetch-artist').value) || undefined,
             })});
           const applied = await r.json();
           if (!applied.ok) throw new Error(applied.error || 'apply failed');
@@ -1038,10 +1046,10 @@
       list.appendChild(row);
     });
   };
-  const probeRefetch = async () => {
+  const probeRefetch = async (opts={}) => {
     const probeBtn = $('#refetch-probe');
     const status = $('#refetch-status');
-    const url = ($('#refetch-url') && $('#refetch-url').value || '').trim();
+    const url = (opts.url || ($('#refetch-url') && $('#refetch-url').value) || '').trim();
     if (!url) { mdui.snackbar({message:'Enter a YouTube URL or video ID'}); return; }
     if (probeBtn) probeBtn.loading = true;
     if (status) status.textContent = 'probing...';
@@ -1050,8 +1058,8 @@
         body: JSON.stringify({
           url,
           lang: ($('#refetch-lang') && $('#refetch-lang').value || 'zh-TW').trim(),
-          title: ($('#refetch-title') && $('#refetch-title').value || '').trim() || undefined,
-          artist: ($('#refetch-artist') && $('#refetch-artist').value || '').trim() || undefined,
+          title: opts.title || undefined,
+          artist: opts.artist || undefined,
         })});
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'probe failed');
@@ -1064,6 +1072,47 @@
       if (list) list.innerHTML = '';
     }
     if (probeBtn) probeBtn.loading = false;
+  };
+
+  /* ---- manual rename (unlyriced / caches rows) ---- */
+  let renameCtx = null;
+  const openRenameDialog = (item) => {
+    const dlg = $('#rename-dialog');
+    if (!dlg) return;
+    renameCtx = {video_id: item.video_id, song: item.song, artist: item.artist};
+    try { dlg.setAttribute('headline', `Rename ${item.song || item.video_id || ''}`); } catch {}
+    const sub = $('#rename-sub');
+    if (sub) sub.textContent = `Fix the title/artist used when fetching lyrics for ${item.video_id || ''}. The saved rename applies to rebase, playlist sync and future checks. Clear both fields to remove it.`;
+    const cur = item.rename || {};
+    const t = $('#rename-title'); if (t) t.value = cur.title || item.song || '';
+    const a = $('#rename-artist'); if (a) a.value = cur.artist || item.artist || '';
+    dlg.open = true;
+  };
+  const saveRename = async (andCheck) => {
+    if (!renameCtx) return;
+    const btn = andCheck ? $('#rename-save-check') : $('#rename-save');
+    const title = ($('#rename-title') && $('#rename-title').value || '').trim();
+    const artist = ($('#rename-artist') && $('#rename-artist').value || '').trim();
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/rename', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({video_id: renameCtx.video_id, title, artist})});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'rename failed');
+      mdui.snackbar({message: d.renamed ? 'Rename saved' : 'Rename cleared'});
+      try { $('#rename-dialog').open = false; } catch {}
+      loadCaches();
+      loadLibrary();
+      if (andCheck) {
+        const urlField = $('#refetch-url');
+        if (urlField) urlField.value = renameCtx.video_id;
+        await probeRefetch({url: renameCtx.video_id,
+          title: title || undefined, artist: artist || undefined});
+        const panel = $('#refetch-probe');
+        if (panel) panel.scrollIntoView({behavior:'smooth', block:'center'});
+      }
+    } catch (e) { mdui.snackbar({message:'Rename failed: '+e.message}); }
+    if (btn) btn.loading = false;
   };
 
   /* ---- playlist refetch (web) ---- */
@@ -1239,6 +1288,12 @@
     if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
     const retitleCloseBtn = $('#retitle-close');
     if (retitleCloseBtn) retitleCloseBtn.addEventListener('click', () => { try{$('#retitle-dialog').open=false;}catch{} });
+    const renameCancelBtn = $('#rename-cancel');
+    if (renameCancelBtn) renameCancelBtn.addEventListener('click', () => { try{$('#rename-dialog').open=false;}catch{} });
+    const renameSaveBtn = $('#rename-save');
+    if (renameSaveBtn) renameSaveBtn.addEventListener('click', () => saveRename(false));
+    const renameSaveCheckBtn = $('#rename-save-check');
+    if (renameSaveCheckBtn) renameSaveCheckBtn.addEventListener('click', () => saveRename(true));
     const refetchProbeBtn = $('#refetch-probe');
     if (refetchProbeBtn) refetchProbeBtn.addEventListener('click', probeRefetch);
     const refetchUrl = $('#refetch-url');
