@@ -525,9 +525,7 @@ def api_probe():
     info = _info_with_rename(video_id, info,
                              custom_title=(body.get('title') or '').strip(),
                              custom_artist=(body.get('artist') or '').strip())
-    renamed = False
-    if saved:
-        renamed = True
+    renamed = bool(saved) or bool((body.get('title') or '').strip() or (body.get('artist') or '').strip())
 
     try:
         from .jwt_pool import pick_jwt
