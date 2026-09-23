@@ -175,3 +175,12 @@ html.mdui-theme-dark .rb-failed, html.mdui-theme-dark .rb-error { background-col
   .plsync-inputs { grid-template-columns: 1fr 100px; }
 }
 .rename-tag { font-size:11.5px; color: rgb(var(--mdui-color-primary)); white-space:nowrap; }
+
+/* ---- bulk refetch options ---- */
+.bulk-opts { display:grid; grid-template-columns: auto auto 110px 130px 130px auto; gap:16px; align-items:end; margin-bottom:4px; }
+.bulk-opt { display:flex; flex-direction:column; gap:6px; }
+.bulk-label { font-size:11.5px; color: rgb(var(--mdui-color-on-surface-variant)); font-weight:500; }
+.bulk-opt mdui-switch { margin-bottom:14px; }
+@media (max-width: 899.98px) {
+  .bulk-opts { grid-template-columns: 1fr 1fr; }
+}
