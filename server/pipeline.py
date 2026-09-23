@@ -26,7 +26,7 @@ from .providers_cubey import fetch_cubey
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
-from .translate import cohere_translate, google_translate_fast
+from .translate import google_translate_fast
 from .cache import is_not_found_result, sanitize_lyrics_parts
 from .nodes import pick_node
 from .jwt_pool import pick_jwt
@@ -198,15 +198,11 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     # Add song metadata
     result['song'] = title
     result['artist'] = artist
-    # Translation
+    # Translation (shared helper -- the background queue uses the same one)
     if translate_to and result.get('lyrics'):
         print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
-        texts = [l['text'] for l in result['lyrics'] if l.get('text')]
-        translations = cohere_translate(texts, translate_to)
-
-        for i, lyric in enumerate(result['lyrics']):
-            if i < len(translations):
-                lyric['translated'] = translations[i]
+        from .translate import translate_result_in_place
+        translate_result_in_place(result, translate_to)
 
     if result and result.get('lyrics'):
         sanitize_lyrics_parts(result['lyrics'])

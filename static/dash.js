@@ -1188,6 +1188,100 @@
     if (startBtn) startBtn.loading = false;
   };
 
+    /* ---- bulk refetch-all (admin options, threads + processes, queued translate) ---- */
+  const segInit = (id) => {
+    document.querySelectorAll(`#${id} mdui-segmented-button-item`).forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll(`#${id} mdui-segmented-button-item`).forEach(o => {
+          if (o === item) o.setAttribute('selected', '');
+          else o.removeAttribute('selected');
+        });
+      });
+    });
+  };
+  const segVal = (id, dflt) => {
+    const sel = document.querySelector(`#${id} mdui-segmented-button-item[selected]`);
+    return (sel && sel.getAttribute('value')) || dflt;
+  };
+  let bulkTimer = null;
+  let bulkJobId = null;
+  const renderBulk = st => {
+    const progress = $('#bulk-progress');
+    const summary = $('#bulk-summary');
+    const status = $('#bulk-status');
+    const list = $('#bulk-results');
+    const running = st && (st.state === 'running');
+    if (status) status.textContent = (st && st.state) || 'idle';
+    const stopBtn = $('#bulk-stop');
+    if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+    if (progress) progress.value = (st && st.total > 0) ? Math.min(1, st.done / st.total) : 0;
+    if (summary) summary.textContent = st && st.total > 0
+      ? `${st.done}/${st.total} up=${st.upgraded || 0} kept=${st.kept || 0} failed=${st.failed || 0} err=${st.errors || 0} tr=${st.tq_done || 0}/${st.tq_queued || 0}${st.current ? '  ' + (st.current.song || st.current.video_id) : ''}`
+      : '';
+    if (list) {
+      list.innerHTML = '';
+      const rows = (st && st.results) || [];
+      if (!rows.length) {
+        list.appendChild(el('div', {style:'font-size:12.5px; color:rgb(var(--mdui-color-outline)); padding:8px 0;'},
+          running ? 'Fetching...' : 'No bulk refetch yet. Pick a scope/mode and Start.'));
+        return;
+      }
+      rows.slice(-100).reverse().forEach(t => {
+        const cls = t.status === 'upgraded' ? 'rb-upgraded' : t.status === 'kept' ? 'rb-same' : (t.status === 'failed' || t.status === 'error') ? 'rb-failed' : 'rb-already';
+        const row = el('div', {class:`rebase-row ${cls}`});
+        row.appendChild(document.createTextNode(`${t.song || '?'} - ${t.artist || ''} | ${t.from || '?'}->${t.to || '?'} | ${t.status}${t.source ? ' | ' + t.source : ''}`));
+        if (t.status === 'upgraded' && t.video_id) {
+          row.appendChild(document.createTextNode('  '));
+          const pv = el('button', {class:'pl-sync-preview', style:'background:none;border:none;color:rgb(var(--mdui-color-primary));cursor:pointer;padding:0;font-size:12px;'}, 'preview');
+          pv.addEventListener('click', () => openPreview(t.video_id, t.lang || 'zh-TW'));
+          row.appendChild(pv);
+        }
+        list.appendChild(row);
+      });
+    }
+  };
+  const stopBulk = async () => {
+    try { await API('/api/admin/library/refetch/stop', {method:'POST'}); } catch {}
+    if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
+  };
+  const startBulk = async () => {
+    const startBtn = $('#bulk-start');
+    if (startBtn) startBtn.loading = true;
+    if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
+    const num = (id, dflt, lo, hi) => {
+      const v = parseInt(($('#' + id) && $('#' + id).value) || dflt, 10);
+      return Math.max(lo, Math.min(hi, isNaN(v) ? dflt : v));
+    };
+    try {
+      const r = await API('/api/admin/library/refetch/start', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          scope: segVal('bulk-scope', 'non-wbw'),
+          mode: segVal('bulk-mode', 'fresh'),
+          lang: (($('#bulk-lang') && $('#bulk-lang').value) || 'zh-TW').trim(),
+          workers: num('bulk-workers', 8, 1, 32),
+          cpu_workers: num('bulk-cpu', 2, 1, 64),
+          translate: !!(($('#bulk-translate') && $('#bulk-translate').checked)),
+        })});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'start failed');
+      bulkJobId = d.job_id;
+      renderBulk({state:'running', total: d.total || 0, done: 0});
+      bulkTimer = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/admin/library/refetch/status/${encodeURIComponent(bulkJobId)}`);
+          const st = await sr.json();
+          renderBulk(st);
+          if (st.state === 'done' || st.state === 'stopped') {
+            if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
+            loadCaches();
+            loadLibrary();
+          }
+        } catch {}
+      }, 2000);
+    } catch (e) { mdui.snackbar({message:'Bulk refetch failed: '+e.message}); }
+    if (startBtn) startBtn.loading = false;
+  };
+
   /* ---- nav ---- */
   const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes'];
   const switchPage = p => {
@@ -1304,6 +1398,12 @@
     if (plSyncStopBtn) plSyncStopBtn.addEventListener('click', stopPlaylistSyncWeb);
     const plSyncUrl = $('#plsync-url');
     if (plSyncUrl) plSyncUrl.addEventListener('keydown', e => { if (e.key === 'Enter') startPlaylistSyncWeb(); });
+    segInit('bulk-scope');
+    segInit('bulk-mode');
+    const bulkStartBtn = $('#bulk-start');
+    if (bulkStartBtn) bulkStartBtn.addEventListener('click', startBulk);
+    const bulkStopBtn = $('#bulk-stop');
+    if (bulkStopBtn) bulkStopBtn.addEventListener('click', stopBulk);
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';

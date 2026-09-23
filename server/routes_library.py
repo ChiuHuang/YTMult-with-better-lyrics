@@ -524,6 +524,51 @@ def _candidate_tier(cand):
     return 'plain'
 
 
+@app.route('/api/admin/library/refetch/start', methods=['POST'])
+@login_required
+def api_bulk_refetch_start():
+    """Start a bulk refetch-all job with admin-chosen options. Body:
+    {scope: all|non-wbw|unlyriced, mode: fresh|rerace, lang,
+    workers (fetch threads 1-32), cpu_workers (parse processes),
+    translate (bool)}. 409 when a job is already running."""
+    from .bulk_refetch import start, BulkBusy
+    body = request.get_json(silent=True) or {}
+    lang = (body.get('lang') or 'zh-TW').strip()
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    try:
+        res = start({
+            'scope': body.get('scope', 'non-wbw'),
+            'mode': body.get('mode', 'fresh'),
+            'lang': lang,
+            'workers': body.get('workers', 8),
+            'cpu_workers': body.get('cpu_workers', 2),
+            'translate': body.get('translate', True),
+        })
+    except BulkBusy as e:
+        return jsonify({'ok': False, 'error': str(e)}), 409
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@app.route('/api/admin/library/refetch/status/<job_id>', methods=['GET'])
+@login_required
+def api_bulk_refetch_status(job_id):
+    from .bulk_refetch import status
+    st = status(job_id)
+    if st is None:
+        return jsonify({'ok': False, 'error': 'unknown job'}), 404
+    return jsonify({**st, 'ok': True})
+
+
+@app.route('/api/admin/library/refetch/stop', methods=['POST'])
+@login_required
+def api_bulk_refetch_stop():
+    from .bulk_refetch import stop
+    return jsonify({'ok': True, 'stopped': stop()})
+
+
 @app.route('/api/admin/library/probe', methods=['POST'])
 @login_required
 def api_probe():

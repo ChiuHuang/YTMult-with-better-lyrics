@@ -97,6 +97,23 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- bulk refetch-all: `server/bulk_refetch.py` job (admin options scope
+  all|non-wbw|unlyriced, mode fresh|rerace, lang, fetch threads, cpu workers,
+  translate toggle; never downgrades cache, removes unlyriced on upgrade);
+  threads fetch, `server/parse_pool.py` ProcessPool normalizes+scores
+  (stdlib-only, spawn-safe; mirrors of cache/race/parsers fns, cross-checked
+  by test), `translate.translate_queue_enqueue` silent background queue
+  (2 daemon workers, same index-aligned mapping via
+  `translate_result_in_place`, also used by `fetch_all_lyrics` now);
+  endpoints `POST /api/admin/library/refetch/start` (409 busy),
+  `GET .../refetch/status/<job_id>`, `POST .../refetch/stop`; Library page
+  "Refetch all (bulk)" panel (segmented scope/mode, workers, translate
+  switch, progress + up/kept/failed/tr counters). Verified: mirror==
+  canonical, real pool tiers, queue drain + cache rewrite, full job
+  (upgrade + no-downgrade-overwrite + 409) via Flask test client.
+- `4f2726d` probe isolation: every provider group in `probe_providers`
+  catches its own exceptions (was: one Cubey/LRCLib/Unison throw 500d the
+  whole refetch-probe click).
 - `66b8405` dashboard refetch-from-URL: `pipeline.probe_providers()` (all 8
   providers, best-first, nothing excluded), manual rename store in
   `library.py` (`cache/rename.json`), `POST /api/admin/library/probe` +
