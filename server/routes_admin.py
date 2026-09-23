@@ -32,6 +32,7 @@ from .jwt_pool import contribute_jwt, list_jwt, remove_jwt, check_all as jwt_che
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .cache import _cache_key_from_filename
+from .library import get_rename
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
 from .logging_util import _log_crash
@@ -134,6 +135,9 @@ def admin_caches():
                 video_id = parts[0]
                 lang = parts[1] if len(parts) > 1 else ''
                 is_fast = cache_key.endswith(':fast')
+                _rn = get_rename(video_id) or {}
+                _rn_t = (_rn.get('title') or '').strip()
+                _rn_a = (_rn.get('artist') or '').strip()
                 items.append({
                     'video_id': video_id,
                     'lang': lang,
@@ -144,6 +148,7 @@ def admin_caches():
                     'synced': data.get('synced', False),
                     'lines': len(data.get('lyrics', [])),
                     'time_ago': time_ago,
+                    'rename': {'title': _rn_t, 'artist': _rn_a} if (_rn_t or _rn_a) else None,
                     '_is_fast': is_fast,
                 })
             except Exception:

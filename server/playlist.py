@@ -26,7 +26,7 @@ from .cache import get_cached, set_cached, is_not_found_result
 from .nodes import ask_nodes_for_cache
 from .providers_yt import get_ytmusic, get_song_info
 from .pipeline import fetch_all_lyrics
-from .library import record_unlyriced
+from .library import record_unlyriced, apply_saved_rename
 from .jwt_pool import contribute_jwt as _pool_contribute
 
 # ============================================================
@@ -95,6 +95,7 @@ def _run_playlist_cache_job(job_id, playlist_id, translate_to):
                 job['failed'] += 1
                 job['done'] += 1
                 continue
+            song_info = apply_saved_rename(video_id, song_info)
             result = fetch_all_lyrics(video_id, song_info, translate_to, jwt_token=None)
             if result and not is_not_found_result(result):
                 set_cached(cache_key, result)
@@ -247,6 +248,7 @@ def _run_playlist_sync_job(job_id, playlist_id, translate_to, regenerate, jwt_to
                     song_info = get_song_info(video_id)
                     if not song_info:
                         raise ValueError('get_song_info returned None')
+                    song_info = apply_saved_rename(video_id, song_info)
                     result = fetch_all_lyrics(video_id, song_info, translate_to, jwt_token)
                     if result and not is_not_found_result(result):
                         set_cached(cache_key, result)

@@ -79,6 +79,38 @@ def _tier_from_data(data):
     return _tier(data)
 
 
+def clear_rename(video_id):
+    """Remove a saved manual title/artist override for a video_id."""
+    if not video_id:
+        return
+    with _RENAME_LOCK:
+        if _RENAME_CACHE is None:
+            _load_rename_file()
+        if video_id in _RENAME_CACHE:
+            del _RENAME_CACHE[video_id]
+            try:
+                os.makedirs(os.path.dirname(_RENAME_PATH) or '.', exist_ok=True)
+                with open(_RENAME_PATH, 'w', encoding='utf-8') as f:
+                    json.dump(_RENAME_CACHE, f, ensure_ascii=False, indent=1)
+            except Exception as e:
+                print(f"[LIBRARY] [FAIL] clear_rename {video_id}: {e}")
+
+
+def apply_saved_rename(video_id, info):
+    """Merge a saved manual rename into a song-info dict in place, return it.
+
+    No-op when nothing is saved. Used by background fetch paths (rebase,
+    playlist sync) so one manual rename improves every later refetch."""
+    saved = get_rename(video_id) or {}
+    t = (saved.get('title') or '').strip()
+    a = (saved.get('artist') or '').strip()
+    if t:
+        info['title'] = t
+    if a:
+        info['artist'] = a
+    return info
+
+
 # ------------------------------------------------------------
 # Cache scan
 # ------------------------------------------------------------
@@ -406,12 +438,21 @@ def _try_llm_retitle_fetch(vid, lang, old_data):
     artist = old_data.get('artist') or ''
     if not song and not artist:
         return None
-    cleaned = retitle_song(song, artist)
-    new_song = cleaned.get('title', song)
-    new_artist = cleaned.get('artist', artist)
+    saved = get_rename(vid) or {}
+    saved_t = (saved.get('title') or '').strip()
+    saved_a = (saved.get('artist') or '').strip()
+    if saved_t or saved_a:
+        # Manual rename wins over the LLM guess -- and skips the LLM call.
+        new_song = saved_t or song
+        new_artist = saved_a or artist
+        print(f"[REBASE] [RENAME] {vid}: {song!r}->{new_song!r} | {artist!r}->{new_artist!r}")
+    else:
+        cleaned = retitle_song(song, artist)
+        new_song = cleaned.get('title', song)
+        new_artist = cleaned.get('artist', artist)
+        print(f"[REBASE] [LLM] retitling {vid}: {song!r}->{new_song!r} | {artist!r}->{new_artist!r}")
     if new_song == song and new_artist == artist:
-        return None  # LLM didn't change anything
-    print(f"[REBASE] [LLM] retitling {vid}: {song!r}->{new_song!r} | {artist!r}->{new_artist!r}")
+        return None  # nothing changed -- no point refetching
     from .pipeline import fetch_all_lyrics
     from .providers_yt import get_song_info
     try:
