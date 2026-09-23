@@ -212,7 +212,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     return result
 
 
-def probe_providers(video_id, song_info, jwt_token=None, only_source=None):
+def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes=None):
     """Fetch each provider independently and return one candidate per
     provider/format so the dashboard can show every finding and let the admin
     pick which one to cache (not just the default best). Each entry is
@@ -269,7 +269,10 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None):
             from .providers_cubey import fetch_cubey
             if not jwt_token:
                 jwt_token = pick_jwt()
-            if jwt_token:
+            if not jwt_token:
+                if notes is not None:
+                    notes.append('Cubey skipped (no JWT in pool)')
+            else:
                 cubey_node = pick_node()
                 best = None
                 for q in queries:

@@ -601,7 +601,8 @@ def api_probe():
 
     try:
         from .jwt_pool import pick_jwt
-        candidates = probe_providers(video_id, info, jwt_token=pick_jwt(), only_source=only_source)
+        notes = []
+        candidates = probe_providers(video_id, info, jwt_token=pick_jwt(), only_source=only_source, notes=notes)
     except Exception as e:
         print(f"[LIBRARY] [FAIL] probe {video_id}: {e}")
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -614,6 +615,7 @@ def api_probe():
         'duration': info.get('duration', 0),
         'lang': lang,
         'renamed': renamed,
+        'notes': notes,
         'candidates': candidates,
     })
 
