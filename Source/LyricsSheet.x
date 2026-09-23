@@ -280,6 +280,8 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_landscapePrev:(UIButton *)sender;
 - (void)ytmu_landscapeNext:(UIButton *)sender;
 - (void)ytmu_landscapePlayPause:(UIButton *)sender;
+- (void)ytmu_setLandscapePlaying:(BOOL)playing;
+- (void)ytmu_setLandscapeTransportIcons;
 - (BOOL)ytmu_tryTapPlayPauseIn:(UIView *)view depth:(NSInteger)depth;
 @end
 
@@ -438,16 +440,18 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.view addSubview:self.tableView];
 
     // --- Landscape split-view panels ---
-    // Left panel: solid dark background + artwork (aspect-fit, no blur-stretch)
+    // Left panel: transparent so the full-screen blurred artwork shows through
     self.landscapeArtPanel = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeArtPanel.backgroundColor = [UIColor blackColor];
+    self.landscapeArtPanel.backgroundColor = [UIColor clearColor];
     self.landscapeArtPanel.clipsToBounds = YES;
     self.landscapeArtPanel.hidden = YES;
+    self.landscapeArtPanel.userInteractionEnabled = YES;
     [self.view addSubview:self.landscapeArtPanel];
 
     self.landscapeArtImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
     self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFit;
     self.landscapeArtImageView.clipsToBounds = YES;
+    self.landscapeArtImageView.userInteractionEnabled = NO;
     [self.landscapeArtPanel addSubview:self.landscapeArtImageView];
 
     // Right panel: semi-transparent tint behind the table in landscape
@@ -455,6 +459,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeRightPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.45];
     self.landscapeRightPanel.clipsToBounds = YES;
     self.landscapeRightPanel.hidden = YES;
+    self.landscapeRightPanel.userInteractionEnabled = NO;
     [self.view addSubview:self.landscapeRightPanel];
 
     // Landscape left info: title, artist, progress, transport
@@ -463,6 +468,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeInfoPanel.hidden = YES;
     self.landscapeInfoPanel.layer.cornerRadius = 12;
     self.landscapeInfoPanel.layer.masksToBounds = YES;
+    self.landscapeInfoPanel.userInteractionEnabled = YES;
     [self.landscapeArtPanel addSubview:self.landscapeInfoPanel];
 
     self.landscapeTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -492,34 +498,42 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeProgressTrack addSubview:self.landscapeProgressFill];
 
     self.landscapePrevButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
-    [self.landscapePrevButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.landscapePrevButton.tintColor = [UIColor whiteColor];
     self.landscapePrevButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     self.landscapePrevButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
     self.landscapePrevButton.layer.cornerRadius = 18;
     self.landscapePrevButton.tag = 7101;
+    self.landscapePrevButton.accessibilityLabel = @"Previous track";
+    self.landscapePrevButton.userInteractionEnabled = YES;
+    self.landscapePrevButton.exclusiveTouch = NO;
     [self.landscapePrevButton addTarget:self action:@selector(ytmu_landscapePrev:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeInfoPanel addSubview:self.landscapePrevButton];
 
     self.landscapePlayButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.landscapePlayButton setTitle:@"pause" forState:UIControlStateNormal];
-    [self.landscapePlayButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.landscapePlayButton.tintColor = [UIColor whiteColor];
     self.landscapePlayButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     self.landscapePlayButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.22];
     self.landscapePlayButton.layer.cornerRadius = 20;
     self.landscapePlayButton.tag = 7102;
+    self.landscapePlayButton.accessibilityLabel = @"Play or pause";
+    self.landscapePlayButton.userInteractionEnabled = YES;
+    self.landscapePlayButton.exclusiveTouch = NO;
     [self.landscapePlayButton addTarget:self action:@selector(ytmu_landscapePlayPause:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeInfoPanel addSubview:self.landscapePlayButton];
 
     self.landscapeNextButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
-    [self.landscapeNextButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    self.landscapeNextButton.tintColor = [UIColor whiteColor];
     self.landscapeNextButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     self.landscapeNextButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
     self.landscapeNextButton.layer.cornerRadius = 18;
     self.landscapeNextButton.tag = 7103;
+    self.landscapeNextButton.accessibilityLabel = @"Next track";
+    self.landscapeNextButton.userInteractionEnabled = YES;
+    self.landscapeNextButton.exclusiveTouch = NO;
     [self.landscapeNextButton addTarget:self action:@selector(ytmu_landscapeNext:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeInfoPanel addSubview:self.landscapeNextButton];
+    self.landscapeIsPlaying = YES;
+    [self ytmu_setLandscapeTransportIcons];
 
     // Exit: top-right of the landscape art panel
     self.landscapeExitButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -599,21 +613,35 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)ytmu_updateLandscapeMetadata {
     NSString *title = nil;
     NSString *artist = nil;
-    YTPlayerViewController *player = g_activePlayer;
-    if (player && [player respondsToSelector:@selector(playerResponse)]) {
-        YTPlayerResponse *resp = player.playerResponse;
-        if (resp && [resp respondsToSelector:@selector(playerData)]) {
-            YTIPlayerResponse *data = resp.playerData;
-            if (data && [data respondsToSelector:@selector(videoDetails)]) {
-                YTIVideoDetails *details = data.videoDetails;
-                title = details.title;
-                artist = details.author;
+    @try {
+        YTPlayerViewController *player = g_activePlayer;
+        if (player && [player respondsToSelector:@selector(playerResponse)]) {
+            YTPlayerResponse *resp = player.playerResponse;
+            if (resp && [resp respondsToSelector:@selector(playerData)]) {
+                YTIPlayerResponse *data = resp.playerData;
+                if (data && [data respondsToSelector:@selector(videoDetails)]) {
+                    YTIVideoDetails *details = data.videoDetails;
+                    if (details) {
+                        if ([details respondsToSelector:@selector(title)]) title = details.title;
+                        if ([details respondsToSelector:@selector(author)]) artist = details.author;
+                    }
+                }
             }
         }
+    } @catch (NSException *e) {
+        title = nil;
+        artist = nil;
     }
-    if (!title.length) title = @"Now Playing";
-    self.landscapeTitleLabel.text = title;
-    self.landscapeArtistLabel.text = artist.length ? artist : @"";
+    // Only overwrite with real values; never blank out a known title/artist
+    // (playerResponse can be momentarily nil during track transitions).
+    if (title.length) {
+        self.landscapeTitleLabel.text = title;
+    } else if (!self.landscapeTitleLabel.text.length) {
+        self.landscapeTitleLabel.text = @"Now Playing";
+    }
+    if (artist.length) {
+        self.landscapeArtistLabel.text = artist;
+    }
 }
 
 - (void)ytmu_updateLandscapeProgress {
@@ -636,56 +664,120 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeProgressFill.frame = f;
 }
 
+- (void)ytmu_setLandscapePlaying:(BOOL)playing {
+    self.landscapeIsPlaying = playing;
+    if (@available(iOS 13.0, *)) {
+        UIImage *img = [UIImage systemImageNamed:playing ? @"pause.fill" : @"play.fill"];
+        if (img) {
+            [self.landscapePlayButton setImage:img forState:UIControlStateNormal];
+            [self.landscapePlayButton setTitle:@"" forState:UIControlStateNormal];
+            return;
+        }
+    }
+    [self.landscapePlayButton setImage:nil forState:UIControlStateNormal];
+    [self.landscapePlayButton setTitle:playing ? @"pause" : @"play" forState:UIControlStateNormal];
+    [self.landscapePlayButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+}
+
+- (void)ytmu_setLandscapeTransportIcons {
+    if (@available(iOS 13.0, *)) {
+        UIImage *prev = [UIImage systemImageNamed:@"backward.fill"];
+        UIImage *next = [UIImage systemImageNamed:@"forward.fill"];
+        if (prev) {
+            [self.landscapePrevButton setImage:prev forState:UIControlStateNormal];
+            [self.landscapePrevButton setTitle:@"" forState:UIControlStateNormal];
+        } else {
+            [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
+            [self.landscapePrevButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        }
+        if (next) {
+            [self.landscapeNextButton setImage:next forState:UIControlStateNormal];
+            [self.landscapeNextButton setTitle:@"" forState:UIControlStateNormal];
+        } else {
+            [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
+            [self.landscapeNextButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        }
+    } else {
+        [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
+        [self.landscapePrevButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
+        [self.landscapeNextButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    }
+    [self ytmu_setLandscapePlaying:self.landscapeIsPlaying];
+}
+
 - (void)ytmu_landscapePrev:(UIButton *)sender {
     UIViewController *np = g_activeNowPlayingVC;
     if (np && [np respondsToSelector:@selector(didTapPrevButton)]) {
         YTMUInvokeNoArgs(np, @selector(didTapPrevButton));
+        sendDebugLog(@"[MUSIC] landscape prev via now-playing VC");
         return;
     }
     UIViewController *top = topMostViewController();
     if (top && [top respondsToSelector:@selector(didTapPrevButton)]) {
         YTMUInvokeNoArgs(top, @selector(didTapPrevButton));
+        sendDebugLog(@"[MUSIC] landscape prev via top VC");
+        return;
     }
+    sendDebugLog(@"[MUSIC] landscape prev: no handler (nowPlayingVC nil or missing selector)");
 }
 
 - (void)ytmu_landscapeNext:(UIButton *)sender {
     UIViewController *np = g_activeNowPlayingVC;
     if (np && [np respondsToSelector:@selector(didTapNextButton)]) {
         YTMUInvokeNoArgs(np, @selector(didTapNextButton));
+        sendDebugLog(@"[MUSIC] landscape next via now-playing VC");
         return;
     }
     UIViewController *top = topMostViewController();
     if (top && [top respondsToSelector:@selector(didTapNextButton)]) {
         YTMUInvokeNoArgs(top, @selector(didTapNextButton));
+        sendDebugLog(@"[MUSIC] landscape next via top VC");
+        return;
     }
+    sendDebugLog(@"[MUSIC] landscape next: no handler (nowPlayingVC nil or missing selector)");
 }
 
 - (void)ytmu_landscapePlayPause:(UIButton *)sender {
     UIViewController *np = g_activeNowPlayingVC;
     if (np && [np respondsToSelector:@selector(didTapPlayPauseButton)]) {
         YTMUInvokeNoArgs(np, @selector(didTapPlayPauseButton));
+        [self ytmu_setLandscapePlaying:!self.landscapeIsPlaying];
+        sendDebugLog(@"[MUSIC] landscape play/pause via now-playing VC");
         return;
     }
     if (np && [np respondsToSelector:@selector(togglePlayPause)]) {
         YTMUInvokeNoArgs(np, @selector(togglePlayPause));
+        [self ytmu_setLandscapePlaying:!self.landscapeIsPlaying];
+        sendDebugLog(@"[MUSIC] landscape play/pause via now-playing toggle");
         return;
     }
     YTPlayerViewController *player = g_activePlayer;
     if (player && [player respondsToSelector:@selector(togglePlayPause)]) {
         YTMUInvokeNoArgs(player, @selector(togglePlayPause));
+        [self ytmu_setLandscapePlaying:!self.landscapeIsPlaying];
+        sendDebugLog(@"[MUSIC] landscape play/pause via player toggle");
         return;
     }
     // Fallback: send touch to any play/pause control under now-playing view
     UIView *npView = np.view;
     if (npView) {
         for (UIView *sub in npView.subviews) {
-            if ([self ytmu_tryTapPlayPauseIn:sub depth:0]) return;
+            if ([self ytmu_tryTapPlayPauseIn:sub depth:0]) {
+                [self ytmu_setLandscapePlaying:!self.landscapeIsPlaying];
+                sendDebugLog(@"[MUSIC] landscape play/pause via now-playing sub-control");
+                return;
+            }
         }
     }
     UIViewController *top = topMostViewController();
     if (top && top != (UIViewController *)self && [top respondsToSelector:@selector(didTapPlayPauseButton)]) {
         YTMUInvokeNoArgs(top, @selector(didTapPlayPauseButton));
+        [self ytmu_setLandscapePlaying:!self.landscapeIsPlaying];
+        sendDebugLog(@"[MUSIC] landscape play/pause via top VC");
+        return;
     }
+    sendDebugLog(@"[MUSIC] landscape play/pause: no handler (nowPlayingVC nil or missing selector)");
 }
 
 - (BOOL)ytmu_tryTapPlayPauseIn:(UIView *)view depth:(NSInteger)depth {
@@ -714,10 +806,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (landscape) {
         // --- Landscape: smaller video/art left + right lyrics panel ---
-        // Hide full-screen portrait background layers
-        self.artworkImageView.hidden = YES;
-        self.blurView.hidden = YES;
-        self.darkOverlay.hidden = YES;
+        // Keep the full-screen blurred artwork background visible
+        self.artworkImageView.hidden = NO;
+        self.blurView.hidden = NO;
+        self.darkOverlay.hidden = NO;
 
         // Show landscape panels
         self.landscapeArtPanel.hidden = NO;
@@ -725,8 +817,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeInfoPanel.hidden = NO;
         self.landscapeExitButton.hidden = NO;
 
-        // Sync artwork image
-        if (self.artworkImageView.image && !self.landscapeArtImageView.image) {
+        // Sync artwork image whenever it changes
+        if (self.artworkImageView.image && self.landscapeArtImageView.image != self.artworkImageView.image) {
             self.landscapeArtImageView.image = self.artworkImageView.image;
         }
 
@@ -803,9 +895,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
         // tableView occupies right panel
         self.tableView.frame = CGRectMake(leftW, 0, rightW, H);
+        [self.view bringSubviewToFront:self.landscapeArtPanel];
         [self.view bringSubviewToFront:self.tableView];
         [self.view bringSubviewToFront:self.fpsLabel];
         [self.view bringSubviewToFront:self.landscapeExitButton];
+        [self.landscapeArtPanel bringSubviewToFront:self.landscapeInfoPanel];
+        self.landscapeArtPanel.userInteractionEnabled = YES;
+        self.landscapeInfoPanel.userInteractionEnabled = YES;
 
         // Smaller bottom inset in landscape (less scroll space needed)
         CGFloat bottomPad = MAX(120.0, H * 0.30f);

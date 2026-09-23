@@ -86,6 +86,7 @@
 @property (nonatomic, strong) UIButton *landscapePrevButton;
 @property (nonatomic, strong) UIButton *landscapePlayButton;
 @property (nonatomic, strong) UIButton *landscapeNextButton;
+@property (nonatomic, assign) BOOL landscapeIsPlaying;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
 @property (nonatomic, assign) float lastVolume;
