@@ -29,6 +29,51 @@ _RETITLE_MODEL = os.environ.get(
     'YTMU_RETITLE_MODEL', 'command-a-plus-05-2026')
 _retitled_cache = {}
 
+# Persistent manual title/artist override store: video_id -> {title, artist}.
+# Written by the dashboard refetch flow (custom rename); read back by the
+# same flow so a saved override is reused until it is explicitly replaced.
+_RENAME_PATH = 'cache/rename.json'
+_RENAME_CACHE = None
+_RENAME_LOCK = threading.Lock()
+
+
+def _load_rename_file():
+    global _RENAME_CACHE
+    try:
+        if os.path.exists(_RENAME_PATH):
+            with open(_RENAME_PATH, 'r', encoding='utf-8') as f:
+                _RENAME_CACHE = json.load(f)
+        else:
+            _RENAME_CACHE = {}
+    except Exception:
+        _RENAME_CACHE = {}
+
+
+def get_rename(video_id):
+    """Return {title, artist} override for a video_id, or None."""
+    if not video_id:
+        return None
+    with _RENAME_LOCK:
+        if _RENAME_CACHE is None:
+            _load_rename_file()
+        return _RENAME_CACHE.get(video_id)
+
+
+def save_rename(video_id, title, artist):
+    """Persist a manual title/artist override for a video_id."""
+    if not video_id:
+        return
+    with _RENAME_LOCK:
+        if _RENAME_CACHE is None:
+            _load_rename_file()
+        _RENAME_CACHE[video_id] = {'title': title or '', 'artist': artist or ''}
+        try:
+            os.makedirs(os.path.dirname(_RENAME_PATH) or '.', exist_ok=True)
+            with open(_RENAME_PATH, 'w', encoding='utf-8') as f:
+                json.dump(_RENAME_CACHE, f, ensure_ascii=False, indent=1)
+        except Exception as e:
+            print(f"[LIBRARY] [FAIL] save_rename {video_id}: {e}")
+
 
 def _tier_from_data(data):
     return _tier(data)
