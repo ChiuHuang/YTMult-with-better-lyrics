@@ -239,12 +239,16 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None):
     def emit(logical_provider, label, cand):
         if not cand or not cand.get('lyrics'):
             return
-        sanitize_lyrics_parts(cand['lyrics'])
-        lyrics = cand['lyrics']
-        synced = bool(cand.get('synced'))
-        wbw = bool(cand.get('wordSynced')) or any(l.get('wordSynced') for l in lyrics)
-        tier = 'wbw' if wbw else ('line' if synced else 'plain')
-        score = _lyrics_score(cand)
+        try:
+            sanitize_lyrics_parts(cand['lyrics'])
+            lyrics = cand['lyrics']
+            synced = bool(cand.get('synced'))
+            wbw = bool(cand.get('wordSynced')) or any(l.get('wordSynced') for l in lyrics)
+            tier = 'wbw' if wbw else ('line' if synced else 'plain')
+            score = _lyrics_score(cand)
+        except Exception as e:
+            print(f"  [probe] emit {logical_provider} error: {e}")
+            return
         candidates.append({
             'provider': logical_provider,
             'source': cand.get('source') or label,
@@ -265,25 +269,28 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None):
 
     # Cubey API (needs JWT): one entry, TTML/QRC preferred over LRC.
     if wants('Cubey'):
-        from .providers_cubey import fetch_cubey
-        if not jwt_token:
-            jwt_token = pick_jwt()
-        if jwt_token:
-            cubey_node = pick_node()
-            best = None
-            for q in queries:
-                cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
-                if not cubey:
-                    continue
-                if cubey.get('parsed'):
-                    cand = {'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}
-                    if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                        best = cand
-                elif cubey.get('synced'):
-                    cand = {'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}
-                    if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                        best = cand
-            emit('Cubey', 'Cubey', best)
+        try:
+            from .providers_cubey import fetch_cubey
+            if not jwt_token:
+                jwt_token = pick_jwt()
+            if jwt_token:
+                cubey_node = pick_node()
+                best = None
+                for q in queries:
+                    cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                    if not cubey:
+                        continue
+                    if cubey.get('parsed'):
+                        cand = {'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}
+                        if best is None or _lyrics_score(cand) > _lyrics_score(best):
+                            best = cand
+                    elif cubey.get('synced'):
+                        cand = {'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}
+                        if best is None or _lyrics_score(cand) > _lyrics_score(best):
+                            best = cand
+                emit('Cubey', 'Cubey', best)
+        except Exception as e:
+            print(f"  [probe] Cubey error: {e}")
 
     # Direct braccato providers: keep each sub-source visible separately --
     # this is exactly the "check each provider and choose" case (bLyrics TTML,
@@ -301,50 +308,56 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None):
             fetcher = _DIRECT_FETCHERS[name]
             try:
                 raw = fetcher(q['title'], q['artist'], duration, album)
+                cand = _candidate_dict(raw, duration, priority=0)
+                if cand and (best is None or _lyrics_score(cand) > _lyrics_score(best)):
+                    best = cand
             except Exception:
                 continue
-            cand = _candidate_dict(raw, duration, priority=0)
-            if cand and (best is None or _lyrics_score(cand) > _lyrics_score(best)):
-                best = cand
         emit(chooser[name], chooser[name], best)
 
     # LRCLib: one entry (synced beats plain).
     if wants('LRCLib'):
-        from .providers_lrclib import fetch_lrclib
-        lrclib_node = pick_node()
-        best = None
-        for q in queries:
-            lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
-            if not lrc:
-                continue
-            if lrc.get('instrumental'):
-                cand = {'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
-            elif lrc.get('synced'):
-                cand = {'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}
-            else:
-                cand = {'lyrics': parse_plain(lrc.get('plain', '')), 'source': 'LRCLib', 'synced': False}
-            if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                best = cand
-        emit('LRCLib', 'LRCLib', best)
+        try:
+            from .providers_lrclib import fetch_lrclib
+            lrclib_node = pick_node()
+            best = None
+            for q in queries:
+                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
+                if not lrc:
+                    continue
+                if lrc.get('instrumental'):
+                    cand = {'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
+                elif lrc.get('synced'):
+                    cand = {'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}
+                else:
+                    cand = {'lyrics': parse_plain(lrc.get('plain', '')), 'source': 'LRCLib', 'synced': False}
+                if best is None or _lyrics_score(cand) > _lyrics_score(best):
+                    best = cand
+            emit('LRCLib', 'LRCLib', best)
+        except Exception as e:
+            print(f"  [probe] LRCLib error: {e}")
 
     # Unison: one entry (TTML/synced preferred over plain).
     if wants('Unison'):
-        from .providers_unison import fetch_unison
-        unison_node = pick_node()
-        best = None
-        for q in queries:
-            uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
-            if not uni:
-                continue
-            if uni.get('parsed'):
-                cand = {'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}
-            elif uni.get('synced'):
-                cand = {'lyrics': parse_lrc(uni['synced'], duration), 'source': 'Unison', 'synced': True}
-            else:
-                cand = {'lyrics': parse_plain(uni.get('plain', '')), 'source': 'Unison', 'synced': False}
-            if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                best = cand
-        emit('Unison', 'Unison', best)
+        try:
+            from .providers_unison import fetch_unison
+            unison_node = pick_node()
+            best = None
+            for q in queries:
+                uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
+                if not uni:
+                    continue
+                if uni.get('parsed'):
+                    cand = {'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}
+                elif uni.get('synced'):
+                    cand = {'lyrics': parse_lrc(uni['synced'], duration), 'source': 'Unison', 'synced': True}
+                else:
+                    cand = {'lyrics': parse_plain(uni.get('plain', '')), 'source': 'Unison', 'synced': False}
+                if best is None or _lyrics_score(cand) > _lyrics_score(best):
+                    best = cand
+            emit('Unison', 'Unison', best)
+        except Exception as e:
+            print(f"  [probe] Unison error: {e}")
 
     # YouTube Music: plain only.
     if wants('YouTube'):
