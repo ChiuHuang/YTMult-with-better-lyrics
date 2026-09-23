@@ -204,6 +204,46 @@
 
         <mdui-card variant="elevated" class="panel">
           <div class="panel-head">
+            <span class="section-title">Refetch from URL</span>
+            <span class="pill pill-mute" id="refetch-status">idle</span>
+            <span class="spacer"></span>
+            <mdui-button id="refetch-probe" variant="filled" icon="search">Check providers</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="refetch-inputs">
+              <mdui-text-field id="refetch-url" variant="outlined" label="YouTube URL or video ID" icon="link"></mdui-text-field>
+              <mdui-text-field id="refetch-lang" variant="outlined" label="Lang" value="zh-TW" icon="translate"></mdui-text-field>
+              <mdui-text-field id="refetch-title" variant="outlined" label="Custom title (rename)" icon="title"></mdui-text-field>
+              <mdui-text-field id="refetch-artist" variant="outlined" label="Custom artist (rename)" icon="person"></mdui-text-field>
+            </div>
+            <div class="refetch-meta" id="refetch-meta">Enter a URL, then Check providers. Custom title/artist override the fetched metadata for this search and are saved for later refetches.</div>
+            <div id="refetch-candidates" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Playlist refetch</span>
+            <span class="pill pill-mute" id="plsync-status">idle</span>
+            <span class="spacer"></span>
+            <mdui-button id="plsync-start" variant="filled" icon="playlist_play">Sync playlist</mdui-button>
+            <mdui-button id="plsync-stop" variant="tonal" icon="stop" style="display:none;">Stop</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="plsync-inputs">
+              <mdui-text-field id="plsync-url" variant="outlined" label="Playlist URL or ID" icon="link"></mdui-text-field>
+              <mdui-text-field id="plsync-lang" variant="outlined" label="Lang" value="zh-TW" icon="translate"></mdui-text-field>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin:10px 0;">
+              <mdui-linear-progress id="plsync-progress" value="0" style="flex:1;"></mdui-linear-progress>
+              <span id="plsync-summary" style="font-size:13px; white-space:nowrap;"></span>
+            </div>
+            <div id="plsync-results" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
             <span class="section-title">Unlyriced songs</span>
             <span class="spacer"></span>
             <mdui-button id="unlyriced-retitle-all" variant="tonal" icon="edit">Retitle all with LLM</mdui-button>

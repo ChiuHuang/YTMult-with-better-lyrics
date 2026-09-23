@@ -4,6 +4,7 @@
 # Admin API routes for the library manager: cache scan, unlyriced list,
 # background rebase, retitling, and cache preview.
 import os
+import re
 import threading
 import time as time_module
 
@@ -11,9 +12,13 @@ from flask import request, jsonify
 from .app import app, login_required, _sse_broadcast
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, rebase_cached,
-    retitle_song,
+    retitle_song, get_rename, save_rename,
 )
-from .cache import get_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
+from .cache import get_cached, set_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
+from .utils import _safe_cache_component
+from .pipeline import probe_providers
+from .providers_yt import get_song_info
+from .translate import cohere_translate
 
 # Module-level rebase job state
 _rebase_job = {
@@ -446,3 +451,160 @@ def api_cache_preview():
         resp['wordSynced'] = wbw
     resp['tier'] = tier
     return jsonify(resp)
+
+
+# ===============================================================
+# Refetch from URL / custom rename: probe every provider, pick one
+# ===============================================================
+_VIDEO_ID_RE = re.compile(r'(?:youtube(?:-nocookie)?\.com/(?:watch\?(?:.*&)?v=|embed/|v/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})')
+_VIDEO_ID_PARAM_RE = re.compile(r'[?&]v=([A-Za-z0-9_-]{11})')
+
+
+def _extract_video_id(text):
+    """Accept a full YouTube/YouTube Music URL or a bare 11-char video ID."""
+    text = (text or '').strip()
+    if not text:
+        return None
+    m = _VIDEO_ID_RE.search(text)
+    if m:
+        return m.group(1)
+    m = _VIDEO_ID_PARAM_RE.search(text)
+    if m:
+        return m.group(1)
+    if re.fullmatch(r'[A-Za-z0-9_-]{11}', text):
+        return text
+    return None
+
+
+def _info_with_rename(video_id, info, custom_title=None, custom_artist=None):
+    """Apply a manual rename (custom beats saved beats fetched) and persist a
+    new override only when the user explicitly typed title/artist."""
+    saved = get_rename(video_id) or {}
+    t = (custom_title or saved.get('title') or '').strip() or info.get('title', '')
+    a = (custom_artist or saved.get('artist') or '').strip() or info.get('artist', '')
+    if custom_title or custom_artist:
+        save_rename(video_id, t, a)
+    info['title'] = t
+    info['artist'] = a
+    return info
+
+
+def _candidate_tier(cand):
+    if cand.get('wordSynced'):
+        return 'wbw'
+    if cand.get('synced'):
+        return 'line'
+    return 'plain'
+
+
+@app.route('/api/admin/library/probe', methods=['POST'])
+@login_required
+def api_probe():
+    """Refetch lyrics for one video, showing every provider's best result so
+    the admin can check each one and pick. Body: {url? or video_id?, lang?,
+    title?, artist?, source?} -- title/artist are the custom rename override;
+    source limits the probe to a single provider name. Returns {ok, video_id,
+    song, artist, duration, renamed, candidates:[...]} sorted best-first."""
+    body = request.get_json(silent=True) or {}
+    video_id = _extract_video_id(body.get('url') or body.get('video_id') or '')
+    if not video_id:
+        return jsonify({'ok': False, 'error': 'Missing or invalid video URL/ID'}), 400
+    lang = body.get('lang') or 'zh-TW'
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    only_source = (body.get('source') or '').strip() or None
+
+    try:
+        info = get_song_info(video_id)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'get_song_info failed: {e}'}), 502
+    if not info:
+        return jsonify({'ok': False, 'error': 'Video not found on YouTube Music'}), 404
+
+    saved = get_rename(video_id) or {}
+    info = _info_with_rename(video_id, info,
+                             custom_title=(body.get('title') or '').strip(),
+                             custom_artist=(body.get('artist') or '').strip())
+    renamed = False
+    if saved:
+        renamed = True
+
+    try:
+        from .jwt_pool import pick_jwt
+        candidates = probe_providers(video_id, info, jwt_token=pick_jwt(), only_source=only_source)
+    except Exception as e:
+        print(f"[LIBRARY] [FAIL] probe {video_id}: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
+
+    return jsonify({
+        'ok': True,
+        'video_id': video_id,
+        'song': info.get('title', ''),
+        'artist': info.get('artist', ''),
+        'duration': info.get('duration', 0),
+        'lang': lang,
+        'renamed': renamed,
+        'candidates': candidates,
+    })
+
+
+@app.route('/api/admin/library/probe/apply', methods=['POST'])
+@login_required
+def api_probe_apply():
+    """Cache one chosen probe candidate. Body: {video_id, lang, source, data,
+    title?, artist?}. Translates for the target lang (unless already
+    translated), persists a manual rename when title/artist are given, writes
+    the cache, and drops the video from the unlyriced list."""
+    body = request.get_json(silent=True) or {}
+    video_id = (body.get('video_id') or '').strip()
+    lang = body.get('lang') or 'zh-TW'
+    source = (body.get('source') or '').strip()
+    data = body.get('data')
+    if not video_id or not isinstance(data, dict) or not data.get('lyrics'):
+        return jsonify({'ok': False, 'error': 'Missing video_id or candidate data'}), 400
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+
+    try:
+        info = get_song_info(video_id)
+    except Exception:
+        info = None
+    base = dict(info or {})
+    base = _info_with_rename(video_id, base,
+                             custom_title=(body.get('title') or '').strip(),
+                             custom_artist=(body.get('artist') or '').strip())
+
+    out = dict(data)
+    out['song'] = base.get('title', out.get('song', ''))
+    out['artist'] = base.get('artist', out.get('artist', ''))
+    if source:
+        out['source'] = source
+    lyrics = out.get('lyrics') or []
+    sanitize_lyrics_parts(lyrics)
+
+    has_translated = any(l.get('translated') for l in lyrics)
+    if lang and lyrics and not has_translated:
+        print(f"  [APPLY] translating {len(lyrics)} lines for {lang}...")
+        texts = [l['text'] for l in lyrics if l.get('text')]
+        translations = cohere_translate(texts, lang)
+        for i, lyric in enumerate(lyrics):
+            if i < len(translations) and translations[i]:
+                lyric['translated'] = translations[i]
+
+    out['wordSynced'] = any(l.get('wordSynced') for l in lyrics)
+    set_cached(f"{video_id}:{lang}", out)
+    remove_unlyriced(video_id)
+    _sse_broadcast('rebase', {'state': 'done', 'applied': video_id})
+
+    return jsonify({
+        'ok': True,
+        'video_id': video_id,
+        'song': out['song'],
+        'artist': out['artist'],
+        'source': out.get('source', ''),
+        'tier': _candidate_tier(out),
+        'lines': len(lyrics),
+        'lang': lang,
+        'renamed': bool((body.get('title') or '').strip() or (body.get('artist') or '').strip()),
+        'data': out,
+    })

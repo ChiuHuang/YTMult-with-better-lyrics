@@ -889,12 +889,12 @@
     const btn = $('#prev-play');
     if (btn) btn.setAttribute('icon', 'play_arrow');
   };
-  const openPreview = async (videoId, lang) => {
+  const openPreview = async (videoId, lang, inlineData) => {
     destroyYtPlayer();
     const dlg = $('#preview-dialog');
     if (!dlg) return;
     try {
-      const data = await json(`/api/admin/cache/preview?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`);
+      const data = inlineData || await json(`/api/admin/cache/preview?v=${encodeURIComponent(videoId)}&lang=${encodeURIComponent(lang)}`);
       prevData = data;
       prevPlayhead = 0;
       prevYtPlaying = false;
@@ -987,6 +987,156 @@
       if (state === YT.PlayerState.PLAYING) ytPlayer.pauseVideo();
       else ytPlayer.playVideo();
     } catch {}
+  };
+
+  /* ---- refetch from URL / per-provider pick + custom rename ---- */
+  const tierPill = t => {
+    const cls = t === 'wbw' ? 'pill-ok' : t === 'line' ? 'pill-warn' : 'pill-mute';
+    return el('span', {class:`pill ${cls}`}, t);
+  };
+  const renderProbeCandidates = (d) => {
+    const meta = $('#refetch-meta');
+    const list = $('#refetch-candidates');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!d || !d.candidates || !d.candidates.length) {
+      meta.textContent = (d && d.error) ? `Probe error: ${d.error}` : 'No lyrics found from any provider for this video.';
+      return;
+    }
+    const renamed = d.renamed ? ' (saved rename applied)' : '';
+    meta.textContent = `${d.song || '?'} - ${d.artist || '?'} | ${d.duration || 0}s | ${d.candidates.length} candidate(s)${renamed}`;
+    d.candidates.forEach((c, i) => {
+      const rowCls = i === 0 ? 'rb-upgraded' : 'rb-same';
+      const previewBtn = el('mdui-button', {variant:'tonal', icon:'visibility'}, 'Preview');
+      previewBtn.addEventListener('click', () => openPreview(d.video_id, d.lang, c.data));
+      const saveBtn = el('mdui-button', {variant:'filled', icon:'save'}, 'Save');
+      saveBtn.addEventListener('click', async () => {
+        saveBtn.loading = true;
+        try {
+          const r = await API('/api/admin/library/probe/apply', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+              video_id: d.video_id, lang: d.lang, source: c.source,
+              data: c.data,
+              title: ($('#refetch-title') && $('#refetch-title').value) || undefined,
+              artist: ($('#refetch-artist') && $('#refetch-artist').value) || undefined,
+            })});
+          const applied = await r.json();
+          if (!applied.ok) throw new Error(applied.error || 'apply failed');
+          mdui.snackbar({message:`Saved ${applied.song} (${applied.source}, ${applied.tier})`});
+          loadCaches();
+          loadLibrary();
+          openPreview(applied.video_id, applied.lang, applied.data);
+        } catch (e) { mdui.snackbar({message:'Apply failed: '+e.message}); }
+        saveBtn.loading = false;
+      });
+      const row = el('div', {class:`rebase-row ${rowCls} probe-row`},
+        el('span', {class:'probe-name'}, `${i === 0 ? 'best: ' : ''}${c.provider || '?'}`),
+        el('span', {class:'probe-source'}, `${c.source || ''} | ${c.lines} lines | score ${c.score}`),
+        tierPill(c.tier),
+        el('span', {class:'probe-actions'}, previewBtn, saveBtn)
+      );
+      list.appendChild(row);
+    });
+  };
+  const probeRefetch = async () => {
+    const probeBtn = $('#refetch-probe');
+    const status = $('#refetch-status');
+    const url = ($('#refetch-url') && $('#refetch-url').value || '').trim();
+    if (!url) { mdui.snackbar({message:'Enter a YouTube URL or video ID'}); return; }
+    if (probeBtn) probeBtn.loading = true;
+    if (status) status.textContent = 'probing...';
+    try {
+      const r = await API('/api/admin/library/probe', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          url,
+          lang: ($('#refetch-lang') && $('#refetch-lang').value || 'zh-TW').trim(),
+          title: ($('#refetch-title') && $('#refetch-title').value || '').trim() || undefined,
+          artist: ($('#refetch-artist') && $('#refetch-artist').value || '').trim() || undefined,
+        })});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'probe failed');
+      renderProbeCandidates(d);
+      if (status) status.textContent = 'done';
+    } catch (e) {
+      if (status) status.textContent = 'error';
+      mdui.snackbar({message:'Probe failed: '+e.message});
+      const list = $('#refetch-candidates');
+      if (list) list.innerHTML = '';
+    }
+    if (probeBtn) probeBtn.loading = false;
+  };
+
+  /* ---- playlist refetch (web) ---- */
+  let plPollTimer = null;
+  let plJobId = null;
+  const renderPlSync = st => {
+    const progress = $('#plsync-progress');
+    const summary = $('#plsync-summary');
+    const status = $('#plsync-status');
+    const list = $('#plsync-results');
+    const running = st && (st.state === 'running' || st.state === 'queued');
+    if (status) status.textContent = (st && st.state) || 'idle';
+    const stopBtn = $('#plsync-stop');
+    if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+    if (progress) progress.value = (st && st.total > 0) ? Math.min(1, st.done / st.total) : 0;
+    if (summary) summary.textContent = st && st.total > 0
+      ? `${st.done}/${st.total} found=${st.found} unlyriced=${st.unlyriced || 0} errors=${st.error_count || 0}${st.current ? '  ' + st.current : ''}`
+      : '';
+    if (list) {
+      list.innerHTML = '';
+      const tracks = (st && st.tracks) || [];
+      if (!tracks.length) {
+        if (running) list.appendChild(el('div', {style:'font-size:12.5px; color:rgb(var(--mdui-color-outline)); padding:8px 0;'}, 'Fetching playlist...'));
+        else list.appendChild(el('div', {style:'font-size:12.5px; color:rgb(var(--mdui-color-outline)); padding:8px 0;'}, 'No playlist sync yet.'));
+        return;
+      }
+      tracks.forEach(t => {
+        const tag = t.tag || t.status || '';
+        const cls = tag === 'found' ? 'rb-upgraded' : tag === 'unlyriced' ? 'rb-failed' : tag === 'error' ? 'rb-error' : 'rb-already';
+        const pv = tag === 'found'
+          ? el('button', {class:'pl-sync-preview', style:'background:none;border:none;color:rgb(var(--mdui-color-primary));cursor:pointer;padding:0;font-size:12px;'}, 'preview')
+          : null;
+        if (pv) pv.addEventListener('click', () => openPreview(t.video_id, ($('#plsync-lang') && $('#plsync-lang').value) || 'zh-TW'));
+        const row = el('div', {class:`rebase-row ${cls}`});
+        row.appendChild(document.createTextNode(`${t.title || t.song || t.video_id || '?'}${t.artist ? ' - ' + t.artist : ''} | ${tag}${t.source ? ' | ' + t.source : ''}`));
+        if (pv) row.appendChild(document.createTextNode('  '));
+        if (pv) row.appendChild(pv);
+        list.appendChild(row);
+      });
+    }
+  };
+  const stopPlaylistSyncWeb = async () => {
+    if (!plJobId) return;
+    try { await API(`/api/playlist/sync/stop/${encodeURIComponent(plJobId)}`, {method:'POST'}); } catch {}
+    if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
+    renderPlSync({state:'stopped'});
+  };
+  const startPlaylistSyncWeb = async () => {
+    const url = ($('#plsync-url') && $('#plsync-url').value || '').trim();
+    if (!url) { mdui.snackbar({message:'Enter a playlist URL or ID'}); return; }
+    const startBtn = $('#plsync-start');
+    if (startBtn) startBtn.loading = true;
+    if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
+    try {
+      const r = await API('/api/playlist/sync', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({playlist_id: url, lang: ($('#plsync-lang') && $('#plsync-lang').value || 'zh-TW').trim()})});
+      const d = await r.json();
+      plJobId = d.job_id;
+      renderPlSync({state:'queued', total: 0, done: 0});
+      plPollTimer = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/playlist/sync/status/${encodeURIComponent(plJobId)}`);
+          const st = await sr.json();
+          renderPlSync(st);
+          if (st.state === 'complete' || st.state === 'stopped' || st.state === 'failed') {
+            if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
+            loadCaches();
+            loadLibrary();
+          }
+        } catch {}
+      }, 2000);
+    } catch (e) { mdui.snackbar({message:'Playlist sync failed: '+e.message}); }
+    if (startBtn) startBtn.loading = false;
   };
 
   /* ---- nav ---- */
@@ -1089,6 +1239,16 @@
     if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
     const retitleCloseBtn = $('#retitle-close');
     if (retitleCloseBtn) retitleCloseBtn.addEventListener('click', () => { try{$('#retitle-dialog').open=false;}catch{} });
+    const refetchProbeBtn = $('#refetch-probe');
+    if (refetchProbeBtn) refetchProbeBtn.addEventListener('click', probeRefetch);
+    const refetchUrl = $('#refetch-url');
+    if (refetchUrl) refetchUrl.addEventListener('keydown', e => { if (e.key === 'Enter') probeRefetch(); });
+    const plSyncStartBtn = $('#plsync-start');
+    if (plSyncStartBtn) plSyncStartBtn.addEventListener('click', startPlaylistSyncWeb);
+    const plSyncStopBtn = $('#plsync-stop');
+    if (plSyncStopBtn) plSyncStopBtn.addEventListener('click', stopPlaylistSyncWeb);
+    const plSyncUrl = $('#plsync-url');
+    if (plSyncUrl) plSyncUrl.addEventListener('keydown', e => { if (e.key === 'Enter') startPlaylistSyncWeb(); });
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';
