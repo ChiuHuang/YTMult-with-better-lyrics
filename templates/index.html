@@ -242,6 +242,56 @@
 
         <mdui-card variant="elevated" class="panel">
           <div class="panel-head">
+            <span class="section-title">Refetch all (bulk)</span>
+            <span class="pill pill-mute" id="bulk-status">idle</span>
+            <span class="spacer"></span>
+            <mdui-button id="bulk-start" variant="filled" icon="upgrade">Start</mdui-button>
+            <mdui-button id="bulk-stop" variant="tonal" icon="stop" style="display:none;">Stop</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="bulk-opts">
+              <div class="bulk-opt">
+                <div class="bulk-label">Scope</div>
+                <mdui-segmented-button id="bulk-scope">
+                  <mdui-segmented-button-item value="non-wbw" selected>Non-WBW</mdui-segmented-button-item>
+                  <mdui-segmented-button-item value="all">All cached</mdui-segmented-button-item>
+                  <mdui-segmented-button-item value="unlyriced">Unlyriced</mdui-segmented-button-item>
+                </mdui-segmented-button>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">Mode</div>
+                <mdui-segmented-button id="bulk-mode">
+                  <mdui-segmented-button-item value="fresh" selected>Fresh fetch</mdui-segmented-button-item>
+                  <mdui-segmented-button-item value="rerace">Rerace</mdui-segmented-button-item>
+                </mdui-segmented-button>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">Lang</div>
+                <mdui-text-field id="bulk-lang" variant="outlined" value="zh-TW"></mdui-text-field>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">Fetch threads</div>
+                <mdui-text-field id="bulk-workers" variant="outlined" type="number" value="8" min="1" max="32"></mdui-text-field>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">CPU workers</div>
+                <mdui-text-field id="bulk-cpu" variant="outlined" type="number" value="2"></mdui-text-field>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">Translate</div>
+                <mdui-switch id="bulk-translate" checked></mdui-switch>
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin:10px 0;">
+              <mdui-linear-progress id="bulk-progress" value="0" style="flex:1;"></mdui-linear-progress>
+              <span id="bulk-summary" style="font-size:13px; white-space:nowrap;"></span>
+            </div>
+            <div id="bulk-results" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
             <span class="section-title">Unlyriced songs</span>
             <span class="spacer"></span>
             <mdui-button id="unlyriced-retitle-all" variant="tonal" icon="edit">Retitle all with LLM</mdui-button>

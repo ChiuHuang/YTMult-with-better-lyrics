@@ -3,6 +3,7 @@
 import functools
 import json
 import os
+import queue as queue_module
 import re
 import sys
 import requests
@@ -353,5 +354,87 @@ def google_translate_fast(texts, target_lang='zh-TW'):
 
     set_translate_cached(cache_key, all_translations)
     return all_translations
+
+
+def translate_result_in_place(result, target_lang):
+    """Fill lyric['translated'] for every text line of a fetched result.
+
+    Same index-aligned mapping the sequential pipeline uses, factored out so
+    the background translate queue behaves identically. Returns the number
+    of lines filled."""
+    if not target_lang or not result or not result.get('lyrics'):
+        return 0
+    texts = [l['text'] for l in result['lyrics'] if l.get('text')]
+    if not texts:
+        return 0
+    translations = cohere_translate(texts, target_lang)
+    for i, lyric in enumerate(result['lyrics']):
+        if i < len(translations):
+            lyric['translated'] = translations[i]
+    return min(len(translations), len(result['lyrics']))
+
+
+# ------------------------------------------------------------
+# Silent background translate queue: fetch threads never block on
+# translation. They cache the untranslated result, enqueue it here, and
+# move on; daemon workers translate + rewrite the cache entry. Only
+# counters are exposed (no UI of its own).
+# ------------------------------------------------------------
+_TQ_QUEUE = queue_module.Queue()
+_TQ_STATS = {'queued': 0, 'done': 0, 'errors': 0}
+_TQ_LOCK = threading.Lock()
+_TQ_WORKERS = 2
+_TQ_STARTED = False
+
+
+def _translate_queue_worker():
+    from .cache import set_cached
+    while True:
+        item = _TQ_QUEUE.get()
+        try:
+            n = translate_result_in_place(item.get('data'), item.get('lang'))
+            if n:
+                set_cached(item['key'], item['data'])
+            with _TQ_LOCK:
+                _TQ_STATS['done'] += 1
+        except Exception as e:
+            print(f"[TRANSQ] [FAIL] {item.get('key', '?')}: {e}")
+            with _TQ_LOCK:
+                _TQ_STATS['errors'] += 1
+        finally:
+            _TQ_QUEUE.task_done()
+
+
+def _ensure_translate_queue():
+    global _TQ_STARTED
+    with _TQ_LOCK:
+        if _TQ_STARTED:
+            return
+        _TQ_STARTED = True
+    for i in range(_TQ_WORKERS):
+        t = threading.Thread(target=_translate_queue_worker, daemon=True,
+                             name=f'translate-q-{i}')
+        t.start()
+
+
+def translate_queue_enqueue(cache_key, lang, data):
+    """Enqueue one fetched (untranslated) result for background translation.
+    Returns True when enqueued, False when there is nothing to translate."""
+    if not cache_key or not lang or not data or not data.get('lyrics'):
+        return False
+    if not any(l.get('text') and not l.get('translated') for l in data['lyrics']):
+        return False
+    _ensure_translate_queue()
+    _TQ_QUEUE.put({'key': cache_key, 'lang': lang, 'data': data})
+    with _TQ_LOCK:
+        _TQ_STATS['queued'] += 1
+    return True
+
+
+def translate_queue_stats():
+    with _TQ_LOCK:
+        s = dict(_TQ_STATS)
+    s['pending'] = s['queued'] - s['done'] - s['errors']
+    return s
 
 
