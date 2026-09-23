@@ -11,4 +11,7 @@
 - (NSString *)currentVideoID;
 - (CGFloat)currentVideoMediaTime;
 - (void)skipSegment;
+- (void)pause;
+- (void)play;
+- (void)togglePlayPause;
 @end
