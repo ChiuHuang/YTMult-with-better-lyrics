@@ -27,7 +27,7 @@ from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
 from .metadata import get_search_queries
 from .race import (_lyrics_score, _wbw_line_count, _race_cubey, _race_lrclib,
-    _race_unison, _race_yt, _race_boidu, _race_binimum, _sse_event)
+    _race_unison, _race_yt, _race_boidu, _race_binimum, _race_amll, _sse_event)
 from .translate import cohere_translate, google_translate_fast, apply_display_transforms
 
 @app.route('/api/lyrics/stream', methods=['GET'])
@@ -115,6 +115,7 @@ def api_lyrics_stream():
             jobs[pool.submit(_race_boidu, queries, album, duration, req_id)] = 'boidu'
             jobs[pool.submit(_race_binimum, queries, album, duration, req_id)] = 'Binimum'
             jobs[pool.submit(_race_unison, queries, video_id, duration, req_id)] = 'Unison'
+            jobs[pool.submit(_race_amll, queries, duration, req_id)] = 'AMLL'
             jobs[pool.submit(_race_yt, video_id, req_id)] = 'YouTube'
 
             best = None

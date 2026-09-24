@@ -50,7 +50,8 @@
   `self_update` (prefers `git pull`, falls back to single-file fetch),
   `parsers_lrc`/`parsers_qrc`/`parsers_ttml`, `providers_lrclib`/
   `providers_yt`/`providers_cubey`/`providers_unison`/`providers_braccato`
-  (boidu + binimum direct, no JWT), `translate`
+  (boidu + binimum direct, no JWT)/`providers_amll` (amlldb word-TTML,
+  no key), `translate`
   (Cohere + Google), `metadata`, `cache`, `pipeline` (fast/full fetch),
   `race` (parallel race + SSE helpers), `playlist` (sync job via
   `routes_library` too), `routes_lyrics`,
@@ -60,8 +61,11 @@
   DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
   providers/translate/cache; routes->all, nothing imports routes.
   Dashboard refetch-from-URL feature: `pipeline.probe_providers()` fetches
-  EVERY provider independently (Cubey/jwt, bLyrics/ttml, QQ, KuGou,
-  BiniLyrics/binimum, LRCLib, Unison, YouTube) -> candidates best-first,
+  EVERY provider independently (Cubey split into inner `Cubey/Musixmatch`,
+  `Cubey/QQ`, `Cubey/bLyrics`, `Cubey/BiniLyrics`, `Cubey/NetEase`,
+  `Cubey/KuGou` via `fetch_cubey_all`, bLyrics/ttml, QQ, KuGou,
+  BiniLyrics/binimum, AMLL (amlldb word-TTML, no key), LRCLib, Unison,
+  YouTube) -> candidates best-first,
   nothing excluded; manual rename store in `library.py` (`cache/rename.json`,
   `get_rename`/`save_rename`, custom > saved > fetched); endpoints
   `POST /api/admin/library/probe` {url|video_id, lang, title?, artist?,
@@ -97,6 +101,21 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- album-filter retry in `providers_braccato.py`: boidu treats `al` as a hard
+  filter and `get_song_info` album is often wrong (held the artist name for
+  Suki/yuri) -> every boidu fetch blanked even on perfect song/artist
+  matches. Root-caused live: ttml+album=yuri=None, ttml w/o album=43 wbw
+  lines. Now query with album, retry without (`_boidu_query` for
+  ttml/qq/kugou, same loop in `fetch_binimum`). Fixes probe AND race/rebase/
+  bulk/client paths at once (all funnel through these fetchers). Verified
+  live: probe for mIpfco-kC-w now leads bLyrics wbw 2042.53.
+- live probe race log: `probe_providers(..., run_id=...)` broadcasts
+  `probe_progress` SSE per provider group (started/found/missed/error/
+  skipped, fixed shape so future providers just call `report()`); endpoint
+  accepts/echoes `run_id`; dashboard `#refetch-live` box streams
+  `[OK]/[--]/[FAIL]/[SKIP]/...` lines filtered by run_id. Verified full
+  8-group event sequence via captured `_sse_broadcast` (note: `server.app`
+  package attr is the Flask object -- patch `sys.modules['server.app']`).
 - node relay UTF-8 fix (`node.py handle_task`): `resp.text` guesses
   ISO-8859-1 when lyrics SSE omits charset -> Japanese came back mojibake
   through Cubey-via-node (same bug class as the braccato forced-UTF-8
