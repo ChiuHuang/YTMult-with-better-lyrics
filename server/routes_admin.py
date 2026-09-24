@@ -81,7 +81,9 @@ def logout():
 @app.route('/')
 @login_required
 def dashboard():
-    return render_template('index.html')
+    # instance_id cache-busts dash.js (?v=) so a deploy/restart always runs
+    # the matching frontend (stale cached JS = missing SSE listeners).
+    return render_template('index.html', instance_id=SERVER_INSTANCE_ID)
 
 
 @app.route('/api/admin/logs', methods=['GET'])

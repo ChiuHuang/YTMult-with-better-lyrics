@@ -215,6 +215,7 @@
               <mdui-text-field id="refetch-lang" variant="outlined" label="Lang" value="zh-TW" icon="translate"></mdui-text-field>
             </div>
             <div class="refetch-meta" id="refetch-meta">Enter a URL, then Check providers. Tip: use Rename on unlyriced or cached rows first when the title is wrong.</div>
+            <div id="refetch-live" class="probe-live"></div>
             <div id="refetch-candidates" class="rebase-list"></div>
           </div>
         </mdui-card>
@@ -472,7 +473,7 @@
   if (mdui.setColorScheme) mdui.setColorScheme('#7C4DFF');
 })();
 </script>
-<script src="{{ url_for('static', filename='dash.js') }}"></script>
+<script src="{{ url_for('static', filename='dash.js') }}?v={{ instance_id or 'dev' }}"></script>
 <script type="module">
   import "{{ url_for('static', filename='braccato/element.js') }}";
 </script>
