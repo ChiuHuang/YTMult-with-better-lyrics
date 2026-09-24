@@ -44,6 +44,7 @@ _PROVIDER_RANK = {
     'Musixmatch': 40,
     'bLyrics': 38,
     'BiniLyrics': 37,
+    'AMLL': 37,
     'QQ': 36,
     'KuGou': 35,
     'NetEase': 33,
@@ -229,6 +230,28 @@ def _race_binimum(queries, album, duration, req_id='?'):
         return None
     except Exception as e:
         print(f"  [REQ {req_id}] [Race] Binimum worker error: {e}")
+        return None
+
+
+def _race_amll(queries, duration, req_id='?'):
+    """AMLL word-synced TTML direct (no JWT)."""
+    t0 = time_module.time()
+    try:
+        from .providers_amll import fetch_amll
+        for q in queries:
+            try:
+                amll = fetch_amll(q['title'], q['artist'], duration)
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Race] AMLL query error: {e}")
+                continue
+            if amll and amll.get('parsed'):
+                sanitize_lyrics_parts(amll['parsed'])
+                print(f"  [REQ {req_id}] [Race] AMLL TTML hit ({(time_module.time()-t0)*1000:.0f}ms)")
+                return {'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}
+        print(f"  [REQ {req_id}] [Race] AMLL miss ({(time_module.time()-t0)*1000:.0f}ms)")
+        return None
+    except Exception as e:
+        print(f"  [REQ {req_id}] [Race] AMLL worker error: {e}")
         return None
 
 
