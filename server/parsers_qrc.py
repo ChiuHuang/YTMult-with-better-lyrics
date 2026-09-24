@@ -157,7 +157,18 @@ def parse_qrc_structured(blob):
                 nxt_s = words[i + 1][1]
                 if s_ms + dur_ms > nxt_s:
                     dur_ms = max(nxt_s - s_ms, 1)
-            parts.append({'startTimeMs': s_ms, 'words': w, 'durationMs': dur_ms})
+            # Carry inter-word spacing inside the part itself, mirroring the
+            # TTML parser (trailing space on non-last Latin words). The
+            # braccato preview renderer splits parts on whitespace and drops
+            # bare space tokens, so spaceless parts render concatenated
+            # ("Flashdrivesawayallsorrows"). iOS trims + rejoins CJK-aware,
+            # so trailing spaces are safe there.
+            display = w
+            if not is_last:
+                nxt_w = words[i + 1][0]
+                if nxt_w and not (_is_cjk_char(w[-1]) and _is_cjk_char(nxt_w[0])):
+                    display = w + ' '
+            parts.append({'startTimeMs': s_ms, 'words': display, 'durationMs': dur_ms})
             prev_end = s_ms + dur_ms
         entry = {
             'time': round(line_start / 1000.0, 3),
@@ -186,11 +197,13 @@ def parse_qrc_to_lrc(blob):
         line = _qrc_tag(e['startTimeMs'])
         parts = e['parts']
         for i, p in enumerate(parts):
-            w = p['words']
+            w = (p['words'] or '').strip()
+            if not w:
+                continue
             line += _qrc_tag(p['startTimeMs'], bracket=False) + w
             if i < len(parts) - 1:
-                nxt = parts[i + 1]['words']
-                if nxt and w and not (_is_cjk_char(w[-1]) and _is_cjk_char(nxt[0])):
+                nxt = (parts[i + 1]['words'] or '').strip()
+                if nxt and not (_is_cjk_char(w[-1]) and _is_cjk_char(nxt[0])):
                     line += ' '
         out_lines.append(line.rstrip())
     return '\n'.join(out_lines)
