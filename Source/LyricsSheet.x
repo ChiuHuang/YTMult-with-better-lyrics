@@ -39,6 +39,56 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     return v.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
 }
 
+// Background-derived ink: the sheet sits on blurred artwork, which can be
+// bright white while the OS is in dark mode (or dark while in light mode),
+// so trait-based ink washes out. The artwork is sampled once per song (see
+// ytmu_probeArtworkBrightness:); until sampled, fall back to the OS theme.
+static int g_ytmu_bgLight = -1; // -1 unknown, 0 dark bg, 1 light bg
+
+static BOOL YTMUBgIsLight(UIView *refView) {
+    if (g_ytmu_bgLight >= 0) return g_ytmu_bgLight == 1;
+    if (refView) return YTMUInterfaceIsLight(refView);
+    return NO;
+}
+
+// Same alpha tuning as YTMUAdaptiveInk, keyed on background brightness
+// instead of the OS theme.
+static UIColor *YTMULyricInk(CGFloat darkAlpha, CGFloat lightAlpha, UIView *refView) {
+    BOOL light = YTMUBgIsLight(refView);
+    return [(light ? [UIColor blackColor] : [UIColor whiteColor])
+            colorWithAlphaComponent:(light ? lightAlpha : darkAlpha)];
+}
+static UIColor *YTMULyricShadow(UIView *refView) {
+    if (YTMUBgIsLight(refView))
+        return [[UIColor darkGrayColor] colorWithAlphaComponent:0.35];
+    return [[UIColor blackColor] colorWithAlphaComponent:0.8];
+}
+// Mean luminance of a thumbnail; -1 when unsampleable.
+static CGFloat YTMUArtworkLuminance(UIImage *img) {
+    if (!img) return -1;
+    CGImageRef cg = img.CGImage;
+    if (!cg) return -1;
+    // Fixed-size buffer: a const size_t extent would be a VLA, which cannot
+    // take an initializer in C.
+    uint8_t px[8 * 8 * 4] = {0};
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    if (!cs) return -1;
+    CGContextRef ctx = CGBitmapContextCreate(px, 8, 8, 8, 8 * 4, cs,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return -1;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, 8, 8), cg);
+    CGContextRelease(ctx);
+    double r = 0, g = 0, b = 0;
+    for (size_t i = 0; i < 64; i++) {
+        r += px[i * 4] / 255.0;
+        g += px[i * 4 + 1] / 255.0;
+        b += px[i * 4 + 2] / 255.0;
+    }
+    r /= 64.0; g /= 64.0; b /= 64.0;
+    return (CGFloat)(0.299 * r + 0.587 * g + 0.114 * b);
+}
+
 %hook YTMLightweightMusicDescriptionShelfCell
 
 - (void)layoutSubviews {
@@ -136,8 +186,8 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
         self.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.lyricLabel.textColor = YTMUAdaptiveInk(0.45, 0.55);
-        self.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
+        self.lyricLabel.textColor = YTMULyricInk(0.45, 0.55, self.contentView);
+        self.lyricLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         self.lyricLabel.layer.shadowRadius = 4.0;
         self.lyricLabel.layer.masksToBounds = NO;
@@ -147,8 +197,8 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:22];
-        self.wipeLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
-        self.wipeLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
+        self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
+        self.wipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
         self.wipeLabel.layer.shadowRadius = 4.0;
         self.wipeLabel.layer.shadowOpacity = 0.75;
@@ -172,8 +222,8 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
         self.transLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-        self.transLabel.textColor = YTMUAdaptiveInk(0.32, 0.5);
-        self.transLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
+        self.transLabel.textColor = YTMULyricInk(0.32, 0.5, self.contentView);
+        self.transLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.transLabel.layer.shadowRadius = 2.0;
         self.transLabel.layer.shadowOpacity = 0.35;
@@ -275,6 +325,9 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 
 // Private selectors used across the controller
 @interface YTMULyricsViewController (LandscapePrivate)
+- (void)ytmu_probeArtworkBrightness:(UIImage *)img;
+- (void)ytmu_refreshBgDerivedInk;
+- (void)ytmu_applyArtworkImage:(UIImage *)img forVideoID:(NSString *)videoID;
 - (void)ytmu_updateLandscapeMetadata;
 - (void)ytmu_updateLandscapeMetadataFromNowPlayingLabels;
 - (void)ytmu_collectNowPlayingLabelsIn:(UIView *)view depth:(NSInteger)depth out:(NSMutableArray *)out;
@@ -381,7 +434,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     UILabel *statusLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 10, self.view.bounds.size.width, 36)];
     statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    statusLabel.textColor = YTMUAdaptiveInk(0.7, 0.75);
+    statusLabel.textColor = YTMULyricInk(0.7, 0.75, self.view);
     statusLabel.textAlignment = NSTextAlignmentCenter;
     statusLabel.font = [UIFont systemFontOfSize:14];
     statusLabel.tag = 8888;
@@ -472,14 +525,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     self.landscapeTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeTitleLabel.font = [UIFont boldSystemFontOfSize:15];
-    self.landscapeTitleLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
+    self.landscapeTitleLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
     self.landscapeTitleLabel.numberOfLines = 1;
     self.landscapeTitleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [self.landscapeInfoPanel addSubview:self.landscapeTitleLabel];
 
     self.landscapeArtistLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeArtistLabel.font = [UIFont systemFontOfSize:12];
-    self.landscapeArtistLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
+    self.landscapeArtistLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     self.landscapeArtistLabel.numberOfLines = 1;
     self.landscapeArtistLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [self.landscapeInfoPanel addSubview:self.landscapeArtistLabel];
@@ -505,13 +558,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     self.landscapeElapsedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeElapsedLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightRegular];
-    self.landscapeElapsedLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
+    self.landscapeElapsedLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     self.landscapeElapsedLabel.text = @"0:00";
     [self.landscapeInfoPanel addSubview:self.landscapeElapsedLabel];
 
     self.landscapeTotalLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeTotalLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightRegular];
-    self.landscapeTotalLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
+    self.landscapeTotalLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     self.landscapeTotalLabel.textAlignment = NSTextAlignmentRight;
     self.landscapeTotalLabel.text = @"0:00";
     [self.landscapeInfoPanel addSubview:self.landscapeTotalLabel];
@@ -614,7 +667,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
-    self.fpsLabel.textColor = YTMUAdaptiveInk(0.7, 0.75);
+    self.fpsLabel.textColor = YTMULyricInk(0.7, 0.75, self.view);
     self.fpsLabel.hidden = YES;
     self.fpsLabel.autoresizingMask = UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleBottomMargin;
     [self.view addSubview:self.fpsLabel];
@@ -1200,6 +1253,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         // Sync artwork image whenever it changes
         if (self.artworkImageView.image && self.landscapeArtImageView.image != self.artworkImageView.image) {
             self.landscapeArtImageView.image = self.artworkImageView.image;
+            // Cached/file path bypasses loadArtwork: still sample it (cheap;
+            // no-ops when the bright/dark bucket is unchanged).
+            [self ytmu_probeArtworkBrightness:self.artworkImageView.image];
         }
 
         CGFloat safeTop = 0, safeBottom = 0;
@@ -1436,6 +1492,39 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+// Sample new artwork; when the background flips bright/dark, re-resolve
+// every background-derived color so text keeps contrasting with the blur
+// instead of following the OS theme.
+- (void)ytmu_probeArtworkBrightness:(UIImage *)img {
+    CGFloat lum = YTMUArtworkLuminance(img);
+    if (lum < 0) return;
+    int light = (lum > 0.55) ? 1 : 0;
+    if (light == g_ytmu_bgLight) return;
+    g_ytmu_bgLight = light;
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] bg luminance %.2f -> %@ ink", lum, light ? @"black" : @"white"]);
+    [self ytmu_refreshBgDerivedInk];
+}
+
+- (void)ytmu_refreshBgDerivedInk {
+    if (self.landscapeTitleLabel) self.landscapeTitleLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
+    if (self.landscapeArtistLabel) self.landscapeArtistLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
+    if (self.landscapeElapsedLabel) self.landscapeElapsedLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
+    if (self.landscapeTotalLabel) self.landscapeTotalLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
+    // reloadData keeps the scroll offset; cells re-resolve ink in configureCell.
+    if (self.tableView) [self.tableView reloadData];
+}
+
+- (void)ytmu_applyArtworkImage:(UIImage *)img forVideoID:(NSString *)videoID {
+    if (!img) return;
+    if (![self.loadingVideoID isEqualToString:videoID]) return;
+    [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
+        self.artworkImageView.image = img;
+    } completion:nil];
+    self.landscapeArtImageView.image = img;
+    self.artworkVideoID = videoID;
+    [self ytmu_probeArtworkBrightness:img];
+}
+
 - (void)loadArtworkForVideo:(NSString *)videoID {
     if (!videoID || videoID.length == 0) return;
 
@@ -1446,13 +1535,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             UIImage *img = [UIImage imageWithData:data];
             if (img) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    if ([self.loadingVideoID isEqualToString:videoID]) {
-                        [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
-                            self.artworkImageView.image = img;
-                        } completion:nil];
-                        self.landscapeArtImageView.image = img;
-                        self.artworkVideoID = videoID;
-                    }
+                    [self ytmu_applyArtworkImage:img forVideoID:videoID];
                 });
                 return;
             }
@@ -1463,13 +1546,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 UIImage *img2 = [UIImage imageWithData:d2];
                 if (img2) {
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        if ([self.loadingVideoID isEqualToString:videoID]) {
-                            [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
-                                self.artworkImageView.image = img2;
-                            } completion:nil];
-                            self.landscapeArtImageView.image = img2;
-                            self.artworkVideoID = videoID;
-                        }
+                        [self ytmu_applyArtworkImage:img2 forVideoID:videoID];
                     });
                 }
             }
@@ -1963,14 +2040,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (![layoutKey isEqualToString:self.cachedWordLayoutKey]) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = display;
-        cell.lyricLabel.textColor = YTMUAdaptiveInk(0.2, 0.2);
+        cell.lyricLabel.textColor = YTMULyricInk(0.2, 0.2, self.view);
 
         NSShadow *sh = [[NSShadow alloc] init];
-        sh.shadowColor = YTMUAdaptiveShadow();
+        sh.shadowColor = YTMULyricShadow(self.view);
         sh.shadowOffset = CGSizeMake(0, 2);
         sh.shadowBlurRadius = 4;
         cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
-            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: YTMUAdaptiveInk(1.0, 1.0), NSShadowAttributeName: sh}];
+            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: YTMULyricInk(1.0, 1.0, self.view), NSShadowAttributeName: sh}];
 
         NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
         NSLayoutManager *lm = [[NSLayoutManager alloc] init];
@@ -2078,40 +2155,40 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (!self.isSynced) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
-        cell.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
+        cell.lyricLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
+        cell.lyricLabel.layer.shadowColor = YTMULyricShadow(self.view).CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         cell.lyricLabel.layer.shadowRadius = 4.0;
         cell.lyricLabel.layer.shadowOpacity = 0.7;
         cell.lyricLabel.layer.masksToBounds = NO;
         [cell clearWipe];
 
-        cell.transLabel.textColor = YTMUAdaptiveInk(0.75, 0.75);
+        cell.transLabel.textColor = YTMULyricInk(0.75, 0.75, self.view);
     } else if (isActive) {
         if (hasWords) {
             [self applyWordColorsToCell:cell lyric:lyric index:index currentTime:currentTime force:YES];
         } else {
             cell.lyricLabel.attributedText = nil;
             cell.lyricLabel.text = displayText;
-            cell.lyricLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
+            cell.lyricLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
             [cell clearWipe];
         }
 
-        cell.lyricLabel.layer.shadowColor = YTMUAdaptiveShadow().CGColor;
+        cell.lyricLabel.layer.shadowColor = YTMULyricShadow(self.view).CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         cell.lyricLabel.layer.shadowRadius = 4.0;
         cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
-        cell.transLabel.textColor = YTMUAdaptiveInk(0.7, 0.7);
+        cell.transLabel.textColor = YTMULyricInk(0.7, 0.7, self.view);
     } else {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = YTMUAdaptiveInk(0.2, 0.2);
+        cell.lyricLabel.textColor = YTMULyricInk(0.2, 0.2, self.view);
         cell.lyricLabel.layer.shadowOpacity = 0.32;
         [cell clearWipe];
 
-        cell.transLabel.textColor = YTMUAdaptiveInk(0.25, 0.25);
+        cell.transLabel.textColor = YTMULyricInk(0.25, 0.25, self.view);
     }
 
     NSString *translated = lyric[@"translated"];
@@ -2298,18 +2375,44 @@ void openLyricsFullscreenForLandscape(void) {
     [top presentViewController:lyricsVC animated:YES completion:nil];
 }
 
-static void YTMULandscapeOrientationChanged(NSNotification *note) {
-    UIDeviceOrientation o = [UIDevice currentDevice].orientation;
-    if (o != UIDeviceOrientationLandscapeLeft && o != UIDeviceOrientationLandscapeRight) {
+// Bounded retry chain: a single deferred attempt misses whenever the
+// interface hasn't finished rotating, the top VC is mid-presentation, or
+// the video ID isn't resolved yet. Keep trying while the phone stays
+// landscape; every attempt re-checks visibility first so we never double
+// present.
+static void YTMUAttemptLandscapeOpenChain(int left) {
+    if (left <= 0) return;
+    if (isLyricsViewVisibleOnScreen()) return;
+    if (!YTMUIsInterfaceLandscape()) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            YTMUAttemptLandscapeOpenChain(left - 1);
+        });
         return;
     }
-    // Defer past the rotation animation so top VC is stable
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    NSString *vid = YTMUResolveCurrentVideoID();
+    UIViewController *top = topMostViewController();
+    if (!vid.length || !top || top.presentedViewController || top.isBeingPresented || top.isBeingDismissed) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            YTMUAttemptLandscapeOpenChain(left - 1);
+        });
+        return;
+    }
+    openLyricsFullscreenForLandscape();
+}
+
+static void YTMULandscapeOrientationChanged(NSNotification *note) {
+    UIDeviceOrientation o = [UIDevice currentDevice].orientation;
+    BOOL deviceLandscape = (o == UIDeviceOrientationLandscapeLeft || o == UIDeviceOrientationLandscapeRight);
+    if (!deviceLandscape) {
+        // Missed earlier (flat rotation, late observer, already landscape on
+        // entry): if the interface is landscape anyway, still try.
         if (!YTMUIsInterfaceLandscape()) return;
-        if (isLyricsViewVisibleOnScreen()) return;
-        NSString *vid = YTMUResolveCurrentVideoID();
-        if (!vid.length) return;
-        openLyricsFullscreenForLandscape();
+        YTMUAttemptLandscapeOpenChain(2);
+        return;
+    }
+    // Defer past the rotation animation so top VC is stable, then retry.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        YTMUAttemptLandscapeOpenChain(4);
     });
 }
 
