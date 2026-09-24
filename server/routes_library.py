@@ -49,6 +49,64 @@ _retitle_job = {
 _retitle_lock = threading.Lock()
 _retitle_cancel = threading.Event()
 
+# Background probe jobs: the dashboard starts a probe, polls light status,
+# and pages the saved candidates without re-probing. Candidates live
+# server-side in the job dict (memory, 30-min TTL) so left/right switching
+# is instant and the slow probe never blocks the POST.
+_probe_jobs = {}
+_probe_jobs_lock = threading.Lock()
+_PROBE_JOB_TTL = 1800
+
+
+def _probe_job_prune():
+    now = time_module.time()
+    with _probe_jobs_lock:
+        old = [jid for jid, j in _probe_jobs.items()
+               if now - j.get('created', now) > _PROBE_JOB_TTL]
+        for jid in old:
+            _probe_jobs.pop(jid, None)
+
+
+def _probe_job_run(job_id):
+    job = _probe_jobs.get(job_id)
+    if not job:
+        return
+    try:
+        from .jwt_pool import pick_jwt
+        notes = []
+
+        def on_candidate(entry):
+            with _probe_jobs_lock:
+                j = _probe_jobs.get(job_id)
+                if j is not None:
+                    j['candidates'].append(entry)
+
+        candidates = probe_providers(
+            job['video_id'], job['info'], jwt_token=pick_jwt(),
+            only_source=job.get('only_source'), notes=notes,
+            run_id=job_id, on_candidate=on_candidate)
+        with _probe_jobs_lock:
+            j = _probe_jobs.get(job_id)
+            if j is not None:
+                j['candidates'] = candidates
+                j['notes'] = notes
+                j['state'] = 'done'
+    except Exception as e:
+        print(f"[LIBRARY] [FAIL] background probe {job_id}: {e}")
+        with _probe_jobs_lock:
+            j = _probe_jobs.get(job_id)
+            if j is not None:
+                j['state'] = 'error'
+                j['error'] = str(e)
+    finally:
+        try:
+            _sse_broadcast('probe_progress', {
+                'run_id': job_id, 'video_id': job.get('video_id', ''),
+                'provider': 'probe', 'status': 'done', 'detail': '',
+            })
+        except Exception:
+            pass
+
 
 @app.route('/api/admin/library/scan', methods=['GET'])
 @login_required
@@ -585,6 +643,7 @@ def api_probe():
     if not _safe_cache_component(lang):
         return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
     only_source = (body.get('source') or '').strip() or None
+    run_id = (body.get('run_id') or '').strip() or None
 
     try:
         info = get_song_info(video_id)
@@ -602,7 +661,7 @@ def api_probe():
     try:
         from .jwt_pool import pick_jwt
         notes = []
-        candidates = probe_providers(video_id, info, jwt_token=pick_jwt(), only_source=only_source, notes=notes)
+        candidates = probe_providers(video_id, info, jwt_token=pick_jwt(), only_source=only_source, notes=notes, run_id=run_id)
     except Exception as e:
         print(f"[LIBRARY] [FAIL] probe {video_id}: {e}")
         return jsonify({'ok': False, 'error': str(e)}), 500
@@ -616,8 +675,71 @@ def api_probe():
         'lang': lang,
         'renamed': renamed,
         'notes': notes,
+        'run_id': run_id,
         'candidates': candidates,
     })
+
+
+@app.route('/api/admin/library/probe/start', methods=['POST'])
+@login_required
+def api_probe_start():
+    """Start a background probe job for one video. Body: same as the sync
+    /probe ({url? or video_id?, lang?, title?, artist?, source?}).
+    Returns {ok, job_id, video_id, status_url} immediately; the dashboard
+    polls status (light) and fetches full candidates once done, paging them
+    without re-probing."""
+    import secrets as _secrets
+    body = request.get_json(silent=True) or {}
+    video_id = _extract_video_id(body.get('url') or body.get('video_id') or '')
+    if not video_id:
+        return jsonify({'ok': False, 'error': 'Missing or invalid video URL/ID'}), 400
+    lang = body.get('lang') or 'zh-TW'
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    only_source = (body.get('source') or '').strip() or None
+    try:
+        info = get_song_info(video_id)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'get_song_info failed: {e}'}), 502
+    if not info:
+        return jsonify({'ok': False, 'error': 'Video not found on YouTube Music'}), 404
+    saved = get_rename(video_id) or {}
+    info = _info_with_rename(video_id, info,
+                             custom_title=(body.get('title') or '').strip(),
+                             custom_artist=(body.get('artist') or '').strip())
+    renamed = bool(saved) or bool((body.get('title') or '').strip() or (body.get('artist') or '').strip())
+    _probe_job_prune()
+    job_id = 'pb' + _secrets.token_hex(6)
+    with _probe_jobs_lock:
+        _probe_jobs[job_id] = {
+            'job_id': job_id, 'state': 'running',
+            'video_id': video_id, 'info': info,
+            'song': info.get('title', ''), 'artist': info.get('artist', ''),
+            'duration': info.get('duration', 0), 'lang': lang,
+            'renamed': renamed, 'only_source': only_source,
+            'notes': [], 'candidates': [], 'error': None,
+            'created': time_module.time(),
+        }
+    threading.Thread(target=_probe_job_run, args=(job_id,), daemon=True).start()
+    return jsonify({'ok': True, 'job_id': job_id, 'video_id': video_id,
+                    'status_url': f'/api/admin/library/probe/status/{job_id}'})
+
+
+@app.route('/api/admin/library/probe/status/<job_id>', methods=['GET'])
+@login_required
+def api_probe_status(job_id):
+    """Light poll by default ({state, count, notes}); pass ?full=1 once done
+    to fetch the saved candidates for paging."""
+    full = (request.args.get('full') or '') == '1'
+    with _probe_jobs_lock:
+        job = _probe_jobs.get(job_id)
+        if not job:
+            return jsonify({'ok': False, 'error': 'unknown job'}), 404
+        out = {k: v for k, v in job.items() if k not in ('info', 'candidates')}
+        out['count'] = len(job.get('candidates') or [])
+        cands = list(job.get('candidates') or []) if full else []
+    out['candidates'] = cands
+    return jsonify({**out, 'ok': True})
 
 
 @app.route('/api/admin/library/probe/apply', methods=['POST'])

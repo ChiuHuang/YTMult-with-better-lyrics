@@ -1033,78 +1033,148 @@
     const cls = t === 'wbw' ? 'pill-ok' : t === 'line' ? 'pill-warn' : 'pill-mute';
     return el('span', {class:`pill ${cls}`}, t);
   };
-  const renderProbeCandidates = (d) => {
+  /* ---- background probe + provider pager ----
+     probe/start returns immediately; light status polls update the count
+     pill while probe_progress SSE streams race lines into #refetch-live.
+     Full candidates are fetched once (job saves them server-side) and
+     paged with left/right instead of re-probing. */
+  let probePollTimer = null;
+  let probePager = null;
+  const stopProbePoll = () => {
+    if (probePollTimer) { clearInterval(probePollTimer); probePollTimer = null; }
+  };
+  const setProbeStatus = (text, cls) => {
+    const status = $('#refetch-status');
+    if (!status) return;
+    status.textContent = text;
+    status.className = 'pill ' + (cls || 'pill-mute');
+  };
+  const applyProbeCandidate = async (saveBtn, d, c) => {
+    saveBtn.loading = true;
+    try {
+      const r = await API('/api/admin/library/probe/apply', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          video_id: d.video_id, lang: d.lang, source: c.source,
+          data: c.data,
+        })});
+      const applied = await r.json();
+      if (!applied.ok) throw new Error(applied.error || 'apply failed');
+      mdui.snackbar({message:`Saved ${applied.song} (${applied.source}, ${applied.tier})`});
+      loadCaches();
+      loadLibrary();
+      openPreview(applied.video_id, applied.lang, applied.data);
+    } catch (e) { mdui.snackbar({message:'Apply failed: '+e.message}); }
+    saveBtn.loading = false;
+  };
+  const renderProbePager = () => {
     const meta = $('#refetch-meta');
     const list = $('#refetch-candidates');
-    if (!list) return;
+    if (!list || !probePager) return;
     list.innerHTML = '';
-    if (!d || !d.candidates || !d.candidates.length) {
-      meta.textContent = (d && d.error) ? `Probe error: ${d.error}` : 'No lyrics found from any provider for this video.';
+    const d = probePager.d;
+    const cands = (d && d.candidates) || [];
+    if (!cands.length) {
+      if (meta) meta.textContent = (d && d.error) ? `Probe error: ${d.error}` : 'No lyrics found from any provider for this video.';
       return;
     }
+    if (probePager.idx < 0) probePager.idx = 0;
+    if (probePager.idx >= cands.length) probePager.idx = cands.length - 1;
+    const i = probePager.idx;
+    const c = cands[i];
     const renamed = d.renamed ? ' (saved rename applied)' : '';
     const notes = (d.notes && d.notes.length) ? ' | ' + d.notes.join('; ') : '';
-    meta.textContent = `${d.song || '?'} - ${d.artist || '?'} | ${d.duration || 0}s | ${d.candidates.length} candidate(s)${renamed}${notes}`;
-    d.candidates.forEach((c, i) => {
-      const rowCls = i === 0 ? 'rb-upgraded' : 'rb-same';
-      const previewBtn = el('mdui-button', {variant:'tonal', icon:'visibility'}, 'Preview');
-      previewBtn.addEventListener('click', () => openPreview(d.video_id, d.lang, c.data));
-      const saveBtn = el('mdui-button', {variant:'filled', icon:'save'}, 'Save');
-      saveBtn.addEventListener('click', async () => {
-        saveBtn.loading = true;
-        try {
-          const r = await API('/api/admin/library/probe/apply', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({
-              video_id: d.video_id, lang: d.lang, source: c.source,
-              data: c.data,
-            })});
-          const applied = await r.json();
-          if (!applied.ok) throw new Error(applied.error || 'apply failed');
-          mdui.snackbar({message:`Saved ${applied.song} (${applied.source}, ${applied.tier})`});
-          loadCaches();
-          loadLibrary();
-          openPreview(applied.video_id, applied.lang, applied.data);
-        } catch (e) { mdui.snackbar({message:'Apply failed: '+e.message}); }
-        saveBtn.loading = false;
-      });
-      const row = el('div', {class:`rebase-row ${rowCls} probe-row`},
-        el('span', {class:'probe-name'}, `${i === 0 ? 'best: ' : ''}${c.provider || '?'}`),
-        el('span', {class:'probe-source'}, `${c.source || ''} | ${c.lines} lines | score ${c.score}`),
-        tierPill(c.tier),
-        el('span', {class:'probe-actions'}, previewBtn, saveBtn)
-      );
-      list.appendChild(row);
-    });
+    if (meta) meta.textContent = `${d.song || '?'} - ${d.artist || '?'} | ${d.duration || 0}s | ${cands.length} candidate(s)${renamed}${notes}`;
+    const prevBtn = el('mdui-button-icon', {icon:'chevron_left'});
+    prevBtn.addEventListener('click', () => { if (probePager.idx > 0) { probePager.idx--; renderProbePager(); } });
+    if (i <= 0) prevBtn.setAttribute('disabled', '');
+    const nextBtn = el('mdui-button-icon', {icon:'chevron_right'});
+    nextBtn.addEventListener('click', () => { if (probePager.idx < cands.length - 1) { probePager.idx++; renderProbePager(); } });
+    if (i >= cands.length - 1) nextBtn.setAttribute('disabled', '');
+    const countLabel = el('span', {style:'min-width:52px; text-align:center; font-weight:600;'}, `${i + 1}/${cands.length}`);
+    const previewBtn = el('mdui-button', {variant:'tonal', icon:'visibility'}, 'Preview');
+    previewBtn.addEventListener('click', () => openPreview(d.video_id, d.lang, c.data));
+    const saveBtn = el('mdui-button', {variant:'filled', icon:'save'}, 'Save');
+    saveBtn.addEventListener('click', () => applyProbeCandidate(saveBtn, d, c));
+    const rowCls = i === 0 ? 'rb-upgraded' : 'rb-same';
+    list.appendChild(el('div', {class:'rebase-row probe-nav'},
+      prevBtn, countLabel, nextBtn,
+      el('span', {class:'probe-name'}, `${i === 0 ? 'best: ' : ''}${c.provider || '?'}`),
+      el('span', {class:'probe-source'}, `${c.source || ''} | ${c.lines} lines | score ${c.score}`),
+      tierPill(c.tier)));
+    list.appendChild(el('div', {class:`rebase-row ${rowCls} probe-row`},
+      el('span', {class:'probe-actions'}, previewBtn, saveBtn)));
   };
-  const probeRefetch = async (opts={}) => {    const probeBtn = $('#refetch-probe');
-    const status = $('#refetch-status');
+  const probeRefetch = async (opts={}) => {
+    const probeBtn = $('#refetch-probe');
     const url = (opts.url || ($('#refetch-url') && $('#refetch-url').value) || '').trim();
     if (!url) { mdui.snackbar({message:'Enter a YouTube URL or video ID'}); return; }
-    probeRunId = 'p' + Date.now().toString(36);
-    const live = $('#refetch-live');
-    if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
-    if (probeBtn) probeBtn.loading = true;
-    if (status) status.textContent = 'probing...';
+    stopProbePoll();
+    probePager = null;
+    let started;
     try {
-      const r = await API('/api/admin/library/probe', {method:'POST', headers:{'Content-Type':'application/json'},
+      const r = await API('/api/admin/library/probe/start', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           url,
           lang: ($('#refetch-lang') && $('#refetch-lang').value || 'zh-TW').trim(),
           title: opts.title || undefined,
           artist: opts.artist || undefined,
-          run_id: probeRunId,
         })});
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || 'probe failed');
-      renderProbeCandidates(d);
-      if (status) status.textContent = 'done';
+      started = await r.json();
+      if (!started.ok) throw new Error(started.error || 'probe start failed');
     } catch (e) {
-      if (status) status.textContent = 'error';
+      setProbeStatus('error', 'pill-mute');
       mdui.snackbar({message:'Probe failed: '+e.message});
       const list = $('#refetch-candidates');
       if (list) list.innerHTML = '';
+      return;
     }
-    if (probeBtn) probeBtn.loading = false;
+    // job_id doubles as the SSE run_id, so race lines stream live.
+    probeRunId = started.job_id;
+    const statusUrl = started.status_url;
+    const live = $('#refetch-live');
+    if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
+    const list = $('#refetch-candidates');
+    if (list) list.innerHTML = '';
+    if (probeBtn) probeBtn.loading = true;
+    setProbeStatus('probing... 0', 'pill-warn');
+    probePollTimer = setInterval(async () => {
+      let s;
+      try {
+        s = await json(statusUrl);
+        if (!s.ok) throw new Error(s.error || 'status failed');
+      } catch (e) {
+        if (probeRunId !== started.job_id) return; // superseded, new poll owns it
+        stopProbePoll();
+        if (probeBtn) probeBtn.loading = false;
+        setProbeStatus('error', 'pill-mute');
+        mdui.snackbar({message:'Probe failed: '+e.message});
+        return;
+      }
+      if (probeRunId !== started.job_id) { stopProbePoll(); return; } // superseded
+      if (s.state === 'running') {
+        setProbeStatus(`probing... ${s.count || 0}`, 'pill-warn');
+        return;
+      }
+      stopProbePoll();
+      if (probeBtn) probeBtn.loading = false;
+      if (s.state === 'error') {
+        setProbeStatus('error', 'pill-mute');
+        const meta = $('#refetch-meta');
+        if (meta) meta.textContent = `Probe error: ${s.error || 'unknown'}`;
+        mdui.snackbar({message:'Probe failed: '+(s.error || 'unknown')});
+        return;
+      }
+      try {
+        const f = await json(statusUrl + '?full=1');
+        if (!f.ok) throw new Error(f.error || 'fetch failed');
+        probePager = {d: f, idx: 0};
+        renderProbePager();
+        setProbeStatus(`${(f.candidates || []).length} providers`, 'pill-ok');
+      } catch (e) {
+        setProbeStatus('error', 'pill-mute');
+        mdui.snackbar({message:'Probe failed: '+e.message});
+      }
+    }, 1500);
   };
 
   /* ---- manual rename (unlyriced / caches rows) ---- */
