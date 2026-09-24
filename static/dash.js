@@ -31,7 +31,9 @@
   const shortSha = s => s ? s.slice(0, 8) : '--';
   const ago = iso => {
     if (!iso) return '--';
-    const d = Date.now() - new Date(iso).getTime();
+    let d = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(d)) return '--';
+    if (d < 0) d = 0;
     if (d < 60000) return Math.round(d/1000)+'s';
     if (d < 3600000) return Math.round(d/60000)+'m';
     if (d < 86400000) return Math.round(d/3600000)+'h';
@@ -227,8 +229,16 @@
         results.scrollTop = results.scrollHeight;
       } catch {}
     });
-    eventSource.addEventListener('retitle_progress', e => {
+    eventSource.addEventListener('probe_progress', e => {
       try {
+        const d = JSON.parse(e.data);
+        // Servers older than the run_id echo send no run_id; accept those
+        // rather than dropping every line silently (empty #refetch-live).
+        if (d.run_id && d.run_id !== probeRunId) return;
+        probeLiveLine(d.provider || '?', d.status || '', d.detail || '');
+      } catch {}
+    });
+    eventSource.addEventListener('retitle_progress', e => {      try {
         const d = JSON.parse(e.data);
         const results = $('#retitle-results');
         if (!results) return;
@@ -372,9 +382,13 @@
 
   /* ---- jwt ---- */
   const jwtStatus = t => {
+    // !live = hash-only record reloaded from disk after a restart: the raw
+    // token is gone, so pick_jwt() skips it even when the persisted ok flag
+    // is stale-true. Never render those green or the pool looks usable while
+    // probes report "no JWT in pool". They revive on device re-contribute.
+    if (!t.live) return el('span', {class:'pill pill-mute'}, 'stale');
     if (t.ok) return el('span', {class:'pill pill-ok'}, el('span', {class:'dot'}), 'ok');
-    if (t.live) return el('span', {class:'pill pill-warn'}, el('span', {class:'dot'}), 'unverified');
-    return el('span', {class:'pill pill-mute'}, 'empty');
+    return el('span', {class:'pill pill-warn'}, el('span', {class:'dot'}), 'unverified');
   };
   const renderJwt = tokens => {
     const list = $('#jwt-list'); if (!list) return;
@@ -1000,6 +1014,21 @@
   };
 
   /* ---- refetch from URL / per-provider pick + custom rename ---- */
+  let probeRunId = null;
+  const probeLiveLine = (provider, status, detail) => {
+    const live = $('#refetch-live');
+    if (!live) return;
+    const tag = status === 'found' ? 'OK' : status === 'missed' ? '--'
+      : status === 'error' ? 'FAIL' : status === 'skipped' ? 'SKIP' : '...';
+    const cls = status === 'found' ? 'pl-ok' : status === 'missed' ? 'pl-miss'
+      : status === 'error' ? 'pl-fail' : status === 'skipped' ? 'pl-miss' : 'pl-run';
+    live.appendChild(el('div', {},
+      el('span', {class: cls}, `[${tag}] `),
+      document.createTextNode(`${provider}${detail ? ' ' + detail : ''}`)));
+    live.classList.add('has-lines');
+    while (live.children.length > 200) live.removeChild(live.firstChild);
+    live.scrollTop = live.scrollHeight;
+  };
   const tierPill = t => {
     const cls = t === 'wbw' ? 'pill-ok' : t === 'line' ? 'pill-warn' : 'pill-mute';
     return el('span', {class:`pill ${cls}`}, t);
@@ -1047,11 +1076,13 @@
       list.appendChild(row);
     });
   };
-  const probeRefetch = async (opts={}) => {
-    const probeBtn = $('#refetch-probe');
+  const probeRefetch = async (opts={}) => {    const probeBtn = $('#refetch-probe');
     const status = $('#refetch-status');
     const url = (opts.url || ($('#refetch-url') && $('#refetch-url').value) || '').trim();
     if (!url) { mdui.snackbar({message:'Enter a YouTube URL or video ID'}); return; }
+    probeRunId = 'p' + Date.now().toString(36);
+    const live = $('#refetch-live');
+    if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
     if (probeBtn) probeBtn.loading = true;
     if (status) status.textContent = 'probing...';
     try {
@@ -1061,6 +1092,7 @@
           lang: ($('#refetch-lang') && $('#refetch-lang').value || 'zh-TW').trim(),
           title: opts.title || undefined,
           artist: opts.artist || undefined,
+          run_id: probeRunId,
         })});
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'probe failed');
