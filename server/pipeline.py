@@ -212,7 +212,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     return result
 
 
-def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes=None):
+def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes=None, run_id=None, on_candidate=None):
     """Fetch each provider independently and return one candidate per
     provider/format so the dashboard can show every finding and let the admin
     pick which one to cache (not just the default best). Each entry is
@@ -220,9 +220,32 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
     'lines', 'score', 'data'} where data is the full song-shape dict
     {lyrics, source, synced, wordSynced, song, artist} ready to cache. Sorted
     best-first by the same _lyrics_score used by the race, so the winner that
-    fetch_all_lyrics would pick is index 0 -- but nothing is excluded."""
+    fetch_all_lyrics would pick is index 0 -- but nothing is excluded.
+    When run_id is given, every provider group also broadcasts a live
+    `probe_progress` SSE event (started/found/missed/error/skipped) so the
+    dashboard can stream the race. New providers only need their own
+    report() calls -- the event shape is fixed.
+    Cubey is NOT listed as one provider: its SSE stream is split into its
+    inner providers (Musixmatch, QQ, bLyrics, BiniLyrics, NetEase, KuGou),
+    each emitted as 'Cubey/<inner>'. only_source accepts an exact key, a
+    base name ('qq' matches direct QQ and Cubey/QQ), or legacy 'Cubey' for
+    all inner providers. on_candidate(entry) fires per emitted candidate so
+    async jobs can stream partial results."""
     from .race import _lyrics_score
     from .providers_braccato import _DIRECT_FETCHERS, _candidate_dict
+    from .app import _sse_broadcast
+
+    def report(provider, status, detail=''):
+        """Live race line for the dashboard (no-op without run_id)."""
+        if not run_id:
+            return
+        try:
+            _sse_broadcast('probe_progress', {
+                'run_id': run_id, 'video_id': video_id,
+                'provider': provider, 'status': status, 'detail': detail or '',
+            })
+        except Exception:
+            pass
 
     title = song_info['title']
     artist = song_info['artist']
@@ -234,6 +257,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
 
     def emit(logical_provider, label, cand):
         if not cand or not cand.get('lyrics'):
+            report(logical_provider, 'missed')
             return
         try:
             sanitize_lyrics_parts(cand['lyrics'])
@@ -244,6 +268,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             score = _lyrics_score(cand)
         except Exception as e:
             print(f"  [probe] emit {logical_provider} error: {e}")
+            report(logical_provider, 'error', str(e))
             return
         candidates.append({
             'provider': logical_provider,
@@ -259,37 +284,74 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                 'song': title, 'artist': artist,
             },
         })
+        if on_candidate is not None:
+            try:
+                on_candidate(candidates[-1])
+            except Exception:
+                pass
+        report(logical_provider, 'found',
+               f"{len(lyrics)} lines {tier} score={round(float(score), 2)}")
 
     def wants(name):
-        return only_source is None or only_source.lower() == name.lower()
+        if only_source is None:
+            return True
+        want = only_source.lower()
+        low = name.lower()
+        if want == low:
+            return True
+        # 'Cubey' alone means all inner Cubey providers; a base name like
+        # 'qq' matches both the direct group and Cubey/<inner>.
+        if '/' in low:
+            origin, base = low.split('/', 1)
+            if want == origin or want == base:
+                return True
+        return False
 
-    # Cubey API (needs JWT): one entry, TTML/QRC preferred over LRC.
-    if wants('Cubey'):
+    _CUBEY_INNERS = ('Musixmatch', 'QQ', 'bLyrics', 'BiniLyrics', 'NetEase', 'KuGou')
+
+    # Cubey API (needs JWT): split into its inner providers, one candidate
+    # each -- never a single opaque 'Cubey' entry.
+    if any(wants(f'Cubey/{inner}') for inner in _CUBEY_INNERS):
         try:
-            from .providers_cubey import fetch_cubey
+            from .providers_cubey import fetch_cubey_all
             if not jwt_token:
                 jwt_token = pick_jwt()
             if not jwt_token:
                 if notes is not None:
                     notes.append('Cubey skipped (no JWT in pool)')
+                for inner in _CUBEY_INNERS:
+                    if wants(f'Cubey/{inner}'):
+                        report(f'Cubey/{inner}', 'skipped', 'no JWT in pool')
             else:
+                for inner in _CUBEY_INNERS:
+                    if wants(f'Cubey/{inner}'):
+                        report(f'Cubey/{inner}', 'started')
                 cubey_node = pick_node()
-                best = None
+                inner_best = {}
                 for q in queries:
-                    cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
-                    if not cubey:
+                    got = fetch_cubey_all(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                    if not got:
                         continue
-                    if cubey.get('parsed'):
-                        cand = {'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}
-                        if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                            best = cand
-                    elif cubey.get('synced'):
-                        cand = {'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}
-                        if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                            best = cand
-                emit('Cubey', 'Cubey', best)
+                    for inner, raw in got.items():
+                        if not wants(f'Cubey/{inner}'):
+                            continue
+                        if raw.get('parsed'):
+                            cand = {'lyrics': raw['parsed'], 'source': raw.get('source', inner), 'synced': True}
+                        elif raw.get('synced'):
+                            cand = {'lyrics': parse_lrc(raw['synced'], duration), 'source': raw.get('source', inner), 'synced': True}
+                        else:
+                            continue
+                        cur = inner_best.get(inner)
+                        if cur is None or _lyrics_score(cand) > _lyrics_score(cur):
+                            inner_best[inner] = cand
+                for inner in _CUBEY_INNERS:
+                    if wants(f'Cubey/{inner}'):
+                        emit(f'Cubey/{inner}', inner, inner_best.get(inner))
         except Exception as e:
             print(f"  [probe] Cubey error: {e}")
+            for inner in _CUBEY_INNERS:
+                if wants(f'Cubey/{inner}'):
+                    report(f'Cubey/{inner}', 'error', str(e))
 
     # Direct braccato providers: keep each sub-source visible separately --
     # this is exactly the "check each provider and choose" case (bLyrics TTML,
@@ -299,6 +361,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         logical = {'ttml': 'bLyrics', 'qq': 'QQ', 'kugou': 'KuGou', 'binimum': 'BiniLyrics'}.get(name, name)
         if not wants(logical):
             continue
+        report(logical, 'started')
         best = None
         chooser = {
             'ttml': 'bLyrics', 'qq': 'QQ', 'kugou': 'KuGou', 'binimum': 'BiniLyrics',
@@ -316,6 +379,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
 
     # LRCLib: one entry (synced beats plain).
     if wants('LRCLib'):
+        report('LRCLib', 'started')
         try:
             from .providers_lrclib import fetch_lrclib
             lrclib_node = pick_node()
@@ -335,9 +399,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             emit('LRCLib', 'LRCLib', best)
         except Exception as e:
             print(f"  [probe] LRCLib error: {e}")
+            report('LRCLib', 'error', str(e))
 
     # Unison: one entry (TTML/synced preferred over plain).
     if wants('Unison'):
+        report('Unison', 'started')
         try:
             from .providers_unison import fetch_unison
             unison_node = pick_node()
@@ -357,16 +423,21 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             emit('Unison', 'Unison', best)
         except Exception as e:
             print(f"  [probe] Unison error: {e}")
+            report('Unison', 'error', str(e))
 
     # YouTube Music: plain only.
     if wants('YouTube'):
+        report('YouTube', 'started')
         try:
             yt = fetch_yt_lyrics(video_id)
             if yt and yt.get('plain'):
                 emit('YouTube', yt.get('source', 'YouTube Music'),
                      {'lyrics': parse_plain(yt['plain']), 'source': yt.get('source', 'YouTube Music'), 'synced': False})
+            else:
+                report('YouTube', 'missed')
         except Exception as e:
             print(f"  [probe] YouTube error: {e}")
+            report('YouTube', 'error', str(e))
 
     candidates.sort(key=lambda c: c['score'], reverse=True)
     return candidates
