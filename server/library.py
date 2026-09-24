@@ -32,6 +32,70 @@ _retitled_cache = {}
 # Persistent manual title/artist override store: video_id -> {title, artist}.
 # Written by the dashboard refetch flow (custom rename); read back by the
 # same flow so a saved override is reused until it is explicitly replaced.
+# The device provider menu (and dashboard) share this file for the saved
+# lyric provider choice: video_id -> {provider, lang, ts}.
+_PROVIDER_PATH = 'cache/provider.json'
+_PROVIDER_CACHE = None
+_PROVIDER_LOCK = threading.Lock()
+
+
+def _load_provider_file():
+    global _PROVIDER_CACHE
+    try:
+        if os.path.exists(_PROVIDER_PATH):
+            with open(_PROVIDER_PATH, 'r', encoding='utf-8') as f:
+                _PROVIDER_CACHE = json.load(f)
+        else:
+            _PROVIDER_CACHE = {}
+    except Exception:
+        _PROVIDER_CACHE = {}
+
+
+def _save_provider_file():
+    try:
+        os.makedirs(os.path.dirname(_PROVIDER_PATH) or '.', exist_ok=True)
+        with open(_PROVIDER_PATH, 'w', encoding='utf-8') as f:
+            json.dump(_PROVIDER_CACHE, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"[LIBRARY] [FAIL] save provider file: {e}")
+
+
+def get_provider(video_id):
+    """Return the saved lyric provider choice {provider, lang, ts}, or None."""
+    if not video_id:
+        return None
+    with _PROVIDER_LOCK:
+        if _PROVIDER_CACHE is None:
+            _load_provider_file()
+        return _PROVIDER_CACHE.get(video_id)
+
+
+def save_provider(video_id, provider, lang=''):
+    """Persist a per-video lyric provider choice (device menu / dashboard)."""
+    if not video_id or not provider:
+        return
+    with _PROVIDER_LOCK:
+        if _PROVIDER_CACHE is None:
+            _load_provider_file()
+        _PROVIDER_CACHE[video_id] = {
+            'provider': provider, 'lang': lang or '',
+            'ts': time_module.time(),
+        }
+        _save_provider_file()
+
+
+def clear_provider(video_id):
+    """Remove a saved lyric provider choice for a video_id."""
+    if not video_id:
+        return
+    with _PROVIDER_LOCK:
+        if _PROVIDER_CACHE is None:
+            _load_provider_file()
+        if video_id in _PROVIDER_CACHE:
+            del _PROVIDER_CACHE[video_id]
+            _save_provider_file()
+
+
 _RENAME_PATH = 'cache/rename.json'
 _RENAME_CACHE = None
 _RENAME_LOCK = threading.Lock()

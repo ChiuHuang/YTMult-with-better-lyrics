@@ -22,7 +22,7 @@ import logging
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import app, SERVER_INSTANCE_ID, _recent_requests, _sse_broadcast
 from .utils import _safe_cache_component, lyrics_content_hash
-from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename, _CACHE_FORMAT_VERSION
+from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename, _CACHE_FORMAT_VERSION, sanitize_lyrics_parts
 from .nodes import ask_nodes_for_cache
 from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
@@ -106,6 +106,11 @@ def api_lyrics():
         _pool_contribute(jwt_token, node_id='device')
     fast_mode = request.args.get('fast', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
+    # Device provider menu override: fetch this provider key now
+    # ('Cubey/QQ', 'bLyrics', 'LRCLib', ...), cache it and remember it.
+    only_provider = (request.args.get('provider') or '').strip() or None
+    if only_provider and not re.fullmatch(r'[A-Za-z/]+', only_provider):
+        return jsonify({"error": "Invalid provider"}), 400
 
     def serve(data):
         """Apply per-display transforms to an outgoing lyrics payload. Safe to
@@ -136,7 +141,8 @@ def api_lyrics():
     # In-flight dedup key — SAME for fast and full so they share the gate.
     # This prevents the common case of 8+ simultaneous requests for the same song
     # (fast + full + multiple VC instances) all running the full pipeline in parallel.
-    dedup_key = f"{video_id}:{translate_to}" if not force_mode else None
+    # Force and single-provider fetches bypass the gate (explicit user action).
+    dedup_key = f"{video_id}:{translate_to}" if not (force_mode or only_provider) else None
 
     # --- Atomic check-and-register (fixes TOCTOU race) ---
     wait_event = None
@@ -173,8 +179,8 @@ def api_lyrics():
             'source': 'none', 'synced': False
         })
 
-    # --- Cache check (only for non-force requests) ---
-    if not force_mode:
+    # --- Cache check (only for non-force, non-provider requests) ---
+    if not force_mode and not only_provider:
         # Fast mode: accept full result too (full is strictly better)
         cached = get_cached(full_cache_key) if fast_mode else get_cached(full_cache_key)
         cache_source = 'full'
@@ -231,6 +237,22 @@ def api_lyrics():
     try:
         print(f"[SEARCH] [REQ {req_id}] Looking up song info via ytmusicapi...")
         t_song = time_module.time()
+
+        if only_provider:
+            print(f"  [REQ {req_id}] Single-provider fetch: {only_provider}")
+            result, perr = _fetch_single_provider(video_id, translate_to, only_provider, jwt_token)
+            print(f"  [REQ {req_id}] single-provider took {(time_module.time()-t_song)*1000:.0f}ms")
+            if perr or not result:
+                print(f"[FAIL] [REQ {req_id}] provider {only_provider}: {perr}")
+                release_inflight()
+                return jsonify({
+                    'lyrics': [{'time': 0, 'text': f'No lyrics from {only_provider}', 'translated': perr or '找不到歌詞', 'duration': 0}],
+                    'source': 'none', 'synced': False
+                })
+            print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
+            print("=" * 60)
+            return serve(result)
+
         song_info = get_song_info(video_id)
         print(f"  [REQ {req_id}] get_song_info took {(time_module.time()-t_song)*1000:.0f}ms")
 
@@ -526,6 +548,195 @@ def api_precache_status(job_id):
     if not job:
         return jsonify({'error': 'not found'}), 404
     return jsonify(job)
+
+
+# ============================================================
+# Device provider menu: probe-as-a-job, pollable status, select-and-save
+# ============================================================
+# The iOS lyrics sheet cannot hold an SSE stream open easily, so probing
+# runs as a background job here: POST .../providers/start, poll
+# GET .../providers/status/<job_id> (candidates arrive progressively via
+# the probe's on_candidate hook), then POST .../providers/select to cache
+# one provider's lyrics and remember the choice per video. Live
+# `probe_progress` SSE events (run_id=job_id) still broadcast for the
+# dashboard, which can watch the same race.
+_provider_jobs = {}
+_provider_jobs_lock = threading.Lock()
+
+
+def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
+    """Probe one provider key (exact 'Cubey/QQ' or base 'QQ'/legacy 'Cubey'),
+    translate, cache, remember the choice, and return (entry, error). Entry
+    is the full song-shape payload ready to serve."""
+    from .jwt_pool import pick_jwt
+    from .pipeline import probe_providers
+    from .library import save_provider, remove_unlyriced
+    from .translate import cohere_translate
+
+    try:
+        song_info = get_song_info(video_id)
+    except Exception as e:
+        return None, f'get_song_info failed: {e}'
+    if not song_info:
+        return None, 'Video not found on YouTube Music'
+
+    jwt = jwt_token or pick_jwt()
+    if jwt_token:
+        _pool_contribute(jwt_token, node_id='device')
+    try:
+        candidates = probe_providers(video_id, song_info, jwt_token=jwt,
+                                     only_source=provider)
+    except Exception as e:
+        return None, str(e)
+    if not candidates:
+        return None, f'Provider {provider} returned no lyrics'
+
+    # Prefer the exact key the menu sent; otherwise take the best found.
+    chosen = None
+    for cand in candidates:
+        if cand.get('provider', '').lower() == provider.lower():
+            chosen = cand
+            break
+    if chosen is None:
+        chosen = candidates[0]
+
+    out = dict(chosen.get('data') or {})
+    out['song'] = song_info.get('title', out.get('song', ''))
+    out['artist'] = song_info.get('artist', out.get('artist', ''))
+    lyrics = out.get('lyrics') or []
+    sanitize_lyrics_parts(lyrics)
+    if lang and lyrics and not any(l.get('translated') for l in lyrics):
+        texts = [l['text'] for l in lyrics if l.get('text')]
+        translations = cohere_translate(texts, lang)
+        for i, lyric in enumerate(lyrics):
+            if i < len(translations) and translations[i]:
+                lyric['translated'] = translations[i]
+    out['wordSynced'] = any(l.get('wordSynced') for l in lyrics)
+    set_cached(f"{video_id}:{lang}", out)
+    save_provider(video_id, chosen.get('provider', provider), lang)
+    try:
+        remove_unlyriced(video_id)
+    except Exception:
+        pass
+    _sse_broadcast('rebase', {'state': 'done', 'applied': video_id})
+    return out, None
+
+
+def _run_provider_probe_job(job_id, video_id, lang, jwt_token):
+    from .jwt_pool import pick_jwt
+    from .pipeline import probe_providers
+    from .library import get_provider
+    with _provider_jobs_lock:
+        job = _provider_jobs.get(job_id)
+    if not job:
+        return
+    try:
+        song_info = get_song_info(video_id)
+    except Exception as e:
+        job['state'] = 'error'
+        job['error'] = f'get_song_info failed: {e}'
+        _sse_broadcast('probe_progress', {'run_id': job_id, 'video_id': video_id,
+                                          'provider': '', 'status': 'error',
+                                          'detail': job['error']})
+        return
+    if not song_info:
+        job['state'] = 'error'
+        job['error'] = 'Video not found on YouTube Music'
+        return
+    job['song'] = song_info.get('title', '')
+    job['artist'] = song_info.get('artist', '')
+    job['duration'] = song_info.get('duration', 0)
+    job['state'] = 'running'
+    jwt = jwt_token or pick_jwt()
+    if jwt_token:
+        _pool_contribute(jwt_token, node_id='device')
+
+    def on_candidate(entry):
+        slim = {k: entry.get(k) for k in
+                ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines', 'score')}
+        job['candidates'].append(slim)
+        job['candidates'].sort(key=lambda c: c.get('score', 0), reverse=True)
+        job['done'] = len(job['candidates'])
+
+    try:
+        notes = []
+        probe_providers(video_id, song_info, jwt_token=jwt, notes=notes,
+                        run_id=job_id, on_candidate=on_candidate)
+        job['notes'] = notes
+        job['state'] = 'complete'
+    except Exception as e:
+        job['state'] = 'error'
+        job['error'] = str(e)
+    job['finished'] = datetime.now().isoformat()
+    _sse_broadcast('probe_progress', {'run_id': job_id, 'video_id': video_id,
+                                      'provider': '', 'status': job['state'],
+                                      'detail': job.get('error', '')})
+
+
+@app.route('/api/lyrics/providers/start', methods=['POST'])
+def api_providers_start():
+    """Start an async provider probe for the device menu. Body (or query):
+    {video_id, lang?, jwt?}. Returns {job_id, status_url} to poll."""
+    body = request.get_json(silent=True) or {}
+    video_id = ((body.get('video_id') or request.args.get('v') or '').strip())
+    lang = (body.get('lang') or request.args.get('lang') or 'zh-TW').strip()
+    jwt_token = body.get('jwt') or request.args.get('jwt')
+    if not video_id or not _safe_cache_component(video_id):
+        return jsonify({'ok': False, 'error': 'Missing or invalid video_id'}), 400
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    from .library import get_provider
+    job_id = _secrets.token_hex(8)
+    job = {
+        'job_id': job_id, 'state': 'queued', 'video_id': video_id,
+        'lang': lang, 'song': '', 'artist': '', 'duration': 0,
+        'candidates': [], 'done': 0, 'notes': [],
+        'saved': (get_provider(video_id) or {}).get('provider', ''),
+        'started': datetime.now().isoformat(),
+    }
+    with _provider_jobs_lock:
+        _provider_jobs[job_id] = job
+    threading.Thread(target=_run_provider_probe_job,
+                     args=(job_id, video_id, lang, jwt_token), daemon=True).start()
+    return jsonify({'ok': True, 'job_id': job_id,
+                    'status_url': f'/api/lyrics/providers/status/{job_id}'})
+
+
+@app.route('/api/lyrics/providers/status/<job_id>', methods=['GET'])
+def api_providers_status(job_id):
+    """Poll a provider probe job: {state, song, artist, saved, candidates[]."""
+    with _provider_jobs_lock:
+        job = _provider_jobs.get(job_id)
+    if not job:
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    return jsonify({'ok': True, **job})
+
+
+@app.route('/api/lyrics/providers/select', methods=['POST'])
+def api_providers_select():
+    """Cache one provider's lyrics now and remember the choice per video.
+    Body: {video_id, lang?, provider, jwt?}. Returns the full lyrics payload
+    so the client can render instantly without a second fetch."""
+    body = request.get_json(silent=True) or {}
+    video_id = (body.get('video_id') or '').strip()
+    lang = (body.get('lang') or 'zh-TW').strip()
+    provider = (body.get('provider') or '').strip()
+    jwt_token = body.get('jwt')
+    if not video_id or not _safe_cache_component(video_id):
+        return jsonify({'ok': False, 'error': 'Missing or invalid video_id'}), 400
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    if not provider:
+        return jsonify({'ok': False, 'error': 'Missing provider'}), 400
+    entry, err = _fetch_single_provider(video_id, lang, provider, jwt_token)
+    if err or not entry:
+        return jsonify({'ok': False, 'error': err or 'No lyrics'}), 502
+    from .translate import apply_display_transforms
+    auto_zh = bool(body.get('auto_zh', False))
+    if isinstance(entry.get('lyrics'), list):
+        apply_display_transforms(entry['lyrics'], lang, auto_zh)
+    return jsonify({'ok': True, 'video_id': video_id, 'lang': lang,
+                    'provider': provider, 'data': entry})
 
 
 # ============================================================
