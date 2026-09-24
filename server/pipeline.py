@@ -177,7 +177,22 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
             consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
 
-    # Priority 4: YouTube Music lyrics
+    # Priority 4: AMLL TTML DB (no JWT) -- word-synced TTML via title
+    # search + raw-lyrics fetch (beautiful-lyrics-reborn amlldb path).
+    print(f"  [4/6] Trying AMLL...")
+    try:
+        from .providers_amll import fetch_amll
+        for q in queries:
+            amll = fetch_amll(q['title'], q['artist'], duration)
+            if not amll or not amll.get('parsed'):
+                continue
+            print(f"  [OK] AMLL: word-synced TTML found! (query: {q['title']})")
+            consider({'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}, 'AMLL TTML')
+            break
+    except Exception as e:
+        print(f"  [FAIL] AMLL error: {e}")
+
+    # Priority 5: YouTube Music lyrics
     print(f"  [4/5] Trying YouTube Music lyrics...")
     try:
         yt = fetch_yt_lyrics(video_id)
@@ -424,6 +439,26 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         except Exception as e:
             print(f"  [probe] Unison error: {e}")
             report('Unison', 'error', str(e))
+
+    # AMLL TTML DB: one entry (word-synced TTML, no JWT).
+    if wants('AMLL'):
+        report('AMLL', 'started')
+        try:
+            from .providers_amll import fetch_amll
+            best = None
+            for q in queries:
+                amll = fetch_amll(q['title'], q['artist'], duration)
+                if not amll or not amll.get('parsed'):
+                    continue
+                cand = {'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}
+                if best is None or _lyrics_score(cand) > _lyrics_score(best):
+                    best = cand
+                if best and best.get('lyrics') and any(l.get('wordSynced') for l in best['lyrics']):
+                    break
+            emit('AMLL', 'AMLL', best)
+        except Exception as e:
+            print(f"  [probe] AMLL error: {e}")
+            report('AMLL', 'error', str(e))
 
     # YouTube Music: plain only.
     if wants('YouTube'):

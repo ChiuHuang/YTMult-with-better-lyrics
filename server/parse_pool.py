@@ -18,6 +18,7 @@ _POOL_PROVIDER_RANK = {
     'Musixmatch': 40,
     'bLyrics': 38,
     'BiniLyrics': 37,
+    'AMLL': 37,
     'QQ': 36,
     'KuGou': 35,
     'NetEase': 33,
