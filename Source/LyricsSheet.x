@@ -285,6 +285,18 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_setLandscapePlaying:(BOOL)playing;
 - (void)ytmu_setLandscapeTransportIcons;
 - (BOOL)ytmu_tryTapPlayPauseIn:(UIView *)view depth:(NSInteger)depth;
+- (void)ytmu_applyLandscapeTheme;
+- (NSString *)ytmu_formatTime:(CGFloat)seconds;
+- (void)ytmu_toolbarReload:(UIButton *)sender;
+- (void)ytmu_headerMenu:(UIButton *)sender;
+- (void)ytmu_openProviderMenuFromView:(UIView *)sender;
+- (void)ytmu_beginProviderProbeWithJWT:(NSString *)jwt fromView:(UIView *)sender;
+- (void)ytmu_pollProviderJob:(NSTimer *)timer;
+- (void)ytmu_stopProviderPoll;
+- (void)ytmu_showProviderMenu:(NSArray *)candidates saved:(NSString *)saved fromView:(UIView *)sender;
+- (void)ytmu_selectProvider:(NSString *)provider;
+- (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion;
+- (void)ytmu_getJSON:(NSString *)path completion:(void (^)(NSDictionary *json, NSError *error))completion;
 @end
 
 BOOL YTMUIsInterfaceLandscape(void) {
@@ -375,18 +387,30 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     statusLabel.tag = 8888;
     [header addSubview:statusLabel];
 
-    UIButton *reloadBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    reloadBtn.frame = CGRectMake(self.view.bounds.size.width - 105, 10, 85, 34);
-    reloadBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-    [reloadBtn setTitle:@"Reload" forState:UIControlStateNormal];
-    [reloadBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
-    reloadBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-    reloadBtn.titleLabel.adjustsFontSizeToFitWidth = YES;
-    reloadBtn.titleLabel.minimumScaleFactor = 0.7;
-    reloadBtn.backgroundColor = YTMUAdaptiveFill();
-    reloadBtn.layer.cornerRadius = 17;
-    [reloadBtn addTarget:self action:@selector(forceReloadLyrics) forControlEvents:UIControlEventTouchUpInside];
-    [header addSubview:reloadBtn];
+    // Header action button: an icon that opens the actions menu
+    // (provider list with live probing state, reload, close).
+    UIButton *menuBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    menuBtn.frame = CGRectMake(self.view.bounds.size.width - 52, 10, 36, 36);
+    menuBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    menuBtn.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    if (@available(iOS 13.0, *)) {
+        UIImage *menuImg = [UIImage systemImageNamed:@"list.bullet"];
+        if (menuImg) {
+            [menuBtn setImage:menuImg forState:UIControlStateNormal];
+            [menuBtn setTitle:@"" forState:UIControlStateNormal];
+        } else {
+            [menuBtn setTitle:@"..." forState:UIControlStateNormal];
+            [menuBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        }
+    } else {
+        [menuBtn setTitle:@"..." forState:UIControlStateNormal];
+        [menuBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+    }
+    menuBtn.backgroundColor = YTMUAdaptiveFill();
+    menuBtn.layer.cornerRadius = 18;
+    [menuBtn addTarget:self action:@selector(ytmu_headerMenu:) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:menuBtn];
+    self.headerMenuButton = menuBtn;
 
     if (self.isModal || self.presentingViewController) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -408,74 +432,95 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     [self.view addSubview:self.tableView];
 
-    // --- Landscape split-view panels ---
-    // Both panels share one opaque dark background so there is no visible
-    // seam between the album side and the lyrics side. The fullscreen
-    // blurred video/artwork background is hidden in landscape, so album art
-    // sits on the same solid color as the lyrics (no letterbox contrast).
-    static const CGFloat kYTMULandscapePanelAlpha = 0.92;
+    // --- Landscape split-view: Image-2 style ---
+    // No opaque columns: the fullscreen blurred artwork (ambient) shows
+    // through everywhere, the album floats as a rounded card with shadow,
+    // and lyrics sit directly on the blur. Light/dark follows the OS via
+    // the adaptive inks and ytmu_applyLandscapeTheme (blur style swap).
     self.landscapeArtPanel = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeArtPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:kYTMULandscapePanelAlpha];
-    self.landscapeArtPanel.clipsToBounds = YES;
+    self.landscapeArtPanel.backgroundColor = [UIColor clearColor];
+    self.landscapeArtPanel.clipsToBounds = NO;
     self.landscapeArtPanel.hidden = YES;
     self.landscapeArtPanel.userInteractionEnabled = YES;
     [self.view addSubview:self.landscapeArtPanel];
 
     self.landscapeArtImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
-    self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFit;
+    self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFill;
     self.landscapeArtImageView.clipsToBounds = YES;
-    self.landscapeArtImageView.backgroundColor = [UIColor clearColor];
+    self.landscapeArtImageView.backgroundColor = YTMUAdaptiveFill();
     self.landscapeArtImageView.userInteractionEnabled = NO;
+    self.landscapeArtImageView.layer.cornerRadius = 10;
+    self.landscapeArtImageView.layer.masksToBounds = YES;
     [self.landscapeArtPanel addSubview:self.landscapeArtImageView];
 
-    // Right panel: same solid tint as the left panel (seamless transition)
+    // Right panel is unused in the Image-2 layout (lyrics float on the
+    // ambient blur); kept hidden so no seam can appear.
     self.landscapeRightPanel = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeRightPanel.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:kYTMULandscapePanelAlpha];
-    self.landscapeRightPanel.clipsToBounds = YES;
+    self.landscapeRightPanel.backgroundColor = [UIColor clearColor];
     self.landscapeRightPanel.hidden = YES;
     self.landscapeRightPanel.userInteractionEnabled = NO;
-    [self.view addSubview:self.landscapeRightPanel];
 
-    // Landscape left info: title, artist, progress, transport
+    // Landscape left column container: transparent, holds title, artist,
+    // progress + times, and the minimal transport row.
     self.landscapeInfoPanel = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeInfoPanel.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.12];
+    self.landscapeInfoPanel.backgroundColor = [UIColor clearColor];
     self.landscapeInfoPanel.hidden = YES;
-    self.landscapeInfoPanel.layer.cornerRadius = 12;
-    self.landscapeInfoPanel.layer.masksToBounds = YES;
+    self.landscapeInfoPanel.layer.cornerRadius = 0;
+    self.landscapeInfoPanel.layer.masksToBounds = NO;
     self.landscapeInfoPanel.userInteractionEnabled = YES;
     [self.landscapeArtPanel addSubview:self.landscapeInfoPanel];
 
     self.landscapeTitleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeTitleLabel.font = [UIFont boldSystemFontOfSize:15];
-    self.landscapeTitleLabel.textColor = [UIColor whiteColor];
+    self.landscapeTitleLabel.textColor = YTMUAdaptiveInk(1.0, 1.0);
     self.landscapeTitleLabel.numberOfLines = 1;
     self.landscapeTitleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [self.landscapeInfoPanel addSubview:self.landscapeTitleLabel];
 
     self.landscapeArtistLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.landscapeArtistLabel.font = [UIFont systemFontOfSize:12];
-    self.landscapeArtistLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.75];
+    self.landscapeArtistLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
     self.landscapeArtistLabel.numberOfLines = 1;
     self.landscapeArtistLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     [self.landscapeInfoPanel addSubview:self.landscapeArtistLabel];
 
     self.landscapeProgressTrack = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeProgressTrack.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.25];
-    self.landscapeProgressTrack.layer.cornerRadius = 2;
+    self.landscapeProgressTrack.backgroundColor = YTMUAdaptiveInk(0.25, 0.2);
+    self.landscapeProgressTrack.layer.cornerRadius = 1.5;
     self.landscapeProgressTrack.layer.masksToBounds = YES;
     [self.landscapeInfoPanel addSubview:self.landscapeProgressTrack];
 
     self.landscapeProgressFill = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeProgressFill.backgroundColor = [UIColor whiteColor];
-    self.landscapeProgressFill.layer.cornerRadius = 2;
+    self.landscapeProgressFill.backgroundColor = YTMUAdaptiveInk(0.95, 0.9);
+    self.landscapeProgressFill.layer.cornerRadius = 1.5;
     self.landscapeProgressFill.layer.masksToBounds = YES;
     [self.landscapeProgressTrack addSubview:self.landscapeProgressFill];
 
+    self.landscapeProgressKnob = [[UIView alloc] initWithFrame:CGRectZero];
+    self.landscapeProgressKnob.backgroundColor = YTMUAdaptiveInk(1.0, 1.0);
+    self.landscapeProgressKnob.layer.cornerRadius = 4;
+    self.landscapeProgressKnob.layer.masksToBounds = YES;
+    self.landscapeProgressKnob.userInteractionEnabled = NO;
+    [self.landscapeInfoPanel addSubview:self.landscapeProgressKnob];
+
+    self.landscapeElapsedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.landscapeElapsedLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightRegular];
+    self.landscapeElapsedLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
+    self.landscapeElapsedLabel.text = @"0:00";
+    [self.landscapeInfoPanel addSubview:self.landscapeElapsedLabel];
+
+    self.landscapeTotalLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.landscapeTotalLabel.font = [UIFont monospacedDigitSystemFontOfSize:10 weight:UIFontWeightRegular];
+    self.landscapeTotalLabel.textColor = YTMUAdaptiveInk(0.6, 0.6);
+    self.landscapeTotalLabel.textAlignment = NSTextAlignmentRight;
+    self.landscapeTotalLabel.text = @"0:00";
+    [self.landscapeInfoPanel addSubview:self.landscapeTotalLabel];
+
+    // Minimal icon transport (Image-2): plain prev/next glyphs, play/pause
+    // as a filled circle. Colors follow the OS theme via the icon setters.
     self.landscapePrevButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapePrevButton.tintColor = [UIColor whiteColor];
-    self.landscapePrevButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    self.landscapePrevButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
-    self.landscapePrevButton.layer.cornerRadius = 18;
+    self.landscapePrevButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapePrevButton.backgroundColor = [UIColor clearColor];
     self.landscapePrevButton.tag = 7101;
     self.landscapePrevButton.accessibilityLabel = @"Previous track";
     self.landscapePrevButton.userInteractionEnabled = YES;
@@ -485,9 +530,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     self.landscapePlayButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.landscapePlayButton.tintColor = [UIColor whiteColor];
-    self.landscapePlayButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    self.landscapePlayButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.22];
-    self.landscapePlayButton.layer.cornerRadius = 20;
+    self.landscapePlayButton.backgroundColor = YTMUAdaptiveInk(1.0, 0.9);
+    self.landscapePlayButton.layer.masksToBounds = YES;
     self.landscapePlayButton.tag = 7102;
     self.landscapePlayButton.accessibilityLabel = @"Play or pause";
     self.landscapePlayButton.userInteractionEnabled = YES;
@@ -496,9 +540,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeInfoPanel addSubview:self.landscapePlayButton];
 
     self.landscapeNextButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeNextButton.tintColor = [UIColor whiteColor];
-    self.landscapeNextButton.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    self.landscapeNextButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.15];
+    self.landscapeNextButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapeNextButton.backgroundColor = [UIColor clearColor];
     self.landscapeNextButton.layer.cornerRadius = 18;
     self.landscapeNextButton.tag = 7103;
     self.landscapeNextButton.accessibilityLabel = @"Next track";
@@ -511,7 +554,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     // Exit: top-right icon button (xmark symbol, "X" text fallback)
     self.landscapeExitButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeExitButton.tintColor = [UIColor whiteColor];
+    self.landscapeExitButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
     if (@available(iOS 13.0, *)) {
         UIImage *xmark = [UIImage systemImageNamed:@"xmark"];
         if (xmark) {
@@ -519,19 +562,55 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self.landscapeExitButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapeExitButton setTitle:@"X" forState:UIControlStateNormal];
-            [self.landscapeExitButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            [self.landscapeExitButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
             self.landscapeExitButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
         }
     } else {
         [self.landscapeExitButton setTitle:@"X" forState:UIControlStateNormal];
-        [self.landscapeExitButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self.landscapeExitButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
         self.landscapeExitButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
     }
-    self.landscapeExitButton.backgroundColor = [[UIColor whiteColor] colorWithAlphaComponent:0.20];
+    self.landscapeExitButton.backgroundColor = YTMUAdaptiveFill();
     self.landscapeExitButton.layer.cornerRadius = 16;
     self.landscapeExitButton.hidden = YES;
     [self.landscapeExitButton addTarget:self action:@selector(dismissModal) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:self.landscapeExitButton];
+
+    // Bottom-right floating toolbar (Image-2): provider list + reload icons.
+    self.landscapeToolbar = [[UIView alloc] initWithFrame:CGRectZero];
+    self.landscapeToolbar.backgroundColor = YTMUAdaptiveFill();
+    self.landscapeToolbar.layer.cornerRadius = 17;
+    self.landscapeToolbar.layer.masksToBounds = YES;
+    self.landscapeToolbar.hidden = YES;
+    [self.view addSubview:self.landscapeToolbar];
+
+    self.landscapeProviderButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.landscapeProviderButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    if (@available(iOS 13.0, *)) {
+        UIImage *pImg = [UIImage systemImageNamed:@"list.bullet"];
+        if (pImg) [self.landscapeProviderButton setImage:pImg forState:UIControlStateNormal];
+    }
+    if (!self.landscapeProviderButton.imageView.image) {
+        [self.landscapeProviderButton setTitle:@"..." forState:UIControlStateNormal];
+        [self.landscapeProviderButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+    }
+    self.landscapeProviderButton.accessibilityLabel = @"Lyric providers";
+    [self.landscapeProviderButton addTarget:self action:@selector(ytmu_openProviderMenuFromView:) forControlEvents:UIControlEventTouchUpInside];
+    [self.landscapeToolbar addSubview:self.landscapeProviderButton];
+
+    self.landscapeReloadButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.landscapeReloadButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    if (@available(iOS 13.0, *)) {
+        UIImage *rImg = [UIImage systemImageNamed:@"arrow.clockwise"];
+        if (rImg) [self.landscapeReloadButton setImage:rImg forState:UIControlStateNormal];
+    }
+    if (!self.landscapeReloadButton.imageView.image) {
+        [self.landscapeReloadButton setTitle:@"R" forState:UIControlStateNormal];
+        [self.landscapeReloadButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+    }
+    self.landscapeReloadButton.accessibilityLabel = @"Reload lyrics";
+    [self.landscapeReloadButton addTarget:self action:@selector(ytmu_toolbarReload:) forControlEvents:UIControlEventTouchUpInside];
+    [self.landscapeToolbar addSubview:self.landscapeReloadButton];
 
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
@@ -691,25 +770,47 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)ytmu_updateLandscapeProgress {
     if (!self.landscapeProgressFill || !self.landscapeProgressTrack) return;
     CGFloat progress = 0;
+    CGFloat totalTime = 0;
+    CGFloat curTime = 0;
     if (g_activePlayer && [g_activePlayer respondsToSelector:@selector(currentVideoTotalMediaTime)]) {
-        CGFloat total = g_activePlayer.currentVideoTotalMediaTime;
-        CGFloat cur = g_activePlayer.currentVideoMediaTime;
-        if (total > 0) progress = (CGFloat)(cur / total);
+        totalTime = g_activePlayer.currentVideoTotalMediaTime;
+        curTime = g_activePlayer.currentVideoMediaTime;
+        if (totalTime > 0) progress = (CGFloat)(curTime / totalTime);
     } else if (g_currentPlaybackTime > 0) {
         progress = 0; // unknown total; leave at 0 unless total known
     }
     if (progress < 0) progress = 0;
     if (progress > 1) progress = 1;
     CGFloat trackW = self.landscapeProgressTrack.bounds.size.width;
+    CGFloat fillW = floor(trackW * progress);
     CGRect f = self.landscapeProgressFill.frame;
-    f.size.width = floor(trackW * progress);
-    f.size.height = 4;
+    f.size.width = fillW;
+    f.size.height = 3;
     f.origin = CGPointZero;
     self.landscapeProgressFill.frame = f;
+    if (self.landscapeElapsedLabel) self.landscapeElapsedLabel.text = [self ytmu_formatTime:curTime];
+    if (self.landscapeTotalLabel) self.landscapeTotalLabel.text = [self ytmu_formatTime:totalTime];
+    if (self.landscapeProgressKnob) {
+        CGFloat knobS = 8;
+        CGFloat knobX = fillW - knobS / 2.0;
+        if (knobX < 0) knobX = 0;
+        if (knobX > trackW - knobS) knobX = trackW - knobS;
+        CGRect kf = self.landscapeProgressKnob.frame;
+        kf.origin.x = self.landscapeProgressTrack.frame.origin.x + knobX;
+        kf.origin.y = self.landscapeProgressTrack.frame.origin.y + (3 - knobS) / 2.0;
+        kf.size.width = knobS;
+        kf.size.height = knobS;
+        self.landscapeProgressKnob.frame = kf;
+    }
 }
 
 - (void)ytmu_setLandscapePlaying:(BOOL)playing {
     self.landscapeIsPlaying = playing;
+    // Filled circle (theme ink) with a contrasting glyph, Image-2 style.
+    self.landscapePlayButton.backgroundColor = YTMUAdaptiveInk(0.95, 0.9);
+    self.landscapePlayButton.tintColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
+        return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor whiteColor] : [UIColor blackColor];
+    }];
     if (@available(iOS 13.0, *)) {
         UIImage *img = [UIImage systemImageNamed:playing ? @"pause.fill" : @"play.fill"];
         if (img) {
@@ -725,29 +826,56 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)ytmu_setLandscapeTransportIcons {
     if (@available(iOS 13.0, *)) {
-        UIImage *prev = [UIImage systemImageNamed:@"backward.fill"];
-        UIImage *next = [UIImage systemImageNamed:@"forward.fill"];
+        UIImageSymbolConfiguration *cfg = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightSemibold];
+        UIImage *prev = [[UIImage systemImageNamed:@"backward.fill"] imageWithConfiguration:cfg];
+        UIImage *next = [[UIImage systemImageNamed:@"forward.fill"] imageWithConfiguration:cfg];
         if (prev) {
             [self.landscapePrevButton setImage:prev forState:UIControlStateNormal];
             [self.landscapePrevButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
-            [self.landscapePrevButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            [self.landscapePrevButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
         }
         if (next) {
             [self.landscapeNextButton setImage:next forState:UIControlStateNormal];
             [self.landscapeNextButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
-            [self.landscapeNextButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            [self.landscapeNextButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
         }
     } else {
         [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
-        [self.landscapePrevButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self.landscapePrevButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
         [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
-        [self.landscapeNextButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        [self.landscapeNextButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
     }
     [self ytmu_setLandscapePlaying:self.landscapeIsPlaying];
+}
+
+- (NSString *)ytmu_formatTime:(CGFloat)seconds {
+    if (!(seconds > 0)) return @"0:00";
+    NSInteger total = (NSInteger)seconds;
+    return [NSString stringWithFormat:@"%ld:%02ld", (long)(total / 60), (long)(total % 60)];
+}
+
+- (void)ytmu_applyLandscapeTheme {
+    // OS theme change: swap the ambient blur so the whole sheet (album
+    // column + lyrics) follows light/dark together with the adaptive inks.
+    if (!self.blurView) return;
+    UIBlurEffectStyle style = YTMUInterfaceIsLight(self.view) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark;
+    UIBlurEffect *effect = [UIBlurEffect effectWithStyle:style];
+    [UIView animateWithDuration:0.25 animations:^{
+        self.blurView.effect = effect;
+    }];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (@available(iOS 13.0, *)) {
+        if (self.traitCollection.userInterfaceStyle != previousTraitCollection.userInterfaceStyle) {
+            [self ytmu_applyLandscapeTheme];
+        }
+    }
 }
 
 - (void)ytmu_landscapePrev:(UIButton *)sender {
@@ -854,6 +982,199 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     return NO;
 }
 
+#pragma mark - Provider actions menu
+
+- (void)ytmu_headerMenu:(UIButton *)sender {
+    [self ytmu_openProviderMenuFromView:sender];
+}
+
+- (void)ytmu_toolbarReload:(UIButton *)sender {
+    [self forceReloadLyrics];
+}
+
+- (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion {
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@%@", YTMUApiBase(), path]];
+    if (!url) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"YTMU" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"bad URL"}]);
+        return;
+    }
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.timeoutInterval = 20.0;
+    if (body) req.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        NSDictionary *json = nil;
+        if (data && !err) json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (completion) completion(json, err);
+    }] resume];
+}
+
+- (void)ytmu_getJSON:(NSString *)path completion:(void (^)(NSDictionary *json, NSError *error))completion {
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@%@", YTMUApiBase(), path]];
+    if (!url) {
+        if (completion) completion(nil, [NSError errorWithDomain:@"YTMU" code:-1 userInfo:@{NSLocalizedDescriptionKey: @"bad URL"}]);
+        return;
+    }
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.timeoutInterval = 15.0;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        NSDictionary *json = nil;
+        if (data && !err) json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (completion) completion(json, err);
+    }] resume];
+}
+
+- (void)ytmu_openProviderMenuFromView:(UIView *)sender {
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    if (!vid.length) {
+        sendDebugLog(@"[MUSIC] provider menu: no video ID");
+        return;
+    }
+    if (self.providerPollTimer) return; // a probe is already running
+    __block BOOL jwtDone = NO;
+    [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
+        if (jwtDone) return;
+        jwtDone = YES;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self ytmu_beginProviderProbeWithJWT:jwt fromView:sender];
+        });
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!jwtDone) {
+            jwtDone = YES;
+            [self ytmu_beginProviderProbeWithJWT:nil fromView:sender];
+        }
+    });
+}
+
+- (void)ytmu_beginProviderProbeWithJWT:(NSString *)jwt fromView:(UIView *)sender {
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    if (!vid.length) return;
+    NSMutableDictionary *body = [@{@"video_id": vid, @"lang": YTMUTargetLang()} mutableCopy];
+    if (jwt.length) body[@"jwt"] = jwt;
+    UIView *anchor = (sender && sender.window) ? sender : self.view;
+    objc_setAssociatedObject(self, @selector(ytmu_openProviderMenuFromView:), anchor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self ytmu_postJSON:@"/api/lyrics/providers/start" body:body completion:^(NSDictionary *json, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *jobID = json[@"job_id"];
+            if (![json[@"ok"] boolValue] || !jobID.length) {
+                sendDebugLog(@"[MUSIC] provider probe start failed");
+                return;
+            }
+            [self ytmu_stopProviderPoll];
+            self.providerJobID = jobID;
+            UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Probing providers" message:@"Starting..." preferredStyle:UIAlertControllerStyleAlert];
+            [loading addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
+                [self ytmu_stopProviderPoll];
+            }]];
+            self.providerLoadingAlert = loading;
+            [self presentViewController:loading animated:YES completion:nil];
+            self.providerPollTimer = [NSTimer scheduledTimerWithTimeInterval:1.2 target:self selector:@selector(ytmu_pollProviderJob:) userInfo:nil repeats:YES];
+        });
+    }];
+}
+
+- (void)ytmu_pollProviderJob:(NSTimer *)timer {
+    if (!self.providerJobID.length) {
+        [self ytmu_stopProviderPoll];
+        return;
+    }
+    NSString *path = [NSString stringWithFormat:@"/api/lyrics/providers/status/%@", self.providerJobID];
+    [self ytmu_getJSON:path completion:^(NSDictionary *json, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error || ![json[@"ok"] boolValue]) {
+                [self ytmu_stopProviderPoll];
+                if (self.providerLoadingAlert) {
+                    [self.providerLoadingAlert dismissViewControllerAnimated:YES completion:nil];
+                    self.providerLoadingAlert = nil;
+                }
+                return;
+            }
+            NSString *state = json[@"state"] ?: @"";
+            NSArray *cands = json[@"candidates"] ?: @[];
+            if (self.providerLoadingAlert) {
+                self.providerLoadingAlert.message = [NSString stringWithFormat:@"Found %lu so far…", (unsigned long)cands.count];
+            }
+            if ([state isEqualToString:@"complete"] || [state isEqualToString:@"error"]) {
+                [self ytmu_stopProviderPoll];
+                UIView *anchor = objc_getAssociatedObject(self, @selector(ytmu_openProviderMenuFromView:));
+                UIAlertController *loading = self.providerLoadingAlert;
+                self.providerLoadingAlert = nil;
+                id saved = json[@"saved"];
+                void (^show)(void) = ^{
+                    if ([state isEqualToString:@"complete"]) {
+                        [self ytmu_showProviderMenu:cands saved:([saved isKindOfClass:[NSString class]] ? saved : nil) fromView:anchor];
+                    }
+                };
+                if (loading) [loading dismissViewControllerAnimated:YES completion:show];
+                else show();
+            }
+        });
+    }];
+}
+
+- (void)ytmu_stopProviderPoll {
+    [self.providerPollTimer invalidate];
+    self.providerPollTimer = nil;
+    self.providerJobID = nil;
+}
+
+- (void)ytmu_showProviderMenu:(NSArray *)candidates saved:(NSString *)saved fromView:(UIView *)sender {
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"Lyrics providers" message:vid preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSDictionary *c in candidates) {
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        NSString *prov = c[@"provider"];
+        if (![prov isKindOfClass:[NSString class]] || !prov.length) continue;
+        NSString *tier = ([c[@"tier"] isKindOfClass:[NSString class]]) ? c[@"tier"] : @"";
+        NSInteger lines = [c[@"lines"] integerValue];
+        BOOL isSaved = (saved.length > 0 && [prov isEqualToString:saved]);
+        NSString *title = [NSString stringWithFormat:@"%@%@ — %@ · %ld lines", isSaved ? @"[saved] " : @"", prov, tier, (long)lines];
+        [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            [self ytmu_selectProvider:prov];
+        }]];
+    }
+    [menu addAction:[UIAlertAction actionWithTitle:@"Best available (auto)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [self forceReloadLyrics];
+    }]];
+    [menu addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:nil]];
+    UIPopoverPresentationController *pop = menu.popoverPresentationController;
+    if (pop) {
+        UIView *anchor = (sender && sender.window) ? sender : self.view;
+        pop.sourceView = anchor;
+        pop.sourceRect = anchor.bounds;
+        pop.permittedArrowDirections = UIPopoverArrowDirectionAny;
+    }
+    [self presentViewController:menu animated:YES completion:nil];
+}
+
+- (void)ytmu_selectProvider:(NSString *)provider {
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    if (!vid.length || !provider.length) return;
+    NSDictionary *body = @{@"video_id": vid, @"lang": YTMUTargetLang(), @"provider": provider};
+    [self ytmu_postJSON:@"/api/lyrics/providers/select" body:body completion:^(NSDictionary *json, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSDictionary *data = json[@"data"];
+            NSArray *lyrics = data[@"lyrics"];
+            if ([json[@"ok"] boolValue] && [lyrics isKindOfClass:[NSArray class]] && lyrics.count > 0) {
+                if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+                g_lyricsCache[vid] = lyrics;
+                YTMULyricsCacheSave(vid, lyrics);
+                self.loadingVideoID = vid;
+                self.isLoading = NO;
+                UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+                if (statusLabel) statusLabel.text = @"";
+                [self updateLyrics:lyrics];
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad" object:vid userInfo:@{@"lyrics": lyrics}];
+                sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider selected: %@", provider]);
+            } else {
+                sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider select failed: %@", provider]);
+            }
+        });
+    }];
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
@@ -862,106 +1183,129 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     BOOL landscape = (W > H);
 
     if (landscape) {
-        // --- Landscape: smaller video/art left + right lyrics panel ---
-        // Hide the fullscreen blurred video/artwork background so the album
-        // image sits on the same solid color as the lyrics panel.
-        self.artworkImageView.hidden = YES;
-        self.blurView.hidden = YES;
-        self.darkOverlay.hidden = YES;
+        // --- Landscape, Image-2 style: fullscreen ambient blur, floating
+        // album card left, lyrics right, minimal transport, toolbar.
+        self.artworkImageView.hidden = NO;
+        self.blurView.hidden = NO;
+        self.darkOverlay.hidden = NO;
+        [self ytmu_applyLandscapeTheme];
 
-        // Keep both panels on one identical background (no seam).
-        UIColor *panelBG = [[UIColor blackColor] colorWithAlphaComponent:0.92];
-        self.landscapeArtPanel.backgroundColor = panelBG;
-        self.landscapeRightPanel.backgroundColor = panelBG;
-
-        // Show landscape panels
+        // Show landscape chrome (right panel stays hidden: no seam by design)
         self.landscapeArtPanel.hidden = NO;
-        self.landscapeRightPanel.hidden = NO;
+        self.landscapeRightPanel.hidden = YES;
         self.landscapeInfoPanel.hidden = NO;
         self.landscapeExitButton.hidden = NO;
+        self.landscapeToolbar.hidden = NO;
 
         // Sync artwork image whenever it changes
         if (self.artworkImageView.image && self.landscapeArtImageView.image != self.artworkImageView.image) {
             self.landscapeArtImageView.image = self.artworkImageView.image;
         }
 
-        // Left panel: 44% of width, full height — background behind smaller video
-        CGFloat leftW = roundf(W * 0.44f);
+        CGFloat safeTop = 0, safeBottom = 0;
+        if (@available(iOS 11.0, *)) {
+            safeTop = self.view.safeAreaInsets.top;
+            safeBottom = self.view.safeAreaInsets.bottom;
+        }
+        // Narrow left column like the reference: ~30%, clamped.
+        CGFloat leftW = roundf(MIN(MAX(W * 0.30f, 260.0f), 360.0f));
         CGFloat rightW = W - leftW;
         self.landscapeArtPanel.frame = CGRectMake(0, 0, leftW, H);
 
-        // Smaller video area: inset from top/sides, leave room for info panel
-        CGFloat vidTop = 48.0;
-        CGFloat infoH = 118.0;
-        CGFloat vidBottomPad = infoH + 16.0;
-        CGFloat vidX = 12.0;
-        CGFloat vidW = leftW - (vidX * 2.0);
-        CGFloat vidH = MAX(80.0, H - vidTop - vidBottomPad);
-        // Prefer 16:9 when it fits
-        CGFloat idealH = floor(vidW * 9.0 / 16.0);
-        if (idealH < vidH) vidH = idealH;
-        self.landscapeArtImageView.frame = CGRectMake(vidX, vidTop, vidW, vidH);
-        self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFit;
-        self.landscapeArtImageView.layer.cornerRadius = 8;
+        // Album card: square, rounded, floating with shadow.
+        CGFloat colX = 16.0;
+        CGFloat colW = leftW - colX * 2.0;
+        CGFloat artS = colW;
+        CGFloat colH = artS + 10.0 + 20.0 + 2.0 + 16.0 + 8.0 + 12.0 + 4.0 + 8.0 + 48.0;
+        CGFloat artY = floor((H - colH) / 2.0);
+        if (artY < safeTop + 8.0) artY = safeTop + 8.0;
+        CGRect artFrame = CGRectMake(colX, artY, artS, artS);
+        self.landscapeArtImageView.frame = artFrame;
+        self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFill;
+        self.landscapeArtImageView.layer.cornerRadius = 10;
         self.landscapeArtImageView.layer.masksToBounds = YES;
+        UIView *artShadow = [self.landscapeArtPanel viewWithTag:7104];
+        if (!artShadow) {
+            artShadow = [[UIView alloc] init];
+            artShadow.tag = 7104;
+            artShadow.backgroundColor = [UIColor blackColor];
+            artShadow.userInteractionEnabled = NO;
+            [self.landscapeArtPanel insertSubview:artShadow belowSubview:self.landscapeArtImageView];
+        }
+        artShadow.frame = artFrame;
+        artShadow.layer.cornerRadius = 10;
+        artShadow.layer.shadowColor = [[UIColor blackColor] CGColor];
+        artShadow.layer.shadowOpacity = 0.35;
+        artShadow.layer.shadowRadius = 14;
+        artShadow.layer.shadowOffset = CGSizeMake(0, 8);
 
-        // Info panel under the video: title, artist, bar, transport
-        CGFloat infoY = CGRectGetMaxY(self.landscapeArtImageView.frame) + 12.0;
-        self.landscapeInfoPanel.frame = CGRectMake(vidX, infoY, vidW, infoH);
+        // Title / artist under the card.
+        self.landscapeInfoPanel.frame = CGRectMake(colX, artY + artS + 10.0, colW, colH - artS - 10.0);
+        self.landscapeTitleLabel.frame = CGRectMake(0, 0, colW, 20);
+        self.landscapeArtistLabel.frame = CGRectMake(0, 22, colW, 16);
 
-        CGFloat pad = 10.0;
-        self.landscapeTitleLabel.frame = CGRectMake(pad, 8, vidW - pad * 2, 20);
-        self.landscapeArtistLabel.frame = CGRectMake(pad, 30, vidW - pad * 2, 16);
-
-        CGFloat barY = 54;
-        self.landscapeProgressTrack.frame = CGRectMake(pad, barY, vidW - pad * 2, 4);
+        // Time labels + thin progress bar + knob.
+        CGFloat timesY = 46;
+        self.landscapeElapsedLabel.frame = CGRectMake(0, timesY, 60, 12);
+        self.landscapeTotalLabel.frame = CGRectMake(colW - 60, timesY, 60, 12);
+        CGFloat barY = timesY + 16;
+        self.landscapeProgressTrack.frame = CGRectMake(0, barY, colW, 3);
         CGFloat progress = 0;
+        CGFloat totalTime = 0;
+        CGFloat curTime = 0;
         if (g_activePlayer && [g_activePlayer respondsToSelector:@selector(currentVideoTotalMediaTime)]) {
-            CGFloat total = g_activePlayer.currentVideoTotalMediaTime;
-            CGFloat cur = g_activePlayer.currentVideoMediaTime;
-            if (total > 0) progress = (CGFloat)(cur / total);
+            totalTime = g_activePlayer.currentVideoTotalMediaTime;
+            curTime = g_activePlayer.currentVideoMediaTime;
+            if (totalTime > 0) progress = (CGFloat)(curTime / totalTime);
         }
         if (progress < 0) progress = 0;
         if (progress > 1) progress = 1;
         CGFloat trackW = self.landscapeProgressTrack.bounds.size.width;
-        self.landscapeProgressFill.frame = CGRectMake(0, 0, floor(trackW * progress), 4);
+        CGFloat fillW = floor(trackW * progress);
+        self.landscapeProgressFill.frame = CGRectMake(0, 0, fillW, 3);
+        self.landscapeElapsedLabel.text = [self ytmu_formatTime:curTime];
+        self.landscapeTotalLabel.text = [self ytmu_formatTime:totalTime];
+        CGFloat knobS = 8;
+        CGFloat knobX = fillW - knobS / 2.0;
+        if (knobX < 0) knobX = 0;
+        if (knobX > trackW - knobS) knobX = trackW - knobS;
+        self.landscapeProgressKnob.frame = CGRectMake(knobX, barY + (3 - knobS) / 2.0, knobS, knobS);
 
-        CGFloat btnY = 68;
-        CGFloat btnH = 36;
-        CGFloat btnW = 64;
-        CGFloat playS = 40;
-        CGFloat gap = 12;
-        CGFloat totalBtnW = btnW + playS + btnW + gap * 2;
-        CGFloat btnX0 = floor((vidW - totalBtnW) / 2.0);
-        self.landscapePrevButton.frame = CGRectMake(btnX0, btnY, btnW, btnH);
-        self.landscapePlayButton.frame = CGRectMake(btnX0 + btnW + gap, btnY + floor((btnH - playS) / 2.0), playS, playS);
-        self.landscapeNextButton.frame = CGRectMake(btnX0 + btnW + gap + playS + gap, btnY, btnW, btnH);
-        self.landscapePlayButton.layer.cornerRadius = playS / 2.0;
-        self.landscapePrevButton.layer.cornerRadius = btnH / 2.0;
-        self.landscapeNextButton.layer.cornerRadius = btnH / 2.0;
+        // Centered minimal transport: prev, filled-circle play, next.
+        CGFloat tY = barY + 14;
+        CGFloat iconS = 44, playD = 48, tGap = 24;
+        CGFloat totalBtnW = iconS + playD + iconS + tGap * 2;
+        CGFloat btnX0 = floor((colW - totalBtnW) / 2.0);
+        self.landscapePrevButton.frame = CGRectMake(btnX0, tY + 2, iconS, iconS);
+        self.landscapePlayButton.frame = CGRectMake(btnX0 + iconS + tGap, tY, playD, playD);
+        self.landscapeNextButton.frame = CGRectMake(btnX0 + iconS + tGap + playD + tGap, tY + 2, iconS, iconS);
+        self.landscapePlayButton.layer.cornerRadius = playD / 2.0;
 
-        // Top-right exit over the whole sheet (upper right of screen)
-        CGFloat safeTop = 0;
-        if (@available(iOS 11.0, *)) {
-            safeTop = self.view.safeAreaInsets.top;
-        }
+        // Top-right exit circle.
         CGFloat exitTop = (safeTop > 0 ? safeTop + 6.0 : 12.0);
         CGFloat exitS = 32;
         self.landscapeExitButton.frame = CGRectMake(W - exitS - 12.0, exitTop, exitS, exitS);
         self.landscapeExitButton.layer.cornerRadius = exitS / 2.0;
-        [self.view bringSubviewToFront:self.landscapeExitButton];
+
+        // Bottom-right floating toolbar: provider list + reload.
+        CGFloat toolBtnS = 34, toolPad = 4;
+        CGFloat toolW = toolBtnS * 2 + toolPad * 2 + 4;
+        CGFloat toolH = toolBtnS + 6;
+        CGFloat toolY = H - safeBottom - toolH - 12.0;
+        self.landscapeToolbar.frame = CGRectMake(W - toolW - 16.0, toolY, toolW, toolH);
+        self.landscapeToolbar.layer.cornerRadius = toolH / 2.0;
+        self.landscapeProviderButton.frame = CGRectMake(toolPad + 2, 3, toolBtnS, toolBtnS);
+        self.landscapeReloadButton.frame = CGRectMake(toolPad + 2 + toolBtnS + 4, 3, toolBtnS, toolBtnS);
 
         // Keep title/artist fresh
         [self ytmu_updateLandscapeMetadata];
 
-        // Right panel behind table
-        self.landscapeRightPanel.frame = CGRectMake(leftW, 0, rightW, H);
-
-        // tableView occupies right panel
+        // tableView floats on the ambient blur, right of the column
         self.tableView.frame = CGRectMake(leftW, 0, rightW, H);
         [self.view bringSubviewToFront:self.landscapeArtPanel];
         [self.view bringSubviewToFront:self.tableView];
         [self.view bringSubviewToFront:self.fpsLabel];
+        [self.view bringSubviewToFront:self.landscapeToolbar];
         [self.view bringSubviewToFront:self.landscapeExitButton];
         [self.landscapeArtPanel bringSubviewToFront:self.landscapeInfoPanel];
         self.landscapeArtPanel.userInteractionEnabled = YES;
@@ -989,6 +1333,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeRightPanel.hidden = YES;
         self.landscapeInfoPanel.hidden = YES;
         self.landscapeExitButton.hidden = YES;
+        self.landscapeToolbar.hidden = YES;
 
         // Restore tableView to full bounds
         self.tableView.frame = self.view.bounds;
@@ -1020,6 +1365,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.displayLink invalidate];
+    [self.providerPollTimer invalidate];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -1047,6 +1393,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     NSString *videoID = notif.object;
     if (videoID) {
         dispatch_async(dispatch_get_main_queue(), ^{
+            [self ytmu_stopProviderPoll];
+            if (self.providerLoadingAlert) {
+                [self.providerLoadingAlert dismissViewControllerAnimated:NO completion:nil];
+                self.providerLoadingAlert = nil;
+            }
             if (![self.loadingVideoID isEqualToString:videoID]) {
                 self.currentIndex = -1;
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
@@ -1332,10 +1683,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (self.landscapeInfoPanel && !self.landscapeInfoPanel.hidden) {
         [self ytmu_updateLandscapeProgress];
         // playerResponse can arrive after the panel opens; keep retrying
-        // until a real title/artist is shown.
+        // until a real title/artist is shown (throttled: ~1/sec).
+        static int landscapeMetaRetryTick = 0;
         BOOL needTitle = (self.landscapeTitleLabel.text.length == 0 ||
                           [self.landscapeTitleLabel.text isEqualToString:@"Now Playing"]);
-        if (needTitle || self.landscapeArtistLabel.text.length == 0) {
+        if ((needTitle || self.landscapeArtistLabel.text.length == 0) &&
+            (landscapeMetaRetryTick++ % 60) == 0) {
             [self ytmu_updateLandscapeMetadata];
         }
     }
