@@ -200,16 +200,15 @@ static BOOL isLowContrast() {
 
 #pragma mark - Low contrast mode
 %hook YTCommonColorPalette
-- (UIColor *)textPrimary { 
+- (UIColor *)textPrimary {
     return isLowContrast() ? [UIColor colorWithWhite:0.565 alpha:1] : %orig;
 }
-- (UIColor *)textSecondary { 
+- (UIColor *)textSecondary {
     return isLowContrast() ? [UIColor colorWithWhite:0.565 alpha:1] : %orig;
 }
 %end
 
-%hook UIColor
-+ (UIColor *)whiteColor {
-    return isLowContrast() ? [UIColor colorWithWhite:0.565 alpha:1] : %orig;
-}
-%end
+// NOTE: low-contrast must stay scoped to YTCommonColorPalette above. A
+// previous %hook UIColor whiteColor dimmed EVERY white surface app-wide
+// (light-theme backgrounds, alerts, keyboards, lyric ink) and broke the
+// white theme on all UIs. Do not re-add a global UIColor hook here.
