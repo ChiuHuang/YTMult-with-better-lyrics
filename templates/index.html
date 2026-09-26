@@ -38,15 +38,15 @@
 
   <mdui-navigation-drawer id="drawer" open close-on-esc close-on-overlay-click>
     <mdui-list id="nav-list">
-      <mdui-list-item icon="dashboard" active data-page="overview">Overview</mdui-list-item>
-      <mdui-list-item icon="terminal" data-page="logs">Live Logs</mdui-list-item>
-      <mdui-list-item icon="storage" data-page="caches">Caches</mdui-list-item>
-      <mdui-list-item icon="library_music" data-page="library">Library</mdui-list-item>
-      <mdui-list-item icon="hub" data-page="nodes">Nodes</mdui-list-item>
-      <mdui-list-item icon="key" data-page="jwt">JWT Pool</mdui-list-item>
-      <mdui-list-item icon="system_update" data-page="update">Self-Update</mdui-list-item>
-      <mdui-list-item icon="folder" data-page="files">Files</mdui-list-item>
-      <mdui-list-item icon="bug_report" data-page="crashes">Crashes</mdui-list-item>
+      <mdui-list-item icon="dashboard" active data-page="overview" href="#/overview">Overview</mdui-list-item>
+      <mdui-list-item icon="terminal" data-page="logs" href="#/logs">Live Logs</mdui-list-item>
+      <mdui-list-item icon="storage" data-page="caches" href="#/caches">Caches</mdui-list-item>
+      <mdui-list-item icon="library_music" data-page="library" href="#/library">Library</mdui-list-item>
+      <mdui-list-item icon="hub" data-page="nodes" href="#/nodes">Nodes</mdui-list-item>
+      <mdui-list-item icon="key" data-page="jwt" href="#/jwt">JWT Pool</mdui-list-item>
+      <mdui-list-item icon="system_update" data-page="update" href="#/update">Self-Update</mdui-list-item>
+      <mdui-list-item icon="folder" data-page="files" href="#/files">Files</mdui-list-item>
+      <mdui-list-item icon="bug_report" data-page="crashes" href="#/crashes">Crashes</mdui-list-item>
     </mdui-list>
     <div class="drawer-foot">server dashboard</div>
   </mdui-navigation-drawer>
@@ -287,6 +287,7 @@
               <mdui-linear-progress id="bulk-progress" value="0" style="flex:1;"></mdui-linear-progress>
               <span id="bulk-summary" style="font-size:13px; white-space:nowrap;"></span>
             </div>
+            <div id="bulk-stage" style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); min-height:18px; margin-bottom:6px;"></div>
             <div id="bulk-results" class="rebase-list"></div>
           </div>
         </mdui-card>
@@ -340,10 +341,10 @@
           </div>
           <div class="panel-body">
             <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
-              Tokens are shared with the Cubey provider. Raw tokens are never exposed here -- only hashes.
+              Tokens are shared with the Cubey provider and persist across restarts/updates. Raw tokens are never exposed here -- only hashes. A token is evicted only after two consecutive dead probes.
             </div>
             <div class="list-head lh-jwt">
-              <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>Status</span><span></span>
+              <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>OK/Fail</span><span>Verdict</span><span>Status</span><span></span>
             </div>
             <div id="jwt-list" class="list-grid"></div>
           </div>

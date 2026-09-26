@@ -18,7 +18,7 @@ import threading
 import time as time_module
 
 from .cache import get_cached, set_cached, sanitize_lyrics_parts, _cache_key_from_filename
-from .candidates import load_candidates, graft_wbw_parts
+from .candidates import load_snapshot, graft_wbw_parts
 from .metadata import get_search_queries
 from .race import _lyrics_score, _wbw_line_count, _race_cubey
 from .providers_braccato import fetch_direct_best
@@ -116,9 +116,22 @@ def _rerace_video(video_id, lang, old_data):
     # Strictly-better tier wins outright; otherwise a wbw snapshot with the
     # same lines is grafted onto the cached lyrics.
     try:
-        saved = load_candidates(video_id)
+        from .candidates import load_snapshot as _load_snapshot
+        _snap = _load_snapshot(video_id)
     except Exception:
-        saved = None
+        _snap = None
+    saved = (_snap or {}).get('candidates') if _snap else None
+    # Outcome tags: providers that missed/errored/skipped in the latest
+    # snapshot are not re-tried on the network leg below.
+    _skip = set()
+    try:
+        for _p, _o in ((_snap or {}).get('outcomes') or {}).items():
+            if isinstance(_o, dict) and _o.get('status') in ('missed', 'error', 'skipped'):
+                _skip.add(_p)
+    except Exception:
+        pass
+    if _skip:
+        print(f"  [RERACE] {video_id} skipping known-miss providers: {sorted(_skip)}")
     if saved:
         for c in saved:
             d = (c or {}).get('data') or {}
@@ -149,7 +162,12 @@ def _rerace_video(video_id, lang, old_data):
                     print(f"  [RERACE] {video_id} grafted wbw from saved {c.get('provider')}")
                     return up
     best = None
+    _MISS_TO_SRC = {'bLyrics': 'ttml', 'QQ': 'qq', 'KuGou': 'kugou', 'BiniLyrics': 'binimum'}
     for name, sources in (('boidu', ('ttml', 'qq', 'kugou')), ('binimum', ('binimum',))):
+        sources = tuple(s for s in sources
+                        if not any(_MISS_TO_SRC.get(m) == s for m in _skip))
+        if not sources:
+            continue
         try:
             cand = fetch_direct_best(queries, album, duration, sources=sources, via_node=node)
             if cand:
@@ -160,14 +178,18 @@ def _rerace_video(video_id, lang, old_data):
             print(f"  [RERACE] {name} worker error: {e}")
             continue
 
-    try:
-        cubey = _race_cubey(queries, video_id, duration, None)
-        if cubey:
-            sanitize_lyrics_parts(cubey['lyrics'])
-            if best is None or _lyrics_score(cubey) > _lyrics_score(best):
-                best = cubey
-    except Exception as e:
-        print(f"  [RERACE] Cubey error: {e}")
+    _CUBEY_INNERS = ('Musixmatch', 'QQ', 'bLyrics', 'BiniLyrics', 'NetEase', 'KuGou')
+    if not all(f'Cubey/{i}' in _skip for i in _CUBEY_INNERS):
+        try:
+            cubey = _race_cubey(queries, video_id, duration, None)
+            if cubey:
+                sanitize_lyrics_parts(cubey['lyrics'])
+                if best is None or _lyrics_score(cubey) > _lyrics_score(best):
+                    best = cubey
+        except Exception as e:
+            print(f"  [RERACE] Cubey error: {e}")
+    elif best is None:
+        print(f"  [RERACE] {video_id} Cubey skipped (all inners missed in snapshot)")
 
     if not best:
         return None
