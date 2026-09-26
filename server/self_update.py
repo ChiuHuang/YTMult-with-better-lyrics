@@ -146,6 +146,27 @@ def _perform_self_update():
                     capture_output=True, text=True, timeout=60)
             if r.returncode == 0:
                 return True, f"git pull: {(r.stdout or '').strip()[:200]}"
+            # ff-only fails when history was rewritten upstream (force-push)
+            # or the clone never shared history: fall back to fetch + reset.
+            # Runtime files (cache/, logs/, config/*.json) are gitignored, so
+            # reset only touches tracked code.
+            f = subprocess.run(['git', 'fetch', 'origin', 'main'],
+                cwd=_root, capture_output=True, text=True, timeout=60)
+            if f.returncode == 0:
+                d = subprocess.run(['git', 'status', '--porcelain'],
+                    cwd=_root, capture_output=True, text=True, timeout=30)
+                dirty = [l for l in (d.stdout or '').splitlines()
+                         if l and not l.startswith('??')]
+                if dirty:
+                    return False, ("git pull failed and reset blocked by "
+                                   f"{len(dirty)} local change(s): "
+                                   + (r.stderr or r.stdout or '').strip()[:200])
+                g = subprocess.run(['git', 'reset', '--hard', 'origin/main'],
+                    cwd=_root, capture_output=True, text=True, timeout=60)
+                if g.returncode == 0:
+                    return True, ("git reset --hard origin/main "
+                                  "(history diverged, fast-forward impossible): "
+                                  f"{(g.stdout or '').strip()[:200]}")
             return False, f"git pull failed: {(r.stderr or r.stdout or '').strip()[:200]}"
     except Exception as e:
         return False, f"git pull error: {e}"
