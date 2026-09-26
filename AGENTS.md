@@ -101,6 +101,17 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- instrumental icon rows on iOS + fast-as-final (`pro`) flag: `configureCell`
+  renders `isInstrumental`/`[instrumental]`/`[MUSIC] Instrumental` lines as a
+  centered note glyph (28pt, active=full ink / idle=dim, no wipe/trans row;
+  font+alignment reset in the text branch for reused cells); tap-to-seek and
+  the active-line scan fall back to `startTimeMs` (gap rows carry no `time`
+  key, previously tap sought to 0). Server tags fast requests served from the
+  full cache (or node cache) with transport-only `pro:true` (never persisted;
+  fast-only hits untagged so the upgrade fetch still runs); the client caches
+  `pro` payloads and skips the redundant full fetch + JWT wait. Verified via
+  Flask test client: fast-on-full pro=True, full req untagged,
+  fast-on-fast untagged, nothing written to disk.
 - album-filter retry in `providers_braccato.py`: boidu treats `al` as a hard
   filter and `get_song_info` album is often wrong (held the artist name for
   Suki/yuri) -> every boidu fetch blanked even on perfect song/artist
