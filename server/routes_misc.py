@@ -49,6 +49,34 @@ def handle_500(e):
     _log_crash(type(e), e, getattr(e, '__traceback__', None))
     return jsonify({'error': 'Internal error', 'instance': SERVER_INSTANCE_ID}), 500
 
+def _dump_screen_name(dump_content):
+    """Topmost screen from the VC hierarchy section (presented wins, else deepest child)."""
+    try:
+        start = dump_content.index('--- VIEW CONTROLLER HIERARCHY ---')
+    except ValueError:
+        start = 0
+    try:
+        end = dump_content.index('--- WINDOWS & VIEW HIERARCHY ---', start)
+    except ValueError:
+        end = len(dump_content)
+    section = dump_content[start:end]
+    vc_pat = re.compile(r'<([A-Za-z0-9_]+(?:ViewController|SheetController|DialogViewController))\b')
+    if '[Presented]' in section:
+        tail = section.rsplit('[Presented]', 1)[1]
+        m = vc_pat.findall(tail)
+        if m:
+            return m[-1]
+    m = vc_pat.findall(section)
+    if m:
+        return m[-1]
+    return 'UnknownScreen'
+
+
+def _safe_dump_component(s, default='novideo'):
+    s = re.sub(r'[^A-Za-z0-9_-]+', '_', (s or '').strip()).strip('_')
+    return s or default
+
+
 @app.route('/log', methods=['POST'])
 def proxy_log():
     try:
@@ -100,7 +128,12 @@ def proxy_log():
             if not has_lyrics_chip:
                 print(f"  [WARN] [UI_DUMP] No lyrics chip text detected - button may be hidden/locked or ASDisplayView (unlock failed)")
 
-            filepath = os.path.join(LOG_DIR, f"UI_DUMP_{timestamp}.txt")
+            filepath = os.path.join(LOG_DIR, f"UI_DUMP_{timestamp}_{_safe_dump_component(_dump_screen_name(dump_content), 'UnknownScreen')}_{_safe_dump_component(vid if vid != '?' else '', 'novideo')}.txt")
+            _dup = 1
+            _base, _ext = os.path.splitext(filepath)
+            while os.path.exists(filepath):
+                _dup += 1
+                filepath = f"{_base}_{_dup}{_ext}"
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(dump_content)
             print(f"[OK] [UI_DUMP] Saved to {filepath} ({len(dump_content)} bytes)")
