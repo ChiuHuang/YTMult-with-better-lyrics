@@ -698,7 +698,7 @@
       setVal('#stat-wbw', fmt(scan.buckets?.wbw));
       setVal('#stat-line', fmt(scan.buckets?.line));
       setVal('#stat-plain', fmt(scan.buckets?.plain));
-      setVal('#stat-none', fmt(scan.buckets?.none));
+      setVal('#stat-none', fmt(scan.buckets?.none) + (scan.unlyriced ? ` (+${fmt(scan.unlyriced)} unlyriced)` : ''));
       renderRebaseStatus(status);
       renderRetitleStatus(retitleStatus);
       try {
@@ -1520,6 +1520,17 @@
     bulkState = null;
     renderBulk({state:'stopped'});
   };
+  const translateMissing = async () => {
+    try {
+      const lang = (($('#bulk-lang') && $('#bulk-lang').value) || '').trim();
+      const r = await API('/api/admin/library/translate/retry', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({lang})});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'failed');
+      mdui.snackbar({message:`Translate queue: ${d.enqueued} enqueued (${d.checked} checked, ${d.pending ?? 0} pending)`});
+      const stage = $('#bulk-stage');
+      if (stage) stage.textContent = `Translate queue: ${d.enqueued} enqueued, ${d.pending ?? 0} pending -- workers retry through 429s until done.`;
+    } catch (e) { mdui.snackbar({message:'Translate retry failed: '+e.message}); }
+  };
   const startBulk = async () => {
     const startBtn = $('#bulk-start');
     if (startBtn) startBtn.loading = true;
@@ -1706,6 +1717,8 @@
     if (bulkStartBtn) bulkStartBtn.addEventListener('click', startBulk);
     const bulkStopBtn = $('#bulk-stop');
     if (bulkStopBtn) bulkStopBtn.addEventListener('click', stopBulk);
+    const bulkTransBtn = $('#bulk-translate-missing');
+    if (bulkTransBtn) bulkTransBtn.addEventListener('click', translateMissing);
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';
