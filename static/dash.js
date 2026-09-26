@@ -589,25 +589,32 @@
   };
   const pingLoop = async (progress, stage, pingEl, closeBtn) => {
     let attempt = 0;
-    const tick = 1600;
+    let alive = true;
     const t0 = Date.now();
     const hist = getPingHistory();
-    const avg = hist.length > 0 ? Math.round(hist.reduce((a, b) => a + b, 0) / hist.length) : 8;
-    const maxEst = avg + 1;
+    const avg = hist.length > 0 ? hist.reduce((a, b) => a + b, 0) / hist.length : 8;
+    const estMs = Math.max(8000, (avg + 1) * 1600);
+    if (progress) { progress.indeterminate = false; progress.value = 0.15; }
+    if (stage) stage.textContent = 'Server restarting...';
+    if (pingEl) pingEl.innerHTML = '<span class="live-dot"></span> Waiting for server...';
+    const anim = () => {
+      if (!alive || !progress) return;
+      const k = Math.min(1, (Date.now() - t0) / estMs);
+      progress.value = 0.15 + k * 0.8;
+      if (k < 1) requestAnimationFrame(anim);
+    };
+    requestAnimationFrame(anim);
     while (true) {
       attempt++;
-      const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-      if (progress) { progress.indeterminate = false; progress.value = Math.min(0.95, 0.15 + (attempt / maxEst) * 0.8); }
-      if (stage) stage.textContent = `Server restarting -- waiting for it to come back... (${elapsed}s elapsed)`;
-      if (pingEl) pingEl.innerHTML = `<span class="live-dot"></span> Waiting for server, try ${attempt} (~${elapsed}s, est ${maxEst} tries)`;
-      await new Promise(res => setTimeout(res, tick));
+      await new Promise(res => setTimeout(res, 1600));
       try {
         const r = await fetch('/api/admin/self_update/check');
         if (r.ok) {
           const data = await r.json();
           savePingHistory(attempt);
+          alive = false;
           if (progress) { progress.indeterminate=false; progress.value=1; }
-          if (stage) stage.textContent = `Updated -- now at ${shortSha(data.local_sha)}`;
+          if (stage) stage.textContent = 'Updated.';
           if (pingEl) pingEl.innerHTML = 'Server is back -- reloading...';
           if (closeBtn) closeBtn.disabled = false;
           setTimeout(()=>{ window.location.reload(); }, 1600);
