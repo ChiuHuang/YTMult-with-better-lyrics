@@ -17,7 +17,7 @@ from .cache import (
 from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
 from .translate import (
-    COHERE_API_KEYS, get_cohere_key, rotate_cohere_key,
+    cohere_key_list, get_cohere_key, rotate_cohere_key,
 )
 
 _UNLYRICED_PATH = 'cache/library_unlyriced.jsonl'
@@ -599,10 +599,12 @@ def _retitle_via_llm(song, artist):
     """Call Cohere for retitling. Returns {title, artist} or None."""
     prompt = _RETITLE_PROMPT_TEMPLATE.format(
         title=song or '', artist=artist or '')
-    for attempt in range(len(COHERE_API_KEYS)):
+    for attempt in range(len(cohere_key_list())):
         try:
             import requests as _requests
             api_key = get_cohere_key()
+            if not api_key:
+                break
             resp = _requests.post(
                 "https://api.cohere.com/v2/chat",
                 headers={
@@ -630,12 +632,12 @@ def _retitle_via_llm(song, artist):
             print(f"  [RETITLE] [WARN] LLM error: {e}")
             rotate_cohere_key()
     print(f"  [RETITLE] [WARN] all LLM keys exhausted")
-    # OrcaRouter fallback (OpenAI-compatible; ORCAROUTER_API_KEY + model
-    # YTMU_ORCA_MODEL, default orcarouter/free). Same JSON contract.
+    # Chat-provider fallback (config/ai_providers.json + ORCAROUTER_API_KEY
+    # env). Same JSON contract.
     try:
         from .translate import orca_enabled, orca_chat
         if orca_enabled():
-            print("  [RETITLE] trying OrcaRouter fallback...")
+            print("  [RETITLE] trying chat-provider fallback...")
             text = orca_chat(
                 [{"role": "user", "content": prompt}], timeout=90)
             if text:

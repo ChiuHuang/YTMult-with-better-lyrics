@@ -24,45 +24,51 @@ import logging
 # Cohere Translate (Command A Translate - free tier)
 # ============================================================
 
-COHERE_API_KEYS = [
-    "REDACTED_COHERE_KEY",
-    "REDACTED_COHERE_KEY",
-    "REDACTED_COHERE_KEY",
-    "REDACTED_COHERE_KEY",
-]
+# Keys are NEVER hardcoded here: they load from config/ai_providers.json
+# (gitignored; see config/ai_providers.example.json) plus env vars.
+# server/ai_providers.py owns file/env merging.
+from .ai_providers import load_cohere_keys, load_chat_providers
+
+COHERE_API_KEYS = []  # compat mirror, refreshed in place on every access
 _cohere_key_idx = 0
-_cohere_key_lock = threading.Lock()
+_cohere_key_lock = threading.RLock()
 _TLS = threading.local()
 
 
-def _env_list(name):
-    out = []
-    for part in re.split(r'[,\s]+', os.environ.get(name, '')):
-        part = (part or '').strip().strip('"\'')
-        if part and part not in out:
-            out.append(part)
-    return out
+def _refresh_cohere_keys():
+    keys = load_cohere_keys()
+    with _cohere_key_lock:
+        COHERE_API_KEYS[:] = keys
+    return keys
 
 
-# Extra Cohere keys via env (never commit keys to the repo):
-#   YTMU_COHERE_KEYS="key1,key2"
-for _k in _env_list('YTMU_COHERE_KEYS'):
-    if _k not in COHERE_API_KEYS:
-        COHERE_API_KEYS.append(_k)
+def cohere_key_list():
+    """Fresh snapshot of all Cohere keys. Never raises."""
+    try:
+        return _refresh_cohere_keys()
+    except Exception:
+        return list(COHERE_API_KEYS)
+
+
+_refresh_cohere_keys()
 
 
 # ------------------------------------------------------------
-# OrcaRouter fallback (OpenAI-compatible meta-router):
-#   https://api.orcarouter.ai/v1, keys start with sk-orca-.
-#   ORCAROUTER_API_KEY=...  YTMU_ORCA_MODEL=orcarouter/free
+# OpenAI-compatible chat fallback (e.g. OrcaRouter):
+# providers come from config/ai_providers.json + ORCAROUTER_API_KEY env.
+# Each entry carries its own url (base_url), headers, key, and model,
+# so a new provider is one JSON object (or one dashboard submit) away.
 # ------------------------------------------------------------
-_ORCA_BASE = os.environ.get('YTMU_ORCA_BASE',
-                            'https://api.orcarouter.ai/v1').rstrip('/')
-_ORCA_MODEL = os.environ.get('YTMU_ORCA_MODEL', 'orcarouter/free')
+def _chat_provider(use):
+    try:
+        providers = load_chat_providers(use)
+    except Exception:
+        return None
+    return providers[0] if providers else None
 
 
 def orca_enabled():
-    return bool(os.environ.get('ORCAROUTER_API_KEY', '').strip())
+    return _chat_provider('translate') is not None
 
 
 def translate_last_error():
@@ -72,33 +78,40 @@ def translate_last_error():
 
 
 def orca_chat(messages, timeout=60, max_tokens=4000):
-    """Raw OpenAI-compatible chat call. Returns text or None. Never raises."""
-    key = os.environ.get('ORCAROUTER_API_KEY', '').strip()
-    if not key:
+    """Raw OpenAI-compatible chat call via the first translate provider.
+    Returns text or None. Never raises."""
+    p = _chat_provider('translate')
+    if not p:
         return None
+    key = (p.get('api_key') or '').strip()
+    base = (p.get('base_url') or '').strip().rstrip('/')
+    if not key or not base:
+        return None
+    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+    for hk, hv in (p.get('headers') or {}).items():
+        if isinstance(hk, str) and isinstance(hv, str):
+            headers[hk] = hv
     try:
         resp = requests.post(
-            _ORCA_BASE + '/chat/completions',
-            headers={
-                'Authorization': f'Bearer {key}',
-                'Content-Type': 'application/json',
-            },
-            json={'model': _ORCA_MODEL, 'messages': messages,
+            base + '/chat/completions',
+            headers=headers,
+            json={'model': p.get('model') or 'orcarouter/free',
+                  'messages': messages,
                   'temperature': 0.2, 'max_tokens': max_tokens},
             timeout=timeout,
         )
         if resp.status_code == 429:
             _TLS.last_error = 'rate_limited'
-            print('  [Orca] Rate limited (429)')
+            print(f"  [Chat:{p.get('name', '?')}] Rate limited (429)")
             return None
         if resp.status_code != 200:
             _TLS.last_error = 'error'
-            print(f'  [Orca] Error {resp.status_code}: {resp.text[:200]}')
+            print(f"  [Chat:{p.get('name', '?')}] Error {resp.status_code}: {resp.text[:200]}")
             return None
         return resp.json()['choices'][0]['message']['content']
     except Exception as e:
         _TLS.last_error = 'error'
-        print(f'  [Orca] Exception: {e}')
+        print(f"  [Chat:{p.get('name', '?')}] Exception: {e}")
         return None
 
 
@@ -166,15 +179,19 @@ def set_translate_cached(cache_key, data):
 
 def get_cohere_key():
     global _cohere_key_idx
+    keys = _refresh_cohere_keys()
+    if not keys:
+        return None
     with _cohere_key_lock:
-        key = COHERE_API_KEYS[_cohere_key_idx % len(COHERE_API_KEYS)]
+        key = keys[_cohere_key_idx % len(keys)]
     return key
 
 def rotate_cohere_key():
     global _cohere_key_idx
     with _cohere_key_lock:
+        n = len(COHERE_API_KEYS) or 1
         _cohere_key_idx += 1
-        idx = _cohere_key_idx % len(COHERE_API_KEYS)
+        idx = _cohere_key_idx % n
     print(f"  [Cohere] Rotated to key index {idx}")
 
 LANG_NAMES = {
@@ -287,7 +304,7 @@ def cohere_translate(texts, target_lang='zh-TW'):
         subset = [texts[i] for i in to_translate_idx]
         translated_subset = _cohere_translate_raw(subset, target_lang)
         if translated_subset is None and orca_enabled():
-            print('  [Cohere] all keys failed, trying OrcaRouter fallback...')
+            print('  [Cohere] all keys failed, trying chat-provider fallback...')
             translated_subset = orca_chat_translate(subset, target_lang)
         if translated_subset is None:
             # Total API failure: serve originals but do NOT cache them, or
@@ -314,6 +331,7 @@ def _cohere_translate_raw(texts, target_lang):
     _TLS.last_error = None
     if not texts:
         return []
+    keys = cohere_key_list()
     saw_429 = False
 
     lang_name = LANG_NAMES.get(target_lang, target_lang)
@@ -332,9 +350,11 @@ def _cohere_translate_raw(texts, target_lang):
         f"{joined}"
     )
 
-    for attempt in range(len(COHERE_API_KEYS)):
+    for attempt in range(len(keys)):
         try:
             api_key = get_cohere_key()
+            if not api_key:
+                break
             resp = requests.post(
                 "https://api.cohere.com/v2/chat",
                 headers={
