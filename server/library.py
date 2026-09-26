@@ -222,7 +222,7 @@ def scan_cache():
 
         # prefer the full key over :fast sibling of the same video
         cur = by_vid.get(vid)
-        if cur is None or (is_fast and not cur['key'].endswith(':fast')):
+        if cur is None or (not is_fast and cur['key'].endswith(':fast')):
             by_vid[vid] = {
                 'video_id': vid,
                 'lang': lang,
