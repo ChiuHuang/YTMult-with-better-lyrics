@@ -1,5 +1,6 @@
 # Secrets + runtime state: never commit.
 config/ai_providers.json
+config/admin_config.json
 cache/
 logs/
 tmp/
