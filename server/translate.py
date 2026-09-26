@@ -31,6 +31,7 @@ COHERE_API_KEYS = [
     "REDACTED_COHERE_KEY",
 ]
 _cohere_key_idx = 0
+_cohere_key_lock = threading.Lock()
 
 import os
 os.makedirs('cache/lyrics', exist_ok=True)
@@ -56,13 +57,16 @@ def set_translate_cached(cache_key, data):
 
 def get_cohere_key():
     global _cohere_key_idx
-    key = COHERE_API_KEYS[_cohere_key_idx % len(COHERE_API_KEYS)]
+    with _cohere_key_lock:
+        key = COHERE_API_KEYS[_cohere_key_idx % len(COHERE_API_KEYS)]
     return key
 
 def rotate_cohere_key():
     global _cohere_key_idx
-    _cohere_key_idx += 1
-    print(f"  [Cohere] Rotated to key index {_cohere_key_idx % len(COHERE_API_KEYS)}")
+    with _cohere_key_lock:
+        _cohere_key_idx += 1
+        idx = _cohere_key_idx % len(COHERE_API_KEYS)
+    print(f"  [Cohere] Rotated to key index {idx}")
 
 LANG_NAMES = {
     'zh-TW': 'Traditional Chinese',

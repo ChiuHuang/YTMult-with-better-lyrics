@@ -349,19 +349,29 @@ def api_retitle():
             return jsonify({'ok': False, 'error': 'already running'})
         body = request.get_json(silent=True) or {}
         video_id = body.get('video_id')
+        video_ids = body.get('video_ids') or []
+        req_items = body.get('items') or []
         song = body.get('song', '')
         artist = body.get('artist', '')
+        try:
+            workers = int(body.get('workers', 8))
+        except (TypeError, ValueError):
+            workers = 8
+        workers = max(1, min(16, workers))
         _retitle_job['state'] = 'running'
         _retitle_job['job_id'] = str(int(time_module.time() * 1000))
         _retitle_job['total'] = 0
         _retitle_job['done'] = 0
         _retitle_job['current'] = None
         _retitle_job['results'] = []
+        _retitle_job['workers'] = workers
         _retitle_cancel.clear()
 
     def _run():
         try:
-            _run_retitle(video_id, song, artist)
+            _run_retitle(video_id, song, artist,
+                         video_ids=video_ids, req_items=req_items,
+                         workers=workers)
         finally:
             with _retitle_lock:
                 _retitle_job['state'] = 'done'
@@ -369,7 +379,7 @@ def api_retitle():
             _sse_broadcast('retitle', {'state': 'done', 'job_id': _retitle_job['job_id']})
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({'ok': True, 'job_id': _retitle_job['job_id']})
+    return jsonify({'ok': True, 'job_id': _retitle_job['job_id'], 'workers': workers})
 
 
 @app.route('/api/admin/library/retitle/status', methods=['GET'])
@@ -387,34 +397,81 @@ def api_retitle_status():
         })
 
 
-def _run_retitle(video_id, song, artist):
+def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers=8):
+    import concurrent.futures as _fut
     from .pipeline import fetch_all_lyrics
-    from .providers_yt import get_song_info as yt_get_song_info
     from .cache import set_cached, is_not_found_result
 
-    if video_id:
-        items = [i for i in list_unlyriced() if i['video_id'] == video_id]
+    unlyriced = list_unlyriced()
+    by_vid = {i.get('video_id'): i for i in unlyriced}
+
+    if req_items:
+        # Explicit per-title list: [{video_id, song?, artist?, lang?}].
+        # Missing song/artist/lang fall back to the unlyriced entry.
+        items = []
+        for r in req_items:
+            if not isinstance(r, dict):
+                continue
+            vid = (r.get('video_id') or '').strip()
+            if not vid:
+                continue
+            base = by_vid.get(vid, {})
+            items.append({
+                'video_id': vid,
+                'song': r.get('song') or base.get('song', ''),
+                'artist': r.get('artist') or base.get('artist', ''),
+                'lang': r.get('lang') or base.get('lang', 'zh-TW'),
+            })
+    elif video_ids:
+        items = []
+        for vid in video_ids:
+            vid = (vid or '').strip() if isinstance(vid, str) else ''
+            if not vid:
+                continue
+            base = by_vid.get(vid)
+            if base:
+                items.append(base)
+            else:
+                items.append({'video_id': vid, 'song': '', 'artist': '', 'lang': 'zh-TW'})
+    elif video_id:
+        items = [i for i in unlyriced if i['video_id'] == video_id]
         if not items:
             items = [{'video_id': video_id, 'song': song, 'artist': artist, 'lang': 'zh-TW'}]
+        elif song or artist:
+            # Single-video override only applies to that one video.
+            items = [dict(items[0])]
+            if song:
+                items[0]['song'] = song
+            if artist:
+                items[0]['artist'] = artist
     else:
-        items = list_unlyriced()
+        items = unlyriced
 
     total = len(items)
-    _retitle_job['total'] = total
+    with _retitle_lock:
+        _retitle_job['total'] = total
 
-    for item in items:
+    if not items:
+        print("[LIBRARY] [OK] retitle done: 0 processed")
+        return
+
+    workers = max(1, min(16, int(workers or 8)))
+
+    def _one(item):
         if _retitle_cancel.is_set():
-            break
+            return None
         vid = item['video_id']
-        orig_song = song or item.get('song', '')
-        orig_artist = artist or item.get('artist', '')
+        orig_song = item.get('song', '')
+        orig_artist = item.get('artist', '')
         lang = item.get('lang', 'zh-TW')
-        _retitle_job['current'] = {'video_id': vid, 'song': orig_song, 'artist': orig_artist}
 
+        with _retitle_lock:
+            _retitle_job['current'] = {'video_id': vid, 'song': orig_song, 'artist': orig_artist}
+            done = _retitle_job.get('done', 0)
         _sse_broadcast('retitle_progress', {
             'video_id': vid, 'song': orig_song, 'artist': orig_artist,
             'status': 'retitling', 'message': 'calling LLM...',
-            'done': _retitle_job.get('done', 0), 'total': total,
+            'done': done, 'total': total,
         })
 
         cleaned = retitle_song(orig_song, orig_artist)
@@ -428,11 +485,13 @@ def _run_retitle(video_id, song, artist):
             'status': 'retitle_only',
         }
 
+        with _retitle_lock:
+            done = _retitle_job.get('done', 0)
         _sse_broadcast('retitle_progress', {
             'video_id': vid, 'song': orig_song, 'artist': orig_artist,
             'new_title': new_title, 'new_artist': new_artist,
-            'status': 'fetching', 'message': f"trying with cleaned title...",
-            'done': _retitle_job.get('done', 0), 'total': total,
+            'status': 'fetching', 'message': "trying with cleaned title...",
+            'done': done, 'total': total,
         })
 
         try:
@@ -458,18 +517,39 @@ def _run_retitle(video_id, song, artist):
             entry['error'] = str(e)
             print(f"[LIBRARY] [FAIL] retitle fetch {vid}: {e}")
 
-        _retitle_job['done'] = _retitle_job.get('done', 0) + 1
-        _retitle_job['results'].append(entry)
+        with _retitle_lock:
+            _retitle_job['done'] = _retitle_job.get('done', 0) + 1
+            _retitle_job['results'].append(entry)
+            done = _retitle_job.get('done', 0)
         _sse_broadcast('retitle_progress', {
             'video_id': vid, 'song': orig_song, 'artist': orig_artist,
             'new_title': new_title, 'new_artist': new_artist,
             'status': entry['status'], 'source': entry.get('source', ''),
-            'done': _retitle_job.get('done', 0), 'total': total,
+            'done': done, 'total': total,
         })
+        return entry
 
-        time_module.sleep(0.5)
+    with _fut.ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, it) for it in items]
+        for f in _fut.as_completed(futs):
+            if _retitle_cancel.is_set():
+                break
+            try:
+                f.result()
+            except Exception as e:
+                print(f"[LIBRARY] [FAIL] retitle worker: {e}")
 
-    print(f"[LIBRARY] [OK] retitle done: {len(_retitle_job.get('results',[]))} processed")
+    print(f"[LIBRARY] [OK] retitle done: {len(_retitle_job.get('results',[]))} processed (workers={workers})")
+
+
+@app.route('/api/admin/library/retitle/stop', methods=['POST'])
+@login_required
+def api_retitle_stop():
+    _retitle_cancel.set()
+    with _retitle_lock:
+        if _retitle_job.get('state') == 'running':
+            _retitle_job['state'] = 'stopped'
+    return jsonify({'ok': True})
 
 
 @app.route('/api/admin/cache/preview', methods=['GET'])

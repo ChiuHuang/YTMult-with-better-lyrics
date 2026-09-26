@@ -756,7 +756,8 @@
     list.innerHTML = '';
     if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No unlyriced songs')); return; }
     items.forEach(item => {
-      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto auto;'},
+      const row = el('div', {class:'list-row', style:'grid-template-columns: auto 1fr auto auto auto;'},
+        (() => { const c = document.createElement('mdui-checkbox'); c.value = item.video_id; c.className = 'retitle-check'; return c; })(),
         el('span', {class:'truncate'}, `${item.song || ''} - ${item.artist || ''} (${item.video_id || ''})`,
           item.rename ? el('span', {class:'rename-tag'}, ` renamed: ${item.rename.title || ''} - ${item.rename.artist || ''}`) : null)
       );
@@ -849,6 +850,10 @@
       });
     }
   };
+  const retitleWorkers = () => {
+    const v = parseInt($('#retitle-workers')?.value || '8', 10);
+    return Math.max(1, Math.min(16, isNaN(v) ? 8 : v));
+  };
   const retitleAll = async () => {
     await mdui.confirm({
       headline: 'Retitle all unlyriced',
@@ -857,13 +862,23 @@
       confirmText: 'Retitle all',
       onConfirm: async () => {
         try {
-          const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({})});
+          const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({workers: retitleWorkers()})});
           const d = await r.json();
           if (d.ok) { mdui.snackbar({message:'Retitle started'}); openRetitleDialog(); }
           else mdui.snackbar({message: d.error || 'Failed'});
         } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
       }
     });
+  };
+  const retitleSelected = async () => {
+    const checked = [...document.querySelectorAll('.retitle-check')].filter(c => c.checked).map(c => c.value);
+    if (!checked.length) { mdui.snackbar({message:'Select at least one song'}); return; }
+    try {
+      const r = await API('/api/admin/library/retitle', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({video_ids: checked, workers: retitleWorkers()})});
+      const d = await r.json();
+      if (d.ok) { mdui.snackbar({message:`Retitle started (${checked.length})`}); openRetitleDialog(); }
+      else mdui.snackbar({message: d.error || 'Failed'});
+    } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
   };
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
@@ -1665,6 +1680,8 @@
     if (rebaseStopBtn) rebaseStopBtn.addEventListener('click', stopRebase);
     const retitleAllBtn = $('#unlyriced-retitle-all');
     if (retitleAllBtn) retitleAllBtn.addEventListener('click', retitleAll);
+    const retitleSelBtn = $('#unlyriced-retitle-selected');
+    if (retitleSelBtn) retitleSelBtn.addEventListener('click', retitleSelected);
     const retitleCloseBtn = $('#retitle-close');
     if (retitleCloseBtn) retitleCloseBtn.addEventListener('click', () => { try{$('#retitle-dialog').open=false;}catch{} });
     const renameCancelBtn = $('#rename-cancel');
