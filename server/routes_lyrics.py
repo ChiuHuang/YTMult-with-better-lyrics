@@ -587,6 +587,45 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     from .pipeline import probe_providers
     from .library import save_provider, remove_unlyriced
     from .translate import cohere_translate
+    import copy as _copy
+
+    # Instant path: a full probe already saved every provider for this video.
+    # Serve the saved one directly (translate into the requested lang) so the
+    # switcher flips providers with no re-probe and no popup.
+    try:
+        from .candidates import load_candidates
+        _saved = load_candidates(video_id)
+    except Exception:
+        _saved = None
+    if _saved:
+        for _c in _saved:
+            if (_c or {}).get('provider', '').lower() == provider.lower():
+                _out = _copy.deepcopy((_c or {}).get('data') or {})
+                if _out.get('lyrics'):
+                    # lang may be '' when the menu sends none; fall back to the
+                    # saved snapshot only for shape, never for translations.
+                    _lang = lang or 'zh-TW'
+                    _out['song'] = _out.get('song', '')
+                    _out['artist'] = _out.get('artist', '')
+                    _lyrics = _out.get('lyrics') or []
+                    sanitize_lyrics_parts(_lyrics)
+                    if _lyrics and not any(l.get('translated') for l in _lyrics):
+                        _texts = [l['text'] for l in _lyrics if l.get('text')]
+                        _translations = cohere_translate(_texts, _lang)
+                        for _i, _lyric in enumerate(_lyrics):
+                            if _i < len(_translations) and _translations[_i]:
+                                _lyric['translated'] = _translations[_i]
+                    _out['wordSynced'] = any(l.get('wordSynced') for l in _lyrics)
+                    set_cached(f"{video_id}:{_lang}", _out)
+                    save_provider(video_id, (_c or {}).get('provider', provider), _lang)
+                    try:
+                        remove_unlyriced(video_id)
+                    except Exception:
+                        pass
+                    _sse_broadcast('rebase', {'state': 'done', 'applied': video_id})
+                    print(f"  [provider] {video_id} served {provider} from saved candidates (no re-probe)")
+                    return _out, None
+                break
 
     try:
         song_info = get_song_info(video_id)
