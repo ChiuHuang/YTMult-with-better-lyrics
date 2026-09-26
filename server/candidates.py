@@ -41,7 +41,7 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
     provider -> {status: found|missed|error|skipped, tier?, ts} so later
     runs know what each provider gave without re-trying. Returns True when
     written."""
-    if only_source or not video_id or not candidates:
+    if only_source or not video_id or (not candidates and not outcomes):
         return False
     try:
         slim = []
@@ -129,7 +129,10 @@ def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
         if not cands and not payload.get('outcomes'):
             return None
         if max_age_s and payload.get('ts'):
-            age = (datetime.now() - datetime.fromisoformat(payload['ts'])).total_seconds()
+            try:
+                age = (datetime.now() - datetime.fromisoformat(payload['ts'])).total_seconds()
+            except Exception:
+                age = 0  # unparseable ts: keep the data, don't drop it
             if age > max_age_s:
                 return None
         return payload
@@ -156,6 +159,11 @@ def _line_is_wbw(line):
         len({p.get('startTimeMs') for p in parts}) > 1
 
 
+def _is_gap_line(line):
+    return bool((line or {}).get('isInstrumental')) or \
+        _norm_text((line or {}).get('text')) == '[instrumental]'
+
+
 def graft_wbw_parts(base_lyrics, donor_lyrics):
     """Copy real word timing from donor onto base when both carry the SAME
     lines. Strict all-or-nothing: every non-gap line must match by
@@ -166,10 +174,10 @@ def graft_wbw_parts(base_lyrics, donor_lyrics):
     for b, d in zip(base_lyrics, donor_lyrics):
         if not isinstance(b, dict) or not isinstance(d, dict):
             return False
-        b_inst = b.get('isInstrumental') or _norm_text(b.get('text')) == '[instrumental]'
-        d_inst = d.get('isInstrumental') or _norm_text(d.get('text')) == '[instrumental]'
-        if b_inst or d_inst:
-            if not (b_inst and d_inst):
+        b_gap = _is_gap_line(b)
+        d_gap = _is_gap_line(d)
+        if b_gap or d_gap:
+            if not (b_gap and d_gap):
                 return False
             continue
         if _norm_text(b.get('text')) != _norm_text(d.get('text')):
@@ -177,7 +185,7 @@ def graft_wbw_parts(base_lyrics, donor_lyrics):
         if not _line_is_wbw(d):
             return False
     for b, d in zip(base_lyrics, donor_lyrics):
-        if b.get('isInstrumental') or d.get('isInstrumental'):
+        if _is_gap_line(b) or _is_gap_line(d):
             continue
         b['parts'] = copy.deepcopy(d.get('parts'))
         b['wordSynced'] = True

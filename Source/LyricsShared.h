@@ -94,6 +94,7 @@
 @property (nonatomic, strong) UIButton *landscapeReloadButton;
 @property (nonatomic, strong) UIButton *headerMenuButton;
 @property (nonatomic, copy) NSString *providerJobID;
+@property (nonatomic, copy) NSString *providerProbeVideoID;
 @property (nonatomic, strong) NSTimer *providerPollTimer;
 @property (nonatomic, strong) NSArray *providerCandidates;
 @property (nonatomic, assign) NSInteger providerIndex;

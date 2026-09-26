@@ -621,12 +621,16 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
                     _out['artist'] = _out.get('artist', '')
                     _lyrics = _out.get('lyrics') or []
                     sanitize_lyrics_parts(_lyrics)
-                    if _lyrics and not any(l.get('translated') for l in _lyrics):
+                    if _lyrics and not all(l.get('translated') for l in _lyrics):
                         _texts = [l['text'] for l in _lyrics if l.get('text')]
                         _translations = cohere_translate(_texts, _lang)
-                        for _i, _lyric in enumerate(_lyrics):
-                            if _i < len(_translations) and _translations[_i]:
-                                _lyric['translated'] = _translations[_i]
+                        _ti = 0
+                        for _lyric in _lyrics:
+                            if not _lyric.get('text'):
+                                continue
+                            if _ti < len(_translations) and _translations[_ti]:
+                                _lyric['translated'] = _translations[_ti]
+                            _ti += 1
                     _out['wordSynced'] = any(l.get('wordSynced') for l in _lyrics)
                     set_cached(f"{video_id}:{_lang}", _out)
                     save_provider(video_id, (_c or {}).get('provider', provider), _lang)
@@ -671,12 +675,16 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     out['artist'] = song_info.get('artist', out.get('artist', ''))
     lyrics = out.get('lyrics') or []
     sanitize_lyrics_parts(lyrics)
-    if lang and lyrics and not any(l.get('translated') for l in lyrics):
+    if lang and lyrics and not all(l.get('translated') for l in lyrics):
         texts = [l['text'] for l in lyrics if l.get('text')]
         translations = cohere_translate(texts, lang)
-        for i, lyric in enumerate(lyrics):
-            if i < len(translations) and translations[i]:
-                lyric['translated'] = translations[i]
+        ti = 0
+        for lyric in lyrics:
+            if not lyric.get('text'):
+                continue
+            if ti < len(translations) and translations[ti]:
+                lyric['translated'] = translations[ti]
+            ti += 1
     out['wordSynced'] = any(l.get('wordSynced') for l in lyrics)
     set_cached(f"{video_id}:{lang}", out)
     save_provider(video_id, chosen.get('provider', provider), lang)
@@ -708,6 +716,9 @@ def _run_provider_probe_job(job_id, video_id, lang, jwt_token):
     if not song_info:
         job['state'] = 'error'
         job['error'] = 'Video not found on YouTube Music'
+        _sse_broadcast('probe_progress', {'run_id': job_id, 'video_id': video_id,
+                                          'provider': '', 'status': 'error',
+                                          'detail': job['error']})
         return
     job['song'] = song_info.get('title', '')
     job['artist'] = song_info.get('artist', '')
@@ -839,13 +850,15 @@ def _compute_server_hash_for_vid_lang(video_id, translate_to, auto_zh):
     return lyrics_content_hash(data.get('lyrics', []))
 
 
-def _prepare_entry_for_download(data, video_id, translate_to):
-    """Apply transforms and return a dict ready for client to store."""
+def _prepare_entry_for_download(data, video_id, translate_to, auto_zh=False):
+    """Apply transforms and return a dict ready for client to store. Must
+    use the caller's auto_zh (the sync hash is computed with it) or the
+    delivered payload hash mismatches and the client never converges."""
     if not data:
         return None
     entry = dict(data)
     if isinstance(entry.get('lyrics'), list):
-        apply_display_transforms(entry['lyrics'], translate_to, True)
+        apply_display_transforms(entry['lyrics'], translate_to, auto_zh)
     # Ensure required fields for client cache
     entry['videoID'] = video_id
     entry['cv'] = _CACHE_FORMAT_VERSION
@@ -863,7 +876,10 @@ def api_lyrics_sync():
     translate_to = (body.get('lang') or 'zh-TW').strip()
     auto_zh = body.get('auto_zh', False)
     entries = body.get('entries', [])
-    max_items = min(int(body.get('max_items', 500)), 2000)
+    try:
+        max_items = min(int(body.get('max_items', 500)), 2000)
+    except (TypeError, ValueError):
+        max_items = 500
     regenerate = bool(body.get('regenerate', True))
     jwt_token = body.get('jwt')
     if jwt_token:
@@ -915,11 +931,13 @@ def api_lyrics_sync():
         full_key = f"{vid}:{translate_to}"
         data = get_cached(full_key)
         if data:
-            entry_data = _prepare_entry_for_download(data, vid, translate_to)
+            entry_data = _prepare_entry_for_download(data, vid, translate_to, auto_zh)
             if entry_data:
                 download.append(entry_data)
 
-    # Start background regen job if there are missing videos to regenerate
+    # Start background regen job if there are missing videos to regenerate.
+    # The raw client JWT stays server-side only (thread arg) -- never stored
+    # on the job dict, which api_sync_status returns verbatim.
     job_id = None
     if regen_vids:
         job_id = _next_sync_job_id()
@@ -933,7 +951,6 @@ def api_lyrics_sync():
             'results': [],
             'lang': translate_to,
             'auto_zh': auto_zh,
-            'jwt': jwt_token,
             'started': datetime.now().isoformat(),
         }
         with _sync_jobs_lock:

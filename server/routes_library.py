@@ -68,7 +68,8 @@ def _probe_job_prune():
 
 
 def _probe_job_run(job_id):
-    job = _probe_jobs.get(job_id)
+    with _probe_jobs_lock:
+        job = _probe_jobs.get(job_id)
     if not job:
         return
     try:
@@ -733,6 +734,7 @@ def api_probe_status(job_id):
     """Light poll by default ({state, count, notes}); pass ?full=1 once done
     to fetch the saved candidates for paging."""
     full = (request.args.get('full') or '') == '1'
+    _probe_job_prune()
     with _probe_jobs_lock:
         job = _probe_jobs.get(job_id)
         if not job:

@@ -234,8 +234,10 @@
       try {
         const d = JSON.parse(e.data);
         // Servers older than the run_id echo send no run_id; accept those
-        // rather than dropping every line silently (empty #refetch-live).
+        // rather than dropping every line silently (empty #refetch-live) --
+        // but never render into an idle run with no active probe.
         if (d.run_id && d.run_id !== probeRunId) return;
+        if (!d.run_id && !probeRunId) return;
         const final = !d.provider || d.provider === 'probe';
         if ((d.status === 'done' || d.status === 'complete') && final) { finishProbeRun(); return; }
         if (d.status === 'error' && final) { finishProbeRun(true); return; }
@@ -299,6 +301,8 @@
           if (d.kept != null) bulkState.kept = d.kept;
           if (d.failed != null) bulkState.failed = d.failed;
           if (d.errors != null) bulkState.errors = d.errors;
+          if (d.tq_done != null) bulkState.tq_done = d.tq_done;
+          if (d.tq_queued != null) bulkState.tq_queued = d.tq_queued;
           bulkState.stage = '';
         } else if (d.type === 'done') {
           bulkState.state = d.state || 'done';
@@ -328,9 +332,9 @@
           if (ix >= 0) plState.tracks[ix] = t; else plState.tracks.push(t);
           plState.done = d.done != null ? d.done : plState.done;
           plState.total = d.total != null ? d.total : plState.total;
-          plState.found = plState.tracks.filter(x => x.status === 'found').length;
-          plState.unlyriced = plState.tracks.filter(x => x.status === 'unlyriced').length;
-          plState.error_count = plState.tracks.filter(x => x.status === 'error' || x.status === 'invalid_id').length;
+          plState.found = plState.tracks.filter(x => (x.tag || x.status) === 'found').length;
+          plState.unlyriced = plState.tracks.filter(x => (x.tag || x.status) === 'unlyriced').length;
+          plState.error_count = plState.tracks.filter(x => { const s = x.tag || x.status; return s === 'error' || s === 'invalid_id'; }).length;
           plState.current = `${d.song || d.video_id || ''} - ${d.artist || ''}`;
           renderPlSync(plState);
         }
@@ -1078,6 +1082,8 @@
   /* ---- refetch from URL / per-provider pick + custom rename ---- */
   let probeRunId = null;
   let probeVideoId = null;
+  let probeTitle = null;
+  let probeArtist = null;
   // Live animated provider rows (web elements, not text): each provider gets
   // a row with a continuous spinner while probing, a smooth elapsed ticker
   // (local 250ms clock, zero HTTP), and a determinate pill + retry button
@@ -1101,13 +1107,20 @@
   };
   const probeRetryProvider = (provider) => {
     if (!probeVideoId) { mdui.snackbar({message:'No video for this run'}); return; }
-    probeRefetch({url: probeVideoId, source: provider});
+    probeRefetch({url: probeVideoId, source: provider,
+      title: probeTitle || undefined, artist: probeArtist || undefined});
   };
   const probeLiveLine = (provider, status, detail) => {
     const live = $('#refetch-live');
     if (!live) return;
     live.classList.add('has-lines');
-    while (live.children.length > 200) live.removeChild(live.firstChild);
+    while (live.children.length > 200) {
+      const old = live.firstChild;
+      live.removeChild(old);
+      // Keep the row map in sync so later updates for an evicted provider
+      // rebuild its row instead of touching a detached node.
+      probeRowMap.forEach((v, k) => { if (v.row === old) probeRowMap.delete(k); });
+    }
     let r = probeRowMap.get(provider);
     if (!r) {
       const spin = el('mdui-circular-progress', {style:'width:16px;height:16px;flex:none;'});
@@ -1171,7 +1184,7 @@
   const clearProbeSafety = () => {
     if (probeSafetyTimer) { clearTimeout(probeSafetyTimer); probeSafetyTimer = null; }
   };
-  const stopProbePoll = () => { clearProbeSafety(); probeRunId = null; };
+  const stopProbePoll = () => { clearProbeSafety(); probeStopElapsed(); probeRunId = null; };
   const setProbeStatus = (text, cls) => {
     const status = $('#refetch-status');
     if (!status) return;
@@ -1262,6 +1275,8 @@
     probeRunId = started.job_id;
     probeStatusUrl = started.status_url;
     probeVideoId = started.video_id || url;
+    probeTitle = opts.title || null;
+    probeArtist = opts.artist || null;
     probeFoundCount = 0;
     const live = $('#refetch-live');
     if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
@@ -1400,6 +1415,8 @@
     if (!plJobId) return;
     try { await API(`/api/playlist/sync/stop/${encodeURIComponent(plJobId)}`, {method:'POST'}); } catch {}
     try { sessionStorage.removeItem('ymtu-playlist-job'); } catch {}
+    plJobId = null;
+    plState = null;
     renderPlSync({state:'stopped'});
   };
   const startPlaylistSyncWeb = async () => {
@@ -1477,6 +1494,9 @@
   const stopBulk = async () => {
     try { await API('/api/admin/library/refetch/stop', {method:'POST'}); } catch {}
     try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {}
+    bulkJobId = null;
+    bulkState = null;
+    renderBulk({state:'stopped'});
   };
   const startBulk = async () => {
     const startBtn = $('#bulk-start');

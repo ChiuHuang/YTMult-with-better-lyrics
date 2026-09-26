@@ -37,12 +37,12 @@ _VERIFY_SONG = 'Never Gonna Give You Up'
 _VERIFY_ARTIST = 'Rick Astley'
 
 _lock = threading.Lock()
-# jwt_id -> entry. A usable entry always carries the raw 'token'; entries
-# reloaded from disk on startup have token=None until the same token is
-# contributed again (nodes re-contribute on connect).
+# jwt_id -> entry. A usable entry always carries the raw 'token' (persisted
+# to disk, restored on startup); legacy hash-only records have token=None
+# until the same token is contributed again.
 _pool = {}
 _rr_counter = 0
-_ttl = 86400 * 7            # a year-old contribution is stale, drop it
+_ttl = 86400 * 7            # contributions older than this are dropped on load
 
 
 def _token_id(token):
@@ -79,6 +79,13 @@ def _persist():
         print(f"  [JWT] persist failed: {e}")
 
 
+def _safe_int(v, dflt=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return dflt
+
+
 def _load_persisted():
     if not os.path.exists(JWT_FILE):
         return 0
@@ -87,26 +94,37 @@ def _load_persisted():
             data = json.load(f)
     except Exception:
         return 0
+    now_ts = time_module.time()
     loaded = 0
     for rec in (data.get('jwt_pool') or []):
-        jid = rec.get('id')
-        if not jid:
+        try:
+            jid = rec.get('id')
+            if not jid:
+                continue
+            added = rec.get('added') or ''
+            try:
+                added_age = now_ts - datetime.fromisoformat(added).timestamp()
+            except Exception:
+                added_age = 0
+            if added_age > _ttl:
+                continue  # ancient contribution, drop
+            _pool[jid] = {
+                'id': jid,
+                'token': rec.get('token'),
+                'token_hash': rec.get('token_hash'),
+                'node_id': rec.get('node_id'),
+                'added': added,
+                'last_checked': rec.get('last_checked'),
+                'last_used': rec.get('last_used') or 0.0,
+                'last_ok': rec.get('last_ok'),
+                'ok': bool(rec.get('ok')),
+                'successes': _safe_int(rec.get('successes')),
+                'fails': _safe_int(rec.get('fails')),
+                'verdict': rec.get('verdict') or 'unverified',
+            }
+            loaded += 1
+        except Exception:
             continue
-        _pool[jid] = {
-            'id': jid,
-            'token': rec.get('token'),
-            'token_hash': rec.get('token_hash'),
-            'node_id': rec.get('node_id'),
-            'added': rec.get('added'),
-            'last_checked': rec.get('last_checked'),
-            'last_used': rec.get('last_used', 0.0),
-            'last_ok': rec.get('last_ok'),
-            'ok': bool(rec.get('ok')),
-            'successes': int(rec.get('successes', 0)),
-            'fails': int(rec.get('fails', 0)),
-            'verdict': rec.get('verdict', 'unverified'),
-        }
-        loaded += 1
     return loaded
 
 
@@ -120,7 +138,7 @@ def contribute_jwt(token, node_id=None):
         prev = _pool.get(jid)
         # Fast path: identical token already contributed by this same source
         # (e.g. every device lyric request re-sends its JWT) -- avoid the disk
-        # write churn. A persisted hash-only record (token=None) still falls
+        # write churn. A legacy hash-only record (token=None) still falls
         # through so we re-populate the raw token on this live contribution.
         if prev is not None and prev.get('token') == token and (prev.get('node_id') or '') == (node_id or ''):
             return {'ok': True, 'id': jid, 'num_pool': len(_pool)}
@@ -280,7 +298,10 @@ def check_all(evict=True):
             unknown_n += 1
             with _lock:
                 if entry['id'] in _pool:
-                    _pool[entry['id']]['verdict'] = 'unknown'
+                    # Keep a probation label ('dead x1') so the table still
+                    # shows the pending second strike.
+                    if int(_pool[entry['id']].get('fails', 0)) == 0:
+                        _pool[entry['id']]['verdict'] = 'unknown'
                     _pool[entry['id']]['last_checked'] = now_iso
     _persist()
     try:

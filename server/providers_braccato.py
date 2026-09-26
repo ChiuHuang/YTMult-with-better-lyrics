@@ -89,21 +89,44 @@ def _parse_ttml(payload):
             pass
     return parse_ttml_basic(payload)
 
+def _boidu_query(url, song, artist, duration, album, via_node):
+    """GET a boidu endpoint with the album filter, retrying without it when
+    that misses. get_song_info album metadata is often wrong (e.g. it holds
+    the artist name) and boidu treats `al` as a hard filter -- one bad album
+    blanks even perfect song/artist matches (seen: Suki/yuri lost its bLyrics
+    wbw until `al` was dropped). Returns the decoded data dict or None."""
+    base = {'s': song, 'a': artist, 'd': str(int(duration))}
+    for attempt_album in ([album] if album else []) + [None]:
+        params = dict(base)
+        if attempt_album:
+            params['al'] = attempt_album
+        text = _retrieve(url, params, via_node)
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if (data.get('ttml') or data.get('lyrics')) and not data.get('error'):
+            return data
+        if attempt_album:
+            print(f"[braccato] no match with album={attempt_album!r}; retrying without album filter")
+    return None
+
 
 def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None):
     """bLyrics TTML (boidu.dev/getLyrics). Word-synced when spans exist."""
     try:
-        params = {'s': song, 'a': artist, 'd': str(int(duration))}
-        if album:
-            params['al'] = album
-        text = _retrieve(BOIDU_TTML_URL, params, via_node)
-        if not text:
+        data = _boidu_query(BOIDU_TTML_URL, song, artist, duration, album, via_node)
+        if not data:
             return None
-        data = json.loads(text)
         lyrics = _parse_ttml(data.get('ttml'))
         if not lyrics:
             return None
-        return {'parsed': lyrics, 'source': 'bLyrics', 'wordSynced': any(l.get('wordSynced') for l in lyrics)}
+        return {'parsed': lyrics, 'source': 'bLyrics', 'wordSynced':
+                any(l.get('wordSynced') for l in lyrics)}
     except Exception as e:
         print(f"[bLyrics] error: {e}")
         return None
@@ -112,14 +135,8 @@ def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None):
 def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
     """Portato QRC (boidu.dev/qq/getLyrics): true word-by-word timing."""
     try:
-        params = {'s': song, 'a': artist, 'd': str(int(duration))}
-        if album:
-            params['al'] = album
-        text = _retrieve(BOIDU_QQ_URL, params, via_node)
-        if not text:
-            return None
-        data = json.loads(text)
-        if not data.get('lyrics') or data.get('error'):
+        data = _boidu_query(BOIDU_QQ_URL, song, artist, duration, album, via_node)
+        if not data:
             return None
         entries = parse_qrc_structured(_peel_json_string(data.get('lyrics')))
         if not entries:
@@ -133,13 +150,9 @@ def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
 def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None):
     """Legato LRC (boidu.dev/kugou/getLyrics)."""
     try:
-        params = {'s': song, 'a': artist, 'd': str(int(duration))}
-        if album:
-            params['al'] = album
-        text = _retrieve(BOIDU_KUGOU_URL, params, via_node)
-        if not text:
+        data = _boidu_query(BOIDU_KUGOU_URL, song, artist, duration, album, via_node)
+        if not data:
             return None
-        data = json.loads(text)
         lrc = _peel_json_string(data.get('lyrics'))
         if not lrc:
             return None
@@ -152,15 +165,21 @@ def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None):
 def fetch_binimum(song, artist, duration=0, album='', via_node=None):
     """BiniLyrics TTML via search -> lyricsUrl (lyrics-api.binimum.org)."""
     try:
-        params = {'track': song, 'artist': artist, 'duration': str(int(duration))}
-        if album:
-            params['album'] = album
-        text = _retrieve(BINIMUM_SEARCH_URL, params, via_node)
-        if not text:
-            return None
-        search = json.loads(text)
-        selected = (search.get('results') or [{}])[0]
-        lyrics_url = selected.get('lyricsUrl')
+        base = {'track': song, 'artist': artist, 'duration': str(int(duration))}
+        lyrics_url = None
+        for attempt_album in ([album] if album else []) + [None]:
+            params = dict(base)
+            if attempt_album:
+                params['album'] = attempt_album
+            text = _retrieve(BINIMUM_SEARCH_URL, params, via_node)
+            if not text:
+                continue
+            search = json.loads(text)
+            lyrics_url = (search.get('results') or [{}])[0].get('lyricsUrl')
+            if lyrics_url:
+                break
+            if attempt_album:
+                print(f"[Binimum] no match with album={attempt_album!r}; retrying without album filter")
         if not lyrics_url:
             return None
         ttml_text = _retrieve(lyrics_url, None, via_node)
