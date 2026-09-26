@@ -99,7 +99,10 @@ _sse_subscribers_lock = threading.Lock()
 def _sse_broadcast(event_type, data):
     """Push an SSE event to all connected dashboard clients."""
     import json as _json
-    msg = f"event: {event_type}\ndata: {_json.dumps(data)}\n\n"
+    try:
+        msg = f"event: {event_type}\ndata: {_json.dumps(data)}\n\n"
+    except Exception:
+        return
     with _sse_subscribers_lock:
         dead = []
         for q in _sse_subscribers:

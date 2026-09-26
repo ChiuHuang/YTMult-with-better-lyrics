@@ -70,7 +70,7 @@ def _cache_candidates(limit, cooldown):
             vid = ':'.join(parts[:-2] if is_fast else parts[:-1])
             if not vid or not lang:
                 continue
-            last = _rerace_last_attempt.get(vid, 0)
+            last = _rerace_last_attempt.get((vid, lang), 0)
             if now - last < cooldown:
                 continue
             cand = (key, vid, lang, entry.get('ts', ''), _tier(data))
@@ -86,15 +86,20 @@ def _cache_candidates(limit, cooldown):
 
 def _translate_upgrade_in_place(up, lang):
     """Fill missing translated rows on an upgrade payload (fast Google pass,
-    same as the network path below). Never raises."""
+    same as the network path below). Index-aligned on text-bearing lines so
+    textless/gap rows never shift later translations. Never raises."""
     if not lang or not up or not up.get('lyrics'):
         return
     texts = [l['text'] for l in up['lyrics'] if l.get('text')]
     try:
         translations = google_translate_fast(texts, lang)
-        for i, l in enumerate(up['lyrics']):
-            if i < len(translations) and translations[i] and not l.get('translated'):
-                l['translated'] = translations[i]
+        ti = 0
+        for l in up['lyrics']:
+            if not l.get('text'):
+                continue
+            if ti < len(translations) and translations[ti] and not l.get('translated'):
+                l['translated'] = translations[ti]
+            ti += 1
     except Exception as e:
         print(f"  [RERACE] inline translation skipped: {e}")
 
@@ -117,8 +122,7 @@ def _rerace_video(video_id, lang, old_data):
     # Strictly-better tier wins outright; otherwise a wbw snapshot with the
     # same lines is grafted onto the cached lyrics.
     try:
-        from .candidates import load_snapshot as _load_snapshot
-        _snap = _load_snapshot(video_id)
+        _snap = load_snapshot(video_id)
     except Exception:
         _snap = None
     saved = (_snap or {}).get('candidates') if _snap else None
@@ -249,7 +253,7 @@ def rerace_pass():
         try:
             upgraded = _rerace_video(vid, lang, old_data)
             with _rerace_lock:
-                _rerace_last_attempt[vid] = time_module.time()
+                _rerace_last_attempt[(vid, lang)] = time_module.time()
             if not upgraded:
                 continue
             full_key = f"{vid}:{lang}"

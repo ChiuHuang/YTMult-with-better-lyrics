@@ -219,6 +219,8 @@ def _run_playlist_sync_job(job_id, playlist_id, translate_to, regenerate, jwt_to
     job['state'] = 'running'
 
     for idx, t in enumerate(tracks):
+        if job.get('state') == 'stopped':
+            break
         video_id = t.get('videoId')
         song = t.get('title', '')
         artist = t.get('artist', '')
@@ -226,7 +228,7 @@ def _run_playlist_sync_job(job_id, playlist_id, translate_to, regenerate, jwt_to
             job['done'] += 1
             job['error_count'] += 1
             job['tracks'].append({'video_id': video_id or '', 'tag': 'invalid_id', 'status': 'invalid_id', 'title': song, 'song': song, 'artist': artist, 'index': idx})
-            _sse_broadcast('playlist_sync_progress', {'job_id': job_id, 'video_id': video_id, 'song': song, 'artist': artist, 'status': 'invalid_id', 'done': job['done'], 'total': job['total']})
+            _sse_broadcast('playlist_sync_progress', {'job_id': job_id, 'video_id': video_id, 'song': song, 'artist': artist, 'status': 'invalid_id', 'tag': 'invalid_id', 'index': idx, 'done': job['done'], 'total': job['total']})
             continue
 
         cache_key = f"{video_id}:{translate_to}"
@@ -278,14 +280,20 @@ def _run_playlist_sync_job(job_id, playlist_id, translate_to, regenerate, jwt_to
         job['done'] += 1
         _sse_broadcast('playlist_sync_progress', {
             'job_id': job_id, 'video_id': video_id, 'song': song, 'artist': artist,
-            'status': track_result['status'], 'source': track_result.get('source', ''),
+            'status': track_result['status'], 'tag': track_result.get('tag', ''),
+            'source': track_result.get('source', ''),
+            'tier': track_result.get('tier', ''),
+            'synced': track_result.get('synced', False),
+            'error': track_result.get('error', ''),
+            'index': idx,
             'done': job['done'], 'total': job['total']
         })
         time_module.sleep(0.2)
 
-    job['state'] = 'complete'
+    if job.get('state') != 'stopped':
+        job['state'] = 'complete'
     job['finished'] = datetime.now().isoformat()
-    _sse_broadcast('playlist_sync_progress', {'job_id': job_id, 'state': 'complete'})
+    _sse_broadcast('playlist_sync_progress', {'job_id': job_id, 'state': job.get('state')})
 
 
 @app.route('/api/playlist/sync/status/<job_id>', methods=['GET'])

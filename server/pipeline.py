@@ -39,7 +39,6 @@ from .jwt_pool import pick_jwt
 # Server-side in-flight dedup
 _in_flight = {}  # dedup_key -> threading.Event
 _in_flight_lock = threading.Lock()  # protects atomic check-and-register
-import threading
 
 def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
     """Fast path: LRCLIB only + Google translate. Returns in ~1-2s."""
@@ -142,7 +141,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         if 'youtube' in low:
             return 'YouTube'
         if 'cubey' in low:
-            return source or 'Cubey'
+            return source if '/' in (source or '') else 'Cubey'
         if 'braccato' in low or 'direct' in low:
             return source or 'bLyrics'
         return source or label
@@ -278,7 +277,11 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         try:
             from .providers_amll import fetch_amll
             for q in queries:
-                amll = fetch_amll(q['title'], q['artist'], duration)
+                try:
+                    amll = fetch_amll(q['title'], q['artist'], duration)
+                except Exception as e:
+                    print(f"  [FAIL] AMLL query error (continuing): {e}")
+                    continue
                 if not amll or not amll.get('parsed'):
                     continue
                 print(f"  [OK] AMLL: word-synced TTML found! (query: {q['title']})")
@@ -419,7 +422,9 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         records the per-provider outcome so later runs know what each
         provider gave (found tier / missed / error / skipped) without
         re-trying. Thread-safe: groups run in parallel."""
-        if status != 'started':
+        if status != 'started' and status != 'found':
+            # 'found' outcomes (with tier) are recorded by emit() itself;
+            # recording here would clobber the tier with a tier-less entry.
             with _probe_lock:
                 outcomes[provider] = {'status': status, 'detail': detail or '',
                                       'ts': datetime.now().isoformat()}
@@ -476,11 +481,14 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             })
             outcomes[logical_provider] = {'status': 'found', 'tier': tier,
                                           'ts': datetime.now().isoformat()}
-            if on_candidate is not None:
-                try:
-                    on_candidate(candidates[-1])
-                except Exception:
-                    pass
+            _just_emitted = candidates[-1]
+        # on_candidate fires outside the lock: a slow consumer must never
+        # stall the other probe groups.
+        if on_candidate is not None:
+            try:
+                on_candidate(_just_emitted)
+            except Exception:
+                pass
         report(logical_provider, 'found',
                f"{len(lyrics)} lines {tier} score={round(float(score), 2)}")
 
@@ -528,7 +536,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                 cubey_node = pick_node()
                 inner_best = {}
                 for q in queries:
-                    got = fetch_cubey_all(_jwt, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                    try:
+                        got = fetch_cubey_all(_jwt, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                    except Exception as e:
+                        print(f"  [probe] Cubey query error (continuing): {e}")
+                        continue
                     if not got:
                         continue
                     for inner, raw in got.items():
@@ -635,7 +647,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             from .providers_amll import fetch_amll
             best = None
             for q in queries:
-                amll = fetch_amll(q['title'], q['artist'], duration)
+                try:
+                    amll = fetch_amll(q['title'], q['artist'], duration)
+                except Exception as e:
+                    print(f"  [probe] AMLL query error (continuing): {e}")
+                    continue
                 if not amll or not amll.get('parsed'):
                     continue
                 cand = {'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}

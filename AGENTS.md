@@ -101,6 +101,21 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- 10-way audit cleanup: fixed outcome-tier clobber, on_candidate deadlock,
+  Cubey/AMLL per-query guards, Unison considered-every-query (dup fix kept),
+  JWT load crash on nulls + TTL prune + probation label, candidates
+  outcomes-only saves + gap parity + ts tolerance, rerace translate
+  alignment + (vid,lang) cooldown, library multi-lang dedupe, probe
+  locks/prune, SSE NaN guard + dumps guard, sync JWT leak + auto_zh hash
+  mismatch + max_items guard + probe error broadcast + partial-translate +
+  aligned select translations, cohere/google negative-cache guards,
+  playlist stop + rich track events, bulk cancel rows + tq counters.
+  iOS: fetch slot release, clock/song/provider resets, pro metadata,
+  probe-vid pinning, reload/select-failure index handling, upgrade + seek
+  guards, lyrics-gated assertOnTop, startTimeMs synced, FE0F strip, stepper
+  lockout, category dedupes. Dashboard: row-map eviction, idle-run guard,
+  retry context, ticker cleanup, stop-state reset, tq + tag counts.
+  Verified: py_compile x13, node --check, JWT/translate/snapshot tests.
 - saved-all + 120fps split + extrapolated clock: `fetch_all_lyrics` now
   persists every tried provider as a snapshot (pre-translation, provider
   keys in switcher vocabulary) -- verified QQ/LRCLib saved, no

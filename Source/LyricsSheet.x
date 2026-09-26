@@ -133,7 +133,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 
     UILabel *descriptionLabel = [self valueForKey:@"_descriptionLabel"];
     if (!descriptionLabel) {
-        sendDebugLog(@"[WARN]️ 找不到 _descriptionLabel");
+        sendDebugLog(@"[WARN] 找不到 _descriptionLabel");
         return;
     }
 
@@ -329,6 +329,12 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
             double startMs = [part[@"startTimeMs"] doubleValue];
             double seekTime = startMs / 1000.0;
             [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSeekToTime" object:@(seekTime)];
+            YTMULyricsViewController *seekVC = (YTMULyricsViewController *)[self _viewControllerForAncestor];
+            if ([seekVC isKindOfClass:[YTMULyricsViewController class]]) {
+                g_currentPlaybackTime = seekTime;
+                seekVC.clockRawTime = seekTime;
+                seekVC.clockRawWall = CACurrentMediaTime();
+            }
             break;
         }
     }
@@ -374,10 +380,6 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_stopProviderPoll;
 - (void)ytmu_showProviderMenu:(NSArray *)candidates saved:(NSString *)saved fromView:(UIView *)sender;
 - (void)ytmu_selectProvider:(NSString *)provider;
-- (void)ytmu_applyProviderAtIndex:(NSInteger)idx;
-- (void)ytmu_stepProvider:(UIButton *)sender;
-- (void)ytmu_refreshProviderSwitcher;
-- (void)ytmu_setProbing:(BOOL)probing;
 - (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion;
 - (void)ytmu_getJSON:(NSString *)path completion:(void (^)(NSDictionary *json, NSError *error))completion;
 @end
@@ -932,8 +934,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     f.size.height = 3;
     f.origin = CGPointZero;
     self.landscapeProgressFill.frame = f;
-    if (self.landscapeElapsedLabel) self.landscapeElapsedLabel.text = [self ytmu_formatTime:curTime];
-    if (self.landscapeTotalLabel) self.landscapeTotalLabel.text = [self ytmu_formatTime:totalTime];
+    if (self.landscapeElapsedLabel) {
+        NSString *et = [self ytmu_formatTime:curTime];
+        if (![self.landscapeElapsedLabel.text isEqualToString:et]) self.landscapeElapsedLabel.text = et;
+    }
+    if (self.landscapeTotalLabel) {
+        NSString *tt = [self ytmu_formatTime:totalTime];
+        if (![self.landscapeTotalLabel.text isEqualToString:tt]) self.landscapeTotalLabel.text = tt;
+    }
     if (self.landscapeProgressKnob) {
         CGFloat knobS = 8;
         CGFloat knobX = fillW - knobS / 2.0;
@@ -1232,6 +1240,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             }
             [self ytmu_stopProviderPoll];
             self.providerJobID = jobID;
+            self.providerProbeVideoID = vid;
             // No popup while probing: the provider buttons dim (see
             // ytmu_setProbing:) and the menu opens when candidates land.
             self.providerPollTimer = [NSTimer scheduledTimerWithTimeInterval:1.2 target:self selector:@selector(ytmu_pollProviderJob:) userInfo:nil repeats:YES];
@@ -1262,7 +1271,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 id saved = json[@"saved"];
                 NSString *savedName = ([saved isKindOfClass:[NSString class]]) ? saved : nil;
                 if ([state isEqualToString:@"complete"]) {
-                    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+                    // Pin to the video probed, not whatever is playing now:
+                    // a mid-probe song change must not file candidates under
+                    // the wrong video.
+                    NSString *vid = self.providerProbeVideoID;
+                    if (!vid.length) vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
                     if (vid.length && [cands isKindOfClass:[NSArray class]]) {
                         if (!self.providerCache) self.providerCache = [NSMutableDictionary dictionary];
                         self.providerCache[vid] = @{@"cands": cands, @"saved": savedName ?: @""};
@@ -1286,7 +1299,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 // Point the switcher at the saved choice, else at the provider serving the
-// current lyrics, else at the best (index 0). Never auto-applies.
+// current lyrics, else unknown (-1: no mark). Never auto-applies and never
+// pretends index 0 is current when the on-screen lyrics came from elsewhere.
 - (void)ytmu_resolveProviderIndexSaved:(NSString *)saved {
     NSInteger idx = -1;
     NSArray *cands = self.providerCandidates;
@@ -1302,7 +1316,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             if ([p isKindOfClass:[NSString class]] && [p isEqualToString:self.lastProvider]) { idx = i; break; }
         }
     }
-    self.providerIndex = (idx >= 0) ? idx : (cands.count > 0 ? 0 : -1);
+    self.providerIndex = (idx >= 0) ? idx : -1;
 }
 
 - (void)ytmu_applyProviderAtIndex:(NSInteger)idx {
@@ -1357,6 +1371,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeProviderButton.alpha = a;
     self.landscapeProviderButton.enabled = !probing;
     self.landscapeReloadButton.alpha = a;
+    self.providerPrevButton.enabled = !probing;
+    self.providerNextButton.enabled = !probing;
     if (self.providerSwitcherLabel && probing) self.providerSwitcherLabel.text = @"…";
     if (!probing) [self ytmu_refreshProviderSwitcher];
 }
@@ -1398,6 +1414,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)ytmu_selectProvider:(NSString *)provider {
     NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
     if (!vid.length || !provider.length) return;
+    // Remember the pre-apply index so a failed round-trip can put the
+    // switcher back instead of advertising lyrics that never loaded.
+    NSInteger prevIndex = self.providerIndex;
     NSDictionary *body = @{@"video_id": vid, @"lang": YTMUTargetLang(), @"provider": provider};
     [self ytmu_postJSON:@"/api/lyrics/providers/select" body:body completion:^(NSDictionary *json, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -1424,6 +1443,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad" object:vid userInfo:@{@"lyrics": lyrics}];
                 sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider selected: %@", provider]);
             } else {
+                self.providerIndex = prevIndex;
+                [self ytmu_refreshProviderSwitcher];
                 sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider select failed: %@", provider]);
             }
         });
@@ -1665,9 +1686,20 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.lyrics = @[];
                 [self.tableView reloadData];
                 self.artworkVideoID = nil;
+                self.artworkImageView.image = nil;
+                self.landscapeArtImageView.image = nil;
                 // New song: drop stale per-song state so the retry chains
                 // refill it (stale title/artist otherwise stick forever,
                 // and the switcher would point at the old video's index).
+                // The extrapolated media clock must restart too, or the new
+                // song opens at the old song's position.
+                self.clockRawTime = 0;
+                self.clockRawWall = 0;
+                self.lastColorKey = nil;
+                self.cachedWordLayoutKey = nil;
+                self.cachedWordRects = nil;
+                self.isLoading = NO;
+                self.loadingSince = nil;
                 self.landscapeTitleLabel.text = @"";
                 self.landscapeArtistLabel.text = @"";
                 self.lastSongTitle = nil;
@@ -1851,13 +1883,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                                                                         object:videoID
                                                                       userInfo:@{@"lyrics": fullDict[@"lyrics"]}];
                 } else if (self.lyrics.count == 0) {
-                    statusLabel.text = @"[WARN]️ 找不到歌詞 / No lyrics found";
+                    statusLabel.text = @"[WARN] 找不到歌詞 / No lyrics found";
                     if (self.isModal) self.view.hidden = NO;
                     self.lyrics = @[];
                     [self.tableView reloadData];
                 }
             } else if (self.lyrics.count == 0) {
-                statusLabel.text = @"[WARN]️ 網路錯誤 / Network error";
+                statusLabel.text = @"[WARN] 網路錯誤 / Network error";
                 if (self.isModal) self.view.hidden = NO;
                 self.lyrics = @[];
                 [self.tableView reloadData];
@@ -1888,10 +1920,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!data || err) return;
+            // Stale check landing after a song change must not full-fetch
+            // a video that is no longer playing.
+            if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
             NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
             if ([dict[@"upgrade"] boolValue]) {
                 sendDebugLog(@"[MUSIC] Server has a better lyrics tier, upgrading");
                 [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
+                    if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
                     [self fetchFullLyricsForVideo:videoID jwt:jwt force:NO];
                 }];
             }
@@ -1971,7 +2007,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (![self.loadingVideoID isEqualToString:videoID]) return;
+            if (![self.loadingVideoID isEqualToString:videoID]) {
+                // Stale response for a previous video: release the slots it
+                // claimed instead of wedging later fetches until reclaim.
+                self.isLoading = NO;
+                self.loadingSince = nil;
+                if ([g_globalLoadingVideoID isEqualToString:videoID]) {
+                    YTMUReleaseGlobalFetch();
+                }
+                return;
+            }
             if (data && !err) {
                 NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 if (dict && dict[@"lyrics"]) {
@@ -1986,9 +2031,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     if ([dict[@"pro"] boolValue]) {
                         // Server served the full cached result for this fast
                         // request: treat it as final, skip the full fetch.
+                        // Same bookkeeping as the full path (provider + song
+                        // feed the switcher index and the title fallback).
                         if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                         g_lyricsCache[videoID] = dict[@"lyrics"];
                         YTMULyricsCacheSave(videoID, dict[@"lyrics"]);
+                        id fp = dict[@"source"];
+                        if ([fp isKindOfClass:[NSString class]] && ((NSString *)fp).length) self.lastProvider = fp;
                         self.isLoading = NO;
                         self.loadingSince = nil;
                         if ([g_globalLoadingVideoID isEqualToString:videoID]) {
@@ -2029,8 +2078,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         [contentContainer bringSubviewToFront:self.view];
     }
     // Never blank the panel: only hide YT siblings while our view is
-    // actually visible (lyricsAlwaysOn off + hidden sheet = native panel).
+    // actually visible AND showing lyrics (lyricsAlwaysOn off + hidden or
+    // empty sheet = native panel).
     if (self.view.hidden || self.view.alpha < 0.05 || !self.view.window) return;
+    if (self.lyrics.count == 0) return;
     for (UIView *sub in contentContainer.subviews) {
         if (sub != self.view && sub.tag != 9999 && !sub.hidden) sub.hidden = YES;
     }
@@ -2161,7 +2212,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 } completion:nil];
             }
 
-            if (!self.tableView.isDragging && !self.tableView.isDecelerating) {
+            if (!self.tableView.isDragging && !self.tableView.isDecelerating && !self.tableView.isTracking) {
                 // Near: smooth-scroll with the song. Far (tap-jump / seek):
                 // jump instantly instead of stacking competing animated
                 // scrolls, which reads as jank on old phones.
@@ -2189,6 +2240,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     self.lyrics = @[];
     [self.tableView reloadData];
+    // Reload invalidates anything the switcher knew: candidates, index,
+    // and per-song metadata all refill from the fresh fetch.
+    self.providerCandidates = nil;
+    self.providerIndex = -1;
+    [self ytmu_refreshProviderSwitcher];
+    self.lastProvider = nil;
+    self.lastSongTitle = nil;
+    self.lastSongArtist = nil;
+    self.clockRawTime = 0;
+    self.clockRawWall = 0;
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
     statusLabel.text = @"Force Reloading...";
@@ -2222,7 +2283,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     BOOL hasTimestamp = NO;
     for (NSDictionary *l in newLyrics) {
-        if ([l[@"time"] doubleValue] > 0.0) {
+        if ([l[@"time"] doubleValue] > 0.0 || [l[@"startTimeMs"] doubleValue] > 0.0) {
             hasTimestamp = YES;
             break;
         }
@@ -2606,6 +2667,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         NSInteger oldIndex = self.currentIndex;
         self.currentIndex = indexPath.row;
         g_currentPlaybackTime = seekTime;
+        // Rebase the extrapolated clock too, or the next tick extrapolates
+        // from the pre-seek sample and snaps the highlight back.
+        self.clockRawTime = seekTime;
+        self.clockRawWall = CACurrentMediaTime();
 
         if (oldIndex >= 0 && oldIndex < self.lyrics.count && oldIndex != indexPath.row) {
             YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:oldIndex inSection:0]];
