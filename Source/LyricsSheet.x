@@ -14,6 +14,9 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
 
 // Dynamic ink: white in dark mode, black in light mode. Deployment target is
 // iOS 13 so colorWithDynamicProvider is always available at runtime.
+// TODO(theme): migrate remaining users (modal close button, play-button
+// fallbacks) to background-derived ink (YTMULyricInk/YTMULyricFill) so every
+// surface follows the blurred artwork instead of the OS theme.
 UIColor *YTMUAdaptiveInk(CGFloat darkAlpha, CGFloat lightAlpha) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
@@ -62,6 +65,12 @@ static UIColor *YTMULyricShadow(UIView *refView) {
     if (YTMUBgIsLight(refView))
         return [[UIColor darkGrayColor] colorWithAlphaComponent:0.35];
     return [[UIColor blackColor] colorWithAlphaComponent:0.8];
+}
+// Same idea as YTMULyricInk for pill/track fills.
+static UIColor *YTMULyricFill(UIView *refView) {
+    BOOL light = YTMUBgIsLight(refView);
+    return [(light ? [UIColor blackColor] : [UIColor whiteColor])
+            colorWithAlphaComponent:(light ? 0.10 : 0.15)];
 }
 // Mean luminance of a thumbnail; -1 when unsampleable.
 static CGFloat YTMUArtworkLuminance(UIImage *img) {
@@ -233,7 +242,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 
         [NSLayoutConstraint activateConstraints:@[
             [self.lyricLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
-            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
+            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
             [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
 
             [self.wipeLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.topAnchor],
@@ -242,7 +251,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
             [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
 
             [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:5],
-            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:20],
+            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
             [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
             [self.transLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]
         ]];
@@ -325,6 +334,14 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 
 // Private selectors used across the controller
 @interface YTMULyricsViewController (LandscapePrivate)
+- (void)ytmu_assertOnTop;
+- (void)ytmu_refreshChromeInk;
+- (void)ytmu_resolveProviderIndexSaved:(NSString *)saved;
+- (void)ytmu_applyProviderAtIndex:(NSInteger)idx;
+- (void)ytmu_stepProvider:(UIButton *)sender;
+- (void)ytmu_refreshProviderSwitcher;
+- (void)ytmu_setProbing:(BOOL)probing;
+- (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
 - (void)ytmu_probeArtworkBrightness:(UIImage *)img;
 - (void)ytmu_refreshBgDerivedInk;
 - (void)ytmu_applyArtworkImage:(UIImage *)img forVideoID:(NSString *)videoID;
@@ -348,6 +365,10 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_stopProviderPoll;
 - (void)ytmu_showProviderMenu:(NSArray *)candidates saved:(NSString *)saved fromView:(UIView *)sender;
 - (void)ytmu_selectProvider:(NSString *)provider;
+- (void)ytmu_applyProviderAtIndex:(NSInteger)idx;
+- (void)ytmu_stepProvider:(UIButton *)sender;
+- (void)ytmu_refreshProviderSwitcher;
+- (void)ytmu_setProbing:(BOOL)probing;
 - (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion;
 - (void)ytmu_getJSON:(NSString *)path completion:(void (^)(NSDictionary *json, NSError *error))completion;
 @end
@@ -665,6 +686,47 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeReloadButton addTarget:self action:@selector(ytmu_toolbarReload:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeToolbar addSubview:self.landscapeReloadButton];
 
+    // Provider switcher (Image-1 style): [<] [list] [name i/n] [>] so the
+    // source can be flipped anytime without re-probing. Stepper tags are
+    // the signed step (-1/+1), handled by ytmu_stepProvider:.
+    self.providerPrevButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.providerPrevButton.tag = -1;
+    if (@available(iOS 13.0, *)) {
+        UIImage *pImg = [UIImage systemImageNamed:@"chevron.left"];
+        if (pImg) [self.providerPrevButton setImage:pImg forState:UIControlStateNormal];
+    }
+    if (!self.providerPrevButton.imageView.image) {
+        [self.providerPrevButton setTitle:@"<" forState:UIControlStateNormal];
+    }
+    self.providerPrevButton.accessibilityLabel = @"Previous lyric provider";
+    [self.providerPrevButton addTarget:self action:@selector(ytmu_stepProvider:) forControlEvents:UIControlEventTouchUpInside];
+    [self.landscapeToolbar addSubview:self.providerPrevButton];
+
+    self.providerNextButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.providerNextButton.tag = 1;
+    if (@available(iOS 13.0, *)) {
+        UIImage *nImg = [UIImage systemImageNamed:@"chevron.right"];
+        if (nImg) [self.providerNextButton setImage:nImg forState:UIControlStateNormal];
+    }
+    if (!self.providerNextButton.imageView.image) {
+        [self.providerNextButton setTitle:@">" forState:UIControlStateNormal];
+    }
+    self.providerNextButton.accessibilityLabel = @"Next lyric provider";
+    [self.providerNextButton addTarget:self action:@selector(ytmu_stepProvider:) forControlEvents:UIControlEventTouchUpInside];
+    [self.landscapeToolbar addSubview:self.providerNextButton];
+
+    self.providerSwitcherLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    self.providerSwitcherLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
+    self.providerSwitcherLabel.textAlignment = NSTextAlignmentCenter;
+    self.providerSwitcherLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.providerSwitcherLabel.text = @"—";
+    self.providerSwitcherLabel.userInteractionEnabled = NO;
+    [self.landscapeToolbar addSubview:self.providerSwitcherLabel];
+
+    self.providerCache = [NSMutableDictionary dictionary];
+    self.providerCandidates = nil;
+    self.providerIndex = -1;
+
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
     self.fpsLabel.textColor = YTMULyricInk(0.7, 0.75, self.view);
@@ -690,6 +752,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
     [self ytmu_refreshOffsetLabel];
+    // Apply background-keyed chrome once up front (falls back to the OS
+    // theme until the first artwork brightness probe lands).
+    [self ytmu_refreshChromeInk];
+    [self ytmu_refreshProviderSwitcher];
 }
 
 - (void)ytmu_refreshOffsetLabel {
@@ -760,6 +826,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     if (artist.length) {
         self.landscapeArtistLabel.text = artist;
+    }
+    // Server song info (ytmusicapi, same source as the lyrics) outranks
+    // scraped now-playing labels but never overrides live player data.
+    if (!title.length && self.lastSongTitle.length) {
+        self.landscapeTitleLabel.text = self.lastSongTitle;
+        title = self.lastSongTitle;
+    }
+    if (!artist.length && self.lastSongArtist.length) {
+        self.landscapeArtistLabel.text = self.lastSongArtist;
+        artist = self.lastSongArtist;
     }
     // playerResponse path can stay nil (e.g. response not parsed yet) — fall
     // back to the visible now-playing labels so title/artist still show.
@@ -859,11 +935,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)ytmu_setLandscapePlaying:(BOOL)playing {
     self.landscapeIsPlaying = playing;
-    // Filled circle (theme ink) with a contrasting glyph, Image-2 style.
-    self.landscapePlayButton.backgroundColor = YTMUAdaptiveInk(0.95, 0.9);
-    self.landscapePlayButton.tintColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor whiteColor] : [UIColor blackColor];
-    }];
+    // Filled circle + contrasting glyph, keyed on background brightness
+    // (not the OS theme): dark bg -> white circle + black glyph, light bg
+    // -> black circle + white glyph.
+    BOOL light = YTMUBgIsLight(self.view);
+    self.landscapePlayButton.backgroundColor = [(light ? [UIColor blackColor] : [UIColor whiteColor])
+        colorWithAlphaComponent:(light ? 0.9 : 0.95)];
+    self.landscapePlayButton.tintColor = (light ? [UIColor whiteColor] : [UIColor blackColor]);
     if (@available(iOS 13.0, *)) {
         UIImage *img = [UIImage systemImageNamed:playing ? @"pause.fill" : @"play.fill"];
         if (img) {
@@ -874,7 +952,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     [self.landscapePlayButton setImage:nil forState:UIControlStateNormal];
     [self.landscapePlayButton setTitle:playing ? @"pause" : @"play" forState:UIControlStateNormal];
-    [self.landscapePlayButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [self.landscapePlayButton setTitleColor:self.landscapePlayButton.tintColor forState:UIControlStateNormal];
 }
 
 - (void)ytmu_setLandscapeTransportIcons {
@@ -914,6 +992,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)ytmu_applyLandscapeTheme {
     // OS theme change: swap the ambient blur so the whole sheet (album
     // column + lyrics) follows light/dark together with the adaptive inks.
+    // TODO(theme): derive the blur style from sampled artwork luminance
+    // (YTMUBgIsLight) instead of the OS theme; keep the 0.25s crossfade.
     if (!self.blurView) return;
     UIBlurEffectStyle style = YTMUInterfaceIsLight(self.view) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark;
     UIBlurEffect *effect = [UIBlurEffect effectWithStyle:style];
@@ -924,6 +1004,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
+    // TODO(theme): with chrome fully background-derived this override only
+    // needs the blur-style swap; drop the full re-theme once the TODO in
+    // ytmu_applyLandscapeTheme lands.
     if (@available(iOS 13.0, *)) {
         if (self.traitCollection.userInterfaceStyle != previousTraitCollection.userInterfaceStyle) {
             [self ytmu_applyLandscapeTheme];
@@ -1084,7 +1167,23 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         sendDebugLog(@"[MUSIC] provider menu: no video ID");
         return;
     }
-    if (self.providerPollTimer) return; // a probe is already running
+    // Switch anytime: a cached probe for this video opens instantly with no
+    // re-probe and no popup.
+    NSDictionary *hit = self.providerCache[vid];
+    NSArray *cached = hit[@"cands"];
+    if ([cached isKindOfClass:[NSArray class]] && cached.count > 0) {
+        self.providerCandidates = cached;
+        NSString *saved = ([hit[@"saved"] isKindOfClass:[NSString class]]) ? hit[@"saved"] : nil;
+        [self ytmu_resolveProviderIndexSaved:saved];
+        [self ytmu_refreshProviderSwitcher];
+        [self ytmu_showProviderMenu:cached saved:saved fromView:sender];
+        return;
+    }
+    if (self.providerPollTimer) {
+        sendDebugLog(@"[MUSIC] provider probe already running (no popup)");
+        return;
+    }
+    [self ytmu_setProbing:YES];
     __block BOOL jwtDone = NO;
     [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
         if (jwtDone) return;
@@ -1103,7 +1202,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)ytmu_beginProviderProbeWithJWT:(NSString *)jwt fromView:(UIView *)sender {
     NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
-    if (!vid.length) return;
+    if (!vid.length) { [self ytmu_setProbing:NO]; return; }
     NSMutableDictionary *body = [@{@"video_id": vid, @"lang": YTMUTargetLang()} mutableCopy];
     if (jwt.length) body[@"jwt"] = jwt;
     UIView *anchor = (sender && sender.window) ? sender : self.view;
@@ -1113,16 +1212,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             NSString *jobID = json[@"job_id"];
             if (![json[@"ok"] boolValue] || !jobID.length) {
                 sendDebugLog(@"[MUSIC] provider probe start failed");
+                [self ytmu_setProbing:NO];
                 return;
             }
             [self ytmu_stopProviderPoll];
             self.providerJobID = jobID;
-            UIAlertController *loading = [UIAlertController alertControllerWithTitle:@"Probing providers" message:@"Starting..." preferredStyle:UIAlertControllerStyleAlert];
-            [loading addAction:[UIAlertAction actionWithTitle:@"Close" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a) {
-                [self ytmu_stopProviderPoll];
-            }]];
-            self.providerLoadingAlert = loading;
-            [self presentViewController:loading animated:YES completion:nil];
+            // No popup while probing: the provider buttons dim (see
+            // ytmu_setProbing:) and the menu opens when candidates land.
             self.providerPollTimer = [NSTimer scheduledTimerWithTimeInterval:1.2 target:self selector:@selector(ytmu_pollProviderJob:) userInfo:nil repeats:YES];
         });
     }];
@@ -1138,30 +1234,31 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error || ![json[@"ok"] boolValue]) {
                 [self ytmu_stopProviderPoll];
-                if (self.providerLoadingAlert) {
-                    [self.providerLoadingAlert dismissViewControllerAnimated:YES completion:nil];
-                    self.providerLoadingAlert = nil;
-                }
+                [self ytmu_setProbing:NO];
+                sendDebugLog(@"[MUSIC] provider probe poll failed");
                 return;
             }
             NSString *state = json[@"state"] ?: @"";
             NSArray *cands = json[@"candidates"] ?: @[];
-            if (self.providerLoadingAlert) {
-                self.providerLoadingAlert.message = [NSString stringWithFormat:@"Found %lu so far…", (unsigned long)cands.count];
-            }
             if ([state isEqualToString:@"complete"] || [state isEqualToString:@"error"]) {
                 [self ytmu_stopProviderPoll];
+                [self ytmu_setProbing:NO];
                 UIView *anchor = objc_getAssociatedObject(self, @selector(ytmu_openProviderMenuFromView:));
-                UIAlertController *loading = self.providerLoadingAlert;
-                self.providerLoadingAlert = nil;
                 id saved = json[@"saved"];
-                void (^show)(void) = ^{
-                    if ([state isEqualToString:@"complete"]) {
-                        [self ytmu_showProviderMenu:cands saved:([saved isKindOfClass:[NSString class]] ? saved : nil) fromView:anchor];
+                NSString *savedName = ([saved isKindOfClass:[NSString class]]) ? saved : nil;
+                if ([state isEqualToString:@"complete"]) {
+                    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+                    if (vid.length && [cands isKindOfClass:[NSArray class]]) {
+                        if (!self.providerCache) self.providerCache = [NSMutableDictionary dictionary];
+                        self.providerCache[vid] = @{@"cands": cands, @"saved": savedName ?: @""};
                     }
-                };
-                if (loading) [loading dismissViewControllerAnimated:YES completion:show];
-                else show();
+                    self.providerCandidates = cands;
+                    [self ytmu_resolveProviderIndexSaved:savedName];
+                    [self ytmu_refreshProviderSwitcher];
+                    [self ytmu_showProviderMenu:cands saved:savedName fromView:anchor];
+                } else {
+                    sendDebugLog(@"[MUSIC] provider probe error (no popup)");
+                }
             }
         });
     }];
@@ -1173,19 +1270,98 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.providerJobID = nil;
 }
 
+// Point the switcher at the saved choice, else at the provider serving the
+// current lyrics, else at the best (index 0). Never auto-applies.
+- (void)ytmu_resolveProviderIndexSaved:(NSString *)saved {
+    NSInteger idx = -1;
+    NSArray *cands = self.providerCandidates;
+    if (saved.length) {
+        for (NSInteger i = 0; i < cands.count; i++) {
+            id p = cands[i][@"provider"];
+            if ([p isKindOfClass:[NSString class]] && [p isEqualToString:saved]) { idx = i; break; }
+        }
+    }
+    if (idx < 0 && self.lastProvider.length) {
+        for (NSInteger i = 0; i < cands.count; i++) {
+            id p = cands[i][@"provider"];
+            if ([p isKindOfClass:[NSString class]] && [p isEqualToString:self.lastProvider]) { idx = i; break; }
+        }
+    }
+    self.providerIndex = (idx >= 0) ? idx : (cands.count > 0 ? 0 : -1);
+}
+
+- (void)ytmu_applyProviderAtIndex:(NSInteger)idx {
+    NSArray *cands = self.providerCandidates;
+    if (idx < 0 || idx >= cands.count) return;
+    id p = cands[idx][@"provider"];
+    if (![p isKindOfClass:[NSString class]] || !((NSString *)p).length) return;
+    self.providerIndex = idx;
+    [self ytmu_refreshProviderSwitcher];
+    [self ytmu_selectProvider:(NSString *)p];
+}
+
+- (void)ytmu_stepProvider:(UIButton *)sender {
+    NSArray *cands = self.providerCandidates;
+    if (cands.count < 2) return;
+    NSInteger idx = self.providerIndex;
+    if (idx < 0) idx = 0;
+    idx = (idx + sender.tag + cands.count) % cands.count;
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider step -> %ld/%lu", (long)idx + 1, (unsigned long)cands.count]);
+    [self ytmu_applyProviderAtIndex:idx];
+}
+
+- (void)ytmu_refreshProviderSwitcher {
+    NSArray *cands = self.providerCandidates;
+    NSString *name = nil;
+    if (self.providerIndex >= 0 && self.providerIndex < cands.count) {
+        id p = cands[self.providerIndex][@"provider"];
+        if ([p isKindOfClass:[NSString class]]) name = p;
+    }
+    if (self.providerSwitcherLabel) {
+        if (name.length && cands.count > 0) {
+            self.providerSwitcherLabel.text = [NSString stringWithFormat:@"%@ %ld/%lu", name, (long)self.providerIndex + 1, (unsigned long)cands.count];
+        } else if (name.length) {
+            self.providerSwitcherLabel.text = name;
+        } else {
+            self.providerSwitcherLabel.text = @"—";
+        }
+    }
+    BOOL multi = cands.count > 1;
+    self.providerPrevButton.enabled = multi;
+    self.providerNextButton.enabled = multi;
+    self.providerPrevButton.alpha = multi ? 1.0 : 0.4;
+    self.providerNextButton.alpha = multi ? 1.0 : 0.4;
+}
+
+- (void)ytmu_setProbing:(BOOL)probing {
+    CGFloat a = probing ? 0.45 : 1.0;
+    self.headerMenuButton.alpha = a;
+    self.headerMenuButton.enabled = !probing;
+    self.landscapeProviderButton.alpha = a;
+    self.landscapeProviderButton.enabled = !probing;
+    self.landscapeReloadButton.alpha = a;
+    if (self.providerSwitcherLabel && probing) self.providerSwitcherLabel.text = @"…";
+    if (!probing) [self ytmu_refreshProviderSwitcher];
+}
+
 - (void)ytmu_showProviderMenu:(NSArray *)candidates saved:(NSString *)saved fromView:(UIView *)sender {
     NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
     UIAlertController *menu = [UIAlertController alertControllerWithTitle:@"Lyrics providers" message:vid preferredStyle:UIAlertControllerStyleActionSheet];
-    for (NSDictionary *c in candidates) {
+    for (NSInteger i = 0; i < candidates.count; i++) {
+        NSDictionary *c = candidates[i];
         if (![c isKindOfClass:[NSDictionary class]]) continue;
         NSString *prov = c[@"provider"];
         if (![prov isKindOfClass:[NSString class]] || !prov.length) continue;
         NSString *tier = ([c[@"tier"] isKindOfClass:[NSString class]]) ? c[@"tier"] : @"";
         NSInteger lines = [c[@"lines"] integerValue];
+        BOOL isCurrent = (i == self.providerIndex);
         BOOL isSaved = (saved.length > 0 && [prov isEqualToString:saved]);
-        NSString *title = [NSString stringWithFormat:@"%@%@ — %@ · %ld lines", isSaved ? @"[saved] " : @"", prov, tier, (long)lines];
+        NSString *title = [NSString stringWithFormat:@"%@%@%ld/%lu %@ — %@ · %ld lines",
+            isCurrent ? @"[>] " : @"", isSaved ? @"[saved] " : @"",
+            (long)i + 1, (unsigned long)candidates.count, prov, tier, (long)lines];
+        NSInteger rowIdx = i;
         [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-            [self ytmu_selectProvider:prov];
+            [self ytmu_applyProviderAtIndex:rowIdx];
         }]];
     }
     [menu addAction:[UIAlertAction actionWithTitle:@"Best available (auto)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -1216,6 +1392,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 YTMULyricsCacheSave(vid, lyrics);
                 self.loadingVideoID = vid;
                 self.isLoading = NO;
+                self.lastProvider = provider;
+                id s = data[@"song"], a = data[@"artist"];
+                if ([s isKindOfClass:[NSString class]] && ((NSString *)s).length) self.lastSongTitle = s;
+                if ([a isKindOfClass:[NSString class]] && ((NSString *)a).length) self.lastSongArtist = a;
+                for (NSInteger i = 0; i < self.providerCandidates.count; i++) {
+                    id p = self.providerCandidates[i][@"provider"];
+                    if ([p isKindOfClass:[NSString class]] && [p isEqualToString:provider]) { self.providerIndex = i; break; }
+                }
+                [self ytmu_refreshProviderSwitcher];
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
                 if (statusLabel) statusLabel.text = @"";
                 [self updateLyrics:lyrics];
@@ -1343,15 +1528,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeExitButton.frame = CGRectMake(W - exitS - 12.0, exitTop, exitS, exitS);
         self.landscapeExitButton.layer.cornerRadius = exitS / 2.0;
 
-        // Bottom-right floating toolbar: provider list + reload.
-        CGFloat toolBtnS = 34, toolPad = 4;
-        CGFloat toolW = toolBtnS * 2 + toolPad * 2 + 4;
+        // Bottom-right floating toolbar: provider switcher ([<][list][name i/n][>]) + reload.
+        CGFloat toolBtnS = 34, toolSmallS = 30, toolLabelW = 96, toolPad = 4, toolGap = 4;
+        CGFloat toolW = toolPad + 2 + toolSmallS + toolGap + toolBtnS + toolGap + toolSmallS + toolGap + toolLabelW + toolGap + toolBtnS + toolPad + 2;
         CGFloat toolH = toolBtnS + 6;
         CGFloat toolY = H - safeBottom - toolH - 12.0;
         self.landscapeToolbar.frame = CGRectMake(W - toolW - 16.0, toolY, toolW, toolH);
         self.landscapeToolbar.layer.cornerRadius = toolH / 2.0;
-        self.landscapeProviderButton.frame = CGRectMake(toolPad + 2, 3, toolBtnS, toolBtnS);
-        self.landscapeReloadButton.frame = CGRectMake(toolPad + 2 + toolBtnS + 4, 3, toolBtnS, toolBtnS);
+        CGFloat tx = toolPad + 2;
+        self.providerPrevButton.frame = CGRectMake(tx, 5, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
+        self.landscapeProviderButton.frame = CGRectMake(tx, 3, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
+        self.providerNextButton.frame = CGRectMake(tx, 5, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
+        self.providerSwitcherLabel.frame = CGRectMake(tx, 3, toolLabelW, toolBtnS); tx += toolLabelW + toolGap;
+        self.landscapeReloadButton.frame = CGRectMake(tx, 3, toolBtnS, toolBtnS);
 
         // Keep title/artist fresh
         [self ytmu_updateLandscapeMetadata];
@@ -1451,10 +1640,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (videoID) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self ytmu_stopProviderPoll];
-            if (self.providerLoadingAlert) {
-                [self.providerLoadingAlert dismissViewControllerAnimated:NO completion:nil];
-                self.providerLoadingAlert = nil;
-            }
+            [self ytmu_setProbing:NO];
             if (![self.loadingVideoID isEqualToString:videoID]) {
                 self.currentIndex = -1;
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
@@ -1462,6 +1648,17 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.lyrics = @[];
                 [self.tableView reloadData];
                 self.artworkVideoID = nil;
+                // New song: drop stale per-song state so the retry chains
+                // refill it (stale title/artist otherwise stick forever,
+                // and the switcher would point at the old video's index).
+                self.landscapeTitleLabel.text = @"";
+                self.landscapeArtistLabel.text = @"";
+                self.lastSongTitle = nil;
+                self.lastSongArtist = nil;
+                self.lastProvider = nil;
+                self.providerCandidates = nil;
+                self.providerIndex = -1;
+                [self ytmu_refreshProviderSwitcher];
             }
             [self ytmu_updateLandscapeMetadata];
             [self fetchLyricsForVideo:videoID];
@@ -1506,11 +1703,48 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self ytmu_refreshBgDerivedInk];
 }
 
+- (void)ytmu_refreshChromeInk {
+    // Buttons, pills, and transport chrome follow the blurred-artwork
+    // brightness (not the OS theme) so they stay readable on any cover.
+    // Re-run whenever the bg bucket changes; snapshots are static colors.
+    UIView *ref = self.view;
+    UIColor *ink = YTMULyricInk(0.9, 0.9, ref);
+    UIColor *fill = YTMULyricFill(ref);
+    void (^tintBtn)(UIButton *) = ^(UIButton *b) {
+        if (!b) return;
+        b.tintColor = ink;
+        [b setTitleColor:ink forState:UIControlStateNormal];
+    };
+    if (self.headerMenuButton) {
+        tintBtn(self.headerMenuButton);
+        self.headerMenuButton.backgroundColor = fill;
+    }
+    if (self.landscapeArtImageView) self.landscapeArtImageView.backgroundColor = fill;
+    if (self.landscapeProgressTrack) self.landscapeProgressTrack.backgroundColor = YTMULyricInk(0.25, 0.2, ref);
+    if (self.landscapeProgressFill) self.landscapeProgressFill.backgroundColor = YTMULyricInk(0.95, 0.9, ref);
+    if (self.landscapeProgressKnob) self.landscapeProgressKnob.backgroundColor = YTMULyricInk(1.0, 1.0, ref);
+    tintBtn(self.landscapePrevButton);
+    tintBtn(self.landscapeNextButton);
+    tintBtn(self.landscapeReloadButton);
+    tintBtn(self.landscapeProviderButton);
+    tintBtn(self.providerPrevButton);
+    tintBtn(self.providerNextButton);
+    tintBtn(self.landscapeExitButton);
+    if (self.landscapeToolbar) self.landscapeToolbar.backgroundColor = fill;
+    if (self.landscapeExitButton) self.landscapeExitButton.backgroundColor = fill;
+    if (self.providerSwitcherLabel) self.providerSwitcherLabel.textColor = YTMULyricInk(0.75, 0.75, ref);
+    UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+    if (statusLabel) statusLabel.textColor = YTMULyricInk(0.7, 0.75, ref);
+    if (self.fpsLabel) self.fpsLabel.textColor = YTMULyricInk(0.7, 0.75, ref);
+    [self ytmu_setLandscapePlaying:self.landscapeIsPlaying];
+}
+
 - (void)ytmu_refreshBgDerivedInk {
     if (self.landscapeTitleLabel) self.landscapeTitleLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
     if (self.landscapeArtistLabel) self.landscapeArtistLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     if (self.landscapeElapsedLabel) self.landscapeElapsedLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     if (self.landscapeTotalLabel) self.landscapeTotalLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
+    [self ytmu_refreshChromeInk];
     // reloadData keeps the scroll offset; cells re-resolve ink in configureCell.
     if (self.tableView) [self.tableView reloadData];
 }
@@ -1591,6 +1825,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                     g_lyricsCache[videoID] = fullDict[@"lyrics"];
                     YTMULyricsCacheSave(videoID, fullDict[@"lyrics"]);
+                    id fs = fullDict[@"song"], fa = fullDict[@"artist"], fp = fullDict[@"source"];
+                    if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
+                    if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
+                    if ([fp isKindOfClass:[NSString class]] && ((NSString *)fp).length) self.lastProvider = fp;
                     [self updateLyrics:fullDict[@"lyrics"]];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                         object:videoID
@@ -1721,6 +1959,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 if (dict && dict[@"lyrics"]) {
                     statusLabel.text = @"";
+                    id fs = dict[@"song"], fa = dict[@"artist"];
+                    if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
+                    if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
                     [self updateLyrics:dict[@"lyrics"]];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                         object:videoID

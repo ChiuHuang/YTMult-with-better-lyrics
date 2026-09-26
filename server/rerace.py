@@ -11,12 +11,14 @@
 # result. Requests egress through idle nodes (via_node) exactly like live
 # requests, so a node's different residential IP does the probing; a dead
 # node falls back to a direct request.
+import copy
 import json
 import os
 import threading
 import time as time_module
 
 from .cache import get_cached, set_cached, sanitize_lyrics_parts, _cache_key_from_filename
+from .candidates import load_candidates, graft_wbw_parts
 from .metadata import get_search_queries
 from .race import _lyrics_score, _wbw_line_count, _race_cubey
 from .providers_braccato import fetch_direct_best
@@ -81,6 +83,21 @@ def _cache_candidates(limit, cooldown):
     return out[:limit]
 
 
+def _translate_upgrade_in_place(up, lang):
+    """Fill missing translated rows on an upgrade payload (fast Google pass,
+    same as the network path below). Never raises."""
+    if not lang or not up or not up.get('lyrics'):
+        return
+    texts = [l['text'] for l in up['lyrics'] if l.get('text')]
+    try:
+        translations = google_translate_fast(texts, lang)
+        for i, l in enumerate(up['lyrics']):
+            if i < len(translations) and translations[i] and not l.get('translated'):
+                l['translated'] = translations[i]
+    except Exception as e:
+        print(f"  [RERACE] inline translation skipped: {e}")
+
+
 def _rerace_video(video_id, lang, old_data):
     """Try to find a strictly-better word-by-word result. Returns the
     upgraded payload or None. Never raises to the caller."""
@@ -95,6 +112,42 @@ def _rerace_video(video_id, lang, old_data):
     album = old_data.get('album', '') or ''
     node = pick_node()
 
+    # Saved probe snapshot first: reuse every provider without re-fetching.
+    # Strictly-better tier wins outright; otherwise a wbw snapshot with the
+    # same lines is grafted onto the cached lyrics.
+    try:
+        saved = load_candidates(video_id)
+    except Exception:
+        saved = None
+    if saved:
+        for c in saved:
+            d = (c or {}).get('data') or {}
+            if not d.get('lyrics'):
+                continue
+            if _tier(d) > _tier(old_data):
+                up = copy.deepcopy(d)
+                up['song'] = old_data.get('song', '') or title
+                up['artist'] = old_data.get('artist', '') or artist
+                _translate_upgrade_in_place(up, lang)
+                sanitize_lyrics_parts(up['lyrics'])
+                print(f"  [RERACE] {video_id} upgrade from saved {c.get('provider')} tier {_tier(old_data)}->{_tier(up)}")
+                return up
+        if _tier(old_data) < 2:
+            for c in saved:
+                d = (c or {}).get('data') or {}
+                if _wbw_line_count(d) == 0:
+                    continue
+                working = copy.deepcopy(old_data.get('lyrics') or [])
+                if working and graft_wbw_parts(working, d.get('lyrics') or []):
+                    up = copy.deepcopy(old_data)
+                    up['lyrics'] = working
+                    up['synced'] = True
+                    up['wordSynced'] = True
+                    up['graftedFrom'] = c.get('provider', '')
+                    _translate_upgrade_in_place(up, lang)
+                    sanitize_lyrics_parts(up['lyrics'])
+                    print(f"  [RERACE] {video_id} grafted wbw from saved {c.get('provider')}")
+                    return up
     best = None
     for name, sources in (('boidu', ('ttml', 'qq', 'kugou')), ('binimum', ('binimum',))):
         try:
@@ -125,15 +178,7 @@ def _rerace_video(video_id, lang, old_data):
 
     best['song'] = old_data.get('song', '') or title
     best['artist'] = old_data.get('artist', '') or artist
-    if lang:
-        texts = [l['text'] for l in best['lyrics'] if l.get('text')]
-        try:
-            translations = google_translate_fast(texts, lang)
-            for i, l in enumerate(best['lyrics']):
-                if i < len(translations) and translations[i] and not l.get('translated'):
-                    l['translated'] = translations[i]
-        except Exception as e:
-            print(f"  [RERACE] inline translation skipped: {e}")
+    _translate_upgrade_in_place(best, lang)
     sanitize_lyrics_parts(best['lyrics'])
     return best
 

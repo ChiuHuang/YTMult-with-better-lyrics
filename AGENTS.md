@@ -101,6 +101,28 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- provider switcher anytime + no probing popup + server saves all providers:
+  iOS header/landscape toolbar now has [<] [list] [name i/n] [>] (steppers
+  apply instantly, menu rows show index + current mark, per-video candidate
+  cache opens the menu with zero re-probe); probing shows no popup (buttons
+  dim while running, menu opens on completion, errors only log). Server
+  `candidates.py` persists every full probe snapshot (latest wins,
+  translations stripped) from `probe_providers`; rerace upgrades from saved
+  snapshots before hitting network; device select serves saved providers
+  instantly (translate-to-lang on demand). `fetch_all_lyrics` stages are
+  isolated (one provider throw no longer aborts the rest) + same-line wbw
+  graft onto a non-wbw winner. Verified: graft y/n cases, save/load
+  roundtrip, rerace-from-saved tier upgrade, select-from-saved with
+  translation, py_compile + import.
+- title/artist reliability: stale landscape title/artist reset on song
+  change (old values stuck forever because the refill guard only ran when
+  empty); server song/artist captured from every fetch payload as fallback
+  between live player data and scraped now-playing labels.
+- bg-keyed chrome: all buttons/pills/transport/progress/status/fps colors
+  follow blurred-artwork luminance via `YTMULyricFill` + `ytmu_refreshChromeInk`
+  (play circle keeps contrasting glyph); lyric cells nudged right (leading
+  20->28). TODO(theme) markers filed for the remaining OS-theme followers
+  (blur style, modal close button, trait re-theme).
 - embed z-order self-heal (`ytmu_assertOnTop`): YT reorders/unhides
   engagement-panel siblings at any time, burying the tag-9999 lyrics view
   after `updateLyrics` put it on top. Helper re-asserts front + hides

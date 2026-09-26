@@ -95,7 +95,15 @@
 @property (nonatomic, strong) UIButton *headerMenuButton;
 @property (nonatomic, copy) NSString *providerJobID;
 @property (nonatomic, strong) NSTimer *providerPollTimer;
-@property (nonatomic, strong) UIAlertController *providerLoadingAlert;
+@property (nonatomic, strong) NSArray *providerCandidates;
+@property (nonatomic, assign) NSInteger providerIndex;
+@property (nonatomic, strong) NSMutableDictionary *providerCache;
+@property (nonatomic, strong) UILabel *providerSwitcherLabel;
+@property (nonatomic, strong) UIButton *providerPrevButton;
+@property (nonatomic, strong) UIButton *providerNextButton;
+@property (nonatomic, copy) NSString *lastProvider;
+@property (nonatomic, copy) NSString *lastSongTitle;
+@property (nonatomic, copy) NSString *lastSongArtist;
 @property (nonatomic, assign) BOOL landscapeIsPlaying;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
