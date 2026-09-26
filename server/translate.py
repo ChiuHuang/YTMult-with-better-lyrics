@@ -173,6 +173,12 @@ def cohere_translate(texts, target_lang='zh-TW'):
     if to_translate_idx:
         subset = [texts[i] for i in to_translate_idx]
         translated_subset = _cohere_translate_raw(subset, target_lang)
+        if translated_subset is None:
+            # Total API failure: serve originals but do NOT cache them, or
+            # every later lookup would serve the failure as a translation.
+            if chinese_target:
+                results = _apply_zh_script(results, target_lang)
+            return results
         for local_i, global_i in enumerate(to_translate_idx):
             results[global_i] = translated_subset[local_i]
     else:
@@ -187,7 +193,7 @@ def cohere_translate(texts, target_lang='zh-TW'):
 
 def _cohere_translate_raw(texts, target_lang):
     """Send exactly these lines to Cohere and return them translated, in order.
-    Falls back to returning the originals if every key fails."""
+    Returns None when every key failed (caller serves originals uncached)."""
     if not texts:
         return []
 
@@ -256,9 +262,10 @@ def _cohere_translate_raw(texts, target_lang):
             print(f"  [Cohere] Exception: {e}")
             rotate_cohere_key()
 
-    # Fallback: return originals
+    # Total failure: signal the caller (None) instead of returning
+    # originals that would be cached as translations.
     print(f"  [Cohere] All keys failed, returning originals")
-    return texts
+    return None
 
 
 def apply_display_transforms(lyrics, target_lang='zh-TW', auto_zh=False):
@@ -329,6 +336,7 @@ def google_translate_fast(texts, target_lang='zh-TW'):
         batches.append(current_batch)
 
     all_translations = []
+    batch_ok = True
     for batch in batches:
         joined = delimiter.join(batch)
         try:
@@ -337,22 +345,34 @@ def google_translate_fast(texts, target_lang='zh-TW'):
             if resp.status_code == 200:
                 data = resp.json()
                 translated = ''.join(part[0] for part in data[0] if part[0])
-                parts = translated.split(';')
+                # Split on the exact delimiter first: a bare ';' split
+                # misaligns the batch whenever a translation itself
+                # contains a semicolon.
+                if delimiter in translated:
+                    parts = [p.strip() for p in translated.split(delimiter)]
+                else:
+                    parts = translated.split(';')
+                    parts = [p.strip() for p in parts]
                 if len(parts) == len(batch):
-                    all_translations.extend([p.strip() for p in parts])
+                    all_translations.extend(parts)
                 else:
                     lines = [t.strip() for t in translated.split('\n') if t.strip()]
                     while len(lines) < len(batch): lines.append('')
                     all_translations.extend(lines[:len(batch)])
             else:
+                batch_ok = False
                 all_translations.extend(['' for _ in batch])
         except Exception as e:
+            batch_ok = False
             all_translations.extend(['' for _ in batch])
 
     if _is_chinese_target(target_lang):
         all_translations = _apply_zh_script(all_translations, target_lang)
 
-    set_translate_cached(cache_key, all_translations)
+    # Never negative-cache a total failure (HTTP error/exception on every
+    # batch): later lookups would serve the blanks as if translated.
+    if batch_ok or any(t for t in all_translations):
+        set_translate_cached(cache_key, all_translations)
     return all_translations
 
 
@@ -360,18 +380,25 @@ def translate_result_in_place(result, target_lang):
     """Fill lyric['translated'] for every text line of a fetched result.
 
     Same index-aligned mapping the sequential pipeline uses, factored out so
-    the background translate queue behaves identically. Returns the number
-    of lines filled."""
+    the background translate queue behaves identically. Alignment runs over
+    text-bearing lines only, so textless/gap rows never shift later
+    translations. Returns the number of lines filled."""
     if not target_lang or not result or not result.get('lyrics'):
         return 0
     texts = [l['text'] for l in result['lyrics'] if l.get('text')]
     if not texts:
         return 0
     translations = cohere_translate(texts, target_lang)
-    for i, lyric in enumerate(result['lyrics']):
-        if i < len(translations):
-            lyric['translated'] = translations[i]
-    return min(len(translations), len(result['lyrics']))
+    filled = 0
+    ti = 0
+    for lyric in result['lyrics']:
+        if not lyric.get('text'):
+            continue
+        if ti < len(translations) and translations[ti]:
+            lyric['translated'] = translations[ti]
+            filled += 1
+        ti += 1
+    return filled
 
 
 # ------------------------------------------------------------

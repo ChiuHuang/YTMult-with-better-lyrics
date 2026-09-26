@@ -49,6 +49,13 @@ def _broadcast(job, payload):
         base = {'job_id': job.get('job_id'), 'done': job.get('done', 0),
                 'total': job.get('total', 0)}
         base.update(payload or {})
+        if base.get('type') in ('row', 'done'):
+            try:
+                cur = translate_queue_stats()
+                base['tq_queued'] = job.get('tq_queued', 0)
+                base['tq_done'] = max(0, cur['done'] - job.get('tq_done_base', 0))
+            except Exception:
+                pass
         _sse_broadcast('bulk_progress', base)
     except Exception:
         pass
@@ -191,8 +198,14 @@ def _fresh_one(job, opts, cancel, target):
                          'detail': detail or ''})
 
     if cancel.is_set():
+        _row = {'video_id': vid, 'lang': lang, 'song': song, 'artist': artist,
+                'from': old_tier, 'to': old_tier, 'status': 'cancelled',
+                'source': '', 'message': 'bulk stop requested'}
         with _JOB_LOCK:
             job['done'] += 1
+            _push_result(job, _row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': _row})
         return
     try:
         info = get_song_info(vid)
@@ -227,8 +240,14 @@ def _rerace_one(job, opts, cancel, target):
     _beat(job)
     _broadcast(job, {'type': 'start', 'video_id': vid, 'song': song, 'artist': artist})
     if cancel.is_set():
+        _row = {'video_id': vid, 'lang': lang, 'song': song, 'artist': artist,
+                'from': old_tier, 'to': old_tier, 'status': 'cancelled',
+                'source': '', 'message': 'bulk stop requested'}
         with _JOB_LOCK:
             job['done'] += 1
+            _push_result(job, _row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': _row})
         return
     if old_tier == 'none':
         # Unlyriced entries have no cache to re-race -- fresh fetch instead.

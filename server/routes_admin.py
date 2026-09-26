@@ -598,6 +598,9 @@ def admin_events():
         interval = float(request.args.get('interval', 30))
     except (TypeError, ValueError):
         interval = 30
+    import math as _math
+    if not _math.isfinite(interval):
+        interval = 30
     interval = min(max(interval, 5.0), 300.0)
     q = queue.Queue(maxsize=200)
     with _sse_subscribers_lock:
