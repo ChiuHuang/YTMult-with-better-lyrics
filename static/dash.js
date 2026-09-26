@@ -586,13 +586,16 @@
   const pingLoop = async (progress, stage, pingEl, closeBtn) => {
     let attempt = 0;
     const tick = 1600;
+    const t0 = Date.now();
     const hist = getPingHistory();
     const avg = hist.length > 0 ? Math.round(hist.reduce((a, b) => a + b, 0) / hist.length) : 8;
     const maxEst = avg + 1;
     while (true) {
       attempt++;
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       if (progress) { progress.indeterminate = false; progress.value = Math.min(0.95, 0.15 + (attempt / maxEst) * 0.8); }
-      if (pingEl) pingEl.innerHTML = `<span class="live-dot"></span> Waiting for server (${attempt}/${maxEst} est)`;
+      if (stage) stage.textContent = `Server restarting -- waiting for it to come back... (${elapsed}s elapsed)`;
+      if (pingEl) pingEl.innerHTML = `<span class="live-dot"></span> Waiting for server, try ${attempt} (~${elapsed}s, est ${maxEst} tries)`;
       await new Promise(res => setTimeout(res, tick));
       try {
         const r = await fetch('/api/admin/self_update/check');
@@ -1074,19 +1077,82 @@
 
   /* ---- refetch from URL / per-provider pick + custom rename ---- */
   let probeRunId = null;
+  let probeVideoId = null;
+  // Live animated provider rows (web elements, not text): each provider gets
+  // a row with a continuous spinner while probing, a smooth elapsed ticker
+  // (local 250ms clock, zero HTTP), and a determinate pill + retry button
+  // when it lands. Movement never jumps in steps.
+  // TODO(web-anim): skeleton shimmer behind rows while the first provider
+  // is still probing; stagger terminal pills by finish order.
+  const probeRowMap = new Map();
+  let probeElapsedTimer = null;
+  const probeTickElapsed = () => {
+    const now = Date.now();
+    probeRowMap.forEach(r => {
+      if (r.running && r.elapsed) r.elapsed.textContent = ((now - r.t0) / 1000).toFixed(1) + 's';
+    });
+  };
+  const probeStartElapsed = () => {
+    if (probeElapsedTimer) return;
+    probeElapsedTimer = setInterval(probeTickElapsed, 250);
+  };
+  const probeStopElapsed = () => {
+    if (probeElapsedTimer) { clearInterval(probeElapsedTimer); probeElapsedTimer = null; }
+  };
+  const probeRetryProvider = (provider) => {
+    if (!probeVideoId) { mdui.snackbar({message:'No video for this run'}); return; }
+    probeRefetch({url: probeVideoId, source: provider});
+  };
   const probeLiveLine = (provider, status, detail) => {
     const live = $('#refetch-live');
     if (!live) return;
-    const tag = status === 'found' ? 'OK' : status === 'missed' ? '--'
-      : status === 'error' ? 'FAIL' : status === 'skipped' ? 'SKIP' : '...';
-    const cls = status === 'found' ? 'pl-ok' : status === 'missed' ? 'pl-miss'
-      : status === 'error' ? 'pl-fail' : status === 'skipped' ? 'pl-miss' : 'pl-run';
-    live.appendChild(el('div', {},
-      el('span', {class: cls}, `[${tag}] `),
-      document.createTextNode(`${provider}${detail ? ' ' + detail : ''}`)));
     live.classList.add('has-lines');
     while (live.children.length > 200) live.removeChild(live.firstChild);
+    let r = probeRowMap.get(provider);
+    if (!r) {
+      const spin = el('mdui-circular-progress', {style:'width:16px;height:16px;flex:none;'});
+      const slot = el('span', {style:'display:inline-flex;width:52px;flex:none;'});
+      const pill = el('span', {class:'pl-run'}, '[...]');
+      slot.appendChild(spin);
+      const name = el('span', {style:'font-weight:600;'}, provider);
+      const det = el('span', {class:'pl-miss', style:'opacity:.75;'}, '');
+      const elapsed = el('span', {class:'mono', style:'font-size:11px;opacity:.6;'}, '0.0s');
+      const retry = el('mdui-button-icon', {icon:'refresh', variant:'text', style:'flex:none;', title:'Re-probe this provider'});
+      retry.style.display = 'none';
+      retry.addEventListener('click', () => probeRetryProvider(provider));
+      const row = el('div', {class:'probe-live-row'}, slot, name, det,
+        el('span', {style:'flex:1;'}),
+        elapsed, retry);
+      live.appendChild(row);
+      r = {row, spin, pill, det, elapsed, retry, t0: Date.now(), running: true, slot};
+      probeRowMap.set(provider, r);
+      live.scrollTop = live.scrollHeight;
+    }
+    const terminal = status === 'found' || status === 'missed' || status === 'error' || status === 'skipped';
+    if (terminal) {
+      r.running = false;
+      r.elapsed.textContent = ((Date.now() - r.t0) / 1000).toFixed(1) + 's';
+      const tag = status === 'found' ? 'OK' : status === 'missed' ? '--'
+        : status === 'error' ? 'FAIL' : 'SKIP';
+      const cls = status === 'found' ? 'pl-ok' : status === 'missed' ? 'pl-miss'
+        : status === 'error' ? 'pl-fail' : 'pl-miss';
+      r.pill.textContent = `[${tag}]`;
+      r.pill.className = cls;
+      r.slot.innerHTML = '';
+      r.slot.appendChild(r.pill);
+      r.det.textContent = detail ? ' ' + detail : '';
+      r.retry.style.display = '';
+    } else {
+      // started / song / probing: keep the spinner running, refresh detail.
+      r.running = true;
+      if (detail) r.det.textContent = ' ' + detail;
+      r.retry.style.display = 'none';
+    }
     live.scrollTop = live.scrollHeight;
+  };
+  const probeClearRows = () => {
+    probeRowMap.clear();
+    probeStopElapsed();
   };
   const tierPill = t => {
     const cls = t === 'wbw' ? 'pill-ok' : t === 'line' ? 'pill-warn' : 'pill-mute';
@@ -1181,6 +1247,7 @@
           lang: ($('#refetch-lang') && $('#refetch-lang').value || 'zh-TW').trim(),
           title: opts.title || undefined,
           artist: opts.artist || undefined,
+          source: opts.source || undefined,
         })});
       started = await r.json();
       if (!started.ok) throw new Error(started.error || 'probe start failed');
@@ -1194,9 +1261,12 @@
     // job_id doubles as the SSE run_id, so race lines stream live.
     probeRunId = started.job_id;
     probeStatusUrl = started.status_url;
+    probeVideoId = started.video_id || url;
     probeFoundCount = 0;
     const live = $('#refetch-live');
     if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
+    probeClearRows();
+    probeStartElapsed();
     const list = $('#refetch-candidates');
     if (list) list.innerHTML = '';
     const meta = $('#refetch-meta');
@@ -1221,6 +1291,7 @@
     const statusUrl = probeStatusUrl;
     if (!runId) return; // stray event, no active run
     clearProbeSafety();
+    probeStopElapsed();
     probeRunId = null;
     probeStatusUrl = null;
     const probeBtn = $('#refetch-probe');

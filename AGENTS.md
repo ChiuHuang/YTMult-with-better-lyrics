@@ -101,6 +101,18 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- everything-parallel + live animated rows: `fetch_all_lyrics` stages and
+  `_rerace_video` legs now run concurrently (wall = slowest, verified
+  0.6s vs 1.6s serial with winner still correct); stream race already was.
+  Fixed a pre-existing Unison bug (stray `continue` meant only the last
+  query's result was ever considered). Dashboard probe log is now animated
+  web rows (spinner + 250ms elapsed ticker, determinate pill + per-row
+  re-probe via only_source on land); update dialog shows elapsed + tries.
+  TODO(web-anim)/TODO(app-anim) filed; `server/egress.py` stubbed with the
+  proxy-protocol questions for proxy.chiuhuang.dev. NOTE: sequential
+  `[..]/[--]` logs mean a stale pre-parallel build is still running --
+  self-update + restart to pick this up (probe prints `[probe] <vid>
+  probing (parallel groups)` on the new build).
 - parallel probes + outcome tags + prune: `probe_providers` runs all 8
   groups concurrently (Cubey, bLyrics/QQ/KuGou/BiniLyrics, LRCLib, Unison,
   AMLL, YouTube) with live started/found/missed/error/skipped SSE per

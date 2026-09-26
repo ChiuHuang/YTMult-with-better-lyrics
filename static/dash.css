@@ -181,6 +181,12 @@ html.mdui-theme-dark .rb-failed, html.mdui-theme-dark .rb-error { background-col
   background: rgba(0,0,0,.45); border-radius:8px; padding:8px 12px; margin-bottom:10px;
   max-height:180px; overflow-y:auto; display:none; }
 .probe-live.has-lines { display:block; }
+/* Animated per-provider rows: flex row, continuous spinner while running,
+   smooth elapsed ticker, determinate pill + retry when landed. */
+.probe-live-row { display:flex; align-items:center; gap:8px; padding:2px 0;
+  animation: probe-row-in .18s ease-out; }
+@keyframes probe-row-in { from { opacity:0; transform:translateY(-3px); } to { opacity:1; transform:none; } }
+.probe-live-row .mono { font-family: inherit; }
 .probe-live .pl-ok { color: rgb(102,187,106); }
 .probe-live .pl-miss { color: rgb(var(--mdui-color-on-surface-variant)); }
 .probe-live .pl-fail { color: rgb(242,139,135); }
