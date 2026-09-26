@@ -1426,6 +1426,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self ytmu_assertOnTop];
     [self ytmu_updateLandscapeMetadata];
     NSString *vid = YTMUResolveCurrentVideoID();
     if (vid && (![vid isEqualToString:self.loadingVideoID] || (self.lyrics.count == 0 && !self.isLoading))) {
@@ -1757,6 +1758,26 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }] resume];
 }
 
+- (void)ytmu_assertOnTop {
+    // Embed only (tag 9999): YT reorders/unhides its engagement-panel
+    // content at any time (song change, layout passes), which buries the
+    // lyrics view again after updateLyrics put it on top. Modal sheets are
+    // presented above YT by UIKit and need nothing here.
+    if (self.isModal) return;
+    if (self.view.tag != 9999) return;
+    UIView *contentContainer = self.view.superview;
+    if (!contentContainer) return;
+    if ([contentContainer.subviews lastObject] != self.view) {
+        [contentContainer bringSubviewToFront:self.view];
+    }
+    // Never blank the panel: only hide YT siblings while our view is
+    // actually visible (lyricsAlwaysOn off + hidden sheet = native panel).
+    if (self.view.hidden || self.view.alpha < 0.05 || !self.view.window) return;
+    for (UIView *sub in contentContainer.subviews) {
+        if (sub != self.view && sub.tag != 9999 && !sub.hidden) sub.hidden = YES;
+    }
+}
+
 - (void)updatePlaybackTime {
     self.fpsTicks++;
     NSTimeInterval fpsNow = CACurrentMediaTime();
@@ -1769,6 +1790,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             self.fpsLabel.text = [NSString stringWithFormat:@"%ld/%ld fps", (long)fps, (long)maxFps];
             sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps (panel max %ld)", (long)fps, (long)maxFps]);
         }
+    }
+    // Self-healing z-order (~1/sec): YT reshuffles panel subviews behind
+    // our back; the check itself is a pointer compare so per-frame cost is
+    // ~zero. No-op for modal sheets (see ytmu_assertOnTop).
+    static int ytmuTopAssertTick = 0;
+    if ((++ytmuTopAssertTick % 90) == 0) {
+        [self ytmu_assertOnTop];
     }
     if (self.landscapeInfoPanel && !self.landscapeInfoPanel.hidden) {
         [self ytmu_updateLandscapeProgress];
@@ -1929,15 +1957,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (newLyrics.count > 0 && (self.isModal || YTMULyricsPreference(@"lyricsAlwaysOn", YES))) {
         self.view.hidden = NO;
-        if (!self.isModal && self.view.tag == 9999) {
-            UIView *contentContainer = self.view.superview;
-            if (contentContainer) {
-                [contentContainer bringSubviewToFront:self.view];
-                for (UIView *sub in contentContainer.subviews) {
-                    if (sub != self.view && sub.tag != 9999) sub.hidden = YES;
-                }
-            }
-        }
+        [self ytmu_assertOnTop];
     }
 }
 
