@@ -101,6 +101,13 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- embed z-order self-heal (`ytmu_assertOnTop`): YT reorders/unhides
+  engagement-panel siblings at any time, burying the tag-9999 lyrics view
+  after `updateLyrics` put it on top. Helper re-asserts front + hides
+  siblings (only while our view is visible, never blanking the panel);
+  called throttled ~1/sec from `updatePlaybackTime`, from `viewWillAppear`,
+  and from `updateLyrics` (replacing the inline block). Modal sheets are
+  UIKit-presented above YT, no-op there.
 - instrumental icon rows on iOS + fast-as-final (`pro`) flag: `configureCell`
   renders `isInstrumental`/`[instrumental]`/`[MUSIC] Instrumental` lines as a
   centered note glyph (28pt, active=full ink / idle=dim, no wipe/trans row;
