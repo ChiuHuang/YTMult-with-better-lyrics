@@ -32,6 +32,115 @@ COHERE_API_KEYS = [
 ]
 _cohere_key_idx = 0
 _cohere_key_lock = threading.Lock()
+_TLS = threading.local()
+
+
+def _env_list(name):
+    out = []
+    for part in re.split(r'[,\s]+', os.environ.get(name, '')):
+        part = (part or '').strip().strip('"\'')
+        if part and part not in out:
+            out.append(part)
+    return out
+
+
+# Extra Cohere keys via env (never commit keys to the repo):
+#   YTMU_COHERE_KEYS="key1,key2"
+for _k in _env_list('YTMU_COHERE_KEYS'):
+    if _k not in COHERE_API_KEYS:
+        COHERE_API_KEYS.append(_k)
+
+
+# ------------------------------------------------------------
+# OrcaRouter fallback (OpenAI-compatible meta-router):
+#   https://api.orcarouter.ai/v1, keys start with sk-orca-.
+#   ORCAROUTER_API_KEY=...  YTMU_ORCA_MODEL=orcarouter/free
+# ------------------------------------------------------------
+_ORCA_BASE = os.environ.get('YTMU_ORCA_BASE',
+                            'https://api.orcarouter.ai/v1').rstrip('/')
+_ORCA_MODEL = os.environ.get('YTMU_ORCA_MODEL', 'orcarouter/free')
+
+
+def orca_enabled():
+    return bool(os.environ.get('ORCAROUTER_API_KEY', '').strip())
+
+
+def translate_last_error():
+    """Failure reason of the last translate call on THIS thread:
+    None (ok/skipped), 'rate_limited' (429), or 'error'."""
+    return getattr(_TLS, 'last_error', None)
+
+
+def orca_chat(messages, timeout=60, max_tokens=4000):
+    """Raw OpenAI-compatible chat call. Returns text or None. Never raises."""
+    key = os.environ.get('ORCAROUTER_API_KEY', '').strip()
+    if not key:
+        return None
+    try:
+        resp = requests.post(
+            _ORCA_BASE + '/chat/completions',
+            headers={
+                'Authorization': f'Bearer {key}',
+                'Content-Type': 'application/json',
+            },
+            json={'model': _ORCA_MODEL, 'messages': messages,
+                  'temperature': 0.2, 'max_tokens': max_tokens},
+            timeout=timeout,
+        )
+        if resp.status_code == 429:
+            _TLS.last_error = 'rate_limited'
+            print('  [Orca] Rate limited (429)')
+            return None
+        if resp.status_code != 200:
+            _TLS.last_error = 'error'
+            print(f'  [Orca] Error {resp.status_code}: {resp.text[:200]}')
+            return None
+        return resp.json()['choices'][0]['message']['content']
+    except Exception as e:
+        _TLS.last_error = 'error'
+        print(f'  [Orca] Exception: {e}')
+        return None
+
+
+def _parse_numbered_lines(translated_text, texts):
+    """Parse '[1] ...' lines back into an order-aligned list."""
+    result_map = {}
+    for line in (translated_text or '').split('\n'):
+        line = line.strip()
+        if line.startswith('['):
+            try:
+                bracket_end = line.index(']')
+                idx = int(line[1:bracket_end])
+                result_map[idx] = line[bracket_end + 1:].strip()
+            except Exception:
+                pass
+    return [result_map.get(i + 1, texts[i]) for i in range(len(texts))]
+
+
+def orca_chat_translate(texts, target_lang='zh-TW'):
+    """Translate lines via OrcaRouter. Returns list or None. Never raises."""
+    if not texts:
+        return []
+    lang_name = LANG_NAMES.get(target_lang, target_lang)
+    numbered = [f"[{i+1}] {t}" for i, t in enumerate(texts)]
+    prompt = (
+        f"Translate the following song lyrics into {lang_name}. "
+        f"Keep the same numbered format [1], [2], etc. "
+        f"These are song lyrics, so keep the poetic style and meaning intact. "
+        f"IMPORTANT: Do not translate onomatopoeia, scat singing, or nonsense words (like 'ba ba', 'la la') literally. Leave them as-is or transliterate them. "
+        f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
+        f"Return ONLY the translated lines with their numbers, nothing else.\n\n"
+        f"{chr(10).join(numbered)}"
+    )
+    text = orca_chat([{'role': 'user', 'content': prompt}], timeout=90)
+    if not text:
+        return None
+    try:
+        return _parse_numbered_lines(text, texts)
+    except Exception as e:
+        _TLS.last_error = 'error'
+        print(f'  [Orca] Parse failed: {e}')
+        return None
 
 import os
 os.makedirs('cache/lyrics', exist_ok=True)
@@ -177,6 +286,9 @@ def cohere_translate(texts, target_lang='zh-TW'):
     if to_translate_idx:
         subset = [texts[i] for i in to_translate_idx]
         translated_subset = _cohere_translate_raw(subset, target_lang)
+        if translated_subset is None and orca_enabled():
+            print('  [Cohere] all keys failed, trying OrcaRouter fallback...')
+            translated_subset = orca_chat_translate(subset, target_lang)
         if translated_subset is None:
             # Total API failure: serve originals but do NOT cache them, or
             # every later lookup would serve the failure as a translation.
@@ -197,9 +309,12 @@ def cohere_translate(texts, target_lang='zh-TW'):
 
 def _cohere_translate_raw(texts, target_lang):
     """Send exactly these lines to Cohere and return them translated, in order.
-    Returns None when every key failed (caller serves originals uncached)."""
+    Returns None when every key failed (caller serves originals uncached).
+    Records the failure reason on translate_last_error() for this thread."""
+    _TLS.last_error = None
     if not texts:
         return []
+    saw_429 = False
 
     lang_name = LANG_NAMES.get(target_lang, target_lang)
 
@@ -235,6 +350,7 @@ def _cohere_translate_raw(texts, target_lang):
 
             if resp.status_code == 429:  # Rate limited
                 print(f"  [Cohere] Rate limited on key {attempt}, rotating...")
+                saw_429 = True
                 rotate_cohere_key()
                 continue
 
@@ -260,6 +376,7 @@ def _cohere_translate_raw(texts, target_lang):
                         pass
 
             # Reconstruct in order
+            _TLS.last_error = None
             return [result_map.get(i+1, texts[i]) for i in range(len(texts))]
 
         except Exception as e:
@@ -268,7 +385,8 @@ def _cohere_translate_raw(texts, target_lang):
 
     # Total failure: signal the caller (None) instead of returning
     # originals that would be cached as translations.
-    print(f"  [Cohere] All keys failed, returning originals")
+    print("  [Cohere] All keys failed")
+    _TLS.last_error = 'rate_limited' if saw_429 else 'error'
     return None
 
 
@@ -416,6 +534,10 @@ _TQ_STATS = {'queued': 0, 'done': 0, 'errors': 0}
 _TQ_LOCK = threading.Lock()
 _TQ_WORKERS = 2
 _TQ_STARTED = False
+# On 429 the worker waits and retries instead of dropping the item, so the
+# queue eventually completes once quota resets. Bounds are env-tunable.
+_TQ_MAX_RETRIES = max(0, int(os.environ.get('YTMU_TQ_MAX_RETRIES', '40')))
+_TQ_RETRY_SLEEP = max(5, int(os.environ.get('YTMU_TQ_RETRY_SLEEP', '60')))
 
 
 def _translate_queue_worker():
@@ -423,11 +545,30 @@ def _translate_queue_worker():
     while True:
         item = _TQ_QUEUE.get()
         try:
+            retries = item.get('retries', 0)
             n = translate_result_in_place(item.get('data'), item.get('lang'))
-            if n:
+            err = translate_last_error()
+            if err == 'rate_limited':
+                if retries >= _TQ_MAX_RETRIES:
+                    print(f"[TRANSQ] [FAIL] {item.get('key', '?')}: "
+                          f"rate-limited x{retries}, dropping")
+                    with _TQ_LOCK:
+                        _TQ_STATS['errors'] += 1
+                else:
+                    wait = _TQ_RETRY_SLEEP
+                    print(f"[TRANSQ] [WAIT] {item.get('key', '?')}: 429, "
+                          f"retry {retries + 1}/{_TQ_MAX_RETRIES} in {wait}s")
+                    time_module.sleep(wait)
+                    item['retries'] = retries + 1
+                    _TQ_QUEUE.put(item)
+                continue
+            if err is None and n:
                 set_cached(item['key'], item['data'])
             with _TQ_LOCK:
-                _TQ_STATS['done'] += 1
+                if err is None:
+                    _TQ_STATS['done'] += 1
+                else:
+                    _TQ_STATS['errors'] += 1
         except Exception as e:
             print(f"[TRANSQ] [FAIL] {item.get('key', '?')}: {e}")
             with _TQ_LOCK:
@@ -460,6 +601,55 @@ def translate_queue_enqueue(cache_key, lang, data):
     with _TQ_LOCK:
         _TQ_STATS['queued'] += 1
     return True
+
+
+def _needs_translation(data, lang):
+    """True when at least one text line still lacks a translation.
+    Lines already in the target Chinese script are intentionally
+    untranslated (script-converted instead), so they don't count."""
+    if not data or not data.get('lyrics'):
+        return False
+    zh = _is_chinese_target(lang or '')
+    for l in data['lyrics']:
+        if not isinstance(l, dict) or not l.get('text') or l.get('translated'):
+            continue
+        if zh and _line_is_already_chinese(l['text']):
+            continue
+        return True
+    return False
+
+
+def find_untranslated(lang=''):
+    """Scan cache/lyrics for entries with lines still missing translations.
+    Returns [{key, lang, data}]. Expired entries included (re-caching them
+    revives the TTL). Never raises."""
+    from .cache import _cache_key_from_filename
+    out = []
+    lyrics_dir = 'cache/lyrics'
+    try:
+        names = os.listdir(lyrics_dir)
+    except Exception:
+        return out
+    for fname in names:
+        try:
+            key = _cache_key_from_filename(fname)
+            if key is None or key.endswith(':fast'):
+                continue
+            parts = key.split(':')
+            klang = parts[-1]
+            if lang and klang != lang:
+                continue
+            with open(os.path.join(lyrics_dir, fname), 'r',
+                      encoding='utf-8') as f:
+                entry = json.load(f)
+            data = entry.get('data')
+            if not data or 'not_found' in data:
+                continue
+            if _needs_translation(data, klang):
+                out.append({'key': key, 'lang': klang, 'data': data})
+        except Exception:
+            continue
+    return out
 
 
 def translate_queue_stats():

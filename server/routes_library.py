@@ -114,6 +114,13 @@ def _probe_job_run(job_id):
 def api_library_scan():
     try:
         result = scan_cache()
+        # "No lyrics" misses are never cached as files -- they live in the
+        # unlyriced list -- so buckets['none'] stays 0 by design. Expose the
+        # real count alongside it.
+        try:
+            result['unlyriced'] = len(list_unlyriced())
+        except Exception:
+            result['unlyriced'] = 0
         return jsonify({'ok': True, **result})
     except Exception as e:
         print(f"[LIBRARY] [FAIL] scan: {e}")
@@ -542,6 +549,36 @@ def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers
     print(f"[LIBRARY] [OK] retitle done: {len(_retitle_job.get('results',[]))} processed (workers={workers})")
 
 
+@app.route('/api/admin/library/translate/queue', methods=['GET'])
+@login_required
+def api_translate_queue():
+    from .translate import translate_queue_stats
+    return jsonify({'ok': True, **translate_queue_stats()})
+
+
+@app.route('/api/admin/library/translate/retry', methods=['POST'])
+@login_required
+def api_translate_retry():
+    """Find cached songs with lines still missing translations and put them
+    on the background translate queue (which waits through 429s until the
+    queue completes). Body: {lang?} to limit to one target lang.
+    Returns {ok, checked, enqueued, ...queue stats}."""
+    from .translate import (find_untranslated, translate_queue_enqueue,
+                            translate_queue_stats)
+    body = request.get_json(silent=True) or {}
+    lang = (body.get('lang') or '').strip() or ''
+    found = find_untranslated(lang)
+    n = 0
+    for f in found[:500]:
+        try:
+            if translate_queue_enqueue(f['key'], f['lang'], f['data']):
+                n += 1
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'checked': len(found), 'enqueued': n,
+                    **translate_queue_stats()})
+
+
 @app.route('/api/admin/library/retitle/stop', methods=['POST'])
 @login_required
 def api_retitle_stop():
@@ -667,7 +704,7 @@ def _candidate_tier(cand):
 @login_required
 def api_bulk_refetch_start():
     """Start a bulk refetch-all job with admin-chosen options. Body:
-    {scope: all|non-wbw|unlyriced, mode: fresh|rerace, lang,
+    {scope: all|non-wbw|unlyriced|plain, mode: fresh|rerace, lang,
     workers (fetch threads 1-32), cpu_workers (parse processes),
     translate (bool)}. 409 when a job is already running."""
     from .bulk_refetch import start, BulkBusy

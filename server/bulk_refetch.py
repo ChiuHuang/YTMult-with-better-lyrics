@@ -317,8 +317,8 @@ def start(opts):
     workers = max(1, min(int(opts.get('workers') or 8), 32))
     cpu_workers = max(1, min(int(opts.get('cpu_workers') or 2), cpu_count()))
     translate = bool(opts.get('translate', True))
-    if scope not in ('all', 'non-wbw', 'unlyriced'):
-        raise ValueError('scope must be all|non-wbw|unlyriced')
+    if scope not in ('all', 'non-wbw', 'unlyriced', 'plain'):
+        raise ValueError('scope must be all|non-wbw|unlyriced|plain')
     if mode not in ('fresh', 'rerace'):
         raise ValueError('mode must be fresh|rerace')
 
@@ -350,6 +350,8 @@ def start(opts):
             for s in songs:
                 tier = s.get('tier', 'plain')
                 if scope == 'non-wbw' and tier == 'wbw':
+                    continue
+                if scope == 'plain' and tier != 'plain':
                     continue
                 targets.append({'video_id': s['video_id'],
                                 'lang': s.get('lang') or lang,

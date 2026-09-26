@@ -630,6 +630,21 @@ def _retitle_via_llm(song, artist):
             print(f"  [RETITLE] [WARN] LLM error: {e}")
             rotate_cohere_key()
     print(f"  [RETITLE] [WARN] all LLM keys exhausted")
+    # OrcaRouter fallback (OpenAI-compatible; ORCAROUTER_API_KEY + model
+    # YTMU_ORCA_MODEL, default orcarouter/free). Same JSON contract.
+    try:
+        from .translate import orca_enabled, orca_chat
+        if orca_enabled():
+            print("  [RETITLE] trying OrcaRouter fallback...")
+            text = orca_chat(
+                [{"role": "user", "content": prompt}], timeout=90)
+            if text:
+                parsed = _parse_json_from_text(text, song, artist)
+                if parsed:
+                    return parsed
+                print("  [RETITLE] [WARN] Orca reply had no JSON")
+    except Exception as e:
+        print(f"  [RETITLE] [WARN] Orca fallback error: {e}")
     return None
 
 
