@@ -12,6 +12,7 @@
 # requests, so a node's different residential IP does the probing; a dead
 # node falls back to a direct request.
 import copy
+import concurrent.futures
 import json
 import os
 import threading
@@ -161,35 +162,60 @@ def _rerace_video(video_id, lang, old_data):
                     sanitize_lyrics_parts(up['lyrics'])
                     print(f"  [RERACE] {video_id} grafted wbw from saved {c.get('provider')}")
                     return up
-    best = None
+    found = []
+    _found_lock = threading.Lock()
+
+    def _take(cand):
+        if cand:
+            sanitize_lyrics_parts(cand['lyrics'])
+            with _found_lock:
+                found.append(cand)
+
+    _rerace_groups = []
     _MISS_TO_SRC = {'bLyrics': 'ttml', 'QQ': 'qq', 'KuGou': 'kugou', 'BiniLyrics': 'binimum'}
     for name, sources in (('boidu', ('ttml', 'qq', 'kugou')), ('binimum', ('binimum',))):
         sources = tuple(s for s in sources
                         if not any(_MISS_TO_SRC.get(m) == s for m in _skip))
         if not sources:
             continue
-        try:
-            cand = fetch_direct_best(queries, album, duration, sources=sources, via_node=node)
-            if cand:
-                sanitize_lyrics_parts(cand['lyrics'])
-                if best is None or _lyrics_score(cand) > _lyrics_score(best):
-                    best = cand
-        except Exception as e:
-            print(f"  [RERACE] {name} worker error: {e}")
-            continue
+
+        def _direct_leg(_sources=sources, _name=name):
+            try:
+                cand = fetch_direct_best(queries, album, duration, sources=_sources, via_node=node)
+                if cand:
+                    _take(cand)
+            except Exception as e:
+                print(f"  [RERACE] {_name} worker error: {e}")
+        _rerace_groups.append(_direct_leg)
 
     _CUBEY_INNERS = ('Musixmatch', 'QQ', 'bLyrics', 'BiniLyrics', 'NetEase', 'KuGou')
     if not all(f'Cubey/{i}' in _skip for i in _CUBEY_INNERS):
-        try:
-            cubey = _race_cubey(queries, video_id, duration, None)
-            if cubey:
-                sanitize_lyrics_parts(cubey['lyrics'])
-                if best is None or _lyrics_score(cubey) > _lyrics_score(best):
-                    best = cubey
-        except Exception as e:
-            print(f"  [RERACE] Cubey error: {e}")
-    elif best is None:
+        def _cubey_leg():
+            try:
+                cubey = _race_cubey(queries, video_id, duration, None)
+                if cubey:
+                    _take(cubey)
+            except Exception as e:
+                print(f"  [RERACE] Cubey error: {e}")
+        _rerace_groups.append(_cubey_leg)
+    else:
         print(f"  [RERACE] {video_id} Cubey skipped (all inners missed in snapshot)")
+
+    # All legs concurrently; wall time is the slowest leg, not the sum.
+    if _rerace_groups:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(_rerace_groups),
+                                                   thread_name_prefix='rerace') as _rexec:
+            for _f in concurrent.futures.as_completed(
+                    [_rexec.submit(_g) for _g in _rerace_groups]):
+                try:
+                    _f.result()
+                except Exception as e:
+                    print(f"  [RERACE] leg error: {e}")
+
+    best = None
+    for cand in found:
+        if best is None or _lyrics_score(cand) > _lyrics_score(best):
+            best = cand
 
     if not best:
         return None

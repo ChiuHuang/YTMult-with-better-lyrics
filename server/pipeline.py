@@ -115,16 +115,19 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
 
     result = None  # best across providers, decided by score
     considered = []  # every (label, candidate) tried, for wbw graft + saving
+    _fetch_lock = threading.Lock()
+    _fetch_stages = []  # stage thunks; all run concurrently below
 
     def consider(candidate, label):
         nonlocal result
         if not candidate or not candidate.get('lyrics'):
             return
         sanitize_lyrics_parts(candidate['lyrics'])
-        considered.append((label, candidate))
-        if result is None or _lyrics_score(candidate) > _lyrics_score(result):
-            result = candidate
-            print(f"  [rank] {label}: {candidate.get('source')} now best (score={_lyrics_score(result):.2f})")
+        with _fetch_lock:
+            considered.append((label, candidate))
+            if result is None or _lyrics_score(candidate) > _lyrics_score(result):
+                result = candidate
+                print(f"  [rank] {label}: {candidate.get('source')} now best (score={_lyrics_score(result):.2f})")
 
     # Priority 0: Cubey API (if we have JWT) -- one pass covers Musixmatch
     # wordByWord/synced, QQ QRC, KuGou LRC, NetEase and the bLyrics/BiniLyrics
@@ -134,8 +137,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         jwt_token = pick_jwt()
         if jwt_token:
             print(f"  [0/5] No request JWT -- using a contributed token from the pool")
-    if jwt_token:
-        print(f"  [0/5] Trying Cubey API (with JWT)...")
+    def _s_cubey():
+        print(f"  [fetch] Trying Cubey API (with JWT)...")
         _stage('Cubey', 'started')
         try:
             cubey_node = pick_node()
@@ -157,110 +160,133 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         except Exception as e:
             print(f"  [FAIL] Cubey stage error (continuing): {e}")
             _stage('Cubey', 'error', str(e))
+    if jwt_token:
+        _fetch_stages.append(_s_cubey)
     else:
         _stage('Cubey', 'skipped', 'no JWT')
-        print(f"  [0/5] Cubey skipped (no JWT)")
+        print(f"  [fetch] Cubey skipped (no JWT)")
 
     # Priority 1: direct braccato providers (no JWT) -- bLyrics TTML (often
     # syllable-timed), Portato QQ QRC (word-by-word), Legato KuGou LRC.
-    _stage('braccato-direct', 'started')
-    try:
-        direct = fetch_direct_best(queries, album, duration)
-        if direct:
-            print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
-            consider(direct, 'braccato direct')
-            _stage('braccato-direct', 'found', direct.get('source', ''))
-        else:
-            _stage('braccato-direct', 'missed')
-    except Exception as e:
-        print(f"  [FAIL] braccato-direct stage error (continuing): {e}")
-        _stage('braccato-direct', 'error', str(e))
+    def _s_direct():
+        _stage('braccato-direct', 'started')
+        try:
+            direct = fetch_direct_best(queries, album, duration)
+            if direct:
+                print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
+                consider(direct, 'braccato direct')
+                _stage('braccato-direct', 'found', direct.get('source', ''))
+            else:
+                _stage('braccato-direct', 'missed')
+        except Exception as e:
+            print(f"  [FAIL] braccato-direct stage error (continuing): {e}")
+            _stage('braccato-direct', 'error', str(e))
+    _fetch_stages.append(_s_direct)
 
     # Priority 2: LRCLIB (best general line-sync source)
-    print(f"  [2/5] Trying LRCLIB...")
-    _stage('LRCLib', 'started')
-    try:
-        lrclib_node = pick_node()
-        for q in queries:
-            try:
-                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
-            except Exception as e:
-                print(f"  [FAIL] LRCLIB query error (continuing): {e}")
-                continue
-            if not lrc:
-                continue
-            if lrc.get('instrumental'):
-                consider({'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}, 'LRCLib instrumental')
-                break
-            if lrc.get('synced'):
-                print(f"  [OK] LRCLIB: synced lyrics found! (query: {q['title']})")
-                consider({'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}, 'LRCLib synced')
-            elif lrc.get('plain'):
-                print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
-                consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
-        _stage('LRCLib', 'done')
-    except Exception as e:
-        print(f"  [FAIL] LRCLIB stage error (continuing): {e}")
-        _stage('LRCLib', 'error', str(e))
+    def _s_lrclib():
+        print(f"  [fetch] Trying LRCLIB...")
+        _stage('LRCLib', 'started')
+        try:
+            lrclib_node = pick_node()
+            for q in queries:
+                try:
+                    lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
+                except Exception as e:
+                    print(f"  [FAIL] LRCLIB query error (continuing): {e}")
+                    continue
+                if not lrc:
+                    continue
+                if lrc.get('instrumental'):
+                    consider({'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}, 'LRCLib instrumental')
+                    break
+                if lrc.get('synced'):
+                    print(f"  [OK] LRCLIB: synced lyrics found! (query: {q['title']})")
+                    consider({'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}, 'LRCLib synced')
+                elif lrc.get('plain'):
+                    print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
+                    consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
+            _stage('LRCLib', 'done')
+        except Exception as e:
+            print(f"  [FAIL] LRCLIB stage error (continuing): {e}")
+            _stage('LRCLib', 'error', str(e))
+    _fetch_stages.append(_s_lrclib)
 
     # Priority 3: Unison (community; TTML can carry word timing)
-    print(f"  [3/5] Trying Unison...")
-    _stage('Unison', 'started')
-    try:
-        unison_node = pick_node()
-        for q in queries:
-            try:
-                uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
-            except Exception as e:
-                print(f"  [FAIL] Unison query error (continuing): {e}")
-                continue
-            if not uni:
-                continue
-            continue
-        if uni.get('parsed'):
-            print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
-            consider({'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}, 'Unison TTML')
-        elif uni.get('synced'):
-            print(f"  [OK] Unison: synced LRC lyrics found! (query: {q['title']})")
-            consider({'lyrics': parse_lrc(uni['synced'], duration), 'source': 'Unison', 'synced': True}, 'Unison synced')
-        elif uni.get('plain'):
-            print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
-            consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
-        _stage('Unison', 'done')
-    except Exception as e:
-        print(f"  [FAIL] Unison stage error (continuing): {e}")
-        _stage('Unison', 'error', str(e))
+    def _s_unison():
+        print(f"  [fetch] Trying Unison...")
+        _stage('Unison', 'started')
+        try:
+            unison_node = pick_node()
+            for q in queries:
+                try:
+                    uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
+                except Exception as e:
+                    print(f"  [FAIL] Unison query error (continuing): {e}")
+                    continue
+                if not uni:
+                    continue
+                if uni.get('parsed'):
+                    print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
+                    consider({'lyrics': uni['parsed'], 'source': 'Unison', 'synced': True}, 'Unison TTML')
+                elif uni.get('synced'):
+                    print(f"  [OK] Unison: synced LRC lyrics found! (query: {q['title']})")
+                    consider({'lyrics': parse_lrc(uni['synced'], duration), 'source': 'Unison', 'synced': True}, 'Unison synced')
+                elif uni.get('plain'):
+                    print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
+                    consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
+            _stage('Unison', 'done')
+        except Exception as e:
+            print(f"  [FAIL] Unison stage error (continuing): {e}")
+            _stage('Unison', 'error', str(e))
+    _fetch_stages.append(_s_unison)
 
     # Priority 4: AMLL TTML DB (no JWT) -- word-synced TTML via title
     # search + raw-lyrics fetch (beautiful-lyrics-reborn amlldb path).
-    print(f"  [4/6] Trying AMLL...")
-    _stage('AMLL', 'started')
-    try:
-        from .providers_amll import fetch_amll
-        for q in queries:
-            amll = fetch_amll(q['title'], q['artist'], duration)
-            if not amll or not amll.get('parsed'):
-                continue
-            print(f"  [OK] AMLL: word-synced TTML found! (query: {q['title']})")
-            consider({'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}, 'AMLL TTML')
-            break
-        _stage('AMLL', 'done')
-    except Exception as e:
-        print(f"  [FAIL] AMLL error: {e}")
-        _stage('AMLL', 'error', str(e))
+    def _s_amll():
+        print(f"  [fetch] Trying AMLL...")
+        _stage('AMLL', 'started')
+        try:
+            from .providers_amll import fetch_amll
+            for q in queries:
+                amll = fetch_amll(q['title'], q['artist'], duration)
+                if not amll or not amll.get('parsed'):
+                    continue
+                print(f"  [OK] AMLL: word-synced TTML found! (query: {q['title']})")
+                consider({'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}, 'AMLL TTML')
+                break
+            _stage('AMLL', 'done')
+        except Exception as e:
+            print(f"  [FAIL] AMLL error: {e}")
+            _stage('AMLL', 'error', str(e))
+    _fetch_stages.append(_s_amll)
 
     # Priority 5: YouTube Music lyrics
-    print(f"  [4/5] Trying YouTube Music lyrics...")
-    _stage('YouTube', 'started')
-    try:
-        yt = fetch_yt_lyrics(video_id)
-        if yt and yt.get('plain'):
-            print(f"  [OK] YouTube: plain lyrics found!")
-            consider({'lyrics': parse_plain(yt['plain']), 'source': yt.get('source', 'YouTube Music'), 'synced': False}, 'YouTube')
-        _stage('YouTube', 'done')
-    except Exception as e:
-        print(f"  [FAIL] YouTube error: {e}")
-        _stage('YouTube', 'error', str(e))
+    def _s_youtube():
+        print(f"  [fetch] Trying YouTube Music lyrics...")
+        _stage('YouTube', 'started')
+        try:
+            yt = fetch_yt_lyrics(video_id)
+            if yt and yt.get('plain'):
+                print(f"  [OK] YouTube: plain lyrics found!")
+                consider({'lyrics': parse_plain(yt['plain']), 'source': yt.get('source', 'YouTube Music'), 'synced': False}, 'YouTube')
+            _stage('YouTube', 'done')
+        except Exception as e:
+            print(f"  [FAIL] YouTube error: {e}")
+            _stage('YouTube', 'error', str(e))
+    _fetch_stages.append(_s_youtube)
+
+    # Run every stage concurrently and wait for all of them. Wall time is
+    # the slowest stage, not the sum -- no more [1/5]..[4/5] stepping.
+    print(f"  [fetch] {len(_fetch_stages)} stages in parallel")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(_fetch_stages)),
+                                               thread_name_prefix='fetch') as _fexec:
+        _ffuts = [_fexec.submit(_fn) for _fn in _fetch_stages]
+        for _f in concurrent.futures.as_completed(_ffuts):
+            try:
+                _f.result()
+            except Exception as e:
+                print(f"  [fetch] stage error: {e}")
 
     # No lyrics found
     if not result:
@@ -359,6 +385,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
     candidates = []
     outcomes = {}
     _probe_lock = threading.Lock()
+    print(f"  [probe] {video_id} probing (parallel groups)")
 
     def emit(logical_provider, label, cand):
         if not cand or not cand.get('lyrics'):
