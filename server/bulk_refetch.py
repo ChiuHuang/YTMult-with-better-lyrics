@@ -9,7 +9,7 @@ import threading
 import time as time_module
 import concurrent.futures
 
-from .cache import get_cached, set_cached, is_not_found_result
+from .cache import get_cached, set_cached, is_not_found_result, _cache_filename
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, apply_saved_rename,
     _try_llm_retitle_fetch,
@@ -124,6 +124,13 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
     result.setdefault('artist', artist)
     try:
         set_cached(key, result)
+        # Keep a stale :fast sibling from shadowing this upgrade in scans:
+        # mirror the upgraded payload so both keys agree on tier.
+        try:
+            if os.path.exists(os.path.join('cache', 'lyrics', _cache_filename(key + ':fast') + '.json')):
+                set_cached(key + ':fast', result)
+        except Exception:
+            pass
     except Exception as e:
         row = {'video_id': vid, 'lang': lang, 'song': song, 'artist': artist,
                'from': old_tier, 'to': new_tier, 'status': 'error',

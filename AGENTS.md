@@ -101,6 +101,16 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- scan 44-bug + iOS judder fixes: `scan_cache` preferred `:fast` over full
+  (inverted condition) so stale fast siblings shadowed bulk upgrades --
+  full now always wins (verified wbw with stale fast present); bulk mirrors
+  upgrades onto an existing fast sibling. iOS tick slimmed per braccato's
+  model (cheap ticks, zero mid-tick measurement): display link 120->30fps,
+  incremental active-line scan (resume at currentIndex-2, full rescan after
+  backward seeks), label rasterization (shadow baked once, mask animates on
+  the cached bitmap), far jumps scroll instantly instead of stacking
+  animated scrolls, z-order/metadata retry counters re-based on 30fps.
+  Needs device rebuild to confirm smoothness on XfEMj-z3TtA.
 - everything-parallel + live animated rows: `fetch_all_lyrics` stages and
   `_rerace_video` legs now run concurrently (wall = slowest, verified
   0.6s vs 1.6s serial with winner still correct); stream race already was.

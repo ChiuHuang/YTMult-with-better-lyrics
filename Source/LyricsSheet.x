@@ -200,6 +200,11 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         self.lyricLabel.layer.shadowRadius = 4.0;
         self.lyricLabel.layer.masksToBounds = NO;
+        // Rasterize text+shadow once per content change instead of
+        // re-rendering the shadow every tick while the wipe mask animates
+        // (the mask composites on top of the cached bitmap, cheaply).
+        self.lyricLabel.layer.shouldRasterize = YES;
+        self.lyricLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
         self.lyricLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.lyricLabel];
 
@@ -212,6 +217,8 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
         self.wipeLabel.layer.shadowRadius = 4.0;
         self.wipeLabel.layer.shadowOpacity = 0.75;
         self.wipeLabel.layer.masksToBounds = NO;
+        self.wipeLabel.layer.shouldRasterize = YES;
+        self.wipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
         self.wipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         self.wipeLabel.userInteractionEnabled = YES;
         [self.contentView addSubview:self.wipeLabel];
@@ -237,6 +244,8 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
         self.transLabel.layer.shadowRadius = 2.0;
         self.transLabel.layer.shadowOpacity = 0.35;
         self.transLabel.layer.masksToBounds = NO;
+        self.transLabel.layer.shouldRasterize = YES;
+        self.transLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
         self.transLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.transLabel];
 
@@ -743,11 +752,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleSongChange:) name:@"YTMUSongDidChange" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLyricsDidLoad:) name:@"YTMULyricsDidLoad" object:nil];
 
+    // Tick at 30fps, not 120: per-tick work is a scan + mask-path rewrite,
+    // and anything above 30 just burns old-phone GPUs into judder
+    // (braccato's web engine likewise keeps per-frame work near-zero).
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updatePlaybackTime)];
     if (@available(iOS 15.0, *)) {
-        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 120, 120);
+        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 30);
     } else if ([self.displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
-        self.displayLink.preferredFramesPerSecond = 120;
+        self.displayLink.preferredFramesPerSecond = 30;
     }
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
@@ -2034,22 +2046,22 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps (panel max %ld)", (long)fps, (long)maxFps]);
         }
     }
-    // Self-healing z-order (~1/sec): YT reshuffles panel subviews behind
-    // our back; the check itself is a pointer compare so per-frame cost is
-    // ~zero. No-op for modal sheets (see ytmu_assertOnTop).
+    // Self-healing z-order (~1/sec at the 30fps tick): YT reshuffles panel
+    // subviews behind our back; the check itself is a pointer compare so
+    // per-frame cost is ~zero. No-op for modal sheets (see ytmu_assertOnTop).
     static int ytmuTopAssertTick = 0;
-    if ((++ytmuTopAssertTick % 90) == 0) {
+    if ((++ytmuTopAssertTick % 30) == 0) {
         [self ytmu_assertOnTop];
     }
     if (self.landscapeInfoPanel && !self.landscapeInfoPanel.hidden) {
         [self ytmu_updateLandscapeProgress];
         // playerResponse can arrive after the panel opens; keep retrying
-        // until a real title/artist is shown (throttled: ~1/sec).
+        // until a real title/artist is shown (throttled: ~1/sec at 30fps).
         static int landscapeMetaRetryTick = 0;
         BOOL needTitle = (self.landscapeTitleLabel.text.length == 0 ||
                           [self.landscapeTitleLabel.text isEqualToString:@"Now Playing"]);
         if ((needTitle || self.landscapeArtistLabel.text.length == 0) &&
-            (landscapeMetaRetryTick++ % 60) == 0) {
+            (landscapeMetaRetryTick++ % 30) == 0) {
             [self ytmu_updateLandscapeMetadata];
         }
     }
@@ -2079,8 +2091,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (currentTime <= 0) return;
 
+    // Incremental scan: line times are sorted, so resume just behind the
+    // current line instead of walking all N lines every tick (braccato
+    // never re-measures mid-tick either). Falls back to a full scan after
+    // any backward seek.
     NSInteger newIndex = -1;
-    for (NSInteger i = 0; i < self.lyrics.count; i++) {
+    NSInteger start = 0;
+    if (self.currentIndex > 2 && self.currentIndex < self.lyrics.count) {
+        NSDictionary *probe = self.lyrics[self.currentIndex - 2];
+        double pt = [probe[@"time"] doubleValue];
+        if (pt <= 0) pt = [probe[@"startTimeMs"] doubleValue] / 1000.0;
+        if (currentTime >= pt) start = self.currentIndex - 2;
+    }
+    for (NSInteger i = start; i < self.lyrics.count; i++) {
         NSDictionary *lyric = self.lyrics[i];
         double time = [lyric[@"time"] doubleValue];
         // Instrumental gap rows carry startTimeMs only (no time key).
@@ -2120,8 +2143,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             }
 
             if (!self.tableView.isDragging && !self.tableView.isDecelerating) {
+                // Near: smooth-scroll with the song. Far (tap-jump / seek):
+                // jump instantly instead of stacking competing animated
+                // scrolls, which reads as jank on old phones.
+                BOOL far = (oldIndex >= 0 && labs(newIndex - oldIndex) > 3);
                 NSIndexPath *indexPath = [NSIndexPath indexPathForRow:newIndex inSection:0];
-                [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:YES];
+                [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:!far];
             }
         }
     } else if (newIndex >= 0) {
