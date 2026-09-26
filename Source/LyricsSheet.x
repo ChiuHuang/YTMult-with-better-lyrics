@@ -1724,6 +1724,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                         object:videoID
                                                                       userInfo:@{@"lyrics": dict[@"lyrics"]}];
+                    if ([dict[@"pro"] boolValue]) {
+                        // Server served the full cached result for this fast
+                        // request: treat it as final, skip the full fetch.
+                        if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+                        g_lyricsCache[videoID] = dict[@"lyrics"];
+                        YTMULyricsCacheSave(videoID, dict[@"lyrics"]);
+                        self.isLoading = NO;
+                        self.loadingSince = nil;
+                        if ([g_globalLoadingVideoID isEqualToString:videoID]) {
+                            YTMUReleaseGlobalFetch();
+                        }
+                        return;
+                    }
                 }
             }
 
@@ -1799,6 +1812,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     for (NSInteger i = 0; i < self.lyrics.count; i++) {
         NSDictionary *lyric = self.lyrics[i];
         double time = [lyric[@"time"] doubleValue];
+        // Instrumental gap rows carry startTimeMs only (no time key).
+        if (time <= 0) time = [lyric[@"startTimeMs"] doubleValue] / 1000.0;
 
         if (currentTime >= time) {
             newIndex = i;
@@ -2142,11 +2157,43 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     return (CGFloat)MIN(MAX((nowMs - startMs) / (endMs - startMs), 0.0), 1.0);
 }
 
+- (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric {
+    if ([lyric[@"isInstrumental"] boolValue]) return YES;
+    id raw = lyric[@"text"];
+    if (![raw isKindOfClass:[NSString class]]) return NO;
+    NSString *t = [(NSString *)raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return [t isEqualToString:@"[instrumental]"] || [t isEqualToString:@"[MUSIC] Instrumental"];
+}
+
 - (void)configureCell:(YTMULyricsCell *)cell atIndex:(NSInteger)index isActive:(BOOL)isActive currentTime:(double)currentTime {
     if (index < 0 || index >= self.lyrics.count) return;
 
     NSDictionary *lyric = self.lyrics[index];
+    if ([self ytmuIsInstrumentalLyric:lyric]) {
+        // Instrumental gap: music-note icon row (mirrors the braccato
+        // preview icon). No wipe mask, no word timing, no translation row.
+        // Font/alignment are reset explicitly in the text branch below
+        // because cells are reused.
+        cell.lyricLabel.attributedText = nil;
+        cell.lyricLabel.text = @"\u266A";
+        cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
+        cell.lyricLabel.textAlignment = NSTextAlignmentCenter;
+        cell.lyricLabel.alpha = 1.0;
+        cell.lyricLabel.transform = CGAffineTransformIdentity;
+        cell.lyricLabel.textColor = YTMULyricInk(isActive ? 1.0 : 0.2, isActive ? 1.0 : 0.2, self.view);
+        cell.lyricLabel.layer.shadowColor = YTMULyricShadow(self.view).CGColor;
+        cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
+        cell.lyricLabel.layer.shadowRadius = 4.0;
+        cell.lyricLabel.layer.shadowOpacity = isActive ? 0.75 : 0.32;
+        cell.lyricLabel.layer.masksToBounds = NO;
+        [cell clearWipe];
+        cell.transLabel.text = @"";
+        cell.transLabel.hidden = YES;
+        return;
+    }
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
+    cell.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
+    cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
     BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric ranges:NULL];
     cell.lyricLabel.alpha = 1.0;
@@ -2233,9 +2280,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     NSDictionary *lyric = self.lyrics[indexPath.row];
     NSNumber *time = lyric[@"time"];
+    double seekBase = time ? [time doubleValue] : -1;
+    if (seekBase < 0) seekBase = [lyric[@"startTimeMs"] doubleValue] / 1000.0;
 
-    if (time && [time doubleValue] >= 0) {
-        double seekTime = [time doubleValue];
+    if (seekBase >= 0) {
+        double seekTime = seekBase;
         // Adjust for per-song offset
         if (g_currentVideoID.length) {
             double offset = YTMULyricsOffsetForVideoID(g_currentVideoID);

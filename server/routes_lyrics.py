@@ -164,8 +164,14 @@ def api_lyrics():
         waited = time_module.time() - t0
         print(f"  [REQ {req_id}] [In-Flight] Wait done after {waited:.2f}s")
         # Check full cache first (might be better than fast), then fast
-        cached = get_cached(full_cache_key) or get_cached(fast_cache_key)
+        full_hit = get_cached(full_cache_key)
+        cached = full_hit or get_cached(fast_cache_key)
         if cached:
+            if fast_mode and full_hit:
+                # Fast request served the full cached result: flag it so the
+                # client treats it as final and skips the full fetch.
+                # Transport-only (in-memory hit, never written to disk).
+                cached['pro'] = True
             print(f"[OK] [REQ {req_id}] Got result from in-flight wait source={cached.get('source')} lines={len(cached.get('lyrics',[]))} synced={cached.get('synced')}")
             print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight)")
             print("=" * 60)
@@ -182,7 +188,7 @@ def api_lyrics():
     # --- Cache check (only for non-force, non-provider requests) ---
     if not force_mode and not only_provider:
         # Fast mode: accept full result too (full is strictly better)
-        cached = get_cached(full_cache_key) if fast_mode else get_cached(full_cache_key)
+        cached = get_cached(full_cache_key)
         cache_source = 'full'
         if not cached:
             cached = get_cached(cache_key)
@@ -207,6 +213,11 @@ def api_lyrics():
                     if dedup_key in _in_flight:
                         _in_flight[dedup_key].set()
                         del _in_flight[dedup_key]
+            if fast_mode and cache_source == 'full':
+                # Fast request served the full cached result: flag it so the
+                # client treats it as final and skips the full fetch.
+                # Transport-only (in-memory hit, never written to disk).
+                cached['pro'] = True
             print("=" * 60)
             return serve(cached)
         else:
@@ -215,6 +226,10 @@ def api_lyrics():
             if node_data:
                 print(f"[OK] [REQ {req_id}] [Node cache] hit -- pulled from a connected node")
                 set_cached(full_cache_key, node_data)
+                if fast_mode:
+                    # Full entry served for a fast request: flag first-class
+                    # (tagged after set_cached so it never persists to disk).
+                    node_data['pro'] = True
                 if dedup_key:
                     with _in_flight_lock:
                         if dedup_key in _in_flight:
