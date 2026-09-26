@@ -28,6 +28,7 @@ from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import google_translate_fast
 from .cache import is_not_found_result, sanitize_lyrics_parts
+from .candidates import save_candidates, graft_wbw_parts
 from .nodes import pick_node
 from .jwt_pool import pick_jwt
 
@@ -104,12 +105,14 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
     from .race import _lyrics_score
 
     result = None  # best across providers, decided by score
+    considered = []  # every (label, candidate) tried, for wbw graft + saving
 
     def consider(candidate, label):
         nonlocal result
         if not candidate or not candidate.get('lyrics'):
             return
         sanitize_lyrics_parts(candidate['lyrics'])
+        considered.append((label, candidate))
         if result is None or _lyrics_score(candidate) > _lyrics_score(result):
             result = candidate
             print(f"  [rank] {label}: {candidate.get('source')} now best (score={_lyrics_score(result):.2f})")
@@ -124,48 +127,71 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             print(f"  [0/5] No request JWT -- using a contributed token from the pool")
     if jwt_token:
         print(f"  [0/5] Trying Cubey API (with JWT)...")
-        cubey_node = pick_node()
-        for q in queries:
-            cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
-            if not cubey:
-                continue
-            if cubey.get('parsed'):
-                print(f"  [OK] Cubey: {cubey.get('source')} TTML lyrics found (wordSynced={cubey.get('wordSynced')}) (query: {q['title']})")
-                consider({'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}, 'Cubey TTML')
-            elif cubey.get('synced'):
-                print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q['title']})")
-                consider({'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
+        try:
+            cubey_node = pick_node()
+            for q in queries:
+                try:
+                    cubey = fetch_cubey(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                except Exception as e:
+                    print(f"  [FAIL] Cubey query error: {e}")
+                    continue
+                if not cubey:
+                    continue
+                if cubey.get('parsed'):
+                    print(f"  [OK] Cubey: {cubey.get('source')} TTML lyrics found (wordSynced={cubey.get('wordSynced')}) (query: {q['title']})")
+                    consider({'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}, 'Cubey TTML')
+                elif cubey.get('synced'):
+                    print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q['title']})")
+                    consider({'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
+        except Exception as e:
+            print(f"  [FAIL] Cubey stage error (continuing): {e}")
 
     # Priority 1: direct braccato providers (no JWT) -- bLyrics TTML (often
     # syllable-timed), Portato QQ QRC (word-by-word), Legato KuGou LRC.
-    direct = fetch_direct_best(queries, album, duration)
-    if direct:
-        print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
-        consider(direct, 'braccato direct')
+    try:
+        direct = fetch_direct_best(queries, album, duration)
+        if direct:
+            print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
+            consider(direct, 'braccato direct')
+    except Exception as e:
+        print(f"  [FAIL] braccato-direct stage error (continuing): {e}")
 
     # Priority 2: LRCLIB (best general line-sync source)
     print(f"  [2/5] Trying LRCLIB...")
-    lrclib_node = pick_node()
-    for q in queries:
-        lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
-        if not lrc:
-            continue
-        if lrc.get('instrumental'):
-            consider({'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}, 'LRCLib instrumental')
-            break
-        if lrc.get('synced'):
-            print(f"  [OK] LRCLIB: synced lyrics found! (query: {q['title']})")
-            consider({'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}, 'LRCLib synced')
-        elif lrc.get('plain'):
-            print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
-            consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
+    try:
+        lrclib_node = pick_node()
+        for q in queries:
+            try:
+                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
+            except Exception as e:
+                print(f"  [FAIL] LRCLIB query error (continuing): {e}")
+                continue
+            if not lrc:
+                continue
+            if lrc.get('instrumental'):
+                consider({'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}, 'LRCLib instrumental')
+                break
+            if lrc.get('synced'):
+                print(f"  [OK] LRCLIB: synced lyrics found! (query: {q['title']})")
+                consider({'lyrics': parse_lrc(lrc['synced'], duration), 'source': 'LRCLib', 'synced': True}, 'LRCLib synced')
+            elif lrc.get('plain'):
+                print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
+                consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
+    except Exception as e:
+        print(f"  [FAIL] LRCLIB stage error (continuing): {e}")
 
     # Priority 3: Unison (community; TTML can carry word timing)
     print(f"  [3/5] Trying Unison...")
-    unison_node = pick_node()
-    for q in queries:
-        uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
-        if not uni:
+    try:
+        unison_node = pick_node()
+        for q in queries:
+            try:
+                uni = fetch_unison(video_id, q['title'], q['artist'], duration, via_node=unison_node)
+            except Exception as e:
+                print(f"  [FAIL] Unison query error (continuing): {e}")
+                continue
+            if not uni:
+                continue
             continue
         if uni.get('parsed'):
             print(f"  [OK] Unison: TTML lyrics found! (query: {q['title']})")
@@ -176,6 +202,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
         elif uni.get('plain'):
             print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
             consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
+    except Exception as e:
+        print(f"  [FAIL] Unison stage error (continuing): {e}")
 
     # Priority 4: AMLL TTML DB (no JWT) -- word-synced TTML via title
     # search + raw-lyrics fetch (beautiful-lyrics-reborn amlldb path).
@@ -209,6 +237,25 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             'lyrics': [{'time': 0, 'text': f'No lyrics found', 'translated': f'找不到歌詞: {title}', 'duration': 0}],
             'source': 'none', 'synced': False
         }
+
+    # Same lines, better timing: when the winner is line-sync/plain but
+    # another tried provider has real word timing for the same lines, graft
+    # the word parts onto the winner instead of settling for the lesser tier.
+    from .race import _wbw_line_count
+    if result and result.get('lyrics') and _wbw_line_count(result) == 0:
+        for _label, cand in considered:
+            if cand is result or _wbw_line_count(cand) == 0:
+                continue
+            import copy as _copy
+            working = _copy.deepcopy(result['lyrics'])
+            if graft_wbw_parts(working, cand.get('lyrics') or []):
+                result['lyrics'] = working
+                result['synced'] = True
+                result['wordSynced'] = True
+                result['graftedFrom'] = cand.get('source', '')
+                print(f"  [graft] {result.get('source')} + word timing from {cand.get('source')} "
+                      f"(score={_lyrics_score(result):.2f})")
+                break
 
     # Add song metadata
     result['song'] = title
@@ -475,6 +522,13 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             report('YouTube', 'error', str(e))
 
     candidates.sort(key=lambda c: c['score'], reverse=True)
+    # Persist the full snapshot (latest wins) so re-race, the device
+    # provider switcher, and the dashboard can reuse every provider without
+    # re-fetching. Partial (only_source) probes never clobber the full set.
+    try:
+        save_candidates(video_id, song_info, candidates, only_source=only_source)
+    except Exception as e:
+        print(f"  [probe] [FAIL] candidate save: {e}")
     return candidates
 
 
