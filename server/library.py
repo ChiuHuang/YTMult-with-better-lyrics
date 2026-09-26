@@ -28,6 +28,7 @@ _UNLYRICED_DEDUP_WINDOW = 500
 _RETITLE_MODEL = os.environ.get(
     'YTMU_RETITLE_MODEL', 'command-a-plus-05-2026')
 _retitled_cache = {}
+_retitled_cache_lock = threading.Lock()
 
 # Persistent manual title/artist override store: video_id -> {title, artist}.
 # Written by the dashboard refetch flow (custom rename); read back by the
@@ -581,14 +582,16 @@ def retitle_song(song, artist):
     """Clean a song title + artist using Cohere LLM. Returns {title, artist}.
     On any failure, falls back to regex-based cleaning. Never raises."""
     cache_key = f"{(song or '').lower()}|{(artist or '').lower()}".strip('|')
-    if cache_key in _retitled_cache:
-        return _retitled_cache[cache_key]
+    with _retitled_cache_lock:
+        if cache_key in _retitled_cache:
+            return _retitled_cache[cache_key]
 
     result = _retitle_via_llm(song, artist)
     if result is None:
         result = _retitle_via_regex(song, artist)
 
-    _retitled_cache[cache_key] = result
+    with _retitled_cache_lock:
+        _retitled_cache[cache_key] = result
     return result
 
 
