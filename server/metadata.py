@@ -48,6 +48,18 @@ def get_search_queries(title, artist, ja_title='', ja_artist=''):
         c = re.sub(r'(?i)\s*-\s*(?:cover|official|remix|mv).*$', '', c)
         return c.strip(' -_./')
 
+    def clean_title_keep_remix(t):
+        """Same as clean_title but KEEPS (remix): remix versions live under
+        their own provider entries, so every probe must try the remix string
+        as-is instead of only the stripped base title."""
+        if not t: return ''
+        c = t
+        c = re.sub(r'(?i)[/／]\s*(?:covered\s+by|cover\s+by|cover|歌ってみた).*$', '', c)
+        c = re.sub(r'(?i)[\(\[\{【「『（［]\s*(?:official\s*(?:video|audio|music\s*video|mv|lyric\s*video)?|full\s*ver\.?|cover(?:ed)?(?:\s+by[^\)\]\}】」』）］]*)?|mv|audio|feat\.?[^\)\]\}】」』）］]*|ft\.?[^\)\]\}】」』）］]*|歌ってみた|self\s*cover|[^\)\]\}】」』）］]*ver\.?)\s*[\)\]\}】」』）］]', '', c)
+        c = re.sub(r'(?i)\b(?:feat\.?|ft\.?)\s+.*$', '', c)
+        c = re.sub(r'(?i)\s*-\s*(?:cover|official|mv).*$', '', c)
+        return c.strip(' -_./')
+
     def clean_artist(a):
         if not a: return ''
         c = a
@@ -64,6 +76,16 @@ def get_search_queries(title, artist, ja_title='', ja_artist=''):
     if title != c_t:
         add_q(title, c_a)
     if artist != c_a:
+        add_q(title, artist)
+    # 2b. Keep-remix title: strip feat/official/etc but NEVER (remix), so
+    # remix versions match their own provider entries every probe.
+    r_t = clean_title_keep_remix(title)
+    if r_t and r_t != c_t and r_t != (title or '').strip():
+        add_q(r_t, c_a)
+        if artist != c_a:
+            add_q(r_t, artist)
+    # 2c. Raw title + raw artist (maximum metadata, nothing stripped).
+    if title and artist and (title != c_t or artist != c_a):
         add_q(title, artist)
 
     # 3. Japanese title/artist variants if available

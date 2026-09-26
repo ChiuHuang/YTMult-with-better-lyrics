@@ -590,7 +590,15 @@ def admin_self_update_perform():
 @app.route('/api/admin/events')
 @login_required
 def admin_events():
-    """SSE stream that pushes log, crash, cache, and node events."""
+    """SSE stream that pushes log, crash, cache, and node events. Accepts
+    ?interval=<seconds> (5..300, default 30): the client heartbeat cadence.
+    Each cadence emits a `ping` event (so pages refresh server-driven with
+    zero polling) plus a comment keepalive for proxies."""
+    try:
+        interval = float(request.args.get('interval', 30))
+    except (TypeError, ValueError):
+        interval = 30
+    interval = min(max(interval, 5.0), 300.0)
     q = queue.Queue(maxsize=200)
     with _sse_subscribers_lock:
         _sse_subscribers.append(q)
@@ -599,12 +607,15 @@ def admin_events():
         try:
             # Send initial snapshot so the client can render immediately
             import json as _json
-            yield f"event: snapshot\ndata: {_json.dumps({'logs': list(_structured_logs)[-80:], 'total': len(_structured_logs)})}\n\n"
+            import time as _time
+            yield f"event: snapshot\ndata: {_json.dumps({'logs': list(_structured_logs)[-80:], 'total': len(_structured_logs), 'interval': interval})}\n\n"
+            yield f"event: ping\ndata: {_json.dumps({'ts': _time.time(), 'interval': interval})}\n\n"
             while True:
                 try:
-                    msg = q.get(timeout=30)
+                    msg = q.get(timeout=interval)
                     yield msg
                 except queue.Empty:
+                    yield f"event: ping\ndata: {_json.dumps({'ts': _time.time(), 'interval': interval})}\n\n"
                     yield ": keepalive\n\n"
         except GeneratorExit:
             pass

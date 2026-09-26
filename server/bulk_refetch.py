@@ -4,6 +4,7 @@
 # CPU-bound normalize+score (parse_pool), and translations go to the silent
 # background queue (translate_queue) so fetching never blocks on Cohere.
 # Only one bulk job runs at a time; progress is polled via status().
+import os
 import threading
 import time as time_module
 import concurrent.futures
@@ -24,10 +25,33 @@ _RESULTS_CAP = 300
 _JOB = {}
 _JOB_LOCK = threading.Lock()
 _CANCEL = threading.Event()
+# A running job with no heartbeat for this long is presumed dead (crashed
+# worker, killed thread): a new start takes over instead of 409ing forever.
+_STALE_AFTER = int(os.environ.get('YTMU_BULK_STALE_S', '600'))
 
 
 class BulkBusy(Exception):
     pass
+
+
+def _beat(job):
+    try:
+        with _JOB_LOCK:
+            job['beat'] = time_module.time()
+    except Exception:
+        pass
+
+
+def _broadcast(job, payload):
+    """Push a bulk_progress SSE event (start/row/stage/done). Never raises."""
+    try:
+        from .app import _sse_broadcast
+        base = {'job_id': job.get('job_id'), 'done': job.get('done', 0),
+                'total': job.get('total', 0)}
+        base.update(payload or {})
+        _sse_broadcast('bulk_progress', base)
+    except Exception:
+        pass
 
 
 def _norm_tier(result):
@@ -61,6 +85,8 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
             job['failed'] += 1
             job['done'] += 1
             _push_result(job, row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': row})
         return row
 
     # CPU-bound normalize+score on worker processes (threads keep fetching).
@@ -90,6 +116,8 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
             job['kept'] += 1
             job['done'] += 1
             _push_result(job, row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': row})
         return row
 
     result.setdefault('song', song)
@@ -104,6 +132,8 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
             job['errors'] += 1
             job['done'] += 1
             _push_result(job, row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': row})
         return row
 
     status = 'upgraded' if _TIER_ORDER.get(new_tier, -1) > _TIER_ORDER.get(old_tier, -1) else 'kept'
@@ -130,6 +160,10 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
             job['tq_queued'] += 1
         job['done'] += 1
         _push_result(job, row)
+    _beat(job)
+    _broadcast(job, {'type': 'row', 'row': row,
+                     'upgraded': job.get('upgraded', 0), 'kept': job.get('kept', 0),
+                     'failed': job.get('failed', 0), 'errors': job.get('errors', 0)})
     return row
 
 
@@ -141,6 +175,14 @@ def _fresh_one(job, opts, cancel, target):
                                          target['artist'])
     with _JOB_LOCK:
         job['current'] = {'video_id': vid, 'song': song, 'artist': artist}
+    _beat(job)
+    _broadcast(job, {'type': 'start', 'video_id': vid, 'song': song, 'artist': artist})
+
+    def _stage(name, status, detail=''):
+        _broadcast(job, {'type': 'stage', 'video_id': vid, 'song': song,
+                         'artist': artist, 'provider': name, 'status': status,
+                         'detail': detail or ''})
+
     if cancel.is_set():
         with _JOB_LOCK:
             job['done'] += 1
@@ -151,7 +193,7 @@ def _fresh_one(job, opts, cancel, target):
             raise ValueError('get_song_info returned None')
         info = apply_saved_rename(vid, info)
         # No inline translation -- the silent queue handles it.
-        result = fetch_all_lyrics(vid, info, translate_to=None)
+        result = fetch_all_lyrics(vid, info, translate_to=None, on_stage=_stage)
         if result:
             result['song'] = info.get('title', song)
             result['artist'] = info.get('artist', artist)
@@ -163,6 +205,8 @@ def _fresh_one(job, opts, cancel, target):
             job['errors'] += 1
             job['done'] += 1
             _push_result(job, row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': row})
         return
     _finish_video(job, opts, vid, lang, old_tier, song, artist, result, 'fresh')
 
@@ -173,6 +217,8 @@ def _rerace_one(job, opts, cancel, target):
                                          target['artist'])
     with _JOB_LOCK:
         job['current'] = {'video_id': vid, 'song': song, 'artist': artist}
+    _beat(job)
+    _broadcast(job, {'type': 'start', 'video_id': vid, 'song': song, 'artist': artist})
     if cancel.is_set():
         with _JOB_LOCK:
             job['done'] += 1
@@ -202,6 +248,8 @@ def _rerace_one(job, opts, cancel, target):
             job['errors'] += 1
             job['done'] += 1
             _push_result(job, row)
+        _beat(job)
+        _broadcast(job, {'type': 'row', 'row': row})
         return
     _finish_video(job, opts, vid, lang, old_tier, song, artist, result, 'rerace')
 
@@ -209,6 +257,7 @@ def _rerace_one(job, opts, cancel, target):
 def _run(job, opts, cancel):
     one = _fresh_one if opts['mode'] == 'fresh' else _rerace_one
     workers = max(1, min(int(opts['workers']), 32))
+    _beat(job)
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers,
                                                    thread_name_prefix='bulkfetch') as pool:
@@ -218,6 +267,7 @@ def _run(job, opts, cancel):
                     f.result()
                 except Exception as e:
                     print(f"[BULK] [FAIL] worker: {e}")
+                _beat(job)
     finally:
         with _JOB_LOCK:
             job['state'] = 'stopped' if cancel.is_set() else 'done'
@@ -226,11 +276,15 @@ def _run(job, opts, cancel):
               f"upgraded={job['upgraded']} kept={job['kept']} "
               f"failed={job['failed']} errors={job['errors']} "
               f"tq_queued={job['tq_queued']}")
+        _broadcast(job, {'type': 'done', 'state': job.get('state'),
+                         'upgraded': job.get('upgraded', 0), 'kept': job.get('kept', 0),
+                         'failed': job.get('failed', 0), 'errors': job.get('errors', 0)})
 
 
 def start(opts):
     """Start a bulk refetch job. opts: {scope, mode, lang, workers,
     cpu_workers, translate}. Raises BulkBusy when one is already running."""
+    global _JOB, _CANCEL
     scope = (opts.get('scope') or 'non-wbw').strip()
     mode = (opts.get('mode') or 'fresh').strip()
     lang = (opts.get('lang') or 'zh-TW').strip()
@@ -244,8 +298,19 @@ def start(opts):
 
     with _JOB_LOCK:
         if _JOB.get('state') == 'running':
-            raise BulkBusy('a bulk refetch is already running')
-        _CANCEL.clear()
+            idle = time_module.time() - _JOB.get('beat', 0)
+            if idle < _STALE_AFTER:
+                raise BulkBusy('a bulk refetch is already running')
+            # Stale heartbeat: the old thread is presumed dead. Stop it via
+            # the old cancel event, then rebind BOTH globals so the orphan
+            # thread's writes land on the abandoned dict (status() keys the
+            # new job by job_id) and stop() targets the new run.
+            print(f"[BULK] taking over stale job {_JOB.get('job_id')} (no beat for {idle:.0f}s)")
+            _CANCEL.set()
+            _CANCEL = threading.Event()
+            _JOB = {}
+        else:
+            _CANCEL.clear()
         targets = []
         if scope == 'unlyriced':
             for it in list_unlyriced():
@@ -276,7 +341,7 @@ def start(opts):
             'upgraded': 0, 'kept': 0, 'failed': 0, 'errors': 0,
             'current': None, 'targets': targets,
             'tq_queued': 0, 'tq_done_base': base['done'], 'tq_err_base': base['errors'],
-            'results': [],
+            'results': [], 'beat': time_module.time(),
         })
         job_id = _JOB['job_id']
         job_opts = {'mode': mode, 'workers': workers,

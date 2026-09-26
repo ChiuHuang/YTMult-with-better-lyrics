@@ -11,8 +11,9 @@
   let logPaused = false;
   const logLines = [];
   const LOG_MAX = 300;
-  const POLL = { overview: 8000, logs: null, caches: 10000, library: 6000, nodes: 6000, jwt: 8000, update: 15000, files: 10000, crashes: 10000 };
-  const timers = {};
+  // Push cadence for the SSE heartbeat (?interval=); page data refreshes
+  // server-driven on each ping instead of client-side polling.
+  const SSE_INTERVAL = 15;
 
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
@@ -173,7 +174,7 @@
   };
   const connectSSE = () => {
     if (eventSource) return;
-    eventSource = new EventSource('/api/admin/events');
+    eventSource = new EventSource(`/api/admin/events?interval=${SSE_INTERVAL}`);
     eventSource.addEventListener('snapshot', e => {
       try {
         const data = JSON.parse(e.data);
@@ -235,6 +236,13 @@
         // Servers older than the run_id echo send no run_id; accept those
         // rather than dropping every line silently (empty #refetch-live).
         if (d.run_id && d.run_id !== probeRunId) return;
+        const final = !d.provider || d.provider === 'probe';
+        if ((d.status === 'done' || d.status === 'complete') && final) { finishProbeRun(); return; }
+        if (d.status === 'error' && final) { finishProbeRun(true); return; }
+        if (d.status === 'found' && d.run_id) {
+          probeFoundCount++;
+          setProbeStatus(`probing... ${probeFoundCount}`, 'pill-warn');
+        }
         probeLiveLine(d.provider || '?', d.status || '', d.detail || '');
       } catch {}
     });
@@ -267,6 +275,67 @@
     });
     eventSource.addEventListener('rebase', e => { if (activePage === 'library') loadLibrary(); });
     eventSource.addEventListener('retitle', e => { if (activePage === 'library') loadLibrary(); });
+    eventSource.addEventListener('jwt', () => { if (activePage === 'jwt') loadJwt(); });
+    eventSource.addEventListener('ping', () => {
+      // Server-driven refresh cadence (see ?interval=): no client polling.
+      throttledRefresh();
+      if (activePage === 'overview') loadOverview();
+      if (activePage === 'jwt') loadJwt();
+    });
+    eventSource.addEventListener('bulk_progress', e => {
+      try {
+        const d = JSON.parse(e.data);
+        if (!d.job_id || d.job_id !== bulkJobId || !bulkState) return;
+        if (d.type === 'start') {
+          bulkState.current = {video_id: d.video_id, song: d.song, artist: d.artist};
+          bulkState.stage = '';
+        } else if (d.type === 'stage') {
+          bulkState.stage = `${d.song || d.video_id || '?'} | trying ${d.provider || '?'}...`;
+        } else if (d.type === 'row' && d.row) {
+          bulkState.results.push(d.row);
+          while (bulkState.results.length > 300) bulkState.results.shift();
+          bulkState.done = d.done != null ? d.done : bulkState.done;
+          if (d.upgraded != null) bulkState.upgraded = d.upgraded;
+          if (d.kept != null) bulkState.kept = d.kept;
+          if (d.failed != null) bulkState.failed = d.failed;
+          if (d.errors != null) bulkState.errors = d.errors;
+          bulkState.stage = '';
+        } else if (d.type === 'done') {
+          bulkState.state = d.state || 'done';
+          bulkState.current = null;
+          bulkState.stage = '';
+        }
+        renderBulk(bulkState);
+        if (d.type === 'done') { try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {} loadCaches(); loadLibrary(); }
+      } catch {}
+    });
+    eventSource.addEventListener('playlist_sync_progress', e => {
+      try {
+        const d = JSON.parse(e.data);
+        if (!d.job_id || d.job_id !== plJobId || !plState) return;
+        if (d.state === 'complete' || d.state === 'stopped' || d.state === 'failed') {
+          plState.state = d.state;
+          renderPlSync(plState);
+          try { sessionStorage.removeItem('ymtu-playlist-job'); } catch {}
+          loadCaches();
+          loadLibrary();
+          return;
+        }
+        if (d.video_id) {
+          const t = {video_id: d.video_id, title: d.song, song: d.song, artist: d.artist,
+                     tag: d.status, status: d.status, source: d.source || ''};
+          const ix = plState.tracks.findIndex(x => x.video_id === d.video_id);
+          if (ix >= 0) plState.tracks[ix] = t; else plState.tracks.push(t);
+          plState.done = d.done != null ? d.done : plState.done;
+          plState.total = d.total != null ? d.total : plState.total;
+          plState.found = plState.tracks.filter(x => x.status === 'found').length;
+          plState.unlyriced = plState.tracks.filter(x => x.status === 'unlyriced').length;
+          plState.error_count = plState.tracks.filter(x => x.status === 'error' || x.status === 'invalid_id').length;
+          plState.current = `${d.song || d.video_id || ''} - ${d.artist || ''}`;
+          renderPlSync(plState);
+        }
+      } catch {}
+    });
     eventSource.addEventListener('open', () => {
       const dot = $('#log-conn');
       if (dot) { dot.innerHTML = '<span class="live-dot"></span> connected'; dot.className = 'pill pill-ok'; }
@@ -382,24 +451,32 @@
 
   /* ---- jwt ---- */
   const jwtStatus = t => {
-    // !live = hash-only record reloaded from disk after a restart: the raw
-    // token is gone, so pick_jwt() skips it even when the persisted ok flag
-    // is stale-true. Never render those green or the pool looks usable while
-    // probes report "no JWT in pool". They revive on device re-contribute.
+    // !live = record without a usable raw token (legacy hash-only file or
+    // evicted): pick_jwt() skips it even when the persisted ok flag is
+    // stale-true. Never render those green or the pool looks usable while
+    // probes report "no JWT in pool". Live tokens revive on re-contribute.
     if (!t.live) return el('span', {class:'pill pill-mute'}, 'stale');
     if (t.ok) return el('span', {class:'pill pill-ok'}, el('span', {class:'dot'}), 'ok');
     return el('span', {class:'pill pill-warn'}, el('span', {class:'dot'}), 'unverified');
+  };
+  const jwtVerdict = v => {
+    const cls = v === 'ok' ? 'pill-ok' : (v || '').startsWith('dead') ? 'pill-mute' : 'pill-warn';
+    return el('span', {class:`pill ${cls}`}, v || 'unverified');
   };
   const renderJwt = tokens => {
     const list = $('#jwt-list'); if (!list) return;
     list.innerHTML = '';
     if (!tokens.length) { list.appendChild(el('div', {class:'list-row'}, 'No pooled tokens')); return; }
     tokens.forEach(t => {
+      const okFail = `${t.successes || 0}/${t.fails || 0}`;
+      const lastOk = t.last_ok ? `ok ${ago(t.last_ok)} ago` : 'never ok';
       const row = el('div', {class:'list-row jwt', style:'font-size:13px;'},
         el('span', {class:'mono truncate'}, t.id || '--'),
         el('span', {class:'truncate'}, t.node_id ? `${t.node_id.slice(0,10)}` : '--'),
         el('span', {}, t.added ? ago(t.added)+' ago' : '--'),
         el('span', {}, t.last_checked ? ago(t.last_checked)+' ago' : '--'),
+        el('span', {class:'mono', title: lastOk}, okFail),
+        jwtVerdict(t.verdict),
         jwtStatus(t),
         el('mdui-button-icon', {icon: 'close', variant: 'text', style:'justify-self:end; color:rgb(var(--mdui-color-error));'})
       );
@@ -594,10 +671,9 @@
     });
   };
 
-  /* ---- library ---- */
-  let rebaseFastTimer = null;
+  /* ---- library (live rows + summaries stream over SSE; page state
+      refreshes on navigation, job-done events, and the SSE heartbeat) ---- */
   let rebaseMode = 'cached';
-  let retitleFastTimer = null;
   const loadLibrary = async () => {
     try {
       const [scan, status, retitleStatus] = await Promise.all([
@@ -615,8 +691,6 @@
         const unlyriced = await json('/api/admin/library/unlyriced');
         renderUnlyriced(unlyriced.items || []);
       } catch (e) { renderUnlyriced([]); }
-      if (status.state === 'running') startRebaseFastPoll(); else stopRebaseFastPoll();
-      if (retitleStatus.state === 'running') startRetitleFastPoll(); else stopRetitleFastPoll();
     } catch (e) {
       console.error('[library] load failed:', e);
       const results = $('#rebase-results');
@@ -777,21 +851,6 @@
       }
     });
   };
-  const startRebaseFastPoll = () => {
-    if (rebaseFastTimer) return;
-    rebaseFastTimer = setInterval(() => { if (activePage === 'library') loadLibrary(); }, 2000);
-  };
-  const stopRebaseFastPoll = () => {
-    if (rebaseFastTimer) { clearInterval(rebaseFastTimer); rebaseFastTimer = null; }
-  };
-  const startRetitleFastPoll = () => {
-    if (retitleFastTimer) return;
-    retitleFastTimer = setInterval(() => { if (activePage === 'library') loadLibrary(); }, 2000);
-  };
-  const stopRetitleFastPoll = () => {
-    if (retitleFastTimer) { clearInterval(retitleFastTimer); retitleFastTimer = null; }
-  };
-
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
   let prevPlayhead = 0;
@@ -1034,15 +1093,19 @@
     return el('span', {class:`pill ${cls}`}, t);
   };
   /* ---- background probe + provider pager ----
-     probe/start returns immediately; light status polls update the count
-     pill while probe_progress SSE streams race lines into #refetch-live.
-     Full candidates are fetched once (job saves them server-side) and
-     paged with left/right instead of re-probing. */
-  let probePollTimer = null;
+     probe/start returns immediately; probe_progress SSE streams race lines
+     (including the song line) into #refetch-live, and the final done/error
+     event fetches the full candidates once -- no status polling. A
+     single-shot safety fetch covers a missed SSE disconnect. Full
+     candidates are saved server-side; left/right pages without re-probing. */
+  let probeStatusUrl = null;
+  let probeFoundCount = 0;
+  let probeSafetyTimer = null;
   let probePager = null;
-  const stopProbePoll = () => {
-    if (probePollTimer) { clearInterval(probePollTimer); probePollTimer = null; }
+  const clearProbeSafety = () => {
+    if (probeSafetyTimer) { clearTimeout(probeSafetyTimer); probeSafetyTimer = null; }
   };
+  const stopProbePoll = () => { clearProbeSafety(); probeRunId = null; };
   const setProbeStatus = (text, cls) => {
     const status = $('#refetch-status');
     if (!status) return;
@@ -1130,51 +1193,56 @@
     }
     // job_id doubles as the SSE run_id, so race lines stream live.
     probeRunId = started.job_id;
-    const statusUrl = started.status_url;
+    probeStatusUrl = started.status_url;
+    probeFoundCount = 0;
     const live = $('#refetch-live');
     if (live) { live.innerHTML = ''; live.classList.remove('has-lines'); }
     const list = $('#refetch-candidates');
     if (list) list.innerHTML = '';
+    const meta = $('#refetch-meta');
+    if (meta) meta.textContent = `${started.song || '?'} - ${started.artist || ''} | probing...`;
     if (probeBtn) probeBtn.loading = true;
     setProbeStatus('probing... 0', 'pill-warn');
-    probePollTimer = setInterval(async () => {
-      let s;
+    // Safety net only: if the final SSE event is missed (disconnect), one
+    // status fetch 150s later still closes the run. Not a poll.
+    clearProbeSafety();
+    const runId = probeRunId;
+    probeSafetyTimer = setTimeout(async () => {
+      if (probeRunId !== runId) return;
       try {
-        s = await json(statusUrl);
-        if (!s.ok) throw new Error(s.error || 'status failed');
-      } catch (e) {
-        if (probeRunId !== started.job_id) return; // superseded, new poll owns it
-        stopProbePoll();
-        if (probeBtn) probeBtn.loading = false;
-        setProbeStatus('error', 'pill-mute');
-        mdui.snackbar({message:'Probe failed: '+e.message});
-        return;
-      }
-      if (probeRunId !== started.job_id) { stopProbePoll(); return; } // superseded
-      if (s.state === 'running') {
-        setProbeStatus(`probing... ${s.count || 0}`, 'pill-warn');
-        return;
-      }
-      stopProbePoll();
-      if (probeBtn) probeBtn.loading = false;
-      if (s.state === 'error') {
-        setProbeStatus('error', 'pill-mute');
-        const meta = $('#refetch-meta');
-        if (meta) meta.textContent = `Probe error: ${s.error || 'unknown'}`;
-        mdui.snackbar({message:'Probe failed: '+(s.error || 'unknown')});
-        return;
-      }
-      try {
-        const f = await json(statusUrl + '?full=1');
-        if (!f.ok) throw new Error(f.error || 'fetch failed');
-        probePager = {d: f, idx: 0};
-        renderProbePager();
-        setProbeStatus(`${(f.candidates || []).length} providers`, 'pill-ok');
-      } catch (e) {
-        setProbeStatus('error', 'pill-mute');
-        mdui.snackbar({message:'Probe failed: '+e.message});
-      }
-    }, 1500);
+        const s = await json(probeStatusUrl);
+        if (probeRunId !== runId) return;
+        if (s.state === 'done' || s.state === 'error') finishProbeRun(s.state === 'error');
+      } catch {}
+    }, 150000);
+  };
+  const finishProbeRun = async (failed) => {
+    const runId = probeRunId;
+    const statusUrl = probeStatusUrl;
+    if (!runId) return; // stray event, no active run
+    clearProbeSafety();
+    probeRunId = null;
+    probeStatusUrl = null;
+    const probeBtn = $('#refetch-probe');
+    if (probeBtn) probeBtn.loading = false;
+    if (!statusUrl) { setProbeStatus('error', 'pill-mute'); return; }
+    if (failed) {
+      setProbeStatus('error', 'pill-mute');
+      const meta = $('#refetch-meta');
+      if (meta) meta.textContent = 'Probe error (see race lines above)';
+      return;
+    }
+    try {
+      const f = await json(statusUrl + '?full=1');
+      if (probeRunId && probeRunId !== runId) return; // superseded mid-flight
+      if (!f.ok) throw new Error(f.error || 'fetch failed');
+      probePager = {d: f, idx: 0};
+      renderProbePager();
+      setProbeStatus(`${(f.candidates || []).length} providers`, 'pill-ok');
+    } catch (e) {
+      setProbeStatus('error', 'pill-mute');
+      mdui.snackbar({message:'Probe failed: '+e.message});
+    }
   };
 
   /* ---- manual rename (unlyriced / caches rows) ---- */
@@ -1218,9 +1286,9 @@
     if (btn) btn.loading = false;
   };
 
-  /* ---- playlist refetch (web) ---- */
-  let plPollTimer = null;
+  /* ---- playlist refetch (web; track rows stream over SSE, no polling) ---- */
   let plJobId = null;
+  let plState = null;
   const renderPlSync = st => {
     const progress = $('#plsync-progress');
     const summary = $('#plsync-summary');
@@ -1260,7 +1328,7 @@
   const stopPlaylistSyncWeb = async () => {
     if (!plJobId) return;
     try { await API(`/api/playlist/sync/stop/${encodeURIComponent(plJobId)}`, {method:'POST'}); } catch {}
-    if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
+    try { sessionStorage.removeItem('ymtu-playlist-job'); } catch {}
     renderPlSync({state:'stopped'});
   };
   const startPlaylistSyncWeb = async () => {
@@ -1268,25 +1336,15 @@
     if (!url) { mdui.snackbar({message:'Enter a playlist URL or ID'}); return; }
     const startBtn = $('#plsync-start');
     if (startBtn) startBtn.loading = true;
-    if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
     try {
       const r = await API('/api/playlist/sync', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({playlist_id: url, lang: ($('#plsync-lang') && $('#plsync-lang').value || 'zh-TW').trim()})});
       const d = await r.json();
       plJobId = d.job_id;
-      renderPlSync({state:'queued', total: 0, done: 0});
-      plPollTimer = setInterval(async () => {
-        try {
-          const sr = await fetch(`/api/playlist/sync/status/${encodeURIComponent(plJobId)}`);
-          const st = await sr.json();
-          renderPlSync(st);
-          if (st.state === 'complete' || st.state === 'stopped' || st.state === 'failed') {
-            if (plPollTimer) { clearInterval(plPollTimer); plPollTimer = null; }
-            loadCaches();
-            loadLibrary();
-          }
-        } catch {}
-      }, 2000);
+      // Rows arrive as playlist_sync_progress SSE events; nothing to poll.
+      plState = {state:'queued', total: 0, done: 0, found: 0, unlyriced: 0, error_count: 0, current: '', tracks: []};
+      try { sessionStorage.setItem('ymtu-playlist-job', plJobId); } catch {}
+      renderPlSync(plState);
     } catch (e) { mdui.snackbar({message:'Playlist sync failed: '+e.message}); }
     if (startBtn) startBtn.loading = false;
   };
@@ -1306,13 +1364,14 @@
     const sel = document.querySelector(`#${id} mdui-segmented-button-item[selected]`);
     return (sel && sel.getAttribute('value')) || dflt;
   };
-  let bulkTimer = null;
   let bulkJobId = null;
+  let bulkState = null;
   const renderBulk = st => {
     const progress = $('#bulk-progress');
     const summary = $('#bulk-summary');
     const status = $('#bulk-status');
     const list = $('#bulk-results');
+    const stageLine = $('#bulk-stage');
     const running = st && (st.state === 'running');
     if (status) status.textContent = (st && st.state) || 'idle';
     const stopBtn = $('#bulk-stop');
@@ -1321,6 +1380,7 @@
     if (summary) summary.textContent = st && st.total > 0
       ? `${st.done}/${st.total} up=${st.upgraded || 0} kept=${st.kept || 0} failed=${st.failed || 0} err=${st.errors || 0} tr=${st.tq_done || 0}/${st.tq_queued || 0}${st.current ? '  ' + (st.current.song || st.current.video_id) : ''}`
       : '';
+    if (stageLine) stageLine.textContent = (running && st && st.stage) ? st.stage : '';
     if (list) {
       list.innerHTML = '';
       const rows = (st && st.results) || [];
@@ -1345,12 +1405,11 @@
   };
   const stopBulk = async () => {
     try { await API('/api/admin/library/refetch/stop', {method:'POST'}); } catch {}
-    if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
+    try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {}
   };
   const startBulk = async () => {
     const startBtn = $('#bulk-start');
     if (startBtn) startBtn.loading = true;
-    if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
     const num = (id, dflt, lo, hi) => {
       const v = parseInt(($('#' + id) && $('#' + id).value) || dflt, 10);
       return Math.max(lo, Math.min(hi, isNaN(v) ? dflt : v));
@@ -1368,28 +1427,22 @@
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'start failed');
       bulkJobId = d.job_id;
-      renderBulk({state:'running', total: d.total || 0, done: 0});
-      bulkTimer = setInterval(async () => {
-        try {
-          const sr = await fetch(`/api/admin/library/refetch/status/${encodeURIComponent(bulkJobId)}`);
-          const st = await sr.json();
-          renderBulk(st);
-          if (st.state === 'done' || st.state === 'stopped') {
-            if (bulkTimer) { clearInterval(bulkTimer); bulkTimer = null; }
-            loadCaches();
-            loadLibrary();
-          }
-        } catch {}
-      }, 2000);
+      // Rows + stage lines arrive as bulk_progress SSE events; nothing to poll.
+      bulkState = {state:'running', total: d.total || 0, done: 0, upgraded: 0, kept: 0,
+                   failed: 0, errors: 0, tq_done: 0, tq_queued: 0, current: null, stage: '', results: []};
+      try { sessionStorage.setItem('ymtu-bulk-job', bulkJobId); } catch {}
+      renderBulk(bulkState);
     } catch (e) { mdui.snackbar({message:'Bulk refetch failed: '+e.message}); }
     if (startBtn) startBtn.loading = false;
   };
 
-  /* ---- nav ---- */
+  /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
   const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes'];
+  const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
   const switchPage = p => {
     if (!pages.includes(p)) return;
     activePage = p;
+    if (pageFromHash() !== p) history.replaceState(null, '', '#/' + p);
     $$('.page').forEach(sec => sec.classList.toggle('active', sec.id === `page-${p}`));
     $$('#nav-list mdui-list-item').forEach(item => { item.active = (item.dataset.page === p); });
     if (p==='overview') loadOverview();
@@ -1408,21 +1461,52 @@
     });
   };
 
-  /* ---- polling ---- */
-  const startPolls = () => {
-    Object.entries(POLL).forEach(([page, ms]) => {
-      if (!ms) return;
-      timers[page] = setInterval(() => { if (activePage===page) { if (page==='overview') loadOverview(); else if (page==='caches') loadCaches(); else if (page==='library') loadLibrary(); else if (page==='nodes') loadNodes(); else if (page==='jwt') loadJwt(); else if (page==='update') loadUpdate(); else if (page==='files') loadFiles(); else if (page==='crashes') loadCrashes(); } }, ms);
-    });
-  };
+  /* ---- polling: none. All live updates arrive server-pushed over the
+      single SSE stream (interval via ?interval=); pages also (re)load on
+      every navigation. ---- */
 
   /* ---- init ---- */
+  const adoptRunningJobs = async () => {
+    // Rejoin jobs that outlived a page reload: one status fetch each (not a
+    // poll), then live SSE takes over. Dead ids are dropped silently.
+    try {
+      const bj = sessionStorage.getItem('ymtu-bulk-job');
+      if (bj) {
+        const st = await json(`/api/admin/library/refetch/status/${encodeURIComponent(bj)}`);
+        if (st && st.state === 'running') {
+          bulkJobId = bj;
+          bulkState = {state:'running', total: st.total || 0, done: st.done || 0,
+            upgraded: st.upgraded || 0, kept: st.kept || 0, failed: st.failed || 0,
+            errors: st.errors || 0, tq_done: st.tq_done || 0, tq_queued: st.tq_queued || 0,
+            current: st.current || null, stage: '', results: st.results || []};
+          renderBulk(bulkState);
+        } else sessionStorage.removeItem('ymtu-bulk-job');
+      }
+    } catch { try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {} }
+    try {
+      const pj = sessionStorage.getItem('ymtu-playlist-job');
+      if (pj) {
+        const st = await json(`/api/playlist/sync/status/${encodeURIComponent(pj)}`);
+        if (st && (st.state === 'running' || st.state === 'queued')) {
+          plJobId = pj;
+          plState = {state: st.state, total: st.total || 0, done: st.done || 0,
+            found: st.found || 0, unlyriced: st.unlyriced || 0, error_count: st.error_count || 0,
+            current: st.current || '', tracks: st.tracks || []};
+          renderPlSync(plState);
+        } else sessionStorage.removeItem('ymtu-playlist-job');
+      }
+    } catch { try { sessionStorage.removeItem('ymtu-playlist-job'); } catch {} }
+  };
   const init = () => {
     applyTheme();
     initNav();
-    startPolls();
     connectSSE();
-    switchPage('overview');
+    adoptRunningJobs();
+    window.addEventListener('hashchange', () => {
+      const p = pageFromHash();
+      if (p && p !== activePage) switchPage(p);
+    });
+    switchPage(pages.includes(pageFromHash()) ? pageFromHash() : 'overview');
     setInterval(tickUptime, 1000);
 
     const drawerBtn = $('#nav-drawer-btn');

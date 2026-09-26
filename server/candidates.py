@@ -31,11 +31,15 @@ def _cand_path(video_id):
     return os.path.join(_CAND_DIR, _cache_filename(video_id) + '.json')
 
 
-def save_candidates(video_id, song_info, candidates, only_source=None):
+def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=None):
     """Persist a full probe snapshot. Latest wins. Skipped for partial
     (only_source) probes so a filtered re-probe never clobbers the full set.
     Stored lyrics are raw (translations stripped -- the select path
-    re-translates into whatever lang the client asks for). Returns True when
+    re-translates into whatever lang the client asks for). Plain-tier
+    entries are pruned when a line-or-better entry exists (wbw never prunes
+    line -- line stays as the fallback switch option). outcomes maps
+    provider -> {status: found|missed|error|skipped, tier?, ts} so later
+    runs know what each provider gave without re-trying. Returns True when
     written."""
     if only_source or not video_id or not candidates:
         return False
@@ -71,6 +75,16 @@ def save_candidates(video_id, song_info, candidates, only_source=None):
             })
         if not slim:
             return False
+        # Prune: plain entries go when a line-or-better entry exists; line
+        # entries always stay (wbw never deletes its fallback).
+        tiers = {c.get('tier') for c in slim}
+        if tiers & {'line', 'wbw'}:
+            dropped = [c.get('provider') for c in slim if c.get('tier') == 'plain']
+            slim = [c for c in slim if c.get('tier') != 'plain']
+            if dropped:
+                print(f"  [CAND] pruned plain provider(s) for {video_id}: {', '.join(dropped)}")
+        if not slim and not outcomes:
+            return False
         os.makedirs(_CAND_DIR, exist_ok=True)
         payload = {
             'v': 1,
@@ -78,6 +92,7 @@ def save_candidates(video_id, song_info, candidates, only_source=None):
             'song': (song_info or {}).get('title', ''),
             'artist': (song_info or {}).get('artist', ''),
             'ts': datetime.now().isoformat(),
+            'outcomes': outcomes or {},
             'candidates': slim,
         }
         tmp = _cand_path(video_id) + '.tmp'
@@ -94,6 +109,14 @@ def save_candidates(video_id, song_info, candidates, only_source=None):
 def load_candidates(video_id, max_age_s=_CAND_MAX_AGE_S):
     """Return the latest snapshot's candidate list (best-first) or None when
     missing/stale/unreadable. Payloads are raw (no translations)."""
+    snap = load_snapshot(video_id, max_age_s=max_age_s)
+    if not snap:
+        return None
+    return snap.get('candidates') or None
+
+
+def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
+    """Full snapshot payload (candidates + outcomes + song/artist/ts)."""
     if not video_id:
         return None
     try:
@@ -103,13 +126,13 @@ def load_candidates(video_id, max_age_s=_CAND_MAX_AGE_S):
         with open(path, 'r', encoding='utf-8') as f:
             payload = json.load(f)
         cands = payload.get('candidates')
-        if not cands:
+        if not cands and not payload.get('outcomes'):
             return None
         if max_age_s and payload.get('ts'):
             age = (datetime.now() - datetime.fromisoformat(payload['ts'])).total_seconds()
             if age > max_age_s:
                 return None
-        return cands
+        return payload
     except Exception:
         return None
 

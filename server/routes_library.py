@@ -722,6 +722,8 @@ def api_probe_start():
         }
     threading.Thread(target=_probe_job_run, args=(job_id,), daemon=True).start()
     return jsonify({'ok': True, 'job_id': job_id, 'video_id': video_id,
+                    'song': info.get('title', ''), 'artist': info.get('artist', ''),
+                    'duration': info.get('duration', 0),
                     'status_url': f'/api/admin/library/probe/status/{job_id}'})
 
 

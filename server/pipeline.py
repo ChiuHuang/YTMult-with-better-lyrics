@@ -89,12 +89,21 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
 
     return result
 
-def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
+def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_stage=None):
     """Try all providers and keep the single best result, ranked by the same
     word-by-word-first score the stream race uses (_lyrics_score), so the
     sequential endpoint and the SSE endpoint agree on what 'best' means.
     A plain hit never outranks a synced one, and a syllable/word-timed hit
-    outranks everything else."""
+    outranks everything else. on_stage(name, status, detail) optionally
+    reports each provider stage (started/found/missed/error) for live UIs."""
+
+    def _stage(name, status, detail=''):
+        if on_stage is None:
+            return
+        try:
+            on_stage(name, status, detail)
+        except Exception:
+            pass
 
     title = song_info['title']
     artist = song_info['artist']
@@ -127,6 +136,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             print(f"  [0/5] No request JWT -- using a contributed token from the pool")
     if jwt_token:
         print(f"  [0/5] Trying Cubey API (with JWT)...")
+        _stage('Cubey', 'started')
         try:
             cubey_node = pick_node()
             for q in queries:
@@ -143,21 +153,32 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
                 elif cubey.get('synced'):
                     print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q['title']})")
                     consider({'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
+            _stage('Cubey', 'done')
         except Exception as e:
             print(f"  [FAIL] Cubey stage error (continuing): {e}")
+            _stage('Cubey', 'error', str(e))
+    else:
+        _stage('Cubey', 'skipped', 'no JWT')
+        print(f"  [0/5] Cubey skipped (no JWT)")
 
     # Priority 1: direct braccato providers (no JWT) -- bLyrics TTML (often
     # syllable-timed), Portato QQ QRC (word-by-word), Legato KuGou LRC.
+    _stage('braccato-direct', 'started')
     try:
         direct = fetch_direct_best(queries, album, duration)
         if direct:
             print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
             consider(direct, 'braccato direct')
+            _stage('braccato-direct', 'found', direct.get('source', ''))
+        else:
+            _stage('braccato-direct', 'missed')
     except Exception as e:
         print(f"  [FAIL] braccato-direct stage error (continuing): {e}")
+        _stage('braccato-direct', 'error', str(e))
 
     # Priority 2: LRCLIB (best general line-sync source)
     print(f"  [2/5] Trying LRCLIB...")
+    _stage('LRCLib', 'started')
     try:
         lrclib_node = pick_node()
         for q in queries:
@@ -177,11 +198,14 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             elif lrc.get('plain'):
                 print(f"  [WARN] LRCLIB: plain lyrics only (query: {q['title']})")
                 consider({'lyrics': parse_plain(lrc['plain']), 'source': 'LRCLib', 'synced': False}, 'LRCLib plain')
+        _stage('LRCLib', 'done')
     except Exception as e:
         print(f"  [FAIL] LRCLIB stage error (continuing): {e}")
+        _stage('LRCLib', 'error', str(e))
 
     # Priority 3: Unison (community; TTML can carry word timing)
     print(f"  [3/5] Trying Unison...")
+    _stage('Unison', 'started')
     try:
         unison_node = pick_node()
         for q in queries:
@@ -202,12 +226,15 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
         elif uni.get('plain'):
             print(f"  [WARN] Unison: plain lyrics only (query: {q['title']})")
             consider({'lyrics': parse_plain(uni['plain']), 'source': 'Unison', 'synced': False}, 'Unison plain')
+        _stage('Unison', 'done')
     except Exception as e:
         print(f"  [FAIL] Unison stage error (continuing): {e}")
+        _stage('Unison', 'error', str(e))
 
     # Priority 4: AMLL TTML DB (no JWT) -- word-synced TTML via title
     # search + raw-lyrics fetch (beautiful-lyrics-reborn amlldb path).
     print(f"  [4/6] Trying AMLL...")
+    _stage('AMLL', 'started')
     try:
         from .providers_amll import fetch_amll
         for q in queries:
@@ -217,18 +244,23 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
             print(f"  [OK] AMLL: word-synced TTML found! (query: {q['title']})")
             consider({'lyrics': amll['parsed'], 'source': 'AMLL', 'synced': True}, 'AMLL TTML')
             break
+        _stage('AMLL', 'done')
     except Exception as e:
         print(f"  [FAIL] AMLL error: {e}")
+        _stage('AMLL', 'error', str(e))
 
     # Priority 5: YouTube Music lyrics
     print(f"  [4/5] Trying YouTube Music lyrics...")
+    _stage('YouTube', 'started')
     try:
         yt = fetch_yt_lyrics(video_id)
         if yt and yt.get('plain'):
             print(f"  [OK] YouTube: plain lyrics found!")
             consider({'lyrics': parse_plain(yt['plain']), 'source': yt.get('source', 'YouTube Music'), 'synced': False}, 'YouTube')
+        _stage('YouTube', 'done')
     except Exception as e:
         print(f"  [FAIL] YouTube error: {e}")
+        _stage('YouTube', 'error', str(e))
 
     # No lyrics found
     if not result:
@@ -270,6 +302,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None):
         sanitize_lyrics_parts(result['lyrics'])
 
     result['wordSynced'] = any(l.get('wordSynced') for l in (result.get('lyrics') or []))
+    _stage('best', 'done', f"{result.get('source', '')} tier="
+            f"{'wbw' if result.get('wordSynced') else ('line' if result.get('synced') else 'plain')}")
 
     return result
 
@@ -298,7 +332,14 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
     from .app import _sse_broadcast
 
     def report(provider, status, detail=''):
-        """Live race line for the dashboard (no-op without run_id)."""
+        """Live race line for the dashboard (no-op without run_id). Also
+        records the per-provider outcome so later runs know what each
+        provider gave (found tier / missed / error / skipped) without
+        re-trying. Thread-safe: groups run in parallel."""
+        if status != 'started':
+            with _probe_lock:
+                outcomes[provider] = {'status': status, 'detail': detail or '',
+                                      'ts': datetime.now().isoformat()}
         if not run_id:
             return
         try:
@@ -316,6 +357,8 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
     queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
 
     candidates = []
+    outcomes = {}
+    _probe_lock = threading.Lock()
 
     def emit(logical_provider, label, cand):
         if not cand or not cand.get('lyrics'):
@@ -332,25 +375,28 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             print(f"  [probe] emit {logical_provider} error: {e}")
             report(logical_provider, 'error', str(e))
             return
-        candidates.append({
-            'provider': logical_provider,
-            'source': cand.get('source') or label,
-            'synced': synced,
-            'wordSynced': wbw,
-            'tier': tier,
-            'lines': len(lyrics),
-            'score': round(score, 3),
-            'data': {
-                'lyrics': lyrics, 'source': cand.get('source') or label,
-                'synced': synced, 'wordSynced': wbw,
-                'song': title, 'artist': artist,
-            },
-        })
-        if on_candidate is not None:
-            try:
-                on_candidate(candidates[-1])
-            except Exception:
-                pass
+        with _probe_lock:
+            candidates.append({
+                'provider': logical_provider,
+                'source': cand.get('source') or label,
+                'synced': synced,
+                'wordSynced': wbw,
+                'tier': tier,
+                'lines': len(lyrics),
+                'score': round(score, 3),
+                'data': {
+                    'lyrics': lyrics, 'source': cand.get('source') or label,
+                    'synced': synced, 'wordSynced': wbw,
+                    'song': title, 'artist': artist,
+                },
+            })
+            outcomes[logical_provider] = {'status': 'found', 'tier': tier,
+                                          'ts': datetime.now().isoformat()}
+            if on_candidate is not None:
+                try:
+                    on_candidate(candidates[-1])
+                except Exception:
+                    pass
         report(logical_provider, 'found',
                f"{len(lyrics)} lines {tier} score={round(float(score), 2)}")
 
@@ -371,16 +417,23 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
 
     _CUBEY_INNERS = ('Musixmatch', 'QQ', 'bLyrics', 'BiniLyrics', 'NetEase', 'KuGou')
 
+    # Every wanted provider group below runs in parallel (ThreadPoolExecutor
+    # at the end); each group owns its exceptions and reports
+    # started/found/missed/error/skipped live via report().
+    probe_groups = []
+
     # Cubey API (needs JWT): split into its inner providers, one candidate
     # each -- never a single opaque 'Cubey' entry.
-    if any(wants(f'Cubey/{inner}') for inner in _CUBEY_INNERS):
+    def _group_cubey():
+        _jwt = jwt_token
         try:
             from .providers_cubey import fetch_cubey_all
-            if not jwt_token:
-                jwt_token = pick_jwt()
-            if not jwt_token:
+            if not _jwt:
+                _jwt = pick_jwt()
+            if not _jwt:
                 if notes is not None:
-                    notes.append('Cubey skipped (no JWT in pool)')
+                    with _probe_lock:
+                        notes.append('Cubey skipped (no JWT in pool)')
                 for inner in _CUBEY_INNERS:
                     if wants(f'Cubey/{inner}'):
                         report(f'Cubey/{inner}', 'skipped', 'no JWT in pool')
@@ -391,7 +444,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                 cubey_node = pick_node()
                 inner_best = {}
                 for q in queries:
-                    got = fetch_cubey_all(jwt_token, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
+                    got = fetch_cubey_all(_jwt, video_id, q['title'], q['artist'], duration, via_node=cubey_node)
                     if not got:
                         continue
                     for inner, raw in got.items():
@@ -414,20 +467,16 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             for inner in _CUBEY_INNERS:
                 if wants(f'Cubey/{inner}'):
                     report(f'Cubey/{inner}', 'error', str(e))
+    if any(wants(f'Cubey/{inner}') for inner in _CUBEY_INNERS):
+        probe_groups.append(_group_cubey)
 
     # Direct braccato providers: keep each sub-source visible separately --
     # this is exactly the "check each provider and choose" case (bLyrics TTML,
     # Portato QQ QRC, Legato KuGou LRC, BiniLyrics syllable TTML).
-    boidu_names = list(_DIRECT_FETCHERS.keys())
-    for name in boidu_names:
-        logical = {'ttml': 'bLyrics', 'qq': 'QQ', 'kugou': 'KuGou', 'binimum': 'BiniLyrics'}.get(name, name)
-        if not wants(logical):
-            continue
+    _LOGICAL = {'ttml': 'bLyrics', 'qq': 'QQ', 'kugou': 'KuGou', 'binimum': 'BiniLyrics'}
+    def _direct_one(name, logical):
         report(logical, 'started')
         best = None
-        chooser = {
-            'ttml': 'bLyrics', 'qq': 'QQ', 'kugou': 'KuGou', 'binimum': 'BiniLyrics',
-        }
         for q in queries:
             fetcher = _DIRECT_FETCHERS[name]
             try:
@@ -437,10 +486,14 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                     best = cand
             except Exception:
                 continue
-        emit(chooser[name], chooser[name], best)
+        emit(logical, logical, best)
+    for _dname in list(_DIRECT_FETCHERS.keys()):
+        _dlogical = _LOGICAL.get(_dname, _dname)
+        if wants(_dlogical):
+            probe_groups.append(functools.partial(_direct_one, _dname, _dlogical))
 
     # LRCLib: one entry (synced beats plain).
-    if wants('LRCLib'):
+    def _group_lrclib():
         report('LRCLib', 'started')
         try:
             from .providers_lrclib import fetch_lrclib
@@ -462,9 +515,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         except Exception as e:
             print(f"  [probe] LRCLib error: {e}")
             report('LRCLib', 'error', str(e))
+    if wants('LRCLib'):
+        probe_groups.append(_group_lrclib)
 
     # Unison: one entry (TTML/synced preferred over plain).
-    if wants('Unison'):
+    def _group_unison():
         report('Unison', 'started')
         try:
             from .providers_unison import fetch_unison
@@ -486,9 +541,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         except Exception as e:
             print(f"  [probe] Unison error: {e}")
             report('Unison', 'error', str(e))
+    if wants('Unison'):
+        probe_groups.append(_group_unison)
 
     # AMLL TTML DB: one entry (word-synced TTML, no JWT).
-    if wants('AMLL'):
+    def _group_amll():
         report('AMLL', 'started')
         try:
             from .providers_amll import fetch_amll
@@ -506,9 +563,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         except Exception as e:
             print(f"  [probe] AMLL error: {e}")
             report('AMLL', 'error', str(e))
+    if wants('AMLL'):
+        probe_groups.append(_group_amll)
 
     # YouTube Music: plain only.
-    if wants('YouTube'):
+    def _group_youtube():
         report('YouTube', 'started')
         try:
             yt = fetch_yt_lyrics(video_id)
@@ -520,13 +579,32 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
         except Exception as e:
             print(f"  [probe] YouTube error: {e}")
             report('YouTube', 'error', str(e))
+    if wants('YouTube'):
+        probe_groups.append(_group_youtube)
+
+    # Run every wanted group in parallel and wait for all of them. Live
+    # started/found/missed/error/skipped events stream per group, so the
+    # dashboard shows exactly which provider is probing right now.
+    if probe_groups:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(len(probe_groups), 8),
+                thread_name_prefix='probe') as _pexec:
+            _pfuts = [_pexec.submit(_fn) for _fn in probe_groups]
+            for _f in concurrent.futures.as_completed(_pfuts):
+                try:
+                    _f.result()
+                except Exception as e:
+                    print(f"  [probe] group error: {e}")
 
     candidates.sort(key=lambda c: c['score'], reverse=True)
     # Persist the full snapshot (latest wins) so re-race, the device
     # provider switcher, and the dashboard can reuse every provider without
     # re-fetching. Partial (only_source) probes never clobber the full set.
+    # outcomes tags each provider (found tier / missed / error / skipped) so
+    # the next run skips known misses instead of re-trying them.
     try:
-        save_candidates(video_id, song_info, candidates, only_source=only_source)
+        save_candidates(video_id, song_info, candidates, only_source=only_source,
+                        outcomes=outcomes)
     except Exception as e:
         print(f"  [probe] [FAIL] candidate save: {e}")
     return candidates
