@@ -35,10 +35,18 @@ BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
 static NSString *YTMULyricsOffsetKey(NSString *videoID) {
     return [NSString stringWithFormat:@"lyricsTimingOffset_%@", videoID];
 }
+// Per-tick callers (120fps lyric loop) must not deserialize NSUserDefaults
+// every frame: cache the value per video, invalidate on set.
+static NSString *g_offsetVideoID = nil;
+static double g_offsetValue = 0.0;
 double YTMULyricsOffsetForVideoID(NSString *videoID) {
     if (!videoID.length) return 0.0;
+    if (g_offsetVideoID && [videoID isEqualToString:g_offsetVideoID]) return g_offsetValue;
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
-    return [settings[YTMULyricsOffsetKey(videoID)] doubleValue];
+    double v = [settings[YTMULyricsOffsetKey(videoID)] doubleValue];
+    g_offsetVideoID = [videoID copy];
+    g_offsetValue = v;
+    return v;
 }
 void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset) {
     if (!videoID.length) return;
@@ -49,6 +57,8 @@ void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset) {
     if (offset == 0.0) [d removeObjectForKey:YTMULyricsOffsetKey(videoID)];
     else d[YTMULyricsOffsetKey(videoID)] = @(offset);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+    g_offsetVideoID = [videoID copy];
+    g_offsetValue = offset;
 }
 
 NSString *YTMUApiBase(void) {
