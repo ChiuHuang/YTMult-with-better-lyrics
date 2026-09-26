@@ -92,13 +92,13 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; }
 .list-row.file { grid-template-columns: 1fr 90px 160px 44px; }
 .list-row.node { grid-template-columns: 1fr 120px 120px 90px 36px; }
-.list-row.jwt { grid-template-columns: 1fr 110px 110px 110px 100px 36px; }
+.list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 100px 36px; }
 .list-head { font-size:11px; color: rgb(var(--mdui-color-on-surface-variant)); font-weight:500; padding:0 16px 6px; }
 .list-head.lh-rq { grid-template-columns: 1fr 80px 80px 100px 70px; display:grid; gap:10px; }
 .list-head.lh-cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; display:grid; gap:10px; }
 .list-head.lh-file { grid-template-columns: 1fr 90px 160px 44px; display:grid; gap:10px; }
 .list-head.lh-node { grid-template-columns: 1fr 120px 120px 90px 36px; display:grid; gap:10px; }
-.list-head.lh-jwt { grid-template-columns: 1fr 110px 110px 110px 100px 36px; display:grid; gap:10px; }
+.list-head.lh-jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 100px 36px; display:grid; gap:10px; }
 
 /* ---- pre code block ---- */
 .code-block { position:relative; }
@@ -175,6 +175,20 @@ html.mdui-theme-dark .rb-failed, html.mdui-theme-dark .rb-error { background-col
   .plsync-inputs { grid-template-columns: 1fr 100px; }
 }
 .rename-tag { font-size:11.5px; color: rgb(var(--mdui-color-primary)); white-space:nowrap; }
+
+/* ---- live probe race log ---- */
+.probe-live { font-family: ui-monospace, Consolas, monospace; font-size:12px; line-height:1.7;
+  background: rgba(0,0,0,.45); border-radius:8px; padding:8px 12px; margin-bottom:10px;
+  max-height:180px; overflow-y:auto; display:none; }
+.probe-live.has-lines { display:block; }
+.probe-live .pl-ok { color: rgb(102,187,106); }
+.probe-live .pl-miss { color: rgb(var(--mdui-color-on-surface-variant)); }
+.probe-live .pl-fail { color: rgb(242,139,135); }
+.probe-live .pl-run { color: rgb(144,202,249); }
+html.mdui-theme-light .probe-live { background: rgba(0,0,0,.06); }
+html.mdui-theme-light .probe-live .pl-ok { color: rgb(46,125,50); }
+html.mdui-theme-light .probe-live .pl-fail { color: rgb(198,40,40); }
+html.mdui-theme-light .probe-live .pl-run { color: rgb(21,101,192); }
 
 /* ---- bulk refetch options ---- */
 .bulk-opts { display:grid; grid-template-columns: auto auto 110px 130px 130px auto; gap:16px; align-items:end; margin-bottom:4px; }

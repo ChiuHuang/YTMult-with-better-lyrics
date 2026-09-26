@@ -101,6 +101,32 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- parallel probes + outcome tags + prune: `probe_providers` runs all 8
+  groups concurrently (Cubey, bLyrics/QQ/KuGou/BiniLyrics, LRCLib, Unison,
+  AMLL, YouTube) with live started/found/missed/error/skipped SSE per
+  provider; every run records per-provider outcomes (found tier / missed /
+  error / skipped) into the candidate snapshot; snapshots prune plain iff
+  line/wbw exists (line never pruned by wbw); rerace skips known-miss
+  providers with zero network calls. Verified: stubbed parallel run
+  (outcomes + save + prune), all-miss snapshot persists, skip leg makes no
+  network calls, rerace upgrade still works.
+- JWT pool durability: raw tokens persist to cache/jwt.json (survive
+  restart/update; hashes only on display); twice-rule eviction (two
+  consecutive 401/403s, unknowns never count, probation tokens still serve
+  last); richer metadata (successes/fails/last_ok/verdict/last_used) shown
+  in the pool table. Verified: persist+reload roundtrip, fail-twice evict,
+  ok metadata.
+- keep-remix queries: `clean_title_keep_remix` adds a strip-everything-
+  except-remix variant (+ raw/raw combo) so remix entries match every probe.
+- no-poll dashboard: probe/bulk/playlist/rebase/retitle/page polls all
+  replaced by SSE (`bulk_progress` start/row/stage/done added;
+  `playlist_sync_progress` + `probe_progress` already existed); heartbeat
+  `?interval=` drives server-pushed page refresh; hash-routed tabs
+  (#/logs...) with nav hrefs for middle-click; sessionStorage rejoins live
+  jobs after reload; bulk has heartbeat + stale-takeover (no more
+  perpetual 409); fetch_all gained an on_stage hook so bulk shows
+  song + trying-which-provider live; fast `pro` now also covers fast-key
+  wbw hits. Verified: node --check, SSE interval endpoint, py_compile.
 - provider switcher anytime + no probing popup + server saves all providers:
   iOS header/landscape toolbar now has [<] [list] [name i/n] [>] (steppers
   apply instantly, menu rows show index + current mark, per-video candidate

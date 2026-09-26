@@ -14,11 +14,12 @@
 #   - POST /api/admin/jwt/contribute (dashboard / manual curl)
 #   - inline 'jwt' query args still work unchanged (pool is a fallback)
 #
-# Raw tokens only ever live in memory. cache/jwt.json persists a token hash
-# plus bookkeeping per contribution, so the admin list survives restarts while
-# the secrets themselves do not get written to disk. A background thread
-# re-probes each live token against Cubey on a timer, marks dead ones, and
-# evicts them; pick_jwt() round-robins the survivors.
+# Raw tokens persist in cache/jwt.json (explicit admin tradeoff: without it
+# every restart/update wipes the pool and Cubey goes dark until devices
+# re-contribute). Only hashes are ever served to clients. A background
+# thread re-probes each live token on a timer; a token is evicted only
+# after two consecutive dead verdicts (twice rule). pick_jwt()
+# round-robins the survivors.
 import json
 import os
 import threading
@@ -57,11 +58,20 @@ def _persist():
     try:
         records = [{
             'id': e['id'],
+            # Raw tokens ARE persisted (explicit admin choice): without this
+            # every restart/update wipes the pool and Cubey goes dark until
+            # devices re-contribute. Only hashes are ever served to clients.
+            'token': e.get('token'),
             'token_hash': e.get('token_hash'),
             'node_id': e.get('node_id'),
             'added': e.get('added'),
             'last_checked': e.get('last_checked'),
+            'last_used': e.get('last_used'),
+            'last_ok': e.get('last_ok'),
             'ok': bool(e.get('ok')),
+            'successes': int(e.get('successes', 0)),
+            'fails': int(e.get('fails', 0)),
+            'verdict': e.get('verdict', 'unverified'),
         } for e in _pool.values()]
         with open(JWT_FILE, 'w', encoding='utf-8') as f:
             json.dump({'jwt_pool': records, 'updated': datetime.now().isoformat()}, f, indent=2)
@@ -84,12 +94,17 @@ def _load_persisted():
             continue
         _pool[jid] = {
             'id': jid,
-            'token': None,
+            'token': rec.get('token'),
             'token_hash': rec.get('token_hash'),
             'node_id': rec.get('node_id'),
             'added': rec.get('added'),
             'last_checked': rec.get('last_checked'),
+            'last_used': rec.get('last_used', 0.0),
+            'last_ok': rec.get('last_ok'),
             'ok': bool(rec.get('ok')),
+            'successes': int(rec.get('successes', 0)),
+            'fails': int(rec.get('fails', 0)),
+            'verdict': rec.get('verdict', 'unverified'),
         }
         loaded += 1
     return loaded
@@ -117,7 +132,12 @@ def contribute_jwt(token, node_id=None):
             'node_id': node_id,
             'added': (prev or {}).get('added', now),
             'last_checked': now,
+            'last_used': (prev or {}).get('last_used', 0.0),
+            'last_ok': (prev or {}).get('last_ok'),
             'ok': was_ok,
+            'successes': int((prev or {}).get('successes', 0)),
+            'fails': 0,
+            'verdict': 'unverified',
         }
         _pool[jid] = entry
         if len(_pool) > POOL_MAX:
@@ -150,8 +170,13 @@ def list_jwt():
                 'node_id': e.get('node_id'),
                 'added': e.get('added'),
                 'last_checked': e.get('last_checked'),
+                'last_used': e.get('last_used'),
+                'last_ok': e.get('last_ok'),
                 'ok': bool(e.get('ok')),
                 'live': bool(e.get('token')),
+                'successes': int(e.get('successes', 0)),
+                'fails': int(e.get('fails', 0)),
+                'verdict': e.get('verdict', 'unverified'),
             })
         items.sort(key=lambda x: x['added'] or '', reverse=True)
         return items
@@ -159,14 +184,17 @@ def list_jwt():
 
 def pick_jwt():
     """Best available token, or None. Prefers tokens already verified good,
-    then unverified fresh ones, rotating across survivors round-robin."""
+    then unverified fresh ones, rotating across survivors round-robin.
+    Once-dead (twice-rule probation) tokens sort last but still serve."""
     global _rr_counter
     now = time_module.time()
     with _lock:
         candidates = [e for e in _pool.values() if e.get('token')]
         if not candidates:
             return None
-        candidates.sort(key=lambda e: (0 if e.get('ok') else 1, e.get('last_used', 0.0)))
+        candidates.sort(key=lambda e: (0 if e.get('ok') else 1,
+                                        int(e.get('fails', 0)),
+                                        e.get('last_used', 0.0)))
         chosen = candidates[_rr_counter % len(candidates)]
         _rr_counter += 1
         chosen['last_used'] = now
@@ -208,30 +236,59 @@ def _probe_token(token, via_node=None):
 
 
 def check_all(evict=True):
-    """Re-probe every live token, update ok/last_checked, evict the dead.
+    """Re-probe every live token, update metadata, evict the twice-dead.
+    Twice rule: a token is removed only after TWO consecutive definite-dead
+    verdicts (401/403). Unknown outcomes (timeout/rate-limit) never count.
     Returns a short summary dict for the admin endpoint."""
     with _lock:
         live = [dict(e) for e in _pool.values() if e.get('token')]
     ok_n = dead_n = unknown_n = 0
+    now_iso = datetime.now().isoformat()
     for entry in live:
         verdict = _probe_token(entry['token'], via_node=pick_node())
-        entry['last_checked'] = datetime.now().isoformat()
+        entry['last_checked'] = now_iso
         if verdict is True:
             ok_n += 1
-            entry['ok'] = True
             with _lock:
                 if entry['id'] in _pool:
-                    _pool[entry['id']]['ok'] = True
-                    _pool[entry['id']]['last_checked'] = entry['last_checked']
+                    cur = _pool[entry['id']]
+                    cur['ok'] = True
+                    cur['verdict'] = 'ok'
+                    cur['fails'] = 0
+                    cur['successes'] = int(cur.get('successes', 0)) + 1
+                    cur['last_ok'] = now_iso
+                    cur['last_checked'] = now_iso
         elif verdict is False:
-            dead_n += 1
-            entry['ok'] = False
-            print(f"  [JWT] {entry['id']} probed DEAD, evicting")
-            if evict:
-                remove_jwt(entry['id'])
+            with _lock:
+                cur = _pool.get(entry['id'])
+                fails = int((cur or {}).get('fails', 0)) + 1 if cur else 1
+                if cur is not None:
+                    cur['fails'] = fails
+                    cur['ok'] = False
+                    cur['verdict'] = f'dead x{fails}'
+                    cur['last_checked'] = now_iso
+            # Only remove when proven unusable twice in a row.
+            if fails >= 2:
+                dead_n += 1
+                print(f"  [JWT] {entry['id']} probed DEAD twice, evicting")
+                if evict:
+                    remove_jwt(entry['id'])
+            else:
+                unknown_n += 1
+                print(f"  [JWT] {entry['id']} probed DEAD once, keeping (twice rule)")
         else:
             unknown_n += 1
+            with _lock:
+                if entry['id'] in _pool:
+                    _pool[entry['id']]['verdict'] = 'unknown'
+                    _pool[entry['id']]['last_checked'] = now_iso
     _persist()
+    try:
+        from .app import _sse_broadcast
+        _sse_broadcast('jwt', {'ok': ok_n, 'dead': dead_n, 'unknown': unknown_n,
+                               'total': len(_pool)})
+    except Exception:
+        pass
     return {'ok': ok_n, 'dead': dead_n, 'unknown': unknown_n, 'total': len(_pool)}
 
 

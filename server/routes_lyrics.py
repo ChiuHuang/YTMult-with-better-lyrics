@@ -120,6 +120,18 @@ def api_lyrics():
             apply_display_transforms(data['lyrics'], translate_to, auto_zh)
         return jsonify(data)
 
+    def _is_final_grade(data):
+        """A fast response the client may treat as final (pro): full-cache
+        hits always qualify; fast-key hits qualify when they already carry
+        real word timing (typically a rerace-upgraded full result also
+        written to the fast key). Rough line/plain fast hits never qualify
+        so the upgrade fetch still runs."""
+        try:
+            from .race import _wbw_line_count
+            return _wbw_line_count(data) > 0
+        except Exception:
+            return False
+
     client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-For') or request.remote_addr
     ua = request.headers.get('User-Agent', '')[:120]
     all_args = dict(request.args)
@@ -167,8 +179,8 @@ def api_lyrics():
         full_hit = get_cached(full_cache_key)
         cached = full_hit or get_cached(fast_cache_key)
         if cached:
-            if fast_mode and full_hit:
-                # Fast request served the full cached result: flag it so the
+            if fast_mode and (full_hit or _is_final_grade(cached)):
+                # Fast request served a final-grade result: flag it so the
                 # client treats it as final and skips the full fetch.
                 # Transport-only (in-memory hit, never written to disk).
                 cached['pro'] = True
@@ -213,8 +225,8 @@ def api_lyrics():
                     if dedup_key in _in_flight:
                         _in_flight[dedup_key].set()
                         del _in_flight[dedup_key]
-            if fast_mode and cache_source == 'full':
-                # Fast request served the full cached result: flag it so the
+            if fast_mode and (cache_source == 'full' or _is_final_grade(cached)):
+                # Fast request served a final-grade result: flag it so the
                 # client treats it as final and skips the full fetch.
                 # Transport-only (in-memory hit, never written to disk).
                 cached['pro'] = True
@@ -701,6 +713,9 @@ def _run_provider_probe_job(job_id, video_id, lang, jwt_token):
     job['artist'] = song_info.get('artist', '')
     job['duration'] = song_info.get('duration', 0)
     job['state'] = 'running'
+    _sse_broadcast('probe_progress', {'run_id': job_id, 'video_id': video_id,
+                                      'provider': 'probe', 'status': 'song',
+                                      'detail': f"{job['song']} - {job['artist']}"})
     jwt = jwt_token or pick_jwt()
     if jwt_token:
         _pool_contribute(jwt_token, node_id='device')
@@ -708,9 +723,13 @@ def _run_provider_probe_job(job_id, video_id, lang, jwt_token):
     def on_candidate(entry):
         slim = {k: entry.get(k) for k in
                 ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines', 'score')}
-        job['candidates'].append(slim)
-        job['candidates'].sort(key=lambda c: c.get('score', 0), reverse=True)
-        job['done'] = len(job['candidates'])
+        with _provider_jobs_lock:
+            j = _provider_jobs.get(job_id)
+            if j is None:
+                return
+            j['candidates'].append(slim)
+            j['candidates'].sort(key=lambda c: c.get('score', 0), reverse=True)
+            j['done'] = len(j['candidates'])
 
     try:
         notes = []
