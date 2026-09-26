@@ -1291,6 +1291,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_applyProviderAtIndex:(NSInteger)idx {
+    // TODO(app-anim): animate the lyrics swap (crossfade + scroll to top)
+    // and pulse the switcher label when the provider changes mid-song.
     NSArray *cands = self.providerCandidates;
     if (idx < 0 || idx >= cands.count) return;
     id p = cands[idx][@"provider"];
