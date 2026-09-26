@@ -104,6 +104,8 @@
 @property (nonatomic, copy) NSString *lastProvider;
 @property (nonatomic, copy) NSString *lastSongTitle;
 @property (nonatomic, copy) NSString *lastSongArtist;
+@property (nonatomic, assign) double clockRawTime;
+@property (nonatomic, assign) NSTimeInterval clockRawWall;
 @property (nonatomic, assign) BOOL landscapeIsPlaying;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;

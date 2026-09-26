@@ -101,6 +101,16 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- saved-all + 120fps split + extrapolated clock: `fetch_all_lyrics` now
+  persists every tried provider as a snapshot (pre-translation, provider
+  keys in switcher vocabulary) -- verified QQ/LRCLib saved, no
+  translated leak; normal full fetches leave switch/rerace reuse like
+  probes do. iOS keeps the 120fps link for smooth animations while state
+  work stays cheap (offset lookup cached per video instead of NSUserDefaults
+  twice per tick; extrapolated media clock ported from braccato tickView:
+  rebase on sample + local extrapolation, freeze after 0.5s stall, seeks
+  rebase). STAY (XfEMj-z3TtA) checked live: bLyrics wbw 41 lines, max 12
+  parts/line -- parsing is clean, judder was the discrete clock + tick cost.
 - scan 44-bug + iOS judder fixes: `scan_cache` preferred `:fast` over full
   (inverted condition) so stale fast siblings shadowed bulk upgrades --
   full now always wins (verified wbw with stale fast present); bulk mirrors

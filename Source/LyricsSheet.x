@@ -752,14 +752,17 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleSongChange:) name:@"YTMUSongDidChange" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLyricsDidLoad:) name:@"YTMULyricsDidLoad" object:nil];
 
-    // Tick at 30fps, not 120: per-tick work is a scan + mask-path rewrite,
-    // and anything above 30 just burns old-phone GPUs into judder
-    // (braccato's web engine likewise keeps per-frame work near-zero).
+    // Two-rate tick: the link runs at 120fps so ANIMATIONS (wipe mask,
+    // activation pop, scrolling) stay smooth, but lyric STATE work stays
+    // cheap -- incremental scan, rasterized labels, TextKit layout only on
+    // content change, mask-path rewrite only when the word quantum changes.
+    // (braccato's web engine is built the same way: near-zero per-frame
+    // work, cached measurement, culled lines.)
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updatePlaybackTime)];
     if (@available(iOS 15.0, *)) {
-        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 30);
+        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 120, 120);
     } else if ([self.displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
-        self.displayLink.preferredFramesPerSecond = 30;
+        self.displayLink.preferredFramesPerSecond = 120;
     }
     [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
@@ -2046,36 +2049,52 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps (panel max %ld)", (long)fps, (long)maxFps]);
         }
     }
-    // Self-healing z-order (~1/sec at the 30fps tick): YT reshuffles panel
+    // Self-healing z-order (~1/sec at the 120fps tick): YT reshuffles panel
     // subviews behind our back; the check itself is a pointer compare so
     // per-frame cost is ~zero. No-op for modal sheets (see ytmu_assertOnTop).
     static int ytmuTopAssertTick = 0;
-    if ((++ytmuTopAssertTick % 30) == 0) {
+    if ((++ytmuTopAssertTick % 120) == 0) {
         [self ytmu_assertOnTop];
     }
     if (self.landscapeInfoPanel && !self.landscapeInfoPanel.hidden) {
         [self ytmu_updateLandscapeProgress];
         // playerResponse can arrive after the panel opens; keep retrying
-        // until a real title/artist is shown (throttled: ~1/sec at 30fps).
+        // until a real title/artist is shown (throttled: ~1/sec at 120fps).
         static int landscapeMetaRetryTick = 0;
         BOOL needTitle = (self.landscapeTitleLabel.text.length == 0 ||
                           [self.landscapeTitleLabel.text isEqualToString:@"Now Playing"]);
         if ((needTitle || self.landscapeArtistLabel.text.length == 0) &&
-            (landscapeMetaRetryTick++ % 30) == 0) {
+            (landscapeMetaRetryTick++ % 120) == 0) {
             [self ytmu_updateLandscapeMetadata];
         }
     }
     if (!self.isSynced || self.lyrics.count == 0) return;
 
     double currentTime = 0;
+    NSTimeInterval tickNow = CACurrentMediaTime();
+    double rawTime = 0;
     if (g_activePlayer) {
         if ([g_activePlayer respondsToSelector:@selector(currentVideoMediaTime)]) {
-            currentTime = [g_activePlayer currentVideoMediaTime];
+            rawTime = [g_activePlayer currentVideoMediaTime];
         } else if ([g_activePlayer respondsToSelector:@selector(currentMediaTime)]) {
-            currentTime = [g_activePlayer currentMediaTime];
+            rawTime = [g_activePlayer currentMediaTime];
         }
     }
-    if (currentTime > 0) {
+    if (rawTime > 0) {
+        // Extrapolated media clock (braccato tickView parity): the player
+        // clock updates discretely, so rebasing on every sample and
+        // extrapolating locally keeps the wipe smooth between samples.
+        // A clock that stops advancing (paused/stall) freezes after 0.5s
+        // instead of running ahead; seeks rebase via the sample jump.
+        if (fabs(rawTime - self.clockRawTime) > 0.0005) {
+            self.clockRawTime = rawTime;
+            self.clockRawWall = tickNow;
+        }
+        if (tickNow - self.clockRawWall < 0.5) {
+            currentTime = self.clockRawTime + (tickNow - self.clockRawWall);
+        } else {
+            currentTime = self.clockRawTime;
+        }
         g_currentPlaybackTime = currentTime;
     } else {
         currentTime = g_currentPlaybackTime;

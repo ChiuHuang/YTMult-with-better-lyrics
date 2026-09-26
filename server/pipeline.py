@@ -118,6 +118,35 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     _fetch_lock = threading.Lock()
     _fetch_stages = []  # stage thunks; all run concurrently below
 
+    def _snapshot_provider(label, source):
+        """Map a fetch_all consider() label + candidate source onto the
+        provider key the switcher/select path understands (same vocabulary
+        as probe_providers: Cubey/<inner>, bLyrics, QQ, KuGou, BiniLyrics,
+        LRCLib, Unison, AMLL, YouTube)."""
+        for known in ('LRCLib', 'Unison', 'AMLL', 'bLyrics', 'QQ', 'KuGou', 'BiniLyrics'):
+            if source == known:
+                return known
+        if source == 'YouTube Music' or source == 'YouTube':
+            return 'YouTube'
+        if '/' in (source or ''):
+            origin = source.split('/', 1)[0]
+            if origin in ('Cubey',):
+                return source
+        low = (label or '').lower()
+        if 'lrclib' in low:
+            return 'LRCLib'
+        if 'unison' in low:
+            return 'Unison'
+        if 'amll' in low:
+            return 'AMLL'
+        if 'youtube' in low:
+            return 'YouTube'
+        if 'cubey' in low:
+            return source or 'Cubey'
+        if 'braccato' in low or 'direct' in low:
+            return source or 'bLyrics'
+        return source or label
+
     def consider(candidate, label):
         nonlocal result
         if not candidate or not candidate.get('lyrics'):
@@ -314,6 +343,34 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                 print(f"  [graft] {result.get('source')} + word timing from {cand.get('source')} "
                       f"(score={_lyrics_score(result):.2f})")
                 break
+
+    # Snapshot every tried provider (latest wins) so re-race, the device
+    # switcher, and later probes reuse all of them without re-fetching.
+    # Saved pre-translation (raw lyrics, like probe snapshots); the cached
+    # winner above stays the translated/upgraded source of truth.
+    try:
+        _snap_cands = []
+        for _label, _cand in considered:
+            _ly = _cand.get('lyrics') or []
+            if not _ly:
+                continue
+            _is_wbw = _wbw_line_count(_cand) > 0
+            _src = _cand.get('source', '') or ''
+            _prov = _snapshot_provider(_label, _src)
+            _snap_cands.append({
+                'provider': _prov, 'source': _src,
+                'synced': bool(_cand.get('synced')), 'wordSynced': _is_wbw,
+                'tier': 'wbw' if _is_wbw else ('line' if _cand.get('synced') else 'plain'),
+                'lines': len(_ly), 'score': round(_lyrics_score(_cand), 3),
+                'data': {'lyrics': _ly, 'source': _src,
+                         'synced': bool(_cand.get('synced')), 'wordSynced': _is_wbw,
+                         'song': title, 'artist': artist},
+            })
+        if _snap_cands:
+            _snap_cands.sort(key=lambda c: c['score'], reverse=True)
+            save_candidates(video_id, {'title': title, 'artist': artist}, _snap_cands)
+    except Exception as e:
+        print(f"  [fetch] [FAIL] snapshot save: {e}")
 
     # Add song metadata
     result['song'] = title
