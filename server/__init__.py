@@ -28,6 +28,7 @@ from . import routes_admin  # noqa: F401
 from . import routes_misc  # noqa: F401
 from . import library  # noqa: F401
 from . import routes_library  # noqa: F401
+from . import routes_ai  # noqa: F401
 
 def main():
     from .app import SERVER_INSTANCE_ID, SERVER_START_TS, SERVER_LOG_FILE, CRASH_LOG_FILE

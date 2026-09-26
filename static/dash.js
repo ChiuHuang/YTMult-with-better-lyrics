@@ -701,6 +701,7 @@
       setVal('#stat-none', fmt(scan.buckets?.none) + (scan.unlyriced ? ` (+${fmt(scan.unlyriced)} unlyriced)` : ''));
       renderRebaseStatus(status);
       renderRetitleStatus(retitleStatus);
+      loadAI();
       try {
         const unlyriced = await json('/api/admin/library/unlyriced');
         renderUnlyriced(unlyriced.items || []);
@@ -879,6 +880,66 @@
       if (d.ok) { mdui.snackbar({message:`Retitle started (${checked.length})`}); openRetitleDialog(); }
       else mdui.snackbar({message: d.error || 'Failed'});
     } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+  };
+  /* ---- AI providers (keys in gitignored config file, masked display) ---- */
+  const renderAI = d => {
+    const list = $('#ai-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const rows = [];
+    (d.cohere || []).forEach(c => rows.push({label: `Cohere ${c.masked}`, tag: 'translate+retitle',
+      del: () => API('/api/admin/ai/cohere', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: c.masked})})}));
+    (d.chat || []).forEach(p => rows.push({label: `${p.name || '?'} ${p.masked} | ${p.model || ''}${p.from_env ? ' (env)' : ''}`, tag: (p.use_for || []).join('+'),
+      del: p.from_env ? null : () => API('/api/admin/ai/chat', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name: p.name})})}));
+    if (!rows.length) { list.appendChild(el('div', {class:'list-row'}, 'No providers configured')); return; }
+    rows.forEach(r => {
+      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
+        el('span', {class:'truncate mono'}, r.label),
+        el('span', {class:'rename-tag'}, r.tag));
+      if (r.del) {
+        const b = el('mdui-button', {variant:'text', icon:'delete'});
+        b.textContent = 'Remove';
+        b.addEventListener('click', async () => {
+          try { const res = await (await r.del()).json(); if (res.ok) renderAI(res); }
+          catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        });
+        row.appendChild(b);
+      } else row.appendChild(el('span', {}));
+      list.appendChild(row);
+    });
+  };
+  const loadAI = async () => {
+    try { renderAI(await json('/api/admin/ai/providers')); }
+    catch (e) { const l = $('#ai-list'); if (l) l.innerHTML = ''; }
+  };
+  const aiInit = () => {
+    const rf = $('#ai-refresh');
+    if (rf) rf.addEventListener('click', loadAI);
+    const addC = $('#ai-cohere-add');
+    if (addC) addC.addEventListener('click', async () => {
+      const v = ($('#ai-cohere-key') || {}).value || '';
+      if (!v.trim()) { mdui.snackbar({message:'Paste a key first'}); return; }
+      try {
+        const r = await API('/api/admin/ai/cohere', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: v.trim()})});
+        const d = await r.json();
+        if (d.ok) { renderAI(d); $('#ai-cohere-key').value = ''; mdui.snackbar({message:'Cohere key added'}); }
+        else mdui.snackbar({message: d.error || 'Failed'});
+      } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+    });
+    const addH = $('#ai-chat-add');
+    if (addH) addH.addEventListener('click', async () => {
+      const val = id => ((($(id) || {}).value) || '').trim();
+      const use = val('#ai-chat-use').split(',').map(s => s.trim()).filter(s => s === 'translate' || s === 'retitle');
+      try {
+        const r = await API('/api/admin/ai/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+          name: val('#ai-chat-name'), api_key: val('#ai-chat-key'),
+          base_url: val('#ai-chat-url'), model: val('#ai-chat-model'),
+          use_for: use.length ? use : ['translate', 'retitle']})});
+        const d = await r.json();
+        if (d.ok) { renderAI(d); $('#ai-chat-key').value = ''; mdui.snackbar({message:'Chat provider saved'}); }
+        else mdui.snackbar({message: d.error || 'Failed'});
+      } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+    });
   };
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
@@ -1719,6 +1780,7 @@
     if (bulkStopBtn) bulkStopBtn.addEventListener('click', stopBulk);
     const bulkTransBtn = $('#bulk-translate-missing');
     if (bulkTransBtn) bulkTransBtn.addEventListener('click', translateMissing);
+    aiInit();
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';

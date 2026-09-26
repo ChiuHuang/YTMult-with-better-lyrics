@@ -296,6 +296,32 @@
 
         <mdui-card variant="elevated" class="panel">
           <div class="panel-head">
+            <span class="section-title">AI providers</span>
+            <span class="spacer"></span>
+            <mdui-button id="ai-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              Keys live in <span class="mono">config/ai_providers.json</span> (gitignored, never committed) plus env vars. Only masked keys are shown here.
+            </div>
+            <div id="ai-list" class="list-grid" style="margin-bottom:12px;"></div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+              <mdui-text-field id="ai-cohere-key" label="Cohere key" style="flex:1; min-width:220px;"></mdui-text-field>
+              <mdui-button id="ai-cohere-add" variant="tonal" icon="add">Add Cohere key</mdui-button>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+              <mdui-text-field id="ai-chat-name" label="Name" value="orcarouter" style="width:130px;"></mdui-text-field>
+              <mdui-text-field id="ai-chat-key" label="API key" style="flex:1; min-width:200px;"></mdui-text-field>
+              <mdui-text-field id="ai-chat-url" label="Base URL" value="https://api.orcarouter.ai/v1" style="flex:1; min-width:200px;"></mdui-text-field>
+              <mdui-text-field id="ai-chat-model" label="Model" value="orcarouter/free" style="width:170px;"></mdui-text-field>
+              <mdui-text-field id="ai-chat-use" label="Use for" value="translate,retitle" style="width:150px;"></mdui-text-field>
+              <mdui-button id="ai-chat-add" variant="tonal" icon="add">Add chat provider</mdui-button>
+            </div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
             <span class="section-title">Unlyriced songs</span>
             <span class="spacer"></span>
             <mdui-button id="unlyriced-retitle-selected" variant="text" icon="edit">Retitle selected</mdui-button>
