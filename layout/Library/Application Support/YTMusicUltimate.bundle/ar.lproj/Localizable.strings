@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = off";
 "DEBUG_TEST_SENT" = "أُرسل كسجل معلومات. يصل الآن إلى لوحة معلومات الخادم.";
 "DEBUG_TEST_BLOCKED" = "لم يُرسل. الرفع محظور بواسطة المفتاح الرئيسي أو مستوى السجل أو مفتاح upload_logs في الخادم.";
+
+"LYRICS_FULLSCREEN" = "ملء الشاشة عند التدوير";
+"LYRICS_FULLSCREEN_DESC" = "أدر الجهاز أفقياً وستفتح الكلمات بملء الشاشة تقائياً";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "المظهر";
+"LG_SECTION_PLAYER" = "المشغل";
+"LG_SECTION_APP" = "التطبيق";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "مفتاح المواد المرئية الرئيسي.";
+"LG_SONG_THEME_WHOLE" = "موضوع الأغنية في التطبيق كله";
+"LG_SONG_THEME_WHOLE_DESC" = "أجواء لونية بأسلوب Apple Music في التطبيق كله.";
+"LG_SONG_THEME_PLAYER" = "موضوع الأغنية في المشغل";
+"LG_SONG_THEME_PLAYER_DESC" = "يستخدم ألوان الغلاف في المشغل المصغّر V1 وفي شاشة التشغيل الحالي.";
+"LG_FULLPLAYER_V2" = "المشغل بملء الشاشة V2";
+"LG_FULLPLAYER_V2_DESC" = "بطاقة الغلاف وأدوات تحكم زجاجية وشريط تقدّم وترويسة مقسّمة.";
+"LG_LYRICS_V2" = "الكلمات V2";
+"LG_LYRICS_V2_DESC" = "خلفية غامرة وبطاقات للسطر النشط.";
+"LG_LYRICS_BUTTON" = "زر الكلمات";
+"LG_LYRICS_BUTTON_DESC" = "يُبقي مدخلاً مرئياً للكلمات في V1 و V2.";
+"LG_QUEUE_V2" = "قائمة الانتظار V2";
+"LG_QUEUE_V2_DESC" = "قائمة التالي الزجاجية وترويسة قائمة الانتظار.";
+"LG_HOME_V2" = "الصفحة الرئيسية V2";
+"LG_HOME_V2_DESC" = "أغلفة بزوايا دائرية ورفوف شفافة ورقائق زجاجية.";
+"LG_PIVOT_V2" = "التنقل السفلي V2";
+"LG_PIVOT_V2_DESC" = "شريط تنقّل مادي عائم.";
+"LG_SHEETS_V2" = "الألواح V2";
+"LG_SHEETS_V2_DESC" = "ألواح إجراءات زجاجية بزوايا دائرية وألواح سفلية.";
+"LG_ENTRY_BUTTON" = "إعدادات Liquid Glass";

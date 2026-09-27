@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = tắt";
 "DEBUG_TEST_SENT" = "Đã gửi như một nhật ký thông tin. Nó đã tới bảng điều khiển máy chủ.";
 "DEBUG_TEST_BLOCKED" = "Chưa gửi. Việc tải lên bị chặn bởi công tắc chính, mức nhật ký, hoặc công tắc upload_logs của máy chủ.";
+
+"LYRICS_FULLSCREEN" = "Toàn màn hình khi xoay";
+"LYRICS_FULLSCREEN_DESC" = "Xoay máy sang ngang, lờ i bài hát sằ tự mḟ mở trong chế độ sể toàn màn hình";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Giao diện";
+"LG_SECTION_PLAYER" = "Trình phát";
+"LG_SECTION_APP" = "Ứng dụng";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Công tắc chính cho vật liệu giao diện.";
+"LG_SONG_THEME_WHOLE" = "Chủ đề bài hát toàn ứng dụng";
+"LG_SONG_THEME_WHOLE_DESC" = "Không khí màu kiểu Apple Music trên toàn ứng dụng.";
+"LG_SONG_THEME_PLAYER" = "Chủ đề bài hát trong trình phát";
+"LG_SONG_THEME_PLAYER_DESC" = "Dùng màu ảnh bìa ở trình phát nhỏ V1 và màn hình Đang phát.";
+"LG_FULLPLAYER_V2" = "Trình phát toàn màn hình V2";
+"LG_FULLPLAYER_V2_DESC" = "Thẻ ảnh bìa, bảng điều khiển kính, thanh tua và tiêu đề chia đôi.";
+"LG_LYRICS_V2" = "Lời bài hát V2";
+"LG_LYRICS_V2_DESC" = "Nền nhúng và các thẻ dòng đang nổi bật.";
+"LG_LYRICS_BUTTON" = "Nút lời bài hát";
+"LG_LYRICS_BUTTON_DESC" = "Giữ một mục lời bài hát luôn hiện ở V1 và V2.";
+"LG_QUEUE_V2" = "Hàng đợi V2";
+"LG_QUEUE_V2_DESC" = "Danh sách Tiếp theo bằng kính và tiêu đề hàng đợi.";
+"LG_HOME_V2" = "Trang chủ V2";
+"LG_HOME_V2_DESC" = "Ảnh bìa bo tròn, kệ trong suốt và thẻ nhỏ bằng kính.";
+"LG_PIVOT_V2" = "Thanh điều hướng dưới V2";
+"LG_PIVOT_V2_DESC" = "Thanh điều hướng vật liệu nổi.";
+"LG_SHEETS_V2" = "Trang V2";
+"LG_SHEETS_V2_DESC" = "Trang hành động và trang dưới bằng kính bo tròn.";
+"LG_ENTRY_BUTTON" = "Cài đặt Liquid Glass";

@@ -159,3 +159,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = spento";
 "DEBUG_TEST_SENT" = "Inviato come log di informazione. Ora raggiunge la dashboard del server.";
 "DEBUG_TEST_BLOCKED" = "Non inviato. Gli invii sono bloccati dall'interruttore principale, dal livello di log o dall'interruttore upload_logs del server.";
+
+"LYRICS_FULLSCREEN" = "Schermo intero alla rotazione";
+"LYRICS_FULLSCREEN_DESC" = "Ruotando in orizzontale, i testi si aprono da soli a schermo intero";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Tema";
+"LG_SECTION_PLAYER" = "Player";
+"LG_SECTION_APP" = "App";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Interruttore principale del materiale visivo.";
+"LG_SONG_THEME_WHOLE" = "Tema del brano in tutta l'app";
+"LG_SONG_THEME_WHOLE_DESC" = "Atmosfera di colori in stile Apple Music in tutta l'app.";
+"LG_SONG_THEME_PLAYER" = "Tema del brano nel player";
+"LG_SONG_THEME_PLAYER_DESC" = "Usa i colori della copertina nel mini-player V1 e in In riproduzione.";
+"LG_FULLPLAYER_V2" = "Player a schermo intero V2";
+"LG_FULLPLAYER_V2_DESC" = "Scheda copertina, trasporto in vetro, barra di posizione e header diviso.";
+"LG_LYRICS_V2" = "Testi V2";
+"LG_LYRICS_V2_DESC" = "Sfondo immersivo e schede per la riga attiva.";
+"LG_LYRICS_BUTTON" = "Pulsante dei testi";
+"LG_LYRICS_BUTTON_DESC" = "Mantiene una voce dei testi sempre visibile in V1 e V2.";
+"LG_QUEUE_V2" = "Coda V2";
+"LG_QUEUE_V2_DESC" = "Elenco in vetro di In arrivo e intestazione della coda.";
+"LG_HOME_V2" = "Home V2";
+"LG_HOME_V2_DESC" = "Copertine arrotondate, ripiani trasparenti e chip di vetro.";
+"LG_PIVOT_V2" = "Navigazione inferiore V2";
+"LG_PIVOT_V2_DESC" = "Barra di navigazione fluttuante in materiale.";
+"LG_SHEETS_V2" = "Sheet V2";
+"LG_SHEETS_V2_DESC" = "Sheet azione e sheet inferiori in vetro arrotondato.";
+"LG_ENTRY_BUTTON" = "Impostazioni Liquid Glass";

@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = desactivado";
 "DEBUG_TEST_SENT" = "Enviado como registro de información. Ya llega al panel del servidor.";
 "DEBUG_TEST_BLOCKED" = "No enviado. Las subidas están bloqueadas por el interruptor principal, el nivel de registro o el interruptor upload_logs del servidor.";
+
+"LYRICS_FULLSCREEN" = "Pantalla completa al girar";
+"LYRICS_FULLSCREEN_DESC" = "Gira el móvil en horizontal y las letras se abren solas en pantalla completa";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Tema";
+"LG_SECTION_PLAYER" = "Reproductor";
+"LG_SECTION_APP" = "Aplicación";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Interruptor maestro del material visual.";
+"LG_SONG_THEME_WHOLE" = "Tema de canción en toda la app";
+"LG_SONG_THEME_WHOLE_DESC" = "Atmósfera de color al estilo de Apple Music en toda la app.";
+"LG_SONG_THEME_PLAYER" = "Tema de canción en el reproductor";
+"LG_SONG_THEME_PLAYER_DESC" = "Usa los colores de la portada en el mini-reproductor V1 y en Ahora sonando.";
+"LG_FULLPLAYER_V2" = "Reproductor completo V2";
+"LG_FULLPLAYER_V2_DESC" = "Tarjeta de portada, transporte de cristal, barra de posición y cabecera dividida.";
+"LG_LYRICS_V2" = "Letras V2";
+"LG_LYRICS_V2_DESC" = "Fondo inmersivo y tarjetas de la línea activa.";
+"LG_LYRICS_BUTTON" = "Botón de letras";
+"LG_LYRICS_BUTTON_DESC" = "Mantiene una entrada visible de letras en V1 y V2.";
+"LG_QUEUE_V2" = "Cola V2";
+"LG_QUEUE_V2_DESC" = "Lista de cristal de Siguiente y cabecera de la cola.";
+"LG_HOME_V2" = "Inicio V2";
+"LG_HOME_V2_DESC" = "Portadas redondeadas, estantes transparentes y fichas de cristal.";
+"LG_PIVOT_V2" = "Navegación inferior V2";
+"LG_PIVOT_V2_DESC" = "Barra de navegación flotante de material.";
+"LG_SHEETS_V2" = "Hojas V2";
+"LG_SHEETS_V2_DESC" = "Hojas de acción y hojas inferiores de cristal redondeadas.";
+"LG_ENTRY_BUTTON" = "Ajustes de Liquid Glass";

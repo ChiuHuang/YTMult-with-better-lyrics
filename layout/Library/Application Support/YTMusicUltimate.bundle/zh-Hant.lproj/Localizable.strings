@@ -190,3 +190,32 @@
 "DEBUG_TEST_SENT" = "已以 info 記錄傳送，現在就會出現在伺服器儀表板。";
 
 "DEBUG_TEST_BLOCKED" = "未傳送。上傳被總開關、記錄等級或伺服器的 upload_logs 開關封鎖。";
+
+"LYRICS_FULLSCREEN" = "旋轉時全蟾幕";
+"LYRICS_FULLSCREEN_DESC" = "轉到橫向時自動全蟾幕顯示歌詞";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "主題";
+"LG_SECTION_PLAYER" = "播放器";
+"LG_SECTION_APP" = "應用程式";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "視覺材質的總開關。";
+"LG_SONG_THEME_WHOLE" = "全應用程式歌曲主題";
+"LG_SONG_THEME_WHOLE_DESC" = "整個應用程式採用 Apple Music 風格的配色氛圍。";
+"LG_SONG_THEME_PLAYER" = "播放器歌曲主題";
+"LG_SONG_THEME_PLAYER_DESC" = "在 V1 迷你播放器和正在播放畫面使用封面配色。";
+"LG_FULLPLAYER_V2" = "全螢幕播放器 V2";
+"LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制區、進度條和分割標題列。";
+"LG_LYRICS_V2" = "歌詞 V2";
+"LG_LYRICS_V2_DESC" = "沉浸式背景和目前歌詞卡片。";
+"LG_LYRICS_BUTTON" = "歌詞按鈕";
+"LG_LYRICS_BUTTON_DESC" = "在 V1 和 V2 保留一個可見的歌詞入口。";
+"LG_QUEUE_V2" = "佇列 V2";
+"LG_QUEUE_V2_DESC" = "玻璃質感的待播清單和佇列標題列。";
+"LG_HOME_V2" = "首頁 V2";
+"LG_HOME_V2_DESC" = "圓角封面、透明層架和玻璃標籤。";
+"LG_PIVOT_V2" = "底部導覽 V2";
+"LG_PIVOT_V2_DESC" = "浮動的材質導覽列。";
+"LG_SHEETS_V2" = "面板 V2";
+"LG_SHEETS_V2_DESC" = "圓角玻璃操作面板和底部面板。";
+"LG_ENTRY_BUTTON" = "Liquid Glass 設定";

@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = オフ";
 "DEBUG_TEST_SENT" = "情報ログとして送信しました。只今サーバーのダッシュボードに届きます。";
 "DEBUG_TEST_BLOCKED" = "送信しません。メインスイッチ、ログレベル、またはサーバーの upload_logs スイッチによって送信がブロックされています。";
+
+"LYRICS_FULLSCREEN" = "横向きで全画面表示";
+"LYRICS_FULLSCREEN_DESC" = "端末を横向きにすると、歌詞が自動で全画面表示に開きます";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "テーマ";
+"LG_SECTION_PLAYER" = "プレーヤー";
+"LG_SECTION_APP" = "アプリ";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "ビジュアルマテリアルのマスタースイッチです";
+"LG_SONG_THEME_WHOLE" = "アプリ全体の曲テーマ";
+"LG_SONG_THEME_WHOLE_DESC" = "アプリ全体に Apple Music 風の配色を適用します";
+"LG_SONG_THEME_PLAYER" = "プレーヤーの曲テーマ";
+"LG_SONG_THEME_PLAYER_DESC" = "V1 のミニプレーヤーと再生中の画面にジャケットの色を使います";
+"LG_FULLPLAYER_V2" = "フルプレーヤー V2";
+"LG_FULLPLAYER_V2_DESC" = "ジャケットカード、ガラスの操作部、シークバー、分割ヘッダー";
+"LG_LYRICS_V2" = "歌詞 V2";
+"LG_LYRICS_V2_DESC" = "没入型の背景とアクティブ行のカード";
+"LG_LYRICS_BUTTON" = "歌詞ボタン";
+"LG_LYRICS_BUTTON_DESC" = "V1 と V2 に常に見える歌詞の入口を残します";
+"LG_QUEUE_V2" = "キュー V2";
+"LG_QUEUE_V2_DESC" = "ガラスの次の曲リストとキューのヘッダー";
+"LG_HOME_V2" = "ホーム V2";
+"LG_HOME_V2_DESC" = "角丸の、透明な棚、ガラスのチップ";
+"LG_PIVOT_V2" = "ボトムナビゲーション V2";
+"LG_PIVOT_V2_DESC" = "浮遊するマテリアルのナビゲーションバー";
+"LG_SHEETS_V2" = "シート V2";
+"LG_SHEETS_V2_DESC" = "角丸のガラスアクションシートとボトムシート";
+"LG_ENTRY_BUTTON" = "Liquid Glass の設定";

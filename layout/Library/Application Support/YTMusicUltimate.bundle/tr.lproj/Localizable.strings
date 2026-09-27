@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = kapalı";
 "DEBUG_TEST_SENT" = "Bilgi günlüğu olarak gönderildi. şimdi sunucu paneline ulaştı.";
 "DEBUG_TEST_BLOCKED" = "Gönderilmedi. Yüklemeleri ana anahtar, günlük düzeyi ya da sunucunun upload_logs anahtarı engelliyor.";
+
+"LYRICS_FULLSCREEN" = "Döndürünce tam ekran";
+"LYRICS_FULLSCREEN_DESC" = "Cihazı yatay çevir, şarkı sözleri otomatik olarak tam ekranda açılır";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Tema";
+"LG_SECTION_PLAYER" = "Oynatıcı";
+"LG_SECTION_APP" = "Uygulama";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Görsel materyal için ana anahtar.";
+"LG_SONG_THEME_WHOLE" = "Uygulama geneli şarkı teması";
+"LG_SONG_THEME_WHOLE_DESC" = "Uygulama genelinde Apple Music tarzı renk atmosferi.";
+"LG_SONG_THEME_PLAYER" = "Oynatıcı şarkı teması";
+"LG_SONG_THEME_PLAYER_DESC" = "V1 mini oynatıcıda ve Şimdi Çalınıyor'da kapak renklerini kullanır.";
+"LG_FULLPLAYER_V2" = "Tam ekran oynatıcı V2";
+"LG_FULLPLAYER_V2_DESC" = "Kapak kartı, camlı kumanda, çubuk ve bölünmüş başlık.";
+"LG_LYRICS_V2" = "Şarkı sözleri V2";
+"LG_LYRICS_V2_DESC" = "Dalmış arka plan ve etkin satır kartları.";
+"LG_LYRICS_BUTTON" = "Şarkı sözleri düğmesi";
+"LG_LYRICS_BUTTON_DESC" = "V1 ve V2'de görünür bir şarkı sözleri girişi korur.";
+"LG_QUEUE_V2" = "Sıra V2";
+"LG_QUEUE_V2_DESC" = "Camlı Sıradakiler listesi ve sıra başlığı.";
+"LG_HOME_V2" = "Ana Sayfa V2";
+"LG_HOME_V2_DESC" = "Yuvarlatılmış kapaklar, saydam raflar ve cam çipler.";
+"LG_PIVOT_V2" = "Alt gezinme V2";
+"LG_PIVOT_V2_DESC" = "Yüzen malzeme gezinme çubuğu.";
+"LG_SHEETS_V2" = "Sayfalar V2";
+"LG_SHEETS_V2_DESC" = "Yuvarlatılmış cam eylem ve alt sayfalar.";
+"LG_ENTRY_BUTTON" = "Liquid Glass ayarları";
