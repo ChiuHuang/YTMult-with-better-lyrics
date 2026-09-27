@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "Uygulama geneli şarkı teması";
 "LG_SONG_THEME_WHOLE_DESC" = "Uygulama genelinde Apple Music tarzı renk atmosferi.";
 "LG_SONG_THEME_PLAYER" = "Oynatıcı şarkı teması";
-"LG_SONG_THEME_PLAYER_DESC" = "V1 mini oynatıcıda ve Şimdi Çalınıyor'da kapak renklerini kullanır.";
+"LG_SONG_THEME_PLAYER_DESC" = "Kapak görselinin renklerini tam ekran oynatıcının arka planı olarak kullanır.";
 "LG_FULLPLAYER_V2" = "Tam ekran oynatıcı V2";
 "LG_FULLPLAYER_V2_DESC" = "Kapak kartı, camlı kumanda, çubuk ve bölünmüş başlık.";
 "LG_LYRICS_V2" = "Şarkı sözleri V2";
-"LG_LYRICS_V2_DESC" = "Dalmış arka plan ve etkin satır kartları.";
+"LG_LYRICS_V2_DESC" = "Dalmış arka plan arkasında bulanık kapak görseli.";
 "LG_LYRICS_BUTTON" = "Şarkı sözleri düğmesi";
 "LG_LYRICS_BUTTON_DESC" = "V1 ve V2'de görünür bir şarkı sözleri girişi korur.";
 "LG_QUEUE_V2" = "Sıra V2";

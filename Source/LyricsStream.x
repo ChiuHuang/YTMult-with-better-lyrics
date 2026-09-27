@@ -452,6 +452,16 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
         if (![lyrics isKindOfClass:[NSArray class]] || !YTMULyricsIsUsable(lyrics, json)) return;
         NSString *stage = [json[@"stage"] isKindOfClass:[NSString class]] ? json[@"stage"] : @"raw";
         BOOL isFinal = [stage isEqualToString:@"final"];
+        // `cached` is the server's own verdict on this request. `raw` and
+        // `final` only exist on the live path (a cache hit short-circuits to
+        // stage=cached with no tline), so either one proves the translation is
+        // being produced as the client watches and the reveal is worth running.
+        // Absent on an older server build: fall back to the stage, which is
+        // never 'cached' for a payload that is still being translated.
+        id cachedFlag = json[@"cached"];
+        BOOL fromCache = (cachedFlag != nil) ? [cachedFlag boolValue]
+                                             : [stage isEqualToString:@"cached"];
+        if (!fromCache) self.typewriterLive = YES;
         if (!self.tstreamGotLyrics) {
             UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
             statusLabel.text = @"";
@@ -485,6 +495,9 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
         NSInteger row = [json[@"row"] integerValue];
         id text = json[@"text"];
         if (![text isKindOfClass:[NSString class]]) return;
+        // A translated line landing in real time: nothing about this request
+        // came out of a cache, so the reveal may run.
+        self.typewriterLive = YES;
         if ([json[@"done"] boolValue]) YTMUStatusBump(@"lines");
         YTMUStatusSet(@"lastRow", @(row));
         YTMUStatusSet(@"lastText", text);
@@ -658,7 +671,12 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     if (row < 0 || row >= self.lyrics.count) return;
     YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
     if (!cell) return;
-    if (!activate || YTMUTypewriterCPS() <= 0.0) {
+    // Not a live translation: the row is not allowed to reveal at all. This has
+    // to be checked here and not only in the tick, because -ytmu_advanceRow: is
+    // called directly with dt=0, which would leave `shown` at 0 and install a
+    // mask that hides the whole translation of a cache hit until the next tick
+    // decides otherwise.
+    if (!activate || YTMUTypewriterCPS() <= 0.0 || !self.typewriterLive) {
         [[self ytmu_typeRowSet] removeObject:@(row)];
         [[self ytmu_typeStates] removeObjectForKey:@(row)];
         [cell ytmu_clearType];
@@ -672,9 +690,12 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
 // A line types as it becomes current, and anything that leaves the set snaps to
 // fully visible so nothing is left half-revealed behind the reader.
 - (void)ytmu_typeStep {
-    if (!self.isSynced || self.lyrics.count == 0) {
-        // No timing means no reveal: drop the masks and the state instead of
-        // leaving a row frozen half-typed.
+    if (!self.isSynced || self.lyrics.count == 0 || !self.typewriterLive) {
+        // No timing, or nothing live to reveal: drop the masks and the state
+        // instead of leaving a row frozen half-typed. A cached payload is the
+        // common case here (re-opening a song the device or the server already
+        // has), and animating it was pure decoration over text that was never
+        // being written.
         if (self.typeState.count) [self ytmu_typeResetAll];
         return;
     }

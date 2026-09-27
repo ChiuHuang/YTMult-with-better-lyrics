@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "Chủ đề bài hát toàn ứng dụng";
 "LG_SONG_THEME_WHOLE_DESC" = "Không khí màu kiểu Apple Music trên toàn ứng dụng.";
 "LG_SONG_THEME_PLAYER" = "Chủ đề bài hát trong trình phát";
-"LG_SONG_THEME_PLAYER_DESC" = "Dùng màu ảnh bìa ở trình phát nhỏ V1 và màn hình Đang phát.";
+"LG_SONG_THEME_PLAYER_DESC" = "Dùng màu ảnh bìa làm nền cho trình phát toàn màn hình.";
 "LG_FULLPLAYER_V2" = "Trình phát toàn màn hình V2";
 "LG_FULLPLAYER_V2_DESC" = "Thẻ ảnh bìa, bảng điều khiển kính, thanh tua và tiêu đề chia đôi.";
 "LG_LYRICS_V2" = "Lời bài hát V2";
-"LG_LYRICS_V2_DESC" = "Nền nhúng và các thẻ dòng đang nổi bật.";
+"LG_LYRICS_V2_DESC" = "Nền nhúng với ảnh bìa làm mờ phía sau lời bài hát.";
 "LG_LYRICS_BUTTON" = "Nút lời bài hát";
 "LG_LYRICS_BUTTON_DESC" = "Giữ một mục lời bài hát luôn hiện ở V1 và V2.";
 "LG_QUEUE_V2" = "Hàng đợi V2";

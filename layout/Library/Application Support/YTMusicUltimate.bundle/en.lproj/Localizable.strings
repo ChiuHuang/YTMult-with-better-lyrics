@@ -203,11 +203,11 @@
 "LG_SONG_THEME_WHOLE" = "Whole-app song theme";
 "LG_SONG_THEME_WHOLE_DESC" = "Apple Music-style color atmosphere across the app.";
 "LG_SONG_THEME_PLAYER" = "Player song theme";
-"LG_SONG_THEME_PLAYER_DESC" = "Use artwork colors in V1 mini-player and Now Playing.";
+"LG_SONG_THEME_PLAYER_DESC" = "Use the artwork colors as the full player's background.";
 "LG_FULLPLAYER_V2" = "Full Player V2";
 "LG_FULLPLAYER_V2_DESC" = "Artwork card, transport glass, scrubber and split header.";
 "LG_LYRICS_V2" = "Lyrics V2";
-"LG_LYRICS_V2_DESC" = "Immersive background and active lyric cards.";
+"LG_LYRICS_V2_DESC" = "Immersive blurred-cover background behind the lyrics.";
 "LG_LYRICS_BUTTON" = "Lyrics button";
 "LG_LYRICS_BUTTON_DESC" = "Keep a visible lyrics entry in V1 and V2.";
 "LG_QUEUE_V2" = "Queue V2";

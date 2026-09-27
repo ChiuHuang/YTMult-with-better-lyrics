@@ -147,6 +147,13 @@
 @property (nonatomic, strong) NSMutableDictionary *typeState;
 @property (nonatomic, strong) NSMutableSet *typeRows;
 @property (nonatomic, assign) NSTimeInterval typeLastWall;
+// NO until something proves the translation is being produced live, so a
+// cached payload paints whole. Armed by the stream on `lyrics stage=raw` (a
+// live fetch is about to stream) and by a blocking response the server tagged
+// cached:0; cleared on every song change. Read by ytmu_typeStep AND by
+// ytmu_typeRow:activate: -- the latter is the one that would otherwise install
+// a zero-fraction mask on a cache hit and blank the line outright.
+@property (nonatomic, assign) BOOL typewriterLive;
 - (void)updateLyrics:(NSArray *)newLyrics;
 - (void)fetchLyricsForVideo:(NSString *)videoID;
 - (void)loadArtworkForVideo:(NSString *)videoID;

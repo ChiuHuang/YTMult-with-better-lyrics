@@ -203,11 +203,11 @@
 "LG_SONG_THEME_WHOLE" = "全應用程式歌曲主題";
 "LG_SONG_THEME_WHOLE_DESC" = "整個應用程式採用 Apple Music 風格的配色氛圍。";
 "LG_SONG_THEME_PLAYER" = "播放器歌曲主題";
-"LG_SONG_THEME_PLAYER_DESC" = "在 V1 迷你播放器和正在播放畫面使用封面配色。";
+"LG_SONG_THEME_PLAYER_DESC" = "用封面圖的顏色作為全螢幕播放器的背景。";
 "LG_FULLPLAYER_V2" = "全螢幕播放器 V2";
 "LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制區、進度條和分割標題列。";
 "LG_LYRICS_V2" = "歌詞 V2";
-"LG_LYRICS_V2_DESC" = "沉浸式背景和目前歌詞卡片。";
+"LG_LYRICS_V2_DESC" = "歌詞背後模糊封面圖打造的沉浸式背景。";
 "LG_LYRICS_BUTTON" = "歌詞按鈕";
 "LG_LYRICS_BUTTON_DESC" = "在 V1 和 V2 保留一個可見的歌詞入口。";
 "LG_QUEUE_V2" = "佇列 V2";

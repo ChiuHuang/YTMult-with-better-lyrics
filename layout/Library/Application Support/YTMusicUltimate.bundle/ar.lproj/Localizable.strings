@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "موضوع الأغنية في التطبيق كله";
 "LG_SONG_THEME_WHOLE_DESC" = "أجواء لونية بأسلوب Apple Music في التطبيق كله.";
 "LG_SONG_THEME_PLAYER" = "موضوع الأغنية في المشغل";
-"LG_SONG_THEME_PLAYER_DESC" = "يستخدم ألوان الغلاف في المشغل المصغّر V1 وفي شاشة التشغيل الحالي.";
+"LG_SONG_THEME_PLAYER_DESC" = "يستخدم ألوان الغلاف كخلفية للمشغل بملء الشاشة.";
 "LG_FULLPLAYER_V2" = "المشغل بملء الشاشة V2";
 "LG_FULLPLAYER_V2_DESC" = "بطاقة الغلاف وأدوات تحكم زجاجية وشريط تقدّم وترويسة مقسّمة.";
 "LG_LYRICS_V2" = "الكلمات V2";
-"LG_LYRICS_V2_DESC" = "خلفية غامرة وبطاقات للسطر النشط.";
+"LG_LYRICS_V2_DESC" = "خلفية غامرة بصورة الغلاف خلف الكلمات.";
 "LG_LYRICS_BUTTON" = "زر الكلمات";
 "LG_LYRICS_BUTTON_DESC" = "يُبقي مدخلاً مرئياً للكلمات في V1 و V2.";
 "LG_QUEUE_V2" = "قائمة الانتظار V2";

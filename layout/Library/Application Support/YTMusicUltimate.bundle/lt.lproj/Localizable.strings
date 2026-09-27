@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "Visos programos dainos tema";
 "LG_SONG_THEME_WHOLE_DESC" = "Apple Music stiliaus spalvų atmosfera visoje programoje.";
 "LG_SONG_THEME_PLAYER" = "Grotuvo dainos tema";
-"LG_SONG_THEME_PLAYER_DESC" = "Naudoja albumo viršelio spalvas V1 mini grotuve ir ekrane Dabar groja.";
+"LG_SONG_THEME_PLAYER_DESC" = "Naudoti albumo menamas spalvas viso ekrano grotnio fonu.";
 "LG_FULLPLAYER_V2" = "Viso ekrano grotuvas V2";
 "LG_FULLPLAYER_V2_DESC" = "Viršelio kortelė, stiklinė valdymo juosta, slankiklis ir padalinta antraštė.";
 "LG_LYRICS_V2" = "Dainos žodžiai V2";
-"LG_LYRICS_V2_DESC" = "Įtraukiantis fonas ir aktyvios eilutės kortelės.";
+"LG_LYRICS_V2_DESC" = "Įtraukiantis fonas su išblukusiu albumo menamu už teksto.";
 "LG_LYRICS_BUTTON" = "Dainos žodžių mygtukas";
 "LG_LYRICS_BUTTON_DESC" = "Išlaiko matomą dainos žodžių įėjimą V1 ir V2.";
 "LG_QUEUE_V2" = "Eilė V2";
