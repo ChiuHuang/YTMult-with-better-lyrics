@@ -62,7 +62,11 @@
 @property (nonatomic, strong) CAGradientLayer *typeMask;
 - (void)setWipeProgress:(CGFloat)progress;
 - (void)clearWipe;
-// fraction 0 hides the text, 1 shows all of it.
+@end
+
+// (Typewriter) category for the cell -- see the note on the view controller's
+// copy below. fraction 0 hides the text, 1 shows all of it.
+@interface YTMULyricsCell (Typewriter)
 - (void)ytmu_setTypeFraction:(CGFloat)fraction;
 - (void)ytmu_clearType;
 @end
@@ -149,6 +153,21 @@
 - (void)forceReloadLyrics;
 - (void)dismissModal;
 - (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges;
+@end
+
+// The five methods below are implemented in Source/LyricsStream.x as
+// @implementation YTMULyricsViewController (Typewriter) -- the matching
+// YTMULyricsCell (Typewriter) pair is above. They must NOT be declared in the
+// primary @interface: a primary declaration obliges EVERY @implementation of
+// that class to define the method, and a definition in a category in another
+// file does not satisfy it, so LyricsSheet.x fails with
+// -Werror,-Wincomplete-implementation. A category declaration carries no such
+// requirement, which is why LyricsStream.x forward-declares them the same way.
+//
+// The PROPERTIES stay in the primary @interface on purpose: clang
+// auto-synthesizes their accessors and ivars in LyricsSheet.x, and a property
+// declared in a category gets no synthesis at all.
+@interface YTMULyricsViewController (Typewriter)
 - (void)ytmu_openTranslateStream:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
 - (void)ytmu_cancelTranslateStream;
 - (void)ytmu_typeRow:(NSInteger)row activate:(BOOL)activate;
