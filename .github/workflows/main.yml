@@ -149,7 +149,7 @@ jobs:
 
             ### 📦 Downloads
             - **[Download IPA]**
-            - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)
+            - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
             - **[Asia Mirror](${{ env.MIRROR_URL }})** 
 
             ### AltStore Source
