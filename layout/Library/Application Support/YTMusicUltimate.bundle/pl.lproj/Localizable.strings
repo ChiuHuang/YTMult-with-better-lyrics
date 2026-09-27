@@ -36,6 +36,8 @@
 "SB_SKIP" = "Pomiń";
 "SB_ASK" = "Zapytaj";
 "SB_NOTIF_DURATION" = "Czas powiadomienia (sek.)";
+"SB_LYRICS_OFFSET" = "Przesun tekst, gdy pominieto intro";
+"SB_LYRICS_OFFSET_DESC" = "Przenosi tekst na poczatek utworu, gdy pominieta niemuzyczna czesc intro";
 
 "SEEK_BUTTONS" = "Zamień przyciski następny/poprzedni na do przodu/do tyłu";
 "SEEK_TIME_FOOTER" = "Wybierz czas przewijania w sekundach\n\Domyślnie:\nW tył = 10 sek.\nW przód = 30 sek.\n\nPomijanie utworów do przodu/tyłu jest możliwe przy dłuższym przytrzymaniu przycisku przewijania.";

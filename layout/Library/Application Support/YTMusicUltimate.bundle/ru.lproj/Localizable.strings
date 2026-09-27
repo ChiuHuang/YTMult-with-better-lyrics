@@ -36,6 +36,8 @@
 "SB_SKIP" = "Перемотать";
 "SB_ASK" = "Спросить";
 "SB_NOTIF_DURATION" = "Длительность уведомлений (сек.)";
+"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
+"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
 
 "SEEK_BUTTONS" = "Заменить «След.» и «Пред.» на кнопки перемотки";
 "SEEK_TIME_FOOTER" = "Выберите время перемотки в секундах\n\nПо умолчанию:\nПеремотка назад = 10cек.\nПеремотка вперед = 30cек.\n\nПереходить к следующему и предыдущему трекам можно долгим нажатием по кнопкам.";

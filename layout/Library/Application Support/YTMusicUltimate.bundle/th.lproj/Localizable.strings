@@ -36,6 +36,8 @@
 "SB_SKIP" = "ข้าม";
 "SB_ASK" = "ถามก่อน";
 "SB_NOTIF_DURATION" = "ระยะเวลาแจ้งเตือน (วินาที)";
+"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
+"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
 
 "SEEK_BUTTONS" = "แทนที่ปุ่มถัดไป/ก่อนหน้า ด้วยปุ่มกรอไปข้างหน้าและย้อนกลับ";
 "SEEK_TIME_FOOTER" = "เลือกเวลาการกรอเป็นวินาที\n\nค่าเริ่มต้น:\nย้อนกลับ = 10 วินาที\nกรอไปข้างหน้า = 30 วินาที\n\nสามารถข้ามไปเพลงถัดไปหรือก่อนหน้าได้โดยกดค้างที่ปุ่ม";

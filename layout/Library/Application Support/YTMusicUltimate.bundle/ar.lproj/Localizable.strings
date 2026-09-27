@@ -36,6 +36,8 @@
 "SB_SKIP" = "Skip";
 "SB_ASK" = "Ask";
 "SB_NOTIF_DURATION" = "Notification duration (sec)";
+"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
+"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
 
 "SEEK_BUTTONS" = "استبدال الإعجاب/عدم الإعجاب بأزرار أمامية وخلفية";
 "SEEK_TIME_FOOTER" = "حدد وقت التقدم بالثواني\n\nالافتراضي:\nالتقدم للخلف = 10 ثوانٍ\nالتقدم للأمام = 30 ثانية\n\nالانتقال إلى الموسيقي التالية والسابقة عن طريق الضغط لفترة طويلة على الأزرار.";

@@ -36,6 +36,8 @@
 "SB_SKIP" = "Praleisti";
 "SB_ASK" = "Klausti";
 "SB_NOTIF_DURATION" = "Pranešimo trukmė (sek)";
+"SB_LYRICS_OFFSET" = "Pastumyti dainas, jei praleidziama ivadinto dalis";
+"SB_LYRICS_OFFSET_DESC" = "Perkelia dainos zodas i dainos pradzia, kai praleidziama ne muzikine ivadinto dalis";
 
 "SEEK_BUTTONS" = "Pakeisti mygtukus kitas/buvęs mygtukais sukti į priekį/atgal";
 "SEEK_TIME_FOOTER" = "Pasirinkti pasukimo laiką sekundėmis\n\nNumatytieji:\nSukti atgal = 10 sek.\nSukti į priekį = 30 sek.";
