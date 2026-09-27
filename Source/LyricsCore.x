@@ -570,7 +570,7 @@ void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
 // this is one small read per track and no provider traffic at all: when the
 // next song starts its switcher is already warm. RAM only -- nothing on disk.
 void YTMUPrefetchProviderLyrics(NSArray *videoIDs, NSString *lang) {
-    if (!videoIDs.length) return;
+    if (!videoIDs.count) return;
     NSMutableArray *todo = [NSMutableArray array];
     for (NSString *vid in videoIDs) {
         if (![vid isKindOfClass:[NSString class]] || !vid.length) continue;
