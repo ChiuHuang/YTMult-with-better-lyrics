@@ -5,10 +5,10 @@
 [![Nightly IPA](assets/badges/release.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
 [![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 
-[![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
-[![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
-[![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
-[![Nodes online](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=nodes)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
+![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)
+![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)
+![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks)
+![Nodes online](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=nodes)
 
 YouTube Music iOS tweak + a self-hosted lyrics server: synced and
 word-synced lyrics, multi-provider race, translation, and an admin dashboard.
@@ -16,6 +16,9 @@ Open source — forks and pull requests welcome.
 
 ## Download
 
+> **Before v1.0:** builds land fast — most pushes to `main` ship a new IPA, so
+> expect the updater to ask you to reinstall often. This settles down after
+> v1.0.
 
 - **Releases (IPA):** https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases
   Every push to `main` builds `YTMusicUltimate.ipa` as `build-N`.

@@ -69,7 +69,22 @@ def api_app_stats():
 # ------------------------------------------------------------
 # MD3 badge renderer (same look as assets/badges/*.svg)
 # ------------------------------------------------------------
-_BADGE_GLYPH = 'M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z'  # download arrow
+# One glyph per type, so the row does not read as five download buttons.
+# Same stroke style as the static badges, drawn on a 14x14 box.
+_BADGE_GLYPHS = {
+    'release': '<path class="glyph" d="M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z"/>',
+    'lyrics': '<path class="glyph" d="M5 10V4.5L10 3.2V9"/>'
+               '<circle class="glyph" cx="3.8" cy="10" r="1.8"/>'
+               '<circle class="glyph" cx="10.2" cy="9" r="1.8"/>',
+    'devices': '<rect class="glyph" x="4" y="2.5" width="6" height="9" rx="1.4"/>'
+               '<path class="glyph" d="M6.4 9.7h1.2"/>',
+    'tracks': '<circle class="glyph" cx="7" cy="7" r="4.6"/>'
+              '<circle class="glyph" cx="7" cy="7" r="0.9"/>',
+    'nodes': '<rect class="glyph" x="2.5" y="2.5" width="9" height="3.6" rx="1"/>'
+             '<rect class="glyph" x="2.5" y="7.9" width="9" height="3.6" rx="1"/>'
+             '<circle class="glyph" cx="4.6" cy="4.3" r="0.4"/>'
+             '<circle class="glyph" cx="4.6" cy="9.7" r="0.4"/>',
+}
 _BADGE_CHAR_W = 7.4   # px per char at 13px/500 Roboto
 _BADGE_RESERVED = 42  # chip (28) + text start gap
 
@@ -78,7 +93,7 @@ def _xml_esc(s):
     return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
-def _badge_svg(text, aria=None):
+def _badge_svg(text, aria=None, glyph='release'):
     """Server-rendered MD3 pill. Plain %s substitution: str.format would
     choke on the CSS braces. textLength forces an exact fit, so measure the
     WHOLE string (prefix + value) -- measuring the value alone squeezed a
@@ -99,20 +114,22 @@ def _badge_svg(text, aria=None):
         '<rect class="bg" width="%d" height="32" rx="16"/>'
         '<circle class="chip" cx="16" cy="16" r="12"/>'
         '<g transform="translate(9,9)">'
-        '<path class="glyph" d="%s"/>'
+        '%s'
         '</g>'
         '<text class="fg" x="33" y="20.5" textLength="%d" '
         'lengthAdjust="spacingAndGlyphs">%s</text></svg>'
-    ) % (w, w, _xml_esc(aria or text), w, _BADGE_GLYPH,
+    ) % (w, w, _xml_esc(aria or text), w,
+         _BADGE_GLYPHS.get(glyph, _BADGE_GLYPHS['release']),
          max(10, w - _BADGE_RESERVED), _xml_esc(text))
 
 
 def _badge_tracks_cached():
     """Distinct cached (video_id, lang) pairs. Filenames only -- scan_cache()
     would open every JSON file, far too slow for a badge."""
+    from .app import _ROOT
     from .cache import _cache_key_from_filename
     try:
-        names = os.listdir(os.path.join('cache', 'lyrics'))
+        names = os.listdir(os.path.join(_ROOT, 'cache', 'lyrics'))
     except OSError:
         return 0
     keys = set()
@@ -128,6 +145,40 @@ def _badge_tracks_cached():
     return len(keys)
 
 
+# Serving counters live in cache/usage_stats.json, which only counts what this
+# process instance served since it started -- it reads low after a restart or
+# a redeploy. The log file has every serve the box ever did (plus one rotated
+# generation), so estimate from that instead. Scanned at most every 30s.
+_LOG_SCAN = {'at': 0.0, 'served': 0}
+_LOG_SCAN_TTL = 30.0
+
+
+def _served_from_logs():
+    """Estimate serves: one 'Returning' line per /api/lyrics response plus one
+    'push FINAL' per completed stream. Counts lines, not distinct req_ids --
+    req_id is only 3 bytes of hex, so ids repeat and would undercount."""
+    now = time_module.time()
+    if now - _LOG_SCAN['at'] < _LOG_SCAN_TTL:
+        return _LOG_SCAN['served']
+    from .app import SERVER_LOG_FILE
+    served = 0
+    for path in (SERVER_LOG_FILE, SERVER_LOG_FILE + '.1'):
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    if '[SEND] [REQ ' not in line:
+                        continue
+                    # one per lyrics response; stream requests log 3 pushes
+                    # (RAW/MACHINE/FINAL) and only the FINAL one is a serve
+                    if ' Returning ' in line or '[Stream] push FINAL' in line:
+                        served += 1
+        except OSError:
+            continue
+    _LOG_SCAN['at'] = now
+    _LOG_SCAN['served'] = served
+    return served
+
+
 def _badge_nodes_online():
     from .nodes import connected_nodes, _connected_nodes_lock
     with _connected_nodes_lock:
@@ -135,7 +186,7 @@ def _badge_nodes_online():
 
 
 def _badge_text(btype):
-    """'<prefix>: <value>' for a badge type, or None when unknown."""
+    """'<label> <value>' for a badge type, or None when unknown."""
     if btype == 'release':
         from .release_info import latest_release
         try:
@@ -143,15 +194,19 @@ def _badge_text(btype):
         except Exception:
             tag = 'unknown'
         return f'Download Last Build: {tag[:24]}'
-    if btype in ('lyrics', 'devices'):
+    if btype == 'lyrics':
+        served = _served_from_logs()
+        if served <= 0:                      # no log yet -> usage counter
+            from .usage_stats import snapshot
+            served = int(snapshot().get('served', 0))
+        return f'Lyrics {served:,}'
+    if btype == 'devices':
         from .usage_stats import snapshot
-        key = 'served' if btype == 'lyrics' else 'users'
-        prefix = 'Lyrics served' if btype == 'lyrics' else 'Devices'
-        return f'{prefix}: {int(snapshot().get(key, 0)):,}'
+        return f"Devices {int(snapshot().get('users', 0)):,}"
     if btype == 'tracks':
-        return f'Tracks cached: {_badge_tracks_cached():,}'
+        return f"Tracks {_badge_tracks_cached():,}"
     if btype == 'nodes':
-        return f'Nodes online: {_badge_nodes_online()}'
+        return f'Nodes {_badge_nodes_online()}'
     return None
 
 
@@ -168,7 +223,7 @@ def api_app_badge():
         text = None
     if text is None:
         text = f'{(btype or "badge")[:20]}: unknown'
-    return Response(_badge_svg(text), mimetype='image/svg+xml',
+    return Response(_badge_svg(text, glyph=btype), mimetype='image/svg+xml',
                     headers={'Cache-Control': 'no-store'})
 
 
