@@ -37,9 +37,10 @@ here for legal reasons). Upload it somewhere with a direct link
    Tip: save the URL once as the `BASE_IPA_URL` repo secret (Settings →
    Secrets and variables → Actions) so pushes build without pasting it
    every time — and it stays out of logs and the public workflow file.
-4. The IPA appears under your fork's Releases. Optional repo secrets for
-   the Asia mirror step: `FILE_UPLOAD_URL`, `FILE_UPLOAD_TOKEN`,
-   `FILE_UPLOAD_FIELD` (multipart field name, default `file`).
+4. The IPA appears under your fork's Releases. Each build is also
+   mirrored to the Asia file CDN automatically (see the `Asia mirror:`
+   line in the workflow log); set the optional `FILE_FOLDER_ID` repo
+   secret to group uploads into one folder.
 
 Build troubleshooting: 99% of failures are the base IPA (must be decrypted
 `.ipa`, direct link). If the run is green but you can't find output, append

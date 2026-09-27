@@ -124,24 +124,25 @@ jobs:
           body: |
             ![YTMusicUltimate](https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png)
 
-            Automated build of YTMusicUltimate. Asia mirror + AltStore source in the README.
+            Automated build of YTMusicUltimate.
+
+            - Asia mirror: each build is also uploaded to the file CDN, see the workflow log (`Asia mirror:` line).
+            - AltStore source: https://ytmtranslate.chiuhuang.dev/api/app/altstore
 
       - name: Mirror IPA to file host
         env:
-          FILE_UPLOAD_URL: ${{ secrets.FILE_UPLOAD_URL }}
-          FILE_UPLOAD_TOKEN: ${{ secrets.FILE_UPLOAD_TOKEN }}
-          FILE_UPLOAD_FIELD: ${{ secrets.FILE_UPLOAD_FIELD }}
+          FILE_FOLDER_ID: ${{ secrets.FILE_FOLDER_ID }}
         run: |
-          if [ -z "$FILE_UPLOAD_URL" ]; then
-            echo "::warning::FILE_UPLOAD_URL secret not set, skipping Asia mirror"
-            exit 0
+          UPLOAD_ARGS=(-F "file=@YTMusicUltimate.ipa;type=application/octet-stream")
+          if [ -n "$FILE_FOLDER_ID" ]; then UPLOAD_ARGS+=(-F "folder=$FILE_FOLDER_ID"); fi
+          RESP=$(curl -sL -X POST https://file.chiuhuang.dev/api/public/upload "${UPLOAD_ARGS[@]}" --max-time 900)
+          echo "$RESP"
+          MIRROR_URL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('download_url',''))")
+          if [ -z "$MIRROR_URL" ]; then
+            echo "::error::File host upload failed (no download_url in response)"
+            exit 1
           fi
-          FIELD="${FILE_UPLOAD_FIELD:-file}"
-          curl -f -X POST "$FILE_UPLOAD_URL" \
-            -H "Authorization: Bearer $FILE_UPLOAD_TOKEN" \
-            -F "$FIELD=@YTMusicUltimate.ipa;type=application/octet-stream" \
-            --max-time 600
-          echo "::notice::Mirrored YTMusicUltimate.ipa to file host"
+          echo "::notice::Asia mirror: $MIRROR_URL"
 
       - name: Output Release URL
         run: |
