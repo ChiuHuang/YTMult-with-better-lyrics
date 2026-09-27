@@ -1628,7 +1628,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (!button) return;
     button.layer.masksToBounds = YES;
     [button addTarget:self action:@selector(ytmu_stepperPressIn:)
-     forControlEvents:UIControlEventTouchDownInside];
+     forControlEvents:UIControlEventTouchDown];
     [button addTarget:self action:@selector(ytmu_stepperPressOut:)
      forControlEvents:UIControlEventTouchUpInside];
     [button addTarget:self action:@selector(ytmu_stepperPressOut:)
