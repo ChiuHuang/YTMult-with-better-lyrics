@@ -63,14 +63,14 @@ def api_app_altstore():
     """AltStore source JSON, always pointing at the newest build-N release
     (download via the worker proxy for Asia). Submit this URL on
     altdirect.app to get direct-install links."""
-    from .release_info import latest_release, worker_url
+    from .release_info import ALTSTORE_ICON, latest_release, worker_url
     rel = latest_release()
     if not rel or not rel.get('download_url'):
         return jsonify({'error': 'No release with an IPA asset found'}), 503
     tag = rel.get('tag') or 'build-?'
     version = tag[6:] if tag.startswith('build-') else tag
-    icon_url = rel.get('icon_url') or (
-        f'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
+    icon_url = (rel.get('icon_url') or ALTSTORE_ICON or
+                'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
     return jsonify({
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',
