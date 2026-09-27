@@ -35,6 +35,10 @@
 @interface YTPlayerViewController (YTMUExt)
 - (double)currentMediaTime;
 - (void)seekToTime:(double)time toleranceBefore:(double)before toleranceAfter:(double)after;
+// %new helpers from SponsorBlock.x: Logos does not make them visible to the
+// type checker inside the hook body, so the call sites need the declaration.
+- (double)ytmu_introEndInSegments:(NSArray *)segments;
+- (void)ytmu_applyLyricsOffsetForVideoID:(NSString *)videoID offset:(double)offset reason:(NSString *)reason;
 @end
 
 @interface YTFormattedStringLabel : UILabel
