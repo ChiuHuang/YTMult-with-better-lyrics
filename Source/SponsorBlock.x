@@ -27,7 +27,9 @@
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (!error) {
-            NSDictionary *jsonResponse = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            // The API answers with a list of segment dicts (it was typed
+            // NSDictionary * here, which is what the loop below iterates).
+            NSArray *jsonResponse = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
             if ([NSJSONSerialization isValidJSONObject:jsonResponse]) {
                 NSMutableDictionary *segments = [NSMutableDictionary dictionary];
                 for (NSDictionary *segmentDict in jsonResponse) {
