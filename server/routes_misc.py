@@ -49,6 +49,14 @@ def handle_500(e):
     _log_crash(type(e), e, getattr(e, '__traceback__', None))
     return jsonify({'error': 'Internal error', 'instance': SERVER_INSTANCE_ID}), 500
 
+
+@app.route('/api/app/settings', methods=['GET'])
+def api_app_settings():
+    """Public remote config for the tweak. Open by design (values are
+    non-secret); managed from the dashboard App tab."""
+    from .app_settings import get_all
+    return jsonify({'ok': True, 'settings': get_all()})
+
 def _dump_screen_name(dump_content):
     """Topmost screen from the VC hierarchy section (presented wins, else deepest child)."""
     try:

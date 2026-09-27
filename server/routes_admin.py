@@ -104,6 +104,49 @@ def admin_logs_clear():
     return jsonify({'ok': True})
 
 
+# ---------------------------------------------------------------
+# App settings (tweak remote config): dashboard CRUD, values served
+# publicly at GET /api/app/settings (routes_misc).
+# ---------------------------------------------------------------
+@app.route('/api/admin/app/settings', methods=['GET'])
+@login_required
+def admin_app_settings():
+    from .app_settings import get_all
+    return jsonify({'ok': True, 'settings': get_all()})
+
+
+@app.route('/api/admin/app/settings', methods=['POST'])
+@login_required
+def admin_app_settings_set():
+    """Set one key. Body: {key, value: string|number|boolean}."""
+    from .app_settings import set_one
+    body = request.get_json(silent=True) or {}
+    try:
+        set_one(body.get('key'), body.get('value'))
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    from .app_settings import get_all
+    return jsonify({'ok': True, 'settings': get_all()})
+
+
+@app.route('/api/admin/app/settings', methods=['DELETE'])
+@login_required
+def admin_app_settings_del():
+    """Delete one override key (defaults still apply). Body: {key}."""
+    from .app_settings import delete_one
+    body = request.get_json(silent=True) or {}
+    removed = delete_one(body.get('key') or '')
+    from .app_settings import get_all
+    return jsonify({'ok': True, 'removed': removed, 'settings': get_all()})
+
+
+@app.route('/api/admin/app/settings/reset', methods=['POST'])
+@login_required
+def admin_app_settings_reset():
+    from .app_settings import reset_defaults
+    return jsonify({'ok': True, 'settings': reset_defaults()})
+
+
 @app.route('/api/admin/caches', methods=['GET'])
 @login_required
 def admin_caches():

@@ -84,6 +84,36 @@ NSString *YTMUUrlEncode(NSString *s) {
     return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: s;
 }
 
+NSDictionary *YTMUAppSettings(void) {
+    NSDictionary *cached = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUAppSettings"];
+    return [cached isKindOfClass:[NSDictionary class]] ? cached : @{};
+}
+BOOL YTMUAppSettingBool(NSString *key, BOOL dflt) {
+    id v = YTMUAppSettings()[key];
+    if ([v isKindOfClass:[NSNumber class]]) return [v boolValue];
+    if ([v isKindOfClass:[NSString class]]) {
+        if ([v caseInsensitiveCompare:@"true"] == NSOrderedSame || [v isEqualToString:@"1"]) return YES;
+        if ([v caseInsensitiveCompare:@"false"] == NSOrderedSame || [v isEqualToString:@"0"]) return NO;
+    }
+    return dflt;
+}
+void YTMUFetchAppSettings(void) {
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    NSTimeInterval last = [ud doubleForKey:@"YTMUAppSettingsFetchedAt"];
+    if (last > 0 && [[NSDate date] timeIntervalSince1970] - last < 3600) return;
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/app/settings", YTMUApiBase()]];
+    if (!url) return;
+    [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        if (err || !data) return;
+        NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        NSDictionary *s = json[@"settings"];
+        if (![s isKindOfClass:[NSDictionary class]]) return;
+        NSUserDefaults *ud2 = [NSUserDefaults standardUserDefaults];
+        [ud2 setObject:s forKey:@"YTMUAppSettings"];
+        [ud2 setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"YTMUAppSettingsFetchedAt"];
+    }] resume];
+}
+
 NSString *YTMULyricsTier(NSArray *lyrics) {
     for (NSDictionary *l in lyrics) {
         if (l[@"wordSynced"] && [l[@"parts"] count] > 1) return @"wbw";
@@ -100,11 +130,16 @@ void sendDebugLog(NSString *msg) {
         full = [NSString stringWithFormat:@"%@ [v=%@ t=%.1f]", msg, g_currentVideoID, g_currentPlaybackTime];
     }
     NSLog(@"[YTMU] %@", full);
+    if (!YTMUAppSettingBool(@"upload_logs", YES)) return;
     NSString *encodedMsg = YTMUUrlEncode(full);
     NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=DEBUG_%@", YTMUApiBase(), encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
 }
 void __attribute__((unused)) sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
+    if (!YTMUAppSettingBool(@"upload_logs", YES)) {
+        sendDebugLog([NSString stringWithFormat:@"%@: %@ %@", event, msg, payload ?: @{}]);
+        return;
+    }
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:payload ?: @{}];
     if (g_currentVideoID) dict[@"videoId"] = g_currentVideoID;
     dict[@"playbackTime"] = @(g_currentPlaybackTime);
@@ -683,6 +718,7 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     BOOL result = %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
+        YTMUFetchAppSettings();
     });
     return result;
 }
@@ -700,6 +736,7 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     }];
     void (^prewarmJWT)(NSNotification *) = ^(NSNotification *note) {
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
+        YTMUFetchAppSettings();
     };
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];

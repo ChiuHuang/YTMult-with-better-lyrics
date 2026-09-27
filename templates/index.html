@@ -47,6 +47,7 @@
       <mdui-list-item icon="system_update" data-page="update" href="#/update">Self-Update</mdui-list-item>
       <mdui-list-item icon="folder" data-page="files" href="#/files">Files</mdui-list-item>
       <mdui-list-item icon="bug_report" data-page="crashes" href="#/crashes">Crashes</mdui-list-item>
+      <mdui-list-item icon="phone_iphone" data-page="app" href="#/app">App</mdui-list-item>
     </mdui-list>
     <div class="drawer-foot">server dashboard</div>
   </mdui-navigation-drawer>
@@ -427,6 +428,27 @@
           </div>
           <div class="panel-body">
             <div id="crash-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <section id="page-app" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">App settings</span>
+            <span class="spacer"></span>
+            <mdui-button id="app-reset" variant="text" icon="restart_alt">Reset defaults</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              Remote config for the tweak, served publicly at <span class="mono">GET /api/app/settings</span> (non-secret values only). Devices fetch on launch.
+            </div>
+            <div id="app-list" class="list-grid" style="margin-bottom:12px;"></div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+              <mdui-text-field id="app-key" label="Key" style="width:180px;"></mdui-text-field>
+              <mdui-text-field id="app-value" label="Value (true/false/number/text)" style="flex:1; min-width:200px;"></mdui-text-field>
+              <mdui-button id="app-set" variant="tonal" icon="save">Save</mdui-button>
+            </div>
           </div>
         </mdui-card>
       </section>
