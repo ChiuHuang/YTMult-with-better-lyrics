@@ -1,5 +1,8 @@
 # YTMusicUltimate (with better lyrics)
 
+[![Build](https://github.com/ChiuHuang/YTMult-with-better-lyrics/actions/workflows/main.yml/badge.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/actions)
+[![Downloads](https://img.shields.io/github/downloads/ChiuHuang/YTMult-with-better-lyrics/total)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
+
 YouTube Music iOS tweak + a self-hosted lyrics server: synced and
 word-synced lyrics, multi-provider race, translation, and an admin dashboard.
 Open source — forks and pull requests welcome.
@@ -9,11 +12,14 @@ Open source — forks and pull requests welcome.
 
 - **Releases (IPA):** https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases
   Every push to `main` builds `YTMusicUltimate.ipa` as `build-N`.
+- **Asia mirror:** prefix any release URL with the worker proxy, e.g.
+  `http://workersproxy.codefoxy.workers.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-160/YTMusicUltimate.ipa`
+  The in-app updater opens this proxied link automatically.
 <a href="https://stikstore.app/altdirect/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore" target="_blank">
    <img src="https://raw.githubusercontent.com/StikStore/altdirect/refs/heads/main/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"/>
 </a>
 
-- **AltStore:** add this source URL (or paste it on altdirect.app):
+- **AltStore / SideStore / Feather:** add this source URL (or paste it on altdirect.app):
   `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
 - **Jailbreak (.deb):** build locally with Theos (below).
 
@@ -27,6 +33,9 @@ here for legal reasons). Upload it somewhere with a direct link
 2. Fork settings → Actions → enable Read and Write permissions.
 3. Actions tab → "Build and Release YTMusicUltimate" → Run workflow,
    paste your decrypted IPA URL (plus optional app name / bundle ID).
+   Tip: save the URL once as the `BASE_IPA_URL` repo secret (Settings →
+   Secrets and variables → Actions) so pushes build without pasting it
+   every time — and it stays out of logs and the public workflow file.
 4. The IPA appears under your fork's Releases. Optional repo secrets for
    the Asia mirror step: `FILE_UPLOAD_URL`, `FILE_UPLOAD_TOKEN`,
    `FILE_UPLOAD_FIELD` (multipart field name, default `file`).
