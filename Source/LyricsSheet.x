@@ -14,9 +14,9 @@ static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
 
 // Dynamic ink: white in dark mode, black in light mode. Deployment target is
 // iOS 13 so colorWithDynamicProvider is always available at runtime.
-// TODO(theme): migrate remaining users (modal close button, play-button
-// fallbacks) to background-derived ink (YTMULyricInk/YTMULyricFill) so every
-// surface follows the blurred artwork instead of the OS theme.
+// NOTE: lyrics chrome must use the YTMULyric* background-derived inks below,
+// not these theme-based ones: the sheet sits on blurred artwork whose
+// brightness is independent of the OS theme.
 UIColor *YTMUAdaptiveInk(CGFloat darkAlpha, CGFloat lightAlpha) {
     return [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
@@ -78,6 +78,16 @@ static UIColor *YTMULyricFill(UIView *refView) {
     BOOL light = YTMUBgIsLight(refView);
     return [(light ? [UIColor blackColor] : [UIColor whiteColor])
             colorWithAlphaComponent:(light ? 0.10 : 0.15)];
+}
+// Base wash + blur style, also keyed on background brightness (not the OS
+// theme). Snapshots: re-resolve via ytmu_refreshBgDerivedInk when the probe
+// lands (until then YTMUBgIsLight falls back to the OS theme).
+static UIColor *YTMUBgBaseColor(UIView *refView) {
+    if (YTMUBgIsLight(refView)) return [UIColor systemBackgroundColor];
+    return [[UIColor blackColor] colorWithAlphaComponent:0.95];
+}
+static UIBlurEffectStyle YTMUBgBlurStyle(UIView *refView) {
+    return YTMUBgIsLight(refView) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark;
 }
 // Mean artwork color for the song-tinted background wash.
 static UIColor *YTMUArtworkAverageColor(UIImage *img) {
@@ -300,9 +310,9 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
         [self.wipeLabel addGestureRecognizer:tapGR];
 
         self.wipeMask = [CAShapeLayer layer];
-        self.wipeMask.fillColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-            return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor blackColor] : [UIColor whiteColor];
-        }].CGColor;
+        // A mask only reads alpha, so any opaque color masks identically;
+        // keep it static white (no OS-theme dependency).
+        self.wipeMask.fillColor = [UIColor whiteColor].CGColor;
         self.wipeMask.frame = CGRectZero;
         self.wipeLabel.layer.mask = self.wipeMask;
         _wipeProgress = 0.0;
@@ -321,10 +331,12 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
         self.transLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.transLabel];
 
+        // Content sits well in from the left edge: the landscape album column
+        // butts against the table, so the lyrics need a clear gutter.
         [NSLayoutConstraint activateConstraints:@[
             [self.lyricLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
-            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
-            [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
+            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:48],
+            [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-28],
 
             [self.wipeLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.topAnchor],
             [self.wipeLabel.leadingAnchor constraintEqualToAnchor:self.lyricLabel.leadingAnchor],
@@ -332,8 +344,8 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
             [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
 
             [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:6],
-            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
-            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
+            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:48],
+            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-28],
             [self.transLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
         ]];
     }
@@ -501,9 +513,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.currentIndex = -1;
     self.activeIndexes = nil;
     self.suppressWordSeekRow = -1;
-    self.view.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor systemBackgroundColor] : [[UIColor blackColor] colorWithAlphaComponent:0.95];
-    }];
+    self.view.backgroundColor = YTMUBgBaseColor(self.view);
 
     self.artworkImageView = [[UIImageView alloc] initWithFrame:self.view.bounds];
     self.artworkImageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -511,18 +521,17 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.artworkImageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.artworkImageView atIndex:0];
 
-    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:(YTMUInterfaceIsLight(self.view) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark)];
+    UIBlurEffect *blurEffect = [UIBlurEffect effectWithStyle:YTMUBgBlurStyle(self.view)];
     self.blurView = [[UIVisualEffectView alloc] initWithEffect:blurEffect];
     self.blurView.frame = self.view.bounds;
     self.blurView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.blurView aboveSubview:self.artworkImageView];
 
     self.darkOverlay = [[UIView alloc] initWithFrame:self.view.bounds];
-    self.darkOverlay.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
-        if (tc.userInterfaceStyle == UIUserInterfaceStyleLight)
-            return [[UIColor blackColor] colorWithAlphaComponent:0.30];
-        return [[UIColor blackColor] colorWithAlphaComponent:0.48];
-    }];
+    // Dim the ambient blur for contrast; keyed on background brightness so
+    // bright covers get the lighter wash and dark covers the heavier one.
+    // Snapshot: refreshed with the bucket in ytmu_refreshBgDerivedInk.
+    self.darkOverlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:(YTMUBgIsLight(self.view) ? 0.30 : 0.48)];
     self.darkOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.darkOverlay aboveSubview:self.blurView];
 
@@ -555,7 +564,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     UIButton *menuBtn = [UIButton buttonWithType:UIButtonTypeSystem];
     menuBtn.frame = CGRectMake(self.view.bounds.size.width - 52, 10, 36, 36);
     menuBtn.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
-    menuBtn.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    menuBtn.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     if (@available(iOS 13.0, *)) {
         UIImage *menuImg = [UIImage systemImageNamed:@"list.bullet"];
         if (menuImg) {
@@ -563,13 +572,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [menuBtn setTitle:@"" forState:UIControlStateNormal];
         } else {
             [menuBtn setTitle:@"..." forState:UIControlStateNormal];
-            [menuBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+            [menuBtn setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
         }
     } else {
         [menuBtn setTitle:@"..." forState:UIControlStateNormal];
-        [menuBtn setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [menuBtn setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
     }
-    menuBtn.backgroundColor = YTMUAdaptiveFill();
+    menuBtn.backgroundColor = YTMULyricFill(self.view);
     menuBtn.layer.cornerRadius = 18;
     [menuBtn addTarget:self action:@selector(ytmu_headerMenu:) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:menuBtn];
@@ -579,9 +588,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
         closeBtn.frame = CGRectMake(16, 10, 36, 36);
         [closeBtn setTitle:@"X" forState:UIControlStateNormal];
-        [closeBtn setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
+        [closeBtn setTitleColor:YTMULyricInk(1.0, 1.0, self.view) forState:UIControlStateNormal];
         closeBtn.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-        closeBtn.backgroundColor = YTMUAdaptiveFill();
+        closeBtn.backgroundColor = YTMULyricFill(self.view);
         closeBtn.layer.cornerRadius = 18;
         [closeBtn addTarget:self action:@selector(dismissModal) forControlEvents:UIControlEventTouchUpInside];
         [header addSubview:closeBtn];
@@ -610,7 +619,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeArtImageView = [[UIImageView alloc] initWithFrame:CGRectZero];
     self.landscapeArtImageView.contentMode = UIViewContentModeScaleAspectFill;
     self.landscapeArtImageView.clipsToBounds = YES;
-    self.landscapeArtImageView.backgroundColor = YTMUAdaptiveFill();
+    self.landscapeArtImageView.backgroundColor = YTMULyricFill(self.view);
     self.landscapeArtImageView.userInteractionEnabled = NO;
     self.landscapeArtImageView.layer.cornerRadius = 10;
     self.landscapeArtImageView.layer.masksToBounds = YES;
@@ -648,19 +657,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeInfoPanel addSubview:self.landscapeArtistLabel];
 
     self.landscapeProgressTrack = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeProgressTrack.backgroundColor = YTMUAdaptiveInk(0.25, 0.2);
+    self.landscapeProgressTrack.backgroundColor = YTMULyricInk(0.25, 0.2, self.view);
     self.landscapeProgressTrack.layer.cornerRadius = 1.5;
     self.landscapeProgressTrack.layer.masksToBounds = YES;
     [self.landscapeInfoPanel addSubview:self.landscapeProgressTrack];
 
     self.landscapeProgressFill = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeProgressFill.backgroundColor = YTMUAdaptiveInk(0.95, 0.9);
+    self.landscapeProgressFill.backgroundColor = YTMULyricInk(0.95, 0.9, self.view);
     self.landscapeProgressFill.layer.cornerRadius = 1.5;
     self.landscapeProgressFill.layer.masksToBounds = YES;
     [self.landscapeProgressTrack addSubview:self.landscapeProgressFill];
 
     self.landscapeProgressKnob = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeProgressKnob.backgroundColor = YTMUAdaptiveInk(1.0, 1.0);
+    self.landscapeProgressKnob.backgroundColor = YTMULyricInk(1.0, 1.0, self.view);
     self.landscapeProgressKnob.layer.cornerRadius = 4;
     self.landscapeProgressKnob.layer.masksToBounds = YES;
     self.landscapeProgressKnob.userInteractionEnabled = NO;
@@ -682,7 +691,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // Minimal icon transport (Image-2): plain prev/next glyphs, play/pause
     // as a filled circle. Colors follow the OS theme via the icon setters.
     self.landscapePrevButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapePrevButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapePrevButton.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     self.landscapePrevButton.backgroundColor = [UIColor clearColor];
     self.landscapePrevButton.tag = 7101;
     self.landscapePrevButton.accessibilityLabel = @"Previous track";
@@ -692,8 +701,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeInfoPanel addSubview:self.landscapePrevButton];
 
     self.landscapePlayButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapePlayButton.tintColor = [UIColor whiteColor];
-    self.landscapePlayButton.backgroundColor = YTMUAdaptiveInk(1.0, 0.9);
+    self.landscapePlayButton.tintColor = YTMULyricInk(1.0, 1.0, self.view);
+    self.landscapePlayButton.backgroundColor = YTMULyricInk(1.0, 0.9, self.view);
     self.landscapePlayButton.layer.masksToBounds = YES;
     self.landscapePlayButton.tag = 7102;
     self.landscapePlayButton.accessibilityLabel = @"Play or pause";
@@ -703,7 +712,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeInfoPanel addSubview:self.landscapePlayButton];
 
     self.landscapeNextButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeNextButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapeNextButton.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     self.landscapeNextButton.backgroundColor = [UIColor clearColor];
     self.landscapeNextButton.layer.cornerRadius = 18;
     self.landscapeNextButton.tag = 7103;
@@ -717,7 +726,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     // Exit: top-right icon button (xmark symbol, "X" text fallback)
     self.landscapeExitButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeExitButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapeExitButton.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     if (@available(iOS 13.0, *)) {
         UIImage *xmark = [UIImage systemImageNamed:@"xmark"];
         if (xmark) {
@@ -725,15 +734,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self.landscapeExitButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapeExitButton setTitle:@"X" forState:UIControlStateNormal];
-            [self.landscapeExitButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+            [self.landscapeExitButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
             self.landscapeExitButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
         }
     } else {
         [self.landscapeExitButton setTitle:@"X" forState:UIControlStateNormal];
-        [self.landscapeExitButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [self.landscapeExitButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
         self.landscapeExitButton.titleLabel.font = [UIFont boldSystemFontOfSize:14];
     }
-    self.landscapeExitButton.backgroundColor = YTMUAdaptiveFill();
+    self.landscapeExitButton.backgroundColor = YTMULyricFill(self.view);
     self.landscapeExitButton.layer.cornerRadius = 16;
     self.landscapeExitButton.hidden = YES;
     [self.landscapeExitButton addTarget:self action:@selector(dismissModal) forControlEvents:UIControlEventTouchUpInside];
@@ -741,35 +750,35 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     // Bottom-right floating toolbar (Image-2): provider list + reload icons.
     self.landscapeToolbar = [[UIView alloc] initWithFrame:CGRectZero];
-    self.landscapeToolbar.backgroundColor = YTMUAdaptiveFill();
+    self.landscapeToolbar.backgroundColor = YTMULyricFill(self.view);
     self.landscapeToolbar.layer.cornerRadius = 17;
     self.landscapeToolbar.layer.masksToBounds = YES;
     self.landscapeToolbar.hidden = YES;
     [self.view addSubview:self.landscapeToolbar];
 
     self.landscapeProviderButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeProviderButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapeProviderButton.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     if (@available(iOS 13.0, *)) {
         UIImage *pImg = [UIImage systemImageNamed:@"list.bullet"];
         if (pImg) [self.landscapeProviderButton setImage:pImg forState:UIControlStateNormal];
     }
     if (!self.landscapeProviderButton.imageView.image) {
         [self.landscapeProviderButton setTitle:@"..." forState:UIControlStateNormal];
-        [self.landscapeProviderButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [self.landscapeProviderButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
     }
     self.landscapeProviderButton.accessibilityLabel = @"Lyric providers";
     [self.landscapeProviderButton addTarget:self action:@selector(ytmu_openProviderMenuFromView:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeToolbar addSubview:self.landscapeProviderButton];
 
     self.landscapeReloadButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.landscapeReloadButton.tintColor = YTMUAdaptiveInk(0.9, 0.9);
+    self.landscapeReloadButton.tintColor = YTMULyricInk(0.9, 0.9, self.view);
     if (@available(iOS 13.0, *)) {
         UIImage *rImg = [UIImage systemImageNamed:@"arrow.clockwise"];
         if (rImg) [self.landscapeReloadButton setImage:rImg forState:UIControlStateNormal];
     }
     if (!self.landscapeReloadButton.imageView.image) {
         [self.landscapeReloadButton setTitle:@"R" forState:UIControlStateNormal];
-        [self.landscapeReloadButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [self.landscapeReloadButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
     }
     self.landscapeReloadButton.accessibilityLabel = @"Reload lyrics";
     [self.landscapeReloadButton addTarget:self action:@selector(ytmu_toolbarReload:) forControlEvents:UIControlEventTouchUpInside];
@@ -945,6 +954,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         NSString *txt = [((UILabel *)view).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (txt.length >= 2 && txt.length <= 100) {
             NSString *low = txt.lowercaseString;
+            // The live badge is a real label but never the song title: keep it
+            // flagged so it can only land in the artist slot.
+            BOOL isLive = ([txt containsString:@"直播"] ||
+                           [low isEqualToString:@"live"] || [low hasPrefix:@"live "]);
             BOOL junk = ([txt containsString:@"歌詞"] || [txt containsString:@"歌词"] ||
                          [low containsString:@"lyric"] || [low containsString:@"unavailable"] ||
                          [txt containsString:@"沒有歌詞"] || [txt containsString:@"没有歌词"] ||
@@ -956,7 +969,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             }
             if (!junk) {
                 CGRect r = [view convertRect:view.bounds toView:nil];
-                [out addObject:@{@"text": txt, @"y": @(r.origin.y)}];
+                [out addObject:@{@"text": txt, @"y": @(r.origin.y), @"live": @(isLive)}];
             }
         }
     }
@@ -979,16 +992,24 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [found sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"y"] compare:b[@"y"]];
     }];
+    // Dedupe, keeping the live flag: the title must be a real (non-live)
+    // label, the artist slot may fall back to the live badge.
     NSMutableArray *ordered = [NSMutableArray array];
     for (NSDictionary *d in found) {
-        if (![ordered containsObject:d[@"text"]]) [ordered addObject:d[@"text"]];
+        if (![ordered containsObject:d[@"text"]]) [ordered addObject:d];
     }
-    if (needTitle && ordered.count > 0) {
-        self.landscapeTitleLabel.text = ordered[0];
+    NSString *pickedTitle = nil;
+    NSString *pickedArtist = nil;
+    for (NSDictionary *d in ordered) {
+        if ([d[@"live"] boolValue]) {
+            if (!pickedArtist) pickedArtist = d[@"text"];
+            continue;
+        }
+        if (!pickedTitle) { pickedTitle = d[@"text"]; continue; }
+        if (!pickedArtist) pickedArtist = d[@"text"];
     }
-    if (needArtist && ordered.count > 1) {
-        self.landscapeArtistLabel.text = ordered[1];
-    }
+    if (needTitle && pickedTitle) self.landscapeTitleLabel.text = pickedTitle;
+    if (needArtist && pickedArtist) self.landscapeArtistLabel.text = pickedArtist;
 }
 
 - (void)ytmu_updateLandscapeProgress {
@@ -1066,20 +1087,20 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self.landscapePrevButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
-            [self.landscapePrevButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+            [self.landscapePrevButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
         }
         if (next) {
             [self.landscapeNextButton setImage:next forState:UIControlStateNormal];
             [self.landscapeNextButton setTitle:@"" forState:UIControlStateNormal];
         } else {
             [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
-            [self.landscapeNextButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+            [self.landscapeNextButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
         }
     } else {
         [self.landscapePrevButton setTitle:@"prev" forState:UIControlStateNormal];
-        [self.landscapePrevButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [self.landscapePrevButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
         [self.landscapeNextButton setTitle:@"next" forState:UIControlStateNormal];
-        [self.landscapeNextButton setTitleColor:YTMUAdaptiveInk(0.9, 0.9) forState:UIControlStateNormal];
+        [self.landscapeNextButton setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
     }
     [self ytmu_setLandscapePlaying:self.landscapeIsPlaying];
 }
@@ -1091,12 +1112,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_applyLandscapeTheme {
-    // OS theme change: swap the ambient blur so the whole sheet (album
-    // column + lyrics) follows light/dark together with the adaptive inks.
-    // TODO(theme): derive the blur style from sampled artwork luminance
-    // (YTMUBgIsLight) instead of the OS theme; keep the 0.25s crossfade.
+    // Ambient blur follows the sampled artwork brightness (not the OS
+    // theme). No-ops when the bucket is unchanged so every-layout calls
+    // don't restart the 0.25s crossfade.
     if (!self.blurView) return;
-    UIBlurEffectStyle style = YTMUInterfaceIsLight(self.view) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark;
+    UIBlurEffectStyle style = YTMUBgBlurStyle(self.view);
+    static UIBlurEffectStyle s_lastStyle = UIBlurEffectStyleDark;
+    static BOOL s_haveStyle = NO;
+    if (s_haveStyle && style == s_lastStyle) return;
+    s_haveStyle = YES;
+    s_lastStyle = style;
     UIBlurEffect *effect = [UIBlurEffect effectWithStyle:style];
     [UIView animateWithDuration:0.25 animations:^{
         self.blurView.effect = effect;
@@ -1105,11 +1130,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
     [super traitCollectionDidChange:previousTraitCollection];
-    // TODO(theme): with chrome fully background-derived this override only
-    // needs the blur-style swap; drop the full re-theme once the TODO in
-    // ytmu_applyLandscapeTheme lands.
+    // Chrome is background-derived, so OS theme flips are ignored once an
+    // artwork probe has landed; only re-resolve while still unknown.
     if (@available(iOS 13.0, *)) {
-        if (self.traitCollection.userInterfaceStyle != previousTraitCollection.userInterfaceStyle) {
+        if (self.traitCollection.userInterfaceStyle != previousTraitCollection.userInterfaceStyle &&
+            g_ytmu_bgLight < 0) {
+            self.view.backgroundColor = YTMUBgBaseColor(self.view);
             [self ytmu_applyLandscapeTheme];
         }
     }
@@ -1749,8 +1775,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         // Keep title/artist fresh
         [self ytmu_updateLandscapeMetadata];
 
-        // tableView floats on the ambient blur, right of the column
-        self.tableView.frame = CGRectMake(leftW, 0, rightW, H);
+        // tableView floats on the ambient blur, right of the column, with a
+        // gutter so the lyrics never crowd the album card
+        CGFloat lyricsGap = 12.0;
+        self.tableView.frame = CGRectMake(leftW + lyricsGap, 0, MAX(80.0, rightW - lyricsGap), H);
         [self.view bringSubviewToFront:self.landscapeArtPanel];
         [self.view bringSubviewToFront:self.tableView];
         [self.view bringSubviewToFront:self.fpsLabel];
@@ -1769,7 +1797,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         }
         UIView *footer = self.tableView.tableFooterView;
         if (!footer || fabs(footer.frame.size.height - bottomPad) > 1.0) {
-            UIView *f = [[UIView alloc] initWithFrame:CGRectMake(0, 0, rightW, bottomPad)];
+            UIView *f = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.tableView.bounds.size.width, bottomPad)];
             f.backgroundColor = [UIColor clearColor];
             self.tableView.tableFooterView = f;
         }
@@ -1854,6 +1882,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.artworkVideoID = nil;
                 self.artworkImageView.image = nil;
                 self.landscapeArtImageView.image = nil;
+                g_ytmu_bgLight = -1;
                 // New song: drop stale per-song state so the retry chains
                 // refill it (stale title/artist otherwise stick forever,
                 // and the switcher would point at the old video's index).
@@ -1956,6 +1985,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_refreshBgDerivedInk {
+    self.view.backgroundColor = YTMUBgBaseColor(self.view);
+    if (self.darkOverlay) self.darkOverlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:(YTMUBgIsLight(self.view) ? 0.30 : 0.48)];
+    [self ytmu_applyLandscapeTheme];
     if (self.landscapeTitleLabel) self.landscapeTitleLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
     if (self.landscapeArtistLabel) self.landscapeArtistLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     if (self.landscapeElapsedLabel) self.landscapeElapsedLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
