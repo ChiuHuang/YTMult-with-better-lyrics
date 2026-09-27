@@ -941,6 +941,68 @@
       } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
     });
   };
+  /* ---- app settings (tweak remote config) ---- */
+  const renderApp = settings => {
+    const list = $('#app-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const keys = Object.keys(settings || {}).sort();
+    if (!keys.length) { list.appendChild(el('div', {class:'list-row'}, 'No settings')); return; }
+    keys.forEach(k => {
+      const v = settings[k];
+      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
+        el('span', {class:'truncate mono'}, `${k} = ${JSON.stringify(v)}`));
+      const edit = el('mdui-button', {variant:'text', icon:'edit'});
+      edit.textContent = 'Edit';
+      edit.addEventListener('click', () => {
+        const cur = $('#app-key'); const cv = $('#app-value');
+        if (cur) cur.value = k;
+        if (cv) cv.value = (typeof v === 'string') ? v : JSON.stringify(v);
+      });
+      row.appendChild(edit);
+      const del = el('mdui-button', {variant:'text', icon:'delete'});
+      del.textContent = 'Reset';
+      del.addEventListener('click', async () => {
+        try {
+          const r = await API('/api/admin/app/settings', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k})});
+          const d = await r.json();
+          if (d.ok) renderApp(d.settings);
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+      });
+      row.appendChild(del);
+      list.appendChild(row);
+    });
+  };
+  const loadApp = async () => {
+    try { renderApp((await json('/api/admin/app/settings')).settings || {}); }
+    catch (e) { const l = $('#app-list'); if (l) l.innerHTML = ''; }
+  };
+  const appInit = () => {
+    const set = $('#app-set');
+    if (set) set.addEventListener('click', async () => {
+      const k = ((($('#app-key') || {}).value) || '').trim();
+      const raw = ((($('#app-value') || {}).value) || '').trim();
+      if (!k) { mdui.snackbar({message:'Key required'}); return; }
+      let v = raw;
+      if (raw === 'true') v = true;
+      else if (raw === 'false') v = false;
+      else if (raw !== '' && !isNaN(Number(raw))) v = Number(raw);
+      try {
+        const r = await API('/api/admin/app/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k, value: v})});
+        const d = await r.json();
+        if (d.ok) { renderApp(d.settings); mdui.snackbar({message:'Saved'}); }
+        else mdui.snackbar({message: d.error || 'Failed'});
+      } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+    });
+    const rs = $('#app-reset');
+    if (rs) rs.addEventListener('click', async () => {
+      try {
+        const r = await API('/api/admin/app/settings/reset', {method:'POST'});
+        const d = await r.json();
+        if (d.ok) { renderApp(d.settings); mdui.snackbar({message:'Defaults restored'}); }
+      } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+    });
+  };
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
   let prevPlayhead = 0;
@@ -1622,7 +1684,7 @@
   };
 
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
-  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes'];
+  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
   const switchPage = p => {
     if (!pages.includes(p)) return;
@@ -1639,6 +1701,7 @@
     else if (p==='update') loadUpdate();
     else if (p==='files') loadFiles();
     else if (p==='crashes') loadCrashes();
+    else if (p==='app') loadApp();
   };
   const initNav = () => {
     $$('#nav-list mdui-list-item').forEach(item => {
@@ -1781,6 +1844,7 @@
     const bulkTransBtn = $('#bulk-translate-missing');
     if (bulkTransBtn) bulkTransBtn.addEventListener('click', translateMissing);
     aiInit();
+    appInit();
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';
