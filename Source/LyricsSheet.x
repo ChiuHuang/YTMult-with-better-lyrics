@@ -194,7 +194,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
-        self.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
         self.lyricLabel.textColor = YTMULyricInk(0.45, 0.55, self.contentView);
         self.lyricLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -210,7 +210,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
-        self.wipeLabel.font = [UIFont boldSystemFontOfSize:22];
+        self.wipeLabel.font = [UIFont boldSystemFontOfSize:28];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
         self.wipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -237,8 +237,8 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
-        self.transLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightMedium];
-        self.transLabel.textColor = YTMULyricInk(0.32, 0.5, self.contentView);
+        self.transLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightMedium];
+        self.transLabel.textColor = YTMULyricInk(0.35, 0.5, self.contentView);
         self.transLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.transLabel.layer.shadowRadius = 2.0;
@@ -250,7 +250,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
         [self.contentView addSubview:self.transLabel];
 
         [NSLayoutConstraint activateConstraints:@[
-            [self.lyricLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:12],
+            [self.lyricLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
             [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
             [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
 
@@ -259,10 +259,10 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
             [self.wipeLabel.trailingAnchor constraintEqualToAnchor:self.lyricLabel.trailingAnchor],
             [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
 
-            [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:5],
+            [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:6],
             [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:28],
             [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-20],
-            [self.transLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-12]
+            [self.transLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
         ]];
     }
     return self;
@@ -294,6 +294,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
     self.wipeLabel.attributedText = nil;
     self.wipeMask.path = nil;
     self.lyricLabel.attributedText = nil;
+    self.lastColorKey = nil;
 }
 
 - (void)ytmu_handleWordTap:(UITapGestureRecognizer *)gesture {
@@ -306,7 +307,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
     NSArray *parts = lyric[@"parts"];
     if (![lyric[@"wordSynced"] boolValue] || parts.count == 0) return;
     UIFont *font = self.wipeLabel.font;
-    if (!font) font = [UIFont boldSystemFontOfSize:22];
+    if (!font) font = [UIFont boldSystemFontOfSize:28];
     NSArray *ranges = nil;
     NSString *display = [vc wbwDisplayTextForLyric:lyric ranges:&ranges];
     if (ranges.count == 0) return;
@@ -2087,6 +2088,56 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+- (double)ytmu_startMsForLyric:(NSDictionary *)lyric {
+    double s = [lyric[@"startTimeMs"] doubleValue];
+    if (s <= 0) s = [lyric[@"time"] doubleValue] * 1000.0;
+    return s;
+}
+
+- (double)ytmu_endMsForLyricAtIndex:(NSInteger)index {
+    if (index < 0 || index >= self.lyrics.count) return 0;
+    NSDictionary *lyric = self.lyrics[index];
+    double start = [self ytmu_startMsForLyric:lyric];
+    if (start <= 0) return 0;
+    // Explicit duration from the payload.
+    double explicitEnd = 0;
+    double durMs = [lyric[@"durationMs"] doubleValue];
+    if (durMs <= 0) durMs = [lyric[@"duration"] doubleValue] * 1000.0;
+    if (durMs > 0) explicitEnd = start + durMs;
+    // Word span end for word-synced lines (same 120ms floor as the wipe).
+    double wordEnd = 0;
+    NSArray *parts = lyric[@"parts"];
+    if ([lyric[@"wordSynced"] boolValue] && [parts count] > 0) {
+        for (NSDictionary *p in parts) {
+            double s = [p[@"startTimeMs"] doubleValue];
+            double d = MAX([p[@"durationMs"] doubleValue], 1.0);
+            d = MAX(d, 120.0);
+            if (s > 0 && s + d > wordEnd) wordEnd = s + d;
+        }
+    }
+    double explicit = MAX(explicitEnd, wordEnd);
+    if (explicit > start) return explicit;
+    // No explicit timing: line runs until the next line starts (sequential
+    // lines never overlap, so only truly overlapping payloads multi-light).
+    if (index + 1 < self.lyrics.count) {
+        double next = [self ytmu_startMsForLyric:self.lyrics[index + 1]];
+        if (next > start) return next;
+    }
+    double fallback = durMs > 0 ? durMs : 4000.0;
+    return start + fallback;
+}
+
+- (NSIndexSet *)ytmu_activeIndexesAtMs:(double)nowMs {
+    NSMutableIndexSet *set = [NSMutableIndexSet indexSet];
+    for (NSInteger i = 0; i < self.lyrics.count; i++) {
+        double start = [self ytmu_startMsForLyric:self.lyrics[i]];
+        if (start <= 0 || nowMs < start) continue;
+        double end = [self ytmu_endMsForLyricAtIndex:i];
+        if (end > start && nowMs < end) [set addIndex:i];
+    }
+    return set;
+}
+
 - (void)updatePlaybackTime {
     self.fpsTicks++;
     NSTimeInterval fpsNow = CACurrentMediaTime();
@@ -2414,18 +2465,18 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
     }
     NSInteger fracQ = (NSInteger)(curFrac * 24.0);
-    NSString *key = [NSString stringWithFormat:@"%p:%ld:%ld:%ld:%.0f", cell, (long)index, (long)curWord, (long)fracQ, (double)width];
-    if (!force && [key isEqualToString:self.lastColorKey]) return;
+    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord, (long)fracQ, (double)width];
+    if (!force && [key isEqualToString:cell.lastColorKey]) return;
 
     UIFont *font = cell.wipeLabel.font;
-    if (!font) font = [UIFont boldSystemFontOfSize:22];
+    if (!font) font = [UIFont boldSystemFontOfSize:28];
     NSArray *ranges = nil;
     NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
     NSString *layoutKey = [NSString stringWithFormat:@"%ld|%.1f|%@", (long)index, (double)width, display];
-    if (![layoutKey isEqualToString:self.cachedWordLayoutKey]) {
+    if (![layoutKey isEqualToString:cell.cachedWordLayoutKey]) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = display;
-        cell.lyricLabel.textColor = YTMULyricInk(0.2, 0.2, self.view);
+        cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
 
         NSShadow *sh = [[NSShadow alloc] init];
         sh.shadowColor = YTMULyricShadow(self.view);
@@ -2455,20 +2506,20 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             CGRect b = [lm boundingRectForGlyphRange:glyphs inTextContainer:tc];
             [rects addObject:[NSValue valueWithCGRect:CGRectInset(b, -1, -2)]];
         }
-        self.cachedWordRects = rects;
-        self.cachedWordLayoutKey = layoutKey;
+        cell.cachedWordRects = rects;
+        cell.cachedWordLayoutKey = layoutKey;
     }
-    self.lastColorKey = key;
+    cell.lastColorKey = key;
 
     UIBezierPath *path = [UIBezierPath bezierPath];
-    NSInteger rcount = MIN(partCount, (NSInteger)[self.cachedWordRects count]);
+    NSInteger rcount = MIN(partCount, (NSInteger)[cell.cachedWordRects count]);
     for (NSInteger i = 0; i < curWord && i < rcount; i++) {
-        CGRect b = [self.cachedWordRects[i] CGRectValue];
+        CGRect b = [cell.cachedWordRects[i] CGRectValue];
         if (CGRectIsNull(b)) continue;
         [path appendPath:[UIBezierPath bezierPathWithRect:b]];
     }
     if (curWord >= 0 && curWord < rcount) {
-        CGRect b = [self.cachedWordRects[curWord] CGRectValue];
+        CGRect b = [cell.cachedWordRects[curWord] CGRectValue];
         if (!CGRectIsNull(b)) {
             b.size.width *= MAX(curFrac, 0.0);
             [path appendPath:[UIBezierPath bezierPathWithRect:b]];
@@ -2562,7 +2613,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         return;
     }
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
-    cell.lyricLabel.font = [UIFont boldSystemFontOfSize:22];
+    cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
     cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
     BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric ranges:NULL];
@@ -2597,15 +2648,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
-        cell.transLabel.textColor = YTMULyricInk(0.7, 0.7, self.view);
+        cell.transLabel.textColor = YTMULyricInk(0.85, 0.85, self.view);
     } else {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
-        cell.lyricLabel.textColor = YTMULyricInk(0.2, 0.2, self.view);
+        cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
         cell.lyricLabel.layer.shadowOpacity = 0.32;
         [cell clearWipe];
 
-        cell.transLabel.textColor = YTMULyricInk(0.25, 0.25, self.view);
+        cell.transLabel.textColor = YTMULyricInk(0.35, 0.35, self.view);
     }
 
     NSString *translated = lyric[@"translated"];
