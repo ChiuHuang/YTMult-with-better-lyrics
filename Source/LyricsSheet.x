@@ -471,6 +471,13 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_selectProvider:(NSString *)provider;
 - (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion;
 - (void)ytmu_getJSON:(NSString *)path completion:(void (^)(NSDictionary *json, NSError *error))completion;
+- (NSString *)ytmu_cleanVideoTitle:(NSString *)raw;
+- (void)ytmu_requestSongMetaForVideo:(NSString *)videoID;
+- (void)ytmu_wireStepperPress:(UIButton *)button;
+- (void)ytmu_stepperPressIn:(UIButton *)button;
+- (void)ytmu_stepperPressOut:(UIButton *)button;
+- (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
+- (void)ytmu_loadProviderMetaForVideo:(NSString *)videoID;
 @end
 
 BOOL YTMUIsInterfaceLandscape(void) {
@@ -798,6 +805,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     self.providerPrevButton.accessibilityLabel = @"Previous lyric provider";
     [self.providerPrevButton addTarget:self action:@selector(ytmu_stepProvider:) forControlEvents:UIControlEventTouchUpInside];
+    [self ytmu_wireStepperPress:self.providerPrevButton];
     [self.landscapeToolbar addSubview:self.providerPrevButton];
 
     self.providerNextButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -811,6 +819,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
     self.providerNextButton.accessibilityLabel = @"Next lyric provider";
     [self.providerNextButton addTarget:self action:@selector(ytmu_stepProvider:) forControlEvents:UIControlEventTouchUpInside];
+    [self ytmu_wireStepperPress:self.providerNextButton];
     [self.landscapeToolbar addSubview:self.providerNextButton];
 
     self.providerSwitcherLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -899,66 +908,167 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+// Video titles carry qualifiers the track name does not ("(Official Video)",
+// "- Topic", "【MV】", "| 4K"). Keep the first segment, drop the bracketed
+// qualifiers, so the full screen header reads like the song it is.
+- (NSString *)ytmu_cleanVideoTitle:(NSString *)raw {
+    if (!raw.length) return nil;
+    NSString *head = raw;
+    NSRange bar = [raw rangeOfString:@"|"];
+    if (bar.location != NSNotFound) head = [raw substringToIndex:bar.location];
+    head = [head stringByReplacingOccurrencesOfString:@" - Topic" withString:@""];
+    NSCharacterSet *brackets = [NSCharacterSet characterSetWithCharactersInString:@"()[]【】「」"];
+    NSMutableString *out = [NSMutableString string];
+    NSUInteger i = 0;
+    while (i < head.length) {
+        unichar c = [head characterAtIndex:i];
+        if (![brackets characterIsMember:c]) {
+            [out appendFormat:@"%C", c];
+            i++;
+            continue;
+        }
+        NSUInteger close = i + 1;
+        while (close < head.length && ![brackets characterIsMember:[head characterAtIndex:close]]) close++;
+        NSString *inner = (close < head.length)
+            ? [head substringWithRange:NSMakeRange(i + 1, close - i - 1)] : @"";
+        NSString *low = inner.lowercaseString;
+        BOOL qualifier = ([low containsString:@"official"] || [low containsString:@"video"] ||
+                          [low containsString:@"lyric"] || [low containsString:@"mv"] ||
+                          [low containsString:@"歌詞"] || [low containsString:@"歌词"] ||
+                          [low containsString:@"audio"] || [low containsString:@"hd"] ||
+                          [low containsString:@"hq"] || [low containsString:@"m/v"] ||
+                          [low containsString:@"visualizer"]);
+        if (!qualifier) [out appendString:inner];  // 【初音ミク】 is part of the name
+        i = (close < head.length) ? close + 1 : close;
+    }
+    NSString *cleaned = [out stringByTrimmingCharactersInSet:
+                         [NSCharacterSet characterSetWithCharactersInString:@" -|·"]];
+    return cleaned.length ? cleaned : raw;
+}
+
 - (void)ytmu_updateLandscapeMetadata {
-    NSString *title = nil;
-    NSString *artist = nil;
-    @try {
-        YTPlayerViewController *player = g_activePlayer;
-        if (player && [player respondsToSelector:@selector(playerResponse)]) {
-            YTPlayerResponse *resp = player.playerResponse;
-            if (resp && [resp respondsToSelector:@selector(playerData)]) {
-                YTIPlayerResponse *data = resp.playerData;
-                if (data && [data respondsToSelector:@selector(videoDetails)]) {
-                    YTIVideoDetails *details = data.videoDetails;
-                    if (details) {
-                        if ([details respondsToSelector:@selector(title)]) title = details.title;
-                        if ([details respondsToSelector:@selector(author)]) artist = details.author;
+    // Priority: server song info (the real track name/artist, the same
+    // metadata the lyrics were fetched with) > player video details > the
+    // visible now-playing labels. playerResponse is frequently nil and its
+    // title is the video title, so it never outranks the server's.
+    NSString *title = self.lastSongTitle.length ? self.lastSongTitle : nil;
+    NSString *artist = self.lastSongArtist.length ? self.lastSongArtist : nil;
+    if (!title.length || !artist.length) {
+        @try {
+            YTPlayerViewController *player = g_activePlayer;
+            if (player && [player respondsToSelector:@selector(playerResponse)]) {
+                YTPlayerResponse *resp = player.playerResponse;
+                if (resp && [resp respondsToSelector:@selector(playerData)]) {
+                    YTIPlayerResponse *data = resp.playerData;
+                    if (data && [data respondsToSelector:@selector(videoDetails)]) {
+                        YTIVideoDetails *details = data.videoDetails;
+                        if (details) {
+                            if (!title.length && [details respondsToSelector:@selector(title)]) {
+                                title = [self ytmu_cleanVideoTitle:details.title];
+                            }
+                            if (!artist.length && [details respondsToSelector:@selector(author)]) {
+                                artist = [self ytmu_cleanVideoTitle:details.author];
+                            }
+                        }
                     }
                 }
             }
+        } @catch (NSException *e) {
+            // Keep whatever we already had; a throwing accessor is not a
+            // reason to blank the header.
         }
-    } @catch (NSException *e) {
-        title = nil;
-        artist = nil;
     }
-    // Only overwrite with real values; never blank out a known title/artist
-    // (playerResponse can be momentarily nil during track transitions).
+    // Still missing something (offline, or the player objects are empty):
+    // scrape the now-playing labels. It only fills gaps, never overwrites.
+    if (!title.length || !artist.length) {
+        [self ytmu_updateLandscapeMetadataFromNowPlayingLabels];
+        if (!title.length && self.landscapeTitleLabel.text.length &&
+            ![self.landscapeTitleLabel.text isEqualToString:@"Now Playing"]) {
+            title = self.landscapeTitleLabel.text;
+        }
+        if (!artist.length && self.landscapeArtistLabel.text.length) {
+            artist = self.landscapeArtistLabel.text;
+        }
+    }
+    // Never blank a known value: playerResponse goes nil mid-transition.
+    // Scraped label text is NOT promoted into lastSongTitle/lastSongArtist:
+    // that pair is the server's real track metadata and must stay clean (it
+    // also decides whether a metadata re-fetch is still needed).
     if (title.length) {
-        self.landscapeTitleLabel.text = title;
+        if (![self.landscapeTitleLabel.text isEqualToString:title]) {
+            self.landscapeTitleLabel.text = title;
+        }
     } else if (!self.landscapeTitleLabel.text.length) {
         self.landscapeTitleLabel.text = @"Now Playing";
     }
     if (artist.length) {
-        self.landscapeArtistLabel.text = artist;
+        if (![self.landscapeArtistLabel.text isEqualToString:artist]) {
+            self.landscapeArtistLabel.text = artist;
+        }
     }
-    // Server song info (ytmusicapi, same source as the lyrics) outranks
-    // scraped now-playing labels but never overrides live player data.
-    if (!title.length && self.lastSongTitle.length) {
-        self.landscapeTitleLabel.text = self.lastSongTitle;
-        title = self.lastSongTitle;
+}
+
+// One metadata round trip per song change: the server knows the real track
+// name for any video id, so the full screen header is never left on
+// "Now Playing" waiting for playerResponse to arrive.
+- (void)ytmu_requestSongMetaForVideo:(NSString *)videoID {
+    if (!videoID.length) return;
+    if ([videoID isEqualToString:self.songMetaVideoID] &&
+        (self.lastSongTitle.length || self.lastSongArtist.length)) {
+        return;
     }
-    if (!artist.length && self.lastSongArtist.length) {
-        self.landscapeArtistLabel.text = self.lastSongArtist;
-        artist = self.lastSongArtist;
-    }
-    // playerResponse path can stay nil (e.g. response not parsed yet) — fall
-    // back to the visible now-playing labels so title/artist still show.
-    if (!title.length || !artist.length) {
-        [self ytmu_updateLandscapeMetadataFromNowPlayingLabels];
-    }
+    self.songMetaVideoID = videoID;
+    NSString *path = [NSString stringWithFormat:@"/api/lyrics/song?v=%@&lang=%@",
+                      YTMUUrlEncode(videoID), YTMUUrlEncode(YTMUTargetLang())];
+    [self ytmu_getJSON:path completion:^(NSDictionary *json, NSError *error) {
+        if (error || ![json[@"ok"] boolValue]) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![videoID isEqualToString:YTMUResolveCurrentVideoID()] &&
+                ![videoID isEqualToString:self.loadingVideoID]) {
+                return; // metadata for a song that already moved on
+            }
+            id s = json[@"song"], a = json[@"artist"];
+            BOOL changed = NO;
+            if ([s isKindOfClass:[NSString class]] && ((NSString *)s).length &&
+                ![s isEqualToString:self.lastSongTitle]) {
+                self.lastSongTitle = s;
+                changed = YES;
+            }
+            if ([a isKindOfClass:[NSString class]] && ((NSString *)a).length &&
+                ![a isEqualToString:self.lastSongArtist]) {
+                self.lastSongArtist = a;
+                changed = YES;
+            }
+            if (changed) [self ytmu_updateLandscapeMetadata];
+        });
+    }];
 }
 
 - (void)ytmu_collectNowPlayingLabelsIn:(UIView *)view depth:(NSInteger)depth out:(NSMutableArray *)out {
     if (!view || depth > 7) return;
     if ([view isKindOfClass:[UILabel class]]) {
-        NSString *txt = [((UILabel *)view).text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (txt.length >= 2 && txt.length <= 100) {
+        UILabel *lbl = (UILabel *)view;
+        NSString *txt = [lbl.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        // Zero-size / hidden / fully transparent labels are placeholders
+        // (collapsed cells, our own injected chip copies): never a song name.
+        BOOL visible = (lbl.bounds.size.width > 1.0 && lbl.bounds.size.height > 1.0 &&
+                        !lbl.hidden && lbl.alpha > 0.05);
+        if (txt.length >= 2 && txt.length <= 100 && visible) {
             NSString *low = txt.lowercaseString;
             // The live badge is a real label but never the song title: keep it
             // flagged so it can only land in the artist slot.
             BOOL isLive = ([txt containsString:@"直播"] ||
                            [low isEqualToString:@"live"] || [low hasPrefix:@"live "]);
-            BOOL junk = ([txt containsString:@"歌詞"] || [txt containsString:@"歌词"] ||
+            // Audio-quality rows ("網頁 44.1 kHz 採樣率", "Lossless") sit in the
+            // same hierarchy and are never the song name.
+            BOOL quality = ([low containsString:@"khz"] || [low containsString:@"kbps"] ||
+                            [low containsString:@"lossless"] || [low containsString:@"web:"] ||
+                            [low containsString:@"web "] || [low containsString:@"串流"] ||
+                            [low containsString:@"采样"] || [low containsString:@"採樣"] ||
+                            [low containsString:@"音质"] || [low containsString:@"音質"] ||
+                            [low containsString:@"web/"]);
+            BOOL junk = quality ||
+                        ([txt containsString:@"歌詞"] || [txt containsString:@"歌词"] ||
                          [low containsString:@"lyric"] || [low containsString:@"unavailable"] ||
                          [txt containsString:@"沒有歌詞"] || [txt containsString:@"没有歌词"] ||
                          [txt isEqualToString:@"Now Playing"]);
@@ -968,8 +1078,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 if ([txt rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound) junk = YES;
             }
             if (!junk) {
-                CGRect r = [view convertRect:view.bounds toView:nil];
-                [out addObject:@{@"text": txt, @"y": @(r.origin.y), @"live": @(isLive)}];
+                CGRect r = [lbl convertRect:lbl.bounds toView:nil];
+                [out addObject:@{@"text": txt, @"y": @(r.origin.y),
+                                 @"size": @(lbl.font.pointSize), @"live": @(isLive)}];
             }
         }
     }
@@ -979,17 +1090,32 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_updateLandscapeMetadataFromNowPlayingLabels {
-    UIViewController *np = g_activeNowPlayingVC;
-    if (!np || !np.isViewLoaded) return;
     BOOL needTitle = (self.landscapeTitleLabel.text.length == 0 ||
                       [self.landscapeTitleLabel.text isEqualToString:@"Now Playing"]);
     BOOL needArtist = (self.landscapeArtistLabel.text.length == 0);
     if (!needTitle && !needArtist) return;
+    // The now-playing VC is the primary source, but it can be swapped out
+    // (expanded/collapsed player); the topmost VC covers those cases.
+    NSMutableArray<UIViewController *> *roots = [NSMutableArray array];
+    UIViewController *np = g_activeNowPlayingVC;
+    if (np.isViewLoaded) [roots addObject:np];
+    UIViewController *top = topMostViewController();
+    if (top.isViewLoaded && top != np && top != (UIViewController *)self) [roots addObject:top];
     NSMutableArray *found = [NSMutableArray array];
-    [self ytmu_collectNowPlayingLabelsIn:np.view depth:0 out:found];
+    for (UIViewController *vc in roots) {
+        [self ytmu_collectNowPlayingLabelsIn:vc.view depth:0 out:found];
+        for (UIViewController *child in vc.childViewControllers) {
+            if (child.isViewLoaded) [self ytmu_collectNowPlayingLabelsIn:child.view depth:0 out:found];
+        }
+    }
     if (found.count == 0) return;
-    // Topmost label first: title usually sits above artist.
+    // Biggest type is the title (the now-playing screen sizes it largest),
+    // the artist is the next one down. Falling back to pure vertical order
+    // when every label shares a font size.
     [found sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        double sa = [a[@"size"] doubleValue], sb = [b[@"size"] doubleValue];
+        if (sa > sb) return NSOrderedAscending;
+        if (sb > sa) return NSOrderedDescending;
         return [a[@"y"] compare:b[@"y"]];
     }];
     // Dedupe, keeping the live flag: the title must be a real (non-live)
@@ -1409,6 +1535,49 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.providerJobID = nil;
 }
 
+// Arm the switcher from a provider list the server already holds in RAM.
+// Every fetch/probe leaves one behind, so the menu is ready the moment a
+// song starts playing -- no re-probe, no popup, and nothing new written to
+// disk. dict is any payload carrying {providers, saved}.
+- (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID {
+    if (!videoID.length || ![dict isKindOfClass:[NSDictionary class]]) return;
+    NSArray *cands = dict[@"providers"];
+    if (![cands isKindOfClass:[NSArray class]] || cands.count == 0) return;
+    if (!self.providerCache) self.providerCache = [NSMutableDictionary dictionary];
+    id savedRaw = dict[@"saved"];
+    NSString *saved = ([savedRaw isKindOfClass:[NSString class]]) ? savedRaw : @"";
+    self.providerCache[videoID] = @{@"cands": cands, @"saved": saved};
+    NSString *cur = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    if (!cur.length || ![cur isEqualToString:videoID]) return;  // prefetched track
+    self.providerCandidates = cands;
+    // The provider actually serving the lyrics wins over the stored choice.
+    [self ytmu_resolveProviderIndexSaved:(self.lastProvider.length ? self.lastProvider : saved)];
+    [self ytmu_refreshProviderSwitcher];
+}
+
+// One cheap RAM read: fills the switcher for a song whose lyrics came from
+// the device cache (no fetch ran, so no payload carried the list).
+- (void)ytmu_loadProviderMetaForVideo:(NSString *)videoID {
+    if (!videoID.length) return;
+    NSDictionary *hit = self.providerCache[videoID];
+    if ([hit[@"cands"] count] > 0) {
+        [self ytmu_applyProviderMeta:hit forVideoID:videoID];
+        return;
+    }
+    if ([videoID isEqualToString:self.providerMetaVideoID]) return;  // already asked
+    self.providerMetaVideoID = videoID;
+    NSString *path = [NSString stringWithFormat:@"/api/lyrics/providers/candidates?v=%@&lang=%@",
+                      YTMUUrlEncode(videoID), YTMUUrlEncode(YTMUTargetLang())];
+    [self ytmu_getJSON:path completion:^(NSDictionary *json, NSError *error) {
+        if (error || ![json[@"ok"] boolValue]) return;
+        if (![json[@"found"] boolValue]) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (![videoID isEqualToString:self.providerMetaVideoID]) return;
+            [self ytmu_applyProviderMeta:json forVideoID:videoID];
+        });
+    }];
+}
+
 // Point the switcher at the saved choice, else at the provider serving the
 // current lyrics, else unknown (-1: no mark). Never auto-applies and never
 // pretends index 0 is current when the on-screen lyrics came from elsewhere.
@@ -1450,6 +1619,53 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     idx = (idx + sender.tag + cands.count) % cands.count;
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider step -> %ld/%lu", (long)idx + 1, (unsigned long)cands.count]);
     [self ytmu_applyProviderAtIndex:idx];
+}
+
+// Stepper press feedback: [<] and [>] widen into a filled pill while held
+// and spring back on release/cancel. Transform-based so the next layout pass
+// (which owns the frames) can never cut the animation short.
+- (void)ytmu_wireStepperPress:(UIButton *)button {
+    if (!button) return;
+    button.layer.masksToBounds = YES;
+    [button addTarget:self action:@selector(ytmu_stepperPressIn:)
+     forControlEvents:UIControlEventTouchDownInside];
+    [button addTarget:self action:@selector(ytmu_stepperPressOut:)
+     forControlEvents:UIControlEventTouchUpInside];
+    [button addTarget:self action:@selector(ytmu_stepperPressOut:)
+     forControlEvents:UIControlEventTouchUpOutside];
+    [button addTarget:self action:@selector(ytmu_stepperPressOut:)
+     forControlEvents:UIControlEventTouchCancel];
+    [button addTarget:self action:@selector(ytmu_stepperPressOut:)
+     forControlEvents:UIControlEventTouchDragExit];
+}
+
+- (void)ytmu_stepperPressIn:(UIButton *)button {
+    if (!button) return;
+    CGFloat h = MAX(button.bounds.size.height, 1.0);
+    // z-order outside the animation block: it must snap, not fade.
+    button.layer.zPosition = 20;
+    UIColor *pill = YTMULyricInk(0.22, 0.22, self.view);
+    [UIView animateWithDuration:0.16 delay:0
+        options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+        animations:^{
+            button.transform = CGAffineTransformMakeScale(1.34, 1.14);
+            button.layer.cornerRadius = h / 2.0;
+            button.backgroundColor = pill;
+        } completion:nil];
+}
+
+- (void)ytmu_stepperPressOut:(UIButton *)button {
+    if (!button) return;
+    [UIView animateWithDuration:0.36 delay:0
+        usingSpringWithDamping:0.6 initialSpringVelocity:0.7
+        options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+        animations:^{
+            button.transform = CGAffineTransformIdentity;
+            button.backgroundColor = [UIColor clearColor];
+        } completion:^(BOOL finished) {
+            button.layer.cornerRadius = 0;
+            button.layer.zPosition = 0;
+        }];
 }
 
 // Tier of the provider serving the current lyrics (better-lyrics dock
@@ -1848,8 +2064,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self ytmu_assertOnTop];
-    [self ytmu_updateLandscapeMetadata];
     NSString *vid = YTMUResolveCurrentVideoID();
+    if (vid) {
+        [self ytmu_requestSongMetaForVideo:vid];
+        [self ytmu_loadProviderMetaForVideo:vid];
+    }
+    [self ytmu_updateLandscapeMetadata];
     if (vid && (![vid isEqualToString:self.loadingVideoID] || (self.lyrics.count == 0 && !self.isLoading))) {
         [self fetchLyricsForVideo:vid];
     }
@@ -1900,11 +2120,18 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.landscapeArtistLabel.text = @"";
                 self.lastSongTitle = nil;
                 self.lastSongArtist = nil;
+                self.songMetaVideoID = nil;
                 self.lastProvider = nil;
                 self.providerCandidates = nil;
                 self.providerIndex = -1;
                 [self ytmu_refreshProviderSwitcher];
             }
+            // Metadata + provider list come from the server for the new song:
+            // two tiny reads, no provider traffic. They land whether the
+            // lyrics come from the network, the server cache or the device
+            // file cache.
+            [self ytmu_requestSongMetaForVideo:videoID];
+            [self ytmu_loadProviderMetaForVideo:videoID];
             [self ytmu_updateLandscapeMetadata];
             [self fetchLyricsForVideo:videoID];
         });
@@ -2098,6 +2325,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
                     if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
                     if ([fp isKindOfClass:[NSString class]] && ((NSString *)fp).length) self.lastProvider = fp;
+                    [self ytmu_applyProviderMeta:fullDict forVideoID:videoID];
+                    [self ytmu_updateLandscapeMetadata];
                     [self updateLyrics:fullDict[@"lyrics"]];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                         object:videoID
@@ -2144,6 +2373,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             // a video that is no longer playing.
             if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
             NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            // This call also carries the song metadata and the provider list
+            // the server holds for this video: both fill in on the pure
+            // cache-hit path, where no lyrics fetch ever runs.
+            id cs = dict[@"song"], ca = dict[@"artist"];
+            if ([cs isKindOfClass:[NSString class]] && ((NSString *)cs).length) self.lastSongTitle = cs;
+            if ([ca isKindOfClass:[NSString class]] && ((NSString *)ca).length) self.lastSongArtist = ca;
+            [self ytmu_applyProviderMeta:dict forVideoID:videoID];
+            [self ytmu_updateLandscapeMetadata];
             if ([dict[@"upgrade"] boolValue]) {
                 sendDebugLog(@"[MUSIC] Server has a better lyrics tier, upgrading");
                 [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
@@ -2161,6 +2398,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (!g_lyricsCache) {
         g_lyricsCache = [[NSMutableDictionary alloc] init];
     }
+
+    // Metadata + provider list first, so the full screen header and the
+    // switcher are right even when the lyrics turn out to be a cache hit.
+    [self ytmu_requestSongMetaForVideo:videoID];
+    [self ytmu_loadProviderMetaForVideo:videoID];
 
     if (g_lyricsCache[videoID]) {
         UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
@@ -2245,6 +2487,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     id fs = dict[@"song"], fa = dict[@"artist"];
                     if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
                     if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
+                    [self ytmu_applyProviderMeta:dict forVideoID:videoID];
+                    [self ytmu_updateLandscapeMetadata];
                     [self updateLyrics:dict[@"lyrics"]];
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
                                                                         object:videoID
@@ -2535,10 +2779,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // and per-song metadata all refill from the fresh fetch.
     self.providerCandidates = nil;
     self.providerIndex = -1;
+    [self.providerCache removeObjectForKey:g_currentVideoID];
+    self.providerMetaVideoID = nil;
     [self ytmu_refreshProviderSwitcher];
     self.lastProvider = nil;
     self.lastSongTitle = nil;
     self.lastSongArtist = nil;
+    self.songMetaVideoID = nil;
+    [self ytmu_requestSongMetaForVideo:g_currentVideoID];
+    [self ytmu_loadProviderMetaForVideo:g_currentVideoID];
     self.clockRawTime = 0;
     self.clockRawWall = 0;
     self.activeIndexes = nil;
@@ -2573,8 +2822,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)updateLyrics:(NSArray *)newLyrics {
     self.lyrics = newLyrics;
 
-    // One type size per song from the longest line: long lines fit without
-    // wrapping, and rows never resize mid-song. Set before reloadData.
+    // One type size per song from the longest line, so rows never resize
+    // mid-song. Deliberately narrow: the old 20..28pt span made every song
+    // change jump the type by up to 8pt. The knee now sits at 28 chars and
+    // the floor is 24pt, so the worst-case swing is 4pt and only very long
+    // lines shrink at all. Set before reloadData.
     NSUInteger maxLen = 0;
     for (NSDictionary *l in newLyrics) {
         if (![l isKindOfClass:[NSDictionary class]]) continue;
@@ -2582,8 +2834,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         if (t.length > maxLen) maxLen = t.length;
     }
     CGFloat size = 28.0;
-    if (maxLen > 24) size = 28.0 * 24.0 / (CGFloat)maxLen;
-    size = MAX(20.0, MIN(28.0, floor(size * 2.0) / 2.0));
+    if (maxLen > 28) {
+        CGFloat over = (CGFloat)MIN(maxLen, (NSUInteger)56) - 28.0;
+        size = 28.0 - 4.0 * (over / 28.0);
+    }
+    size = MAX(24.0, MIN(28.0, floor(size * 2.0) / 2.0));
     s_lyricFontSize = size;
 
     BOOL hasTimestamp = NO;
