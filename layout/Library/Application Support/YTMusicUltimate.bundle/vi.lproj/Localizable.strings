@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "tất cả âm thanh đã tải"; //keep it lowercase
 "DELETE" = "Xóa";
 "RENAME" = "Đặt tên";
+
+"AUTO_SYNC_TITLE" = "Auto-sync in background";
+"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
+"DOWNLOAD" = "Download";
+"UPDATE_WHATS_NEW" = "What's new:\n%@";

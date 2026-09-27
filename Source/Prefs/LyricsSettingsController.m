@@ -1,5 +1,6 @@
 #import "LyricsSettingsController.h"
 #import "../LyricsShared.h"
+#import "../Headers/Localization.h"
 
 // Lightweight progress overlay for the cache sync feature. UIAlertController
 // doesn't officially support adding a UIProgressView, so this is a small
@@ -256,7 +257,7 @@
             @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
             @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"key": @"lyricsPrecacheQueue"},
             @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"key": @"lyricsAutoUpdate"},
-            @{@"title": @"Auto-sync in background", @"desc": @"Silently pull server translations into local cache (every 6h)", @"key": @"lyricsAutoSync"},
+            @{@"title": LOC(@"AUTO_SYNC_TITLE"), @"desc": LOC(@"AUTO_SYNC_DESC"), @"key": @"lyricsAutoSync"},
             @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
             @{@"title": @"Send screenshot debug data", @"desc": @"Upload a UI hierarchy only after you take a screenshot", @"key": @"sendLyricsScreenshotDebug"}
         ];

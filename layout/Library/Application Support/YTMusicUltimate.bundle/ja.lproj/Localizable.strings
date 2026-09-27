@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "all download audios"; //keep it lowercase
 "DELETE" = "Delete";
 "RENAME" = "Rename";
+
+"AUTO_SYNC_TITLE" = "バックグラウンド自動同期";
+"AUTO_SYNC_DESC" = "6時間ごとにサーバーの翻訳を自動取得";
+"DOWNLOAD" = "ダウンロード";
+"UPDATE_WHATS_NEW" = "新機能：\n%@";

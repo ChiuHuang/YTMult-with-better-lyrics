@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "所有下载的音频"; //keep it lowercase
 "DELETE" = "删除";
 "RENAME" = "重命名";
+
+"AUTO_SYNC_TITLE" = "后台自动同步";
+"AUTO_SYNC_DESC" = "每 6 小时将服务器翻译静默拉回本地缓存";
+"DOWNLOAD" = "下载";
+"UPDATE_WHATS_NEW" = "更新内容：\n%@";

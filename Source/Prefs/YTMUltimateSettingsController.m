@@ -1,5 +1,6 @@
 #import "YTMUltimateSettingsController.h"
 #import "LyricsSettingsController.h"
+#import "../Headers/Localization.h"
 
 #ifndef TWEAK_GIT_COMMIT
 #define TWEAK_GIT_COMMIT "unknown"
@@ -332,7 +333,7 @@
                 NSString *notes = result[@"release_notes"];
                 if ([notes isKindOfClass:[NSString class]] && notes.length) {
                     if (notes.length > 800) notes = [[notes substringToIndex:800] stringByAppendingString:@"…"];
-                    message = [message stringByAppendingFormat:@"\n\nWhat's new:\n%@", notes];
+                    message = [message stringByAppendingFormat:LOC(@"UPDATE_WHATS_NEW"), notes];
                 }
             } else {
                 message = [NSString stringWithFormat:@"You are on the latest build.\n\nCommit: %@", latest];
@@ -347,7 +348,7 @@
                 if (![dlURL isKindOfClass:[NSString class]] || !dlURL.length) {
                     dlURL = @"https://github.com/ChiuHuang/ytmusicultimate";
                 }
-                [alert addAction:[UIAlertAction actionWithTitle:@"Download" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                [alert addAction:[UIAlertAction actionWithTitle:LOC(@"DOWNLOAD") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                     [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dlURL] options:@{} completionHandler:nil];
                 }]];
             }
