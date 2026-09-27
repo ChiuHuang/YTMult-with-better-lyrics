@@ -52,6 +52,7 @@ def latest_release():
             'published_at': j.get('published_at') or '',
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
+            'notes': (j.get('body') or '')[:1500],
         }
         _CACHE.update(at=now, release=rel)
         return rel

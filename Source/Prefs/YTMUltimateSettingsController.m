@@ -329,6 +329,11 @@
                 message = @"Could not reach the update service. Try again later.";
             } else if (updateAvailable) {
                 message = [NSString stringWithFormat:@"An update is available.\n\nThis build: %@\nLatest: %@", currentCommit, latest];
+                NSString *notes = result[@"release_notes"];
+                if ([notes isKindOfClass:[NSString class]] && notes.length) {
+                    if (notes.length > 800) notes = [[notes substringToIndex:800] stringByAppendingString:@"…"];
+                    message = [message stringByAppendingFormat:@"\n\nWhat's new:\n%@", notes];
+                }
             } else {
                 message = [NSString stringWithFormat:@"You are on the latest build.\n\nCommit: %@", latest];
             }

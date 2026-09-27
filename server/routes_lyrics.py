@@ -83,6 +83,7 @@ def api_update():
         'build': (rel or {}).get('tag'),
         'download_url': dl,
         'download_url_proxy': worker_url(dl) if dl else None,
+        'release_notes': (rel or {}).get('notes') or '',
     })
 
 @app.route('/api/lyrics', methods=['GET'])
