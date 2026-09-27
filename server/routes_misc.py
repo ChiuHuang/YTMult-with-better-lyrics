@@ -81,27 +81,28 @@ def api_app_badge():
             label = 'unknown'
     label = label[:24]
     # width fits the text; textLength forces exact fit (no overflow).
+    # Plain %s substitution: str.format would choke on the CSS braces.
     w = max(88, int(38 + 7.4 * len(label)))
+    esc = label.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
     svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="32" '
-        'viewBox="0 0 {w} 32" role="img" aria-label="{label}">'
-        '<style>.bg{{fill:#D3E3FD}}.fg{{fill:#041E49;'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="32" '
+        'viewBox="0 0 %d 32" role="img" aria-label="%s">'
+        '<style>.bg{fill:#D3E3FD}.fg{fill:#041E49;'
         "font-family:Roboto,-apple-system,'Segoe UI',sans-serif;"
-        'font-size:13px;font-weight:500}}.chip{{fill:#041E49}}'
-        '.glyph{{stroke:#D3E3FD;stroke-width:1.8;fill:none;'
-        'stroke-linecap:round;stroke-linejoin:round}}'
+        'font-size:13px;font-weight:500}.chip{fill:#041E49}'
+        '.glyph{stroke:#D3E3FD;stroke-width:1.8;fill:none;'
+        'stroke-linecap:round;stroke-linejoin:round}'
         '@media (prefers-color-scheme: dark){.bg{fill:#004A77}'
         '.fg{fill:#D3E3FD}.chip{fill:#D3E3FD}.glyph{stroke:#004A77}}'
         '</style>'
-        '<rect class="bg" width="{w}" height="32" rx="16"/>'
+        '<rect class="bg" width="%d" height="32" rx="16"/>'
         '<circle class="chip" cx="16" cy="16" r="12"/>'
         '<g transform="translate(9,9)">'
         '<path class="glyph" d="M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z"/>'
         '</g>'
-        '<text class="fg" x="33" y="20.5" textLength="{tw}" '
-        'lengthAdjust="spacingAndGlyphs">{label}</text></svg>'
-    ).format(w=w, tw=max(10, w - 42), label=label.replace('&', '&amp;')
-             .replace('<', '&lt;').replace('>', '&gt;'))
+        '<text class="fg" x="33" y="20.5" textLength="%d" '
+        'lengthAdjust="spacingAndGlyphs">%s</text></svg>'
+    ) % (w, w, esc, w, max(10, w - 42), esc)
     return Response(svg, mimetype='image/svg+xml',
                     headers={'Cache-Control': 'no-store'})
 
