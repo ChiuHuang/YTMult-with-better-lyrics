@@ -201,4 +201,8 @@ UIColor *YTMUAdaptiveFill(void);
 UIColor *YTMUAdaptiveShadow(void);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
+#ifdef __cplusplus
+}
+#endif
+
 #endif
