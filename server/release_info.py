@@ -3,6 +3,7 @@
 # source). GitHub API is cached 10 min (60/hr unauth limit on shared IPs);
 # every failure degrades to None so endpoints stay up.
 import os
+import re
 import time as time_module
 
 import requests
@@ -15,6 +16,14 @@ WORKER_PREFIX = os.environ.get(
 
 _CACHE = {'at': 0.0, 'release': None}
 _TTL = 600
+
+
+def _clean_notes(body):
+    """Release body minus markdown image lines (they render as raw text in
+    the in-app alert). Capped for the update dialog."""
+    lines = [l for l in (body or '').splitlines()
+             if not re.match(r'\s*!\[.*?\]\(.*?\)\s*$', l)]
+    return '\n'.join(lines).strip()[:1500]
 
 
 def worker_url(url):
@@ -41,10 +50,13 @@ def latest_release():
         r.raise_for_status()
         j = r.json()
         asset = None
+        icon_asset = None
         for a in j.get('assets') or []:
-            if (a.get('name') or '').endswith('.ipa') and a.get('browser_download_url'):
+            name = a.get('name') or ''
+            if name.endswith('.ipa') and a.get('browser_download_url') and not asset:
                 asset = a
-                break
+            if name.lower() == 'icon.png' and a.get('browser_download_url'):
+                icon_asset = a
         if not asset:
             return None
         rel = {
@@ -52,7 +64,8 @@ def latest_release():
             'published_at': j.get('published_at') or '',
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
-            'notes': (j.get('body') or '')[:1500],
+            'icon_url': (icon_asset or {}).get('browser_download_url'),
+            'notes': _clean_notes(j.get('body') or ''),
         }
         _CACHE.update(at=now, release=rel)
         return rel

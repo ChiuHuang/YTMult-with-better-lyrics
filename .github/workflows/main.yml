@@ -117,8 +117,14 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           name: YTMusicUltimate (build ${{ github.run_number }})
-          files: YTMusicUltimate.ipa
+          files: |
+            YTMusicUltimate.ipa
+            main/Resources/icon.png
           draft: false
+          body: |
+            ![YTMusicUltimate](https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png)
+
+            Automated build of YTMusicUltimate. Asia mirror + AltStore source in the README.
 
       - name: Mirror IPA to file host
         env:

@@ -69,6 +69,8 @@ def api_app_altstore():
         return jsonify({'error': 'No release with an IPA asset found'}), 503
     tag = rel.get('tag') or 'build-?'
     version = tag[6:] if tag.startswith('build-') else tag
+    icon_url = rel.get('icon_url') or (
+        f'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
     return jsonify({
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',
@@ -81,6 +83,7 @@ def api_app_altstore():
             'versionDescription': f'YTMusicUltimate ({tag})',
             'downloadURL': worker_url(rel['download_url']),
             'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
+            'iconURL': icon_url,
             'size': rel.get('size') or 0,
         }],
     })
