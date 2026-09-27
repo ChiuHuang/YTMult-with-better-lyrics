@@ -101,6 +101,13 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- compact provider menu (better-lyrics dock style): collapsed trigger shows
+  the current tier icon (wbw blue / line mint / plain dim, redrawn bars, no
+  upstream SVG copied), tap expands a native anchored UIMenu (iOS 14+) with
+  provider name + tier icon rows, `i/n · tier · lines` subtitles (15+),
+  current checkmark, Best-available(auto) row; [<][>] steppers kept;
+  probe completion arms the menu (no programmatic UIMenu open) instead of
+  the fullscreen sheet; iOS 13 keeps the sheet fallback.
 - 10-way audit cleanup: fixed outcome-tier clobber, on_candidate deadlock,
   Cubey/AMLL per-query guards, Unison considered-every-query (dup fix kept),
   JWT load crash on nulls + TTL prune + probation label, candidates
