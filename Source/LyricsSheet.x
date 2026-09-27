@@ -42,6 +42,13 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     return v.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
 }
 
+// Dynamic lyric type scale: one size per song from the longest line, so
+// long lines fit without wrapping and rows never resize mid-song (no jump).
+// Shadows stay absolute (never scaled) so they can't jump either.
+static CGFloat s_lyricFontSize = 28.0;
+static CGFloat YTMULyricMainFontSize(void) { return s_lyricFontSize; }
+static CGFloat YTMULyricTransFontSize(void) { return s_lyricFontSize * 19.0 / 28.0; }
+
 // Background-derived ink: the sheet sits on blurred artwork, which can be
 // bright white while the OS is in dark mode (or dark while in light mode),
 // so trait-based ink washes out. The artwork is sampled once per song (see
@@ -72,6 +79,31 @@ static UIColor *YTMULyricFill(UIView *refView) {
     return [(light ? [UIColor blackColor] : [UIColor whiteColor])
             colorWithAlphaComponent:(light ? 0.10 : 0.15)];
 }
+// Mean artwork color for the song-tinted background wash.
+static UIColor *YTMUArtworkAverageColor(UIImage *img) {
+    CGImageRef cg = img.CGImage;
+    if (!cg) return nil;
+    uint8_t px[8 * 8 * 4] = {0};
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    if (!cs) return nil;
+    CGContextRef ctx = CGBitmapContextCreate(px, 8, 8, 8, 8 * 4, cs,
+        kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return nil;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, 8, 8), cg);
+    CGContextRelease(ctx);
+    unsigned long r = 0, g = 0, b = 0;
+    int n = 0;
+    for (int i = 0; i < 64; i++) {
+        if (px[i * 4 + 3] < 16) continue;
+        r += px[i * 4]; g += px[i * 4 + 1]; b += px[i * 4 + 2]; n++;
+    }
+    if (!n) return nil;
+    return [UIColor colorWithRed:r / (CGFloat)n / 255.0
+                           green:g / (CGFloat)n / 255.0
+                            blue:b / (CGFloat)n / 255.0 alpha:1.0];
+}
+
 // Mean luminance of a thumbnail; -1 when unsampleable.
 static CGFloat YTMUArtworkLuminance(UIImage *img) {
     if (!img) return -1;
@@ -234,7 +266,7 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 
         self.lyricLabel = [[UILabel alloc] init];
         self.lyricLabel.numberOfLines = 0;
-        self.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
+        self.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.lyricLabel.textColor = YTMULyricInk(0.45, 0.55, self.contentView);
         self.lyricLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -250,7 +282,7 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
-        self.wipeLabel.font = [UIFont boldSystemFontOfSize:28];
+        self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
         self.wipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
@@ -277,7 +309,7 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
-        self.transLabel.font = [UIFont systemFontOfSize:19 weight:UIFontWeightMedium];
+        self.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];
         self.transLabel.textColor = YTMULyricInk(0.35, 0.5, self.contentView);
         self.transLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
@@ -348,7 +380,7 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
     NSArray *parts = lyric[@"parts"];
     if (![lyric[@"wordSynced"] boolValue] || parts.count == 0) return;
     UIFont *font = self.wipeLabel.font;
-    if (!font) font = [UIFont boldSystemFontOfSize:28];
+    if (!font) font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     NSArray *ranges = nil;
     NSString *display = [vc wbwDisplayTextForLyric:lyric ranges:&ranges];
     if (ranges.count == 0) return;
@@ -402,6 +434,7 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_setProbing:(BOOL)probing;
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
 - (void)ytmu_probeArtworkBrightness:(UIImage *)img;
+- (void)ytmu_applySongTint:(UIImage *)img;
 - (void)ytmu_refreshBgDerivedInk;
 - (void)ytmu_applyArtworkImage:(UIImage *)img forVideoID:(NSString *)videoID;
 - (void)ytmu_updateLandscapeMetadata;
@@ -1941,6 +1974,27 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeArtImageView.image = img;
     self.artworkVideoID = videoID;
     [self ytmu_probeArtworkBrightness:img];
+    [self ytmu_applySongTint:img];
+}
+
+- (void)ytmu_applySongTint:(UIImage *)img {
+    // Translucent wash of the song's own color over the blurred artwork, so
+    // the whole lyrics UI (portrait + landscape share self.view) follows
+    // the cover. Animated so song changes cross-fade instead of popping.
+    if (!img || !self.view || !self.blurView) return;
+    UIColor *avg = YTMUArtworkAverageColor(img);
+    if (!avg) return;
+    if (!self.songTintView) {
+        UIView *t = [[UIView alloc] initWithFrame:self.view.bounds];
+        t.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        t.userInteractionEnabled = NO;
+        t.backgroundColor = [UIColor clearColor];
+        [self.view insertSubview:t aboveSubview:self.blurView];
+        self.songTintView = t;
+    }
+    [UIView animateWithDuration:0.6 animations:^{
+        self.songTintView.backgroundColor = [avg colorWithAlphaComponent:0.28];
+    }];
 }
 
 - (void)loadArtworkForVideo:(NSString *)videoID {
@@ -2487,6 +2541,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)updateLyrics:(NSArray *)newLyrics {
     self.lyrics = newLyrics;
 
+    // One type size per song from the longest line: long lines fit without
+    // wrapping, and rows never resize mid-song. Set before reloadData.
+    NSUInteger maxLen = 0;
+    for (NSDictionary *l in newLyrics) {
+        if (![l isKindOfClass:[NSDictionary class]]) continue;
+        NSString *t = [self normalizedLyricText:l[@"text"]];
+        if (t.length > maxLen) maxLen = t.length;
+    }
+    CGFloat size = 28.0;
+    if (maxLen > 24) size = 28.0 * 24.0 / (CGFloat)maxLen;
+    size = MAX(20.0, MIN(28.0, floor(size * 2.0) / 2.0));
+    s_lyricFontSize = size;
+
     BOOL hasTimestamp = NO;
     for (NSDictionary *l in newLyrics) {
         if ([l[@"time"] doubleValue] > 0.0 || [l[@"startTimeMs"] doubleValue] > 0.0) {
@@ -2510,7 +2577,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         [self loadArtworkForVideo:artVid];
     }
 
-    [self.tableView reloadData];
+    // Song change (portrait sheet and landscape share this table): dissolve
+    // instead of a hard reload so row-height changes don't jump.
+    NSString *vid = self.loadingVideoID ?: g_currentVideoID;
+    BOOL songChanged = vid.length && ![vid isEqualToString:self.displayedVideoID];
+    self.displayedVideoID = [vid copy];
+    if (songChanged && newLyrics.count > 0) {
+        [UIView transitionWithView:self.tableView duration:0.28
+                           options:UIViewAnimationOptionTransitionCrossDissolve
+                        animations:^{ [self.tableView reloadData]; }
+                        completion:nil];
+    } else {
+        [self.tableView reloadData];
+    }
 
     if (newLyrics.count > 0 && (self.isModal || YTMULyricsPreference(@"lyricsAlwaysOn", YES))) {
         self.view.hidden = NO;
@@ -2625,7 +2704,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (!force && [key isEqualToString:cell.lastColorKey]) return;
 
     UIFont *font = cell.wipeLabel.font;
-    if (!font) font = [UIFont boldSystemFontOfSize:28];
+    if (!font) font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     NSArray *ranges = nil;
     NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
     NSString *layoutKey = [NSString stringWithFormat:@"%ld|%.1f|%@", (long)index, (double)width, display];
@@ -2769,7 +2848,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         return;
     }
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
-    cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
+    cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
+    cell.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
+    cell.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];
     cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
     BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric ranges:NULL];

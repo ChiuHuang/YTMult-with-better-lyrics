@@ -66,6 +66,46 @@ def api_app_stats():
     return jsonify({'ok': True, **snapshot()})
 
 
+@app.route('/api/app/badge', methods=['GET'])
+def api_app_badge():
+    """Server-rendered MD3 badge (same theme as assets/badges/). Currently
+    ?type=release -> latest build tag. SVG, no-store."""
+    from .release_info import latest_release
+    btype = (request.args.get('type') or 'release').strip()
+    label = 'release'
+    if btype == 'release':
+        try:
+            rel = latest_release()
+            label = (rel or {}).get('tag') or 'none yet'
+        except Exception:
+            label = 'unknown'
+    label = label[:24]
+    # width fits the text; textLength forces exact fit (no overflow).
+    w = max(88, int(38 + 7.4 * len(label)))
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="32" '
+        'viewBox="0 0 {w} 32" role="img" aria-label="{label}">'
+        '<style>.bg{{fill:#D3E3FD}}.fg{{fill:#041E49;'
+        "font-family:Roboto,-apple-system,'Segoe UI',sans-serif;"
+        'font-size:13px;font-weight:500}}.chip{{fill:#041E49}}'
+        '.glyph{{stroke:#D3E3FD;stroke-width:1.8;fill:none;'
+        'stroke-linecap:round;stroke-linejoin:round}}'
+        '@media (prefers-color-scheme: dark){.bg{fill:#004A77}'
+        '.fg{fill:#D3E3FD}.chip{fill:#D3E3FD}.glyph{stroke:#004A77}}'
+        '</style>'
+        '<rect class="bg" width="{w}" height="32" rx="16"/>'
+        '<circle class="chip" cx="16" cy="16" r="12"/>'
+        '<g transform="translate(9,9)">'
+        '<path class="glyph" d="M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z"/>'
+        '</g>'
+        '<text class="fg" x="33" y="20.5" textLength="{tw}" '
+        'lengthAdjust="spacingAndGlyphs">{label}</text></svg>'
+    ).format(w=w, tw=max(10, w - 42), label=label.replace('&', '&amp;')
+             .replace('<', '&lt;').replace('>', '&gt;'))
+    return Response(svg, mimetype='image/svg+xml',
+                    headers={'Cache-Control': 'no-store'})
+
+
 @app.route('/api/app/release-hook', methods=['POST'])
 def api_app_release_hook():
     """Actions webhook: instant release info (incl. Asia mirror URL) without

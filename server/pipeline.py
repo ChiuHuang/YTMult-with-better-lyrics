@@ -381,8 +381,9 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     # Translation (shared helper -- the background queue uses the same one)
     if translate_to and result.get('lyrics'):
         print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
-        from .translate import translate_result_in_place
-        translate_result_in_place(result, translate_to)
+        from .translate import translate_result_in_place, _detect_song_lang
+        translate_result_in_place(result, translate_to,
+                                  song_lang=_detect_song_lang(song_info))
 
     if result and result.get('lyrics'):
         sanitize_lyrics_parts(result['lyrics'])

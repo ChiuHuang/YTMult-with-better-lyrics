@@ -276,8 +276,27 @@ def _apply_zh_script(texts, target_lang):
     return texts
 
 
-def cohere_translate(texts, target_lang='zh-TW'):
-    """Translate a list of text lines using Cohere Command A Translate."""
+def _detect_song_lang(info):
+    """Best-effort song language from metadata: 'ja' when Japanese fields
+    or kana are present, else '' (unknown). Used to decide whether
+    Han-script lines are really Chinese (skip) or Japanese kanji (translate)."""
+    try:
+        info = info or {}
+        if info.get('ja_title') or info.get('ja_artist'):
+            return 'ja'
+        text = f"{info.get('title', '')} {info.get('artist', '')}"
+        if re.search(r'[\u3040-\u30FF\uFF66-\uFF9F]', text):
+            return 'ja'
+    except Exception:
+        pass
+    return ''
+
+
+def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
+    """Translate a list of text lines using Cohere Command A Translate.
+    song_lang (e.g. 'ja' from _detect_song_lang): for a non-Chinese song,
+    Han-script lines are kanji, not Chinese -- translate them instead of
+    skipping as already-Chinese."""
     if not texts:
         return []
 
@@ -291,9 +310,11 @@ def cohere_translate(texts, target_lang='zh-TW'):
         return cached
 
     # Chinese target: lines that are already Chinese script skip Cohere
-    # entirely and only get a script conversion pass at the end.
+    # entirely and only get a script conversion pass at the end -- UNLESS
+    # the song itself is not Chinese (Japanese kanji looks Han but isn't).
     chinese_target = _is_chinese_target(target_lang)
-    if chinese_target:
+    skip_han = chinese_target and song_lang in ('', 'zh', 'zh-TW', 'zh-CN', 'zh-HK')
+    if chinese_target and skip_han:
         to_translate_idx = [i for i, t in enumerate(texts) if not _line_is_already_chinese(t)]
     else:
         to_translate_idx = list(range(len(texts)))
@@ -518,7 +539,7 @@ def google_translate_fast(texts, target_lang='zh-TW'):
     return all_translations
 
 
-def translate_result_in_place(result, target_lang):
+def translate_result_in_place(result, target_lang, song_lang=''):
     """Fill lyric['translated'] for every text line of a fetched result.
 
     Same index-aligned mapping the sequential pipeline uses, factored out so
@@ -530,7 +551,7 @@ def translate_result_in_place(result, target_lang):
     texts = [l['text'] for l in result['lyrics'] if l.get('text')]
     if not texts:
         return 0
-    translations = cohere_translate(texts, target_lang)
+    translations = cohere_translate(texts, target_lang, song_lang=song_lang)
     filled = 0
     ti = 0
     for lyric in result['lyrics']:

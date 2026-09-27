@@ -14,13 +14,13 @@ Open source — forks and pull requests welcome.
 
 - **Releases (IPA):** https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases
   Every push to `main` builds `YTMusicUltimate.ipa` as `build-N`.
+
+  [![Latest release](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=release)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
+
 - **Asia mirror:** prefix any release URL with the proxy (Cloudflare CDN), e.g.
   `https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-160/YTMusicUltimate.ipa`
   The in-app updater opens this proxied link automatically. Built IPAs are
   also mirrored to the Asia file CDN (`https://file.chiuhuang.dev/`).
-<a href="https://stikstore.app/altdirect/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore" target="_blank">
-   <img src="https://raw.githubusercontent.com/StikStore/altdirect/refs/heads/main/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"/>
-</a>
 
 - **AltStore / SideStore / Feather:** add this source URL (or paste it on altdirect.app):
   `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
