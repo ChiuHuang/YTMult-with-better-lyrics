@@ -160,11 +160,42 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     # Priority 0: Cubey API (if we have JWT) -- one pass covers Musixmatch
     # wordByWord/synced, QQ QRC, KuGou LRC, NetEase and the bLyrics/BiniLyrics
     # TTML events, with word-by-word always preferred inside the stream.
-    # No request JWT? Fall back to the contributed pool before giving up.
+    # No request JWT? Fall back to the contributed pool before giving up: the
+    # device is not required to wait for its own Turnstile token, so this is
+    # the normal path and it says which credential it used (exactly one line
+    # per full fetch, never the token itself). pick_jwt only reads RAM -- it
+    # cannot block on a probe here.
+    jwt_src = 'device'
+    _jwt_meta = {}
     if not jwt_token:
-        jwt_token = pick_jwt()
-        if jwt_token:
-            print(f"  [0/5] No request JWT -- using a contributed token from the pool")
+        _picked = pick_jwt(with_meta=True)
+        # Tolerate a legacy/stubbed pick_jwt that returns the bare token
+        # instead of the (token, meta) pair: a bad unpack here would take
+        # down every provider stage, not just Cubey.
+        if isinstance(_picked, tuple):
+            jwt_token = _picked[0] if _picked else None
+            _jwt_meta = _picked[1] if len(_picked) > 1 else {}
+        else:
+            jwt_token = _picked
+        jwt_src = 'pool' if jwt_token else 'none'
+    try:
+        if jwt_src == 'device':
+            print(f"  [JWT] device token for {video_id} (pool not consulted)")
+        elif jwt_src == 'pool':
+            _m = _jwt_meta if isinstance(_jwt_meta, dict) else {}
+            _age = int(_m['age_s']) if _m.get('age_s', -1) >= 0 else '?'
+            _extra = ' probation=1' if _m.get('probation') else ''
+            print(f"  [JWT] pool token for {video_id} (id={_m.get('id') or '?'} age={_age}s "
+                  f"successes={_m.get('successes', 0)} fails={_m.get('fails', 0)} "
+                  f"last_ok={_m.get('last_ok') or 'never'} "
+                  f"verdict={_m.get('verdict') or 'unverified'} "
+                  f"pool={_m.get('pool_size', 0)}{_extra})")
+        else:
+            print(f"  [JWT] no token in pool, Cubey skipped for {video_id}")
+    except Exception as e:
+        # Logging must never break a fetch.
+        print(f"  [JWT] source line failed (continuing): {e}")
+
     def _s_cubey():
         print(f"  [fetch] Trying Cubey API (with JWT)...")
         _stage('Cubey', 'started')
@@ -191,8 +222,9 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     if jwt_token:
         _fetch_stages.append(_s_cubey)
     else:
-        _stage('Cubey', 'skipped', 'no JWT')
-        print(f"  [fetch] Cubey skipped (no JWT)")
+        # The [JWT] line above already said Cubey is out; keep the stage
+        # event (it reaches the device's `status` list) and nothing else.
+        _stage('Cubey', 'skipped', 'no JWT in pool and none from the device')
 
     # Priority 1: direct braccato providers (no JWT) -- bLyrics TTML (often
     # syllable-timed), Portato QQ QRC (word-by-word), Legato KuGou LRC.
