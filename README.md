@@ -5,6 +5,11 @@
 [![Nightly IPA](assets/badges/release.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
 [![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 
+[![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
+[![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
+[![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
+[![Nodes online](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=nodes)](https://ytmtranslate.chiuhuang.dev/api/app/stats)
+
 YouTube Music iOS tweak + a self-hosted lyrics server: synced and
 word-synced lyrics, multi-provider race, translation, and an admin dashboard.
 Open source — forks and pull requests welcome.
@@ -78,6 +83,11 @@ python proxy_server.py        # listens on :20016
   `/api/app/settings`).
 - Device debug uploads land in `logs/`; on-device lyrics cache is never
   poisoned by not-found results.
+- Public read-only endpoints (also what the badges above render):
+  - `/api/app/stats` — JSON usage counter (lyrics served, devices, last song).
+  - `/api/app/badge?type=release|lyrics|devices|tracks|nodes` — MD3 badge
+    SVG, same look as `assets/badges/`. Self-hosters can drop the README
+    image URLs on your own domain.
 
 ## Tweak features (highlights)
 
