@@ -101,6 +101,36 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- all providers in RAM + switcher press feedback + fullscreen title fix:
+  `server/candidates.py` is now RAM-first: every provider a fetch or probe
+  tried is kept in a bounded LRU (32 videos, deep-copied on read) and NOTHING
+  is written to `cache/candidates` anymore (opt-in via
+  `YTMU_PERSIST_CANDIDATES=1` / `save_candidates(..., persist=True)`); only
+  the provider actually serving reaches the on-disk lyrics cache, and
+  selecting another one re-caches just that one. `routes_lyrics` grew
+  `_provider_meta()` (RAM list + saved choice), attaches it to every
+  `/api/lyrics` payload (transport-only, never persisted) and to
+  `/api/lyrics/check`, plus two new reads:
+  `GET /api/lyrics/song?v=` (title/artist, served from the cached entry or
+  `providers_yt.get_song_info_cached` 30min TTL/LRU) and
+  `GET /api/lyrics/providers/candidates?v=`. iOS arms the switcher from
+  whichever payload carries the list (fast/full/check/candidates), so the
+  menu is ready as the song plays with zero extra provider traffic; queue
+  precache now runs the FULL pipeline for the immediate next track (all
+  providers raced, winner cached) and fast for the rest
+  (`ytmu_precachePost` in LyricsCore.x). Fullscreen title/artist: server
+  metadata outranks `playerResponse` (whose title is the video title --
+  `ytmu_cleanVideoTitle` strips `(Official Video)`/`- Topic`/`【MV】`/`| 4K`),
+  the label scrape now ranks by font size, skips hidden/zero-size and
+  audio-quality rows, and only fills gaps; the per-song `ytmu_requestSongMetaForVideo:`
+  request (guarded by `songMetaVideoID`) fixes the "stuck on Now Playing"
+  case where the lyrics came from the device cache and no payload carried
+  metadata. [<] [>] steppers grow into a filled pill while held
+  (`ytmu_wireStepperPress:` -> `ytmu_stepperPressIn:`/`Out:`, transform-based
+  so layout passes cannot cut the spring). Verified: py_compile all server
+  files, imports, node --check, plus a stubbed end-to-end run (4 providers in
+  RAM / 0 snapshot files, list on the payload, winner-only cache, select
+  from RAM with every fetcher raising).
 - compact provider menu (better-lyrics dock style): collapsed trigger shows
   the current tier icon (wbw blue / line mint / plain dim, redrawn bars, no
   upstream SVG copied), tap expands a native anchored UIMenu (iOS 14+) with
