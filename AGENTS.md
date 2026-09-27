@@ -140,6 +140,55 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **node reconnect: fast floor, bounded ceiling, fewer drops** (user: "make
+  backoff lower or dont make it disconnect"). `node.py` was the only backoff
+  in the repo: 2s doubling to a 60s cap, and NOTHING ever reset it, so a
+  server restart or a wifi blip could leave a node dark for a minute and
+  one bad afternoon set the pace for the whole day. Now
+  `_RECONNECT_MIN 1.0` / `_RECONNECT_MAX 10.0` / `_RECONNECT_GROWTH 1.5`,
+  jitter +0-15% applied to the wait and then clamped so 1s and 10s stay exact
+  (jitter lengthens, never shortens -- the first cut did the opposite and
+  let the floor drift to 0.7s). The curve resets on a session that
+  AUTHENTICATED and lived >= `_SESSION_RESET_MIN` (15s), tracked by
+  `_SESSION['authed_at']` written from the `hello_ack ok` branch: resetting
+  on a bare socket open would let a revoked key spin at 1s forever, and
+  resetting on any open would let a proxy that kills every socket hammer at
+  1s, so the reset is gated twice. Liveness: `ping_timeout 10 -> 120`
+  (`_PING_INTERVAL` stays 30). That was the "disconnect" half and it is a
+  real bug, not a preference -- websocket-client records the pong on the
+  READER thread, which is the same thread `on_message` runs on, so one
+  relayed `http_fetch` (20s requests timeout, and they queue) blocked pong
+  processing and the client declared a healthy socket dead. Server side is
+  untouched on purpose: `ws.receive(timeout=90)` is what reaps a silently
+  dead node, and raising it would only make bad nodes look alive. The
+  template sha moved, so every node refetches node.py on its own within 30s
+  (verified: template sha == a node's own `_code_sha` after the
+  SERVER_WS_URL/NODE_ID/NODE_KEY normalization, so there is no refetch
+  loop). Verified with a stubbed-`websocket` harness over the real
+  `run_forever_with_backoff`: never-connects walks 1.1 -> 8.1 -> 10.0 and
+  stays at 10.0 (6 dials/min worst case), a long session drops the next
+  wait back to ~1.0, a rejected key and an immediately-dropped session both
+  still climb to the cap, and the run_forever kwargs are
+  `{ping_interval: 30, ping_timeout: 120}`.
+- **settings API documented** (`docs/settings-api.md`, linked from the
+  README's public-endpoints list). Full reference: merge order (defaults
+  overlaid by the file, a read never raises), the key regex and the
+  value-type rules, all five endpoints with request/response bodies and curl,
+  the auth trap (an unauthenticated admin call is a `302` to `/login`, not a
+  `401`, so `curl -f` does not catch it), the device side (1h fetch cache in
+  `YTMUFetchAppSettings`, so a dashboard change is not instant; the
+  `YTMUAppSettingBool` string coercion table; the `upload_logs` gate as the
+  worked example), a checklist for adding a key, the dashboard's value-field
+  parsing, and the traps (gitignored file, no seed copy of the
+  `.example.json`, no unknown-key validation, no null values). Fixed one
+  inconsistency the doc would otherwise have had to lie about: DELETE with a
+  malformed key was a 500 through the crash handler while POST returned
+  `400` -- now `400` too (`server/routes_admin.py:141`). Also corrected the
+  README's "first run copies config/*.example.json" claim: no code does
+  that, the real files are created on first write. Verified with the Flask
+  test client against 22 checks (public read open, admin gated, 400s for a
+  bad key / list / >4000-char string / missing value, DELETE 400, defaults
+  surviving a delete, reset emptying the file to `{}`).
 - **node cache push removed, JWT push added** (user: "stop syncing caches and
   also sync jwt"). Gone: `_cache_entries_for_sync` / `_push_cache_sync` /
   `_full_sync_for` / `_cache_sync_loop` and the `'sync'`/`'sync_end'` receivers
