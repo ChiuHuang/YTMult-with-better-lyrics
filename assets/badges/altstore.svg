@@ -3,18 +3,18 @@
     .bg { fill: #D3E3FD; }
     .fg { fill: #041E49; font-family: Roboto, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 500; }
     .chip { fill: #041E49; }
-    .glyph { stroke: #D3E3FD; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .glyph { fill: #D3E3FD; }
     @media (prefers-color-scheme: dark) {
       .bg { fill: #004A77; }
       .fg { fill: #D3E3FD; }
       .chip { fill: #D3E3FD; }
-      .glyph { stroke: #004A77; }
+      .glyph { fill: #004A77; }
     }
   </style>
   <rect class="bg" width="106" height="32" rx="16"/>
   <circle class="chip" cx="16" cy="16" r="12"/>
-  <g transform="translate(9,9)">
-    <path class="glyph" d="M7 2v7m0 0L4.5 6.5M7 9l2.5-2.5M3 12h8"/>
+  <g transform="translate(10,10) scale(0.5)">
+    <path class="glyph" d="M5,20h14v-2H5V20z M19,9h-4V3H9v6H5l7,7L19,9z"/>
   </g>
   <text class="fg" x="33" y="20.5">AltDirect</text>
 </svg>

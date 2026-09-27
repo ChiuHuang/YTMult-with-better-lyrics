@@ -111,3 +111,5 @@ python proxy_server.py        # listens on :20016
 
 Fork of [YTMusicUltimate](https://github.com/ginsudev/YTMusicUltimate)
 by Ginsu and Dayanch96. Lyrics system, server, and dashboard by ChiuHuang.
+Badge icons are [Material Icons](https://fonts.google.com/icons) by Google
+(Apache-2.0).
