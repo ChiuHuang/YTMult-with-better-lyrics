@@ -70,20 +70,15 @@ def api_app_stats():
 # MD3 badge renderer (same look as assets/badges/*.svg)
 # ------------------------------------------------------------
 # One glyph per type, so the row does not read as five download buttons.
-# Same stroke style as the static badges, drawn on a 14x14 box.
+# Official Google Material Icons (Apache-2.0), 24x24 paths pasted verbatim and
+# drawn at scale(0.5) -> 12x12 inside the 24px chip. Same set as
+# assets/badges/*.svg, so dynamic and static badges look identical.
 _BADGE_GLYPHS = {
-    'release': '<path class="glyph" d="M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z"/>',
-    'lyrics': '<path class="glyph" d="M5 10V4.5L10 3.2V9"/>'
-               '<circle class="glyph" cx="3.8" cy="10" r="1.8"/>'
-               '<circle class="glyph" cx="10.2" cy="9" r="1.8"/>',
-    'devices': '<rect class="glyph" x="4" y="2.5" width="6" height="9" rx="1.4"/>'
-               '<path class="glyph" d="M6.4 9.7h1.2"/>',
-    'tracks': '<circle class="glyph" cx="7" cy="7" r="4.6"/>'
-              '<circle class="glyph" cx="7" cy="7" r="0.9"/>',
-    'nodes': '<rect class="glyph" x="2.5" y="2.5" width="9" height="3.6" rx="1"/>'
-             '<rect class="glyph" x="2.5" y="7.9" width="9" height="3.6" rx="1"/>'
-             '<circle class="glyph" cx="4.6" cy="4.3" r="0.4"/>'
-             '<circle class="glyph" cx="4.6" cy="9.7" r="0.4"/>',
+    'release': 'M5,20h14v-2H5V20z M19,9h-4V3H9v6H5l7,7L19,9z',
+    'lyrics': 'M14,9c0-2.04,1.24-3.79,3-4.57V4c0-1.1-0.9-2-2-2H4C2.9,2,2.01,2.9,2.01,4L2,22l4-4h9c1.1,0,2-0.9,2-2v-2.42 C15.24,12.8,14,11.05,14,9z M10,14H6v-2h4V14z M13,11H6V9h7V11z M13,8H6V6h7V8z',
+    'devices': 'M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z',
+    'tracks': 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z',
+    'nodes': 'M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z',
 }
 _BADGE_CHAR_W = 7.4   # px per char at 13px/500 Roboto
 _BADGE_RESERVED = 42  # chip (28) + text start gap
@@ -106,15 +101,14 @@ def _badge_svg(text, aria=None, glyph='release'):
         '<style>.bg{fill:#D3E3FD}.fg{fill:#041E49;'
         "font-family:Roboto,-apple-system,'Segoe UI',sans-serif;"
         'font-size:13px;font-weight:500}.chip{fill:#041E49}'
-        '.glyph{stroke:#D3E3FD;stroke-width:1.8;fill:none;'
-        'stroke-linecap:round;stroke-linejoin:round}'
+        '.glyph{fill:#D3E3FD}'
         '@media (prefers-color-scheme: dark){.bg{fill:#004A77}'
-        '.fg{fill:#D3E3FD}.chip{fill:#D3E3FD}.glyph{stroke:#004A77}}'
+        '.fg{fill:#D3E3FD}.chip{fill:#D3E3FD}.glyph{fill:#004A77}}'
         '</style>'
         '<rect class="bg" width="%d" height="32" rx="16"/>'
         '<circle class="chip" cx="16" cy="16" r="12"/>'
-        '<g transform="translate(9,9)">'
-        '%s'
+        '<g transform="translate(10,10) scale(0.5)">'
+        '<path class="glyph" d="%s"/>'
         '</g>'
         '<text class="fg" x="33" y="20.5" textLength="%d" '
         'lengthAdjust="spacingAndGlyphs">%s</text></svg>'

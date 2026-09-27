@@ -118,6 +118,15 @@
   `overflow:auto`, so an overfull dialog shows a scroll bar; hide it with
   `::part(body)` (mdui shadow roots are open). Release body now uses the
   official altdirect image embed instead of a fenced raw source URL.
+  Badge icons are official Google Material Icons (Apache-2.0, credited in the
+  README): 24x24 filled paths drawn at `translate(10,10) scale(0.5)` (12x12
+  inside the 24px chip) with `.glyph{fill:...}`, not the old 14x14 hand-drawn
+  strokes. `_BADGE_GLYPHS` stores BARE `d` data, so the template has to wrap
+  it (`<path class="glyph" d="%s"/>`) -- pasting markup into the table renders
+  nothing. Repo layout gotcha: the icons are NOT under `src/<category>/<name>`,
+  they are `src/<category>/<name>/materialicons/24px.svg` (and `download` is in
+  `file/`, `smartphone` in `hardware/`, `lyrics`/`album` in `av/`, `dns` in
+  `action/`).
 - intro skip becomes the song offset: a `music_offtopic` segment at the head
   of a video delays the song, so the lyric timeline (which starts at line 1)
   ran late by exactly the segment length. `Source/SponsorBlock.x` now stores
