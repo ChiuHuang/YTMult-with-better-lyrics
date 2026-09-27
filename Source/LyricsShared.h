@@ -153,6 +153,16 @@
 - (void)forceReloadLyrics;
 - (void)dismissModal;
 - (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges;
+// Implemented in Source/LyricsSheet.x, but CALLED from Source/LyricsStream.x, so
+// they are declared here rather than in that file's own category. A declaration
+// in LyricsStream.x's @interface would demand a definition in the
+// @implementation of the same category in the same file, and fail with
+// -Werror,-Wincomplete-implementation. A declaration here is satisfied by the
+// primary @implementation in LyricsSheet.x.
+- (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
+- (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
+- (void)ytmu_updateLandscapeMetadata;
+- (void)fetchFullLyricsForVideo:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
 @end
 
 // The five methods below are implemented in Source/LyricsStream.x as
