@@ -58,6 +58,14 @@ def api_app_settings():
     return jsonify({'ok': True, 'settings': get_all()})
 
 
+@app.route('/api/app/stats', methods=['GET'])
+def api_app_stats():
+    """Public usage counter: lyrics served, devices, last song + status.
+    Actions embeds it into release notes."""
+    from .usage_stats import snapshot
+    return jsonify({'ok': True, **snapshot()})
+
+
 @app.route('/api/app/release-hook', methods=['POST'])
 def api_app_release_hook():
     """Actions webhook: instant release info (incl. Asia mirror URL) without
