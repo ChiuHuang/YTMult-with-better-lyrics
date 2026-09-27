@@ -1321,7 +1321,8 @@
      (including the song line) into #refetch-live, and the final done/error
      event fetches the full candidates once -- no status polling. A
      single-shot safety fetch covers a missed SSE disconnect. Full
-     candidates are saved server-side; left/right pages without re-probing. */
+     candidates are kept server-side (RAM store, per-video); left/right pages
+     without re-probing. */
   let probeStatusUrl = null;
   let probeFoundCount = 0;
   let probeSafetyTimer = null;

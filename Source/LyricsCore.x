@@ -408,41 +408,30 @@ NSArray *YTMULyricsCacheEntries(void) {
     return [entries copy];
 }
 
-void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
-    if (!videoIDs || videoIDs.count == 0) return;
-    if (!lang.length) lang = YTMUTargetLang();
-    
-    NSString *apiBase = YTMUApiBase();
-    NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/precache", apiBase];
+static void ytmu_precachePost(NSArray *validVids, NSString *lang, BOOL full) {
+    if (!validVids.count) return;
+    NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/precache", YTMUApiBase()];
     NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) return;
-    
-    NSMutableArray *validVids = [NSMutableArray array];
-    for (NSString *vid in videoIDs) {
-        if ([vid isKindOfClass:[NSString class]] && vid.length && _safe_cache_component(vid)) {
-            [validVids addObject:vid];
-            if (validVids.count >= 20) break;
-        }
-    }
-    if (validVids.count == 0) return;
-    
+
     NSMutableDictionary *body = [NSMutableDictionary dictionary];
     body[@"video_ids"] = validVids;
-    body[@"lang"] = lang;
-    if (useFull) body[@"full"] = @YES;
-    
+    body[@"lang"] = lang ?: YTMUTargetLang();
+    if (full) body[@"full"] = @YES;
+
     NSString *jwt = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"][@"ytmuJwtToken"];
     if (jwt && jwt.length) body[@"jwt"] = jwt;
-    
+
     NSData *jsonBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
     if (!jsonBody) return;
-    
+
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     req.HTTPMethod = @"POST";
     [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     req.HTTPBody = jsonBody;
     req.timeoutInterval = 10.0;
-    
+
+    NSString *tag = full ? @"all" : @"fast";
     [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error) {
             sendDebugLog([NSString stringWithFormat:@"[PRECACHE] Request failed: %@", error.localizedDescription]);
@@ -455,8 +444,36 @@ void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
         }
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         if (!json) return;
-        sendDebugLog([NSString stringWithFormat:@"[PRECACHE] Queued %@ videos (job: %@)", @(validVids.count), json[@"job_id"] ?: @"?"]);
+        sendDebugLog([NSString stringWithFormat:@"[PRECACHE] Queued %@ videos (%@, job: %@)",
+                      @(validVids.count), tag, json[@"job_id"] ?: @"?"]);
     }] resume];
+}
+
+void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
+    if (!videoIDs || videoIDs.count == 0) return;
+    if (!lang.length) lang = YTMUTargetLang();
+
+    NSMutableArray *validVids = [NSMutableArray array];
+    for (NSString *vid in videoIDs) {
+        if ([vid isKindOfClass:[NSString class]] && vid.length && _safe_cache_component(vid)) {
+            [validVids addObject:vid];
+            if (validVids.count >= 20) break;
+        }
+    }
+    if (validVids.count == 0) return;
+
+    if (useFull) {
+        ytmu_precachePost(validVids, lang, YES);
+        return;
+    }
+    // The track that plays next gets the full pipeline: every provider is
+    // raced (so the server holds the whole list in RAM and the switcher is
+    // armed the moment it starts) and only the winner is cached. The rest of
+    // the queue stays on the cheap fast path.
+    ytmu_precachePost(@[validVids.firstObject], lang, YES);
+    if (validVids.count > 1) {
+        ytmu_precachePost([validVids subarrayWithRange:NSMakeRange(1, validVids.count - 1)], lang, NO);
+    }
 }
 
 BOOL _safe_cache_component(NSString *s) {

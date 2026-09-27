@@ -39,6 +39,48 @@ from .playlist import _playlist_jobs, _playlist_jobs_lock
 _update_cache = {'commit': None, 'checked_at': 0.0}
 
 
+# ============================================================
+# Provider switcher metadata (RAM snapshots)
+# ============================================================
+# Every provider a fetch tried is kept in RAM (see candidates.py) so the
+# device switcher can list them without re-probing. The lyrics payload
+# carries the slim list (no lyric data) so the menu arms the moment the
+# song's lyrics land -- the client never has to ask for it separately.
+
+
+def _provider_meta(video_id):
+    """{providers: [...], saved: 'X'} for a video, or None when nothing is
+    held. Providers are read straight from the RAM snapshot; this never
+    fetches and never writes anything to disk."""
+    if not video_id:
+        return None
+    try:
+        from .candidates import load_candidates
+        cands = load_candidates(video_id)
+    except Exception:
+        cands = None
+    if not cands:
+        return None
+    out = []
+    for c in cands:
+        if not isinstance(c, dict):
+            continue
+        row = {k: c.get(k) for k in
+               ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines', 'score')}
+        if row.get('provider'):
+            out.append(row)
+    if not out:
+        return None
+    saved = ''
+    try:
+        from .library import get_provider
+        saved = (get_provider(video_id) or {}).get('provider', '') or ''
+    except Exception:
+        saved = ''
+    return {'providers': out, 'saved': saved}
+
+
+
 def latest_tweak_commit():
     """Fetch the current public build revision, caching it for five minutes."""
     now = time_module.time()
@@ -127,6 +169,16 @@ def api_lyrics():
         `set_cached`, and cache-hit loads are fresh reads from disk."""
         if isinstance(data, dict) and isinstance(data.get('lyrics'), list):
             apply_display_transforms(data['lyrics'], translate_to, auto_zh)
+        # Arm the device switcher with every provider this video has in RAM
+        # (transport-only: set_cached already ran on this dict, so the extra
+        # keys never reach disk).
+        if isinstance(data, dict) and not data.get('providers'):
+            try:
+                _meta = _provider_meta(video_id)
+                if _meta:
+                    data.update(_meta)
+            except Exception:
+                pass
         try:
             from .usage_stats import record_serve
             if isinstance(data, dict) and not is_not_found_result(data):
@@ -415,6 +467,52 @@ def api_cache_list():
     return jsonify({'count': len(items), 'items': items})
 
 
+@app.route('/api/lyrics/song', methods=['GET'])
+def api_lyrics_song():
+    """Title/artist for a video id, straight from YT Music metadata.
+
+    The full screen panel needs the track name on every song change, and the
+    on-device player objects are not a dependable source (playerResponse is
+    often nil and the now-playing labels are hidden behind our own view).
+    This is one cached metadata lookup -- no lyric providers involved."""
+    from .providers_yt import get_song_info_cached
+    video_id = (request.args.get('v') or '').strip()
+    if not _safe_cache_component(video_id):
+        return jsonify({'ok': False, 'error': 'Invalid video ID'}), 400
+    # A cached lyrics entry already carries the metadata: no ytmusicapi call.
+    cached = get_cached(f"{video_id}:{request.args.get('lang') or 'zh-TW'}") or \
+        get_cached(f"{video_id}:{request.args.get('lang') or 'zh-TW'}:fast")
+    if cached and cached.get('song'):
+        return jsonify({'ok': True, 'video_id': video_id,
+                        'song': cached.get('song', ''),
+                        'artist': cached.get('artist', ''),
+                        'duration': cached.get('duration', 0),
+                        'source': cached.get('source', '')})
+    info = get_song_info_cached(video_id)
+    if not info:
+        return jsonify({'ok': False, 'error': 'Video not found on YouTube Music'}), 404
+    return jsonify({'ok': True, 'video_id': video_id,
+                    'song': info.get('title', ''),
+                    'artist': info.get('artist', ''),
+                    'album': info.get('album', ''),
+                    'duration': info.get('duration', 0)})
+
+
+@app.route('/api/lyrics/providers/candidates', methods=['GET'])
+def api_providers_candidates():
+    """Provider list for a video straight from the RAM snapshot. The device
+    calls it on song change (and for locally cached lyrics) so the switcher
+    is armed with zero provider traffic; an empty answer just means the
+    switcher stays unarmed and the next tap probes as before."""
+    video_id = (request.args.get('v') or '').strip()
+    if not _safe_cache_component(video_id):
+        return jsonify({'ok': False, 'error': 'Invalid video ID'}), 400
+    meta = _provider_meta(video_id) or {}
+    return jsonify({'ok': True, 'video_id': video_id, 'found': bool(meta),
+                    'providers': meta.get('providers') or [],
+                    'saved': meta.get('saved', '')})
+
+
 _TIER_RANK = {'raw': 0, 'line': 1, 'wbw': 2}
 
 
@@ -446,7 +544,8 @@ def api_lyrics_check():
     data = get_cached(f"{video_id}:{translate_to}") or get_cached(f"{video_id}:{translate_to}:fast")
     if not data:
         print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=0 cv_stale={format_stale}")
-        return jsonify({'found': False, 'upgrade': format_stale, 'formatVersion': _CACHE_FORMAT_VERSION})
+        return jsonify({'found': False, 'upgrade': format_stale, 'formatVersion': _CACHE_FORMAT_VERSION,
+                        'providers': (_provider_meta(video_id) or {}).get('providers') or []})
 
     if _wbw_line_count(data) > 0:
         srv_tier = 'wbw'
@@ -458,6 +557,7 @@ def api_lyrics_check():
         client_tier = 'raw'
     upgrade = (_TIER_RANK[srv_tier] > _TIER_RANK[client_tier]) or format_stale
     print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=1 tier={srv_tier} upgrade={int(upgrade)}")
+    _pmeta = _provider_meta(video_id) or {}
     return jsonify({
         'found': True,
         'tier': srv_tier,
@@ -468,6 +568,13 @@ def api_lyrics_check():
         'upgrade': upgrade,
         'formatVersion': _CACHE_FORMAT_VERSION,
         'clientFormatVersion': client_ver,
+        # Song metadata rides along: the device shows the title/artist in the
+        # full screen panel and this call already reads the cached entry, so
+        # a lyrics cache hit still gets a real name without another request.
+        'song': data.get('song', ''),
+        'artist': data.get('artist', ''),
+        'providers': _pmeta.get('providers') or [],
+        'saved': _pmeta.get('saved', ''),
     })
 
 

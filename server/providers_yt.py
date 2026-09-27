@@ -11,7 +11,7 @@ import time as time_module
 import subprocess
 import threading
 import concurrent.futures
-from collections import deque
+from collections import deque, OrderedDict
 from datetime import datetime
 from urllib.parse import quote
 import secrets as _secrets
@@ -98,4 +98,37 @@ def fetch_yt_lyrics(video_id):
     except Exception as e:
         print(f"  [FAIL] ytmusicapi error: {e}")
     return None
+
+
+# --- short-lived metadata cache -------------------------------------------
+# Title/artist for a video id never changes, but the JA twin lookup costs a
+# second round trip. The device asks for metadata on every song change (full
+# screen title/artist), so cache it briefly instead of re-querying.
+_SONG_INFO_TTL_S = 1800
+_SONG_INFO_MAX = 32
+_song_info_cache = OrderedDict()
+_song_info_lock = threading.RLock()
+
+
+def get_song_info_cached(video_id, ttl_s=_SONG_INFO_TTL_S):
+    """get_song_info with a small TTL+LRU cache. Returns None on failure
+    without caching the failure (a retry next call is cheaper than a stale
+    miss)."""
+    if not video_id:
+        return None
+    now = time_module.time()
+    with _song_info_lock:
+        hit = _song_info_cache.get(video_id)
+        if hit and (now - hit[0]) < ttl_s:
+            _song_info_cache.move_to_end(video_id)
+            return hit[1]
+    info = get_song_info(video_id)
+    if not info:
+        return None
+    with _song_info_lock:
+        _song_info_cache[video_id] = (time_module.time(), info)
+        _song_info_cache.move_to_end(video_id)
+        while len(_song_info_cache) > _SONG_INFO_MAX:
+            _song_info_cache.popitem(last=False)
+    return info
 
