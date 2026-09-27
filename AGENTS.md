@@ -610,6 +610,69 @@
       per-instance associated state (the second live VC used to inherit the
       first one's decision). `ytmu_requestArtworkOnce:` + `s_ytmuArtRequestKey`
       keep it to one request per song.
+  14. `[done]` rotate from fullscreen back to portrait CLOSES the fullscreen
+      lyrics (no half-landscape panel, no re-present). `viewWillTransition
+      ToSize:withTransitionCoordinator:` in `Source/LyricsSheet.x:2798` gates on
+      the TRANSITION's target size (a fire-time interface check aborts every
+      real rotation - the interface has not turned yet), then closes from the
+      coordinator's completion block. The race with the auto-open chain is gone
+      because both chains now carry an orientation generation
+      (`s_ytmuOrientationGeneration`): `YTMUAttemptLandscapeOpenChain(int,
+      NSUInteger)` and `YTMUAttemptFallbackPresent(NSString *, int, NSUInteger)`
+      abort on any newer orientation decision, and `YTMUBumpOrientation
+      Generation()` runs at close time. `isLyricsViewVisibleOnScreen`'s
+      portrait-bounds comparison can no longer be fooled, because a closed
+      instance stays closed: `YTMUSetClosedByRotation(self, YES)` latches, and
+      `updateLyrics:` / `handleLyricsDidLoad:` both return early on it. The
+      latch clears only in `viewWillAppear:` / `fetchLyricsForVideo:` (opens).
+  15. `[done]` closing OURS no longer leaves the native panel up:
+      `dismissModal` schedules `ytmu_collapseRevealedNativeLyrics` at +0.30 s
+      (the modal has finished dismissing by then). Proof of "something is still
+      up" = `YTMULyricsTaggedViewOnScreen()` or
+      `isLyricsEngagementPanel(topMostViewController())`; the target is the
+      controller that owns the tag-9999 view, `g_activeEngagementPanelContainer`
+      or the top VC. Both `ytmu_restoreHostingPanelChrome` and
+      `ytmu_collapseHostingPanel` are now behind `if (self.view.superview)` -
+      the restore used to run with no container. Host resolution changed from
+      `_viewControllerForAncestor` (which returns the NEAREST ancestor, i.e.
+      usually `self`) to `ytmu_resolveHostingPanel`, a responder walk that skips
+      `self` and sibling `YTMULyricsViewController`s and demands
+      `YTMUViewIsInsideView(self.view, host.view)`. Both last-resort
+      `dismissViewControllerAnimated:` calls require that ownership proof plus
+      `dismissible != self` and `!isBeingDismissed`, so an unrelated VC can
+      never be the fallback victim. The guarded selector list is now
+      `ytmu_tryCollapseTarget:` (`respondsToSelector` + `@try` + the existing
+      `-Warc-performSelector-leaks` pragma), shared by both collapse paths.
+  16. `[done]` the landscape fullscreen is a FEATURE, default ON: pref
+      `lyricsFullscreenAutoOpen` (missing key = ON) read at 4 sites -
+      `ytmu_enforceFullscreenAutoOpen` (per-instance, `NSUserDefaultsDid
+      ChangeNotification` + a throttled tick backstop, landscape-only so the
+      portrait page sheet survives), `openLyricsFullscreenForLandscape`, each
+      `YTMUAttemptLandscapeOpenChain` step, and `YTMULandscapeArm`. Toggling it
+      off while the panel is up closes it through the same
+      `ytmu_closeFullscreenWithReason:`. The close also releases what used to
+      wedge the NEXT open: provider poll, probing dim, the retranslate latch,
+      `ytmu_cancelTranslateStream` (before the dismissal), `isLoading` and both
+      fetch slots. Face-up jitter in landscape no longer re-arms the chain: the
+      arm defers 0.4 s in BOTH branches (the other one used 0 s). Settings row
+      is in `Prefs/LyricsSettingsController.m` section 0 (`LYRICS_FULLSCREEN` /
+      `LYRICS_FULLSCREEN_DESC`). Two judgement calls to keep in mind: the
+      portrait tap-opened page sheet shares `dismissModal`, so it also collapses
+      a revealed native panel; and the exit button still does NOT cancel the
+      stream (only rotation and pref-off do) to avoid changing the retranslate
+      path.
+  17. `[done - small]` two real character bugs in the catalog, found by the
+      strings pass and fixed in `d2bab38`: zh-Hant
+      `LYRICS_FULLSCREEN{,_DESC}` had U+87FA (snail) where U+87FE (firefly/
+      glow) was meant, and vi `LYRICS_FULLSCREEN_DESC` had a decomposed
+      `m<combining acute>o` instead of precomposed U+1EDF. Sweep now finds no
+      U+87FA and no combining marks in any of the 14 files. Still pre-existing
+      and untouched: ar/ja/ru/th/vi `SB_LYRICS_OFFSET{,_DESC}` fully English,
+      ja 4 untranslated tab-bar keys.
+  18. `[done - small]` the `lyrics` badge glyph was the first path of Material's
+      `chat` icon (bubble + tail = "a message icon with a dot"). Now
+      `subtitles` (the caption box) - Material's own `lyrics` icon is a rounded
+      bubble WITH a note in it, so it reads the same way. Commit `337c7d5`.
   - Residual risk worth knowing: the queue walk probes YT selectors by name;
     if a YT update renames all of them the feature degrades to a no-op again.
     The one-shot `[PRECACHE] queue walk found no up-next list` line in the
@@ -623,9 +686,22 @@
     retranslate button, the typewriter on two lines, the new ink tint, the
     wider gutters, and the `[PRECACHE]` lines in the dashboard log (item 9 is
     code-done but has never actually fired on a device).
-  - Not touched, still open: `pack.json` / `session-ses_f5af.md` /
-    `BRACCATO_COMPARISON.md` show as deleted in `git status` from an earlier
-    session - decide whether to restore or commit the deletion.
+  - Fullscreen items 14/15/16 on device: (a) rotate landscape->portrait with
+    the panel up - it must close, not linger half-landscape, and it must not
+    pop back 1s later; (b) close with the X in landscape - NOTHING
+    lyrics-shaped may stay on screen afterwards (that is item 15, the one that
+    was visibly broken); (c) rotate back to landscape inside a second and it
+    re-opens on its own (auto-open is ON by default); (d) turn
+    `lyricsFullscreenAutoOpen` off in settings while the panel is up - it
+    closes, and the next landscape rotation does NOT re-open it; (e) lay the
+    phone face-up in landscape for a few seconds - the panel must not
+    flap open/closed (the 0.4s arm deferral).
+  - RESOLVED, no action left: `session-ses_f5af.md` / `BRACCATO_COMPARISON.md`
+    are gone from disk and were never tracked (nothing to restore), and
+    `pack.json` + `client_edits_pack.py` are now gitignored
+    (`.gitignore:12-13`, "Local AI context packs: generated, never pushed") so
+    they stopped showing as deletions. `client_edits_pack.py` is therefore
+    untracked by design -- a rebuild does NOT need a commit.
 - Streamed translate + typewriter reveal: needs a device rebuild. Check, in
   this order: (1) a song with no server cache -- the lyric lines appear
   untranslated first and each translation types in; (2) the Debug page shows
