@@ -478,6 +478,7 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_stepperPressOut:(UIButton *)button;
 - (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
 - (void)ytmu_loadProviderMetaForVideo:(NSString *)videoID;
+- (void)ytmu_loadProviderLyricsForVideo:(NSString *)videoID;
 @end
 
 BOOL YTMUIsInterfaceLandscape(void) {
@@ -1420,6 +1421,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         sendDebugLog(@"[MUSIC] provider menu: no video ID");
         return;
     }
+    // Tapping early in a song: pull the provider lyrics now so the switch
+    // that follows paints from RAM instead of waiting on the network.
+    [self ytmu_loadProviderLyricsForVideo:vid];
     // Switch anytime: on iOS 14+ the armed UIMenu opens on tap with zero
     // re-probe, so this path only fires while unarmed (or iOS 13 fallback).
     NSDictionary *hit = self.providerCache[vid];
@@ -1578,6 +1582,27 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }];
 }
 
+// Pull every provider's raw lyrics for a song, once, and park them in device
+// RAM. Switching the source then paints instantly (no network, no re-race);
+// the select call that follows brings the translation and caches that one
+// provider. Nothing here touches the disk cache.
+- (void)ytmu_loadProviderLyricsForVideo:(NSString *)videoID {
+    if (!videoID.length) return;
+    if (YTMUProviderLyricsCount(videoID) > 0) return;
+    if ([videoID isEqualToString:self.providerDataVideoID]) return;  // already asked
+    self.providerDataVideoID = videoID;
+    NSString *path = [NSString stringWithFormat:@"/api/lyrics/providers/data?v=%@&lang=%@",
+                      YTMUUrlEncode(videoID), YTMUUrlEncode(YTMUTargetLang())];
+    [self ytmu_getJSON:path completion:^(NSDictionary *json, NSError *error) {
+        if (error || ![json[@"ok"] boolValue] || ![json[@"found"] boolValue]) return;
+        NSArray *entries = json[@"providers"];
+        if (![entries isKindOfClass:[NSArray class]] || entries.count == 0) return;
+        YTMUProviderLyricsStore(videoID, entries);
+        sendDebugLog([NSString stringWithFormat:@"[MUSIC] %lu provider(s) for %@ held in RAM",
+                      (unsigned long)YTMUProviderLyricsCount(videoID), videoID]);
+    }];
+}
+
 // Point the switcher at the saved choice, else at the provider serving the
 // current lyrics, else unknown (-1: no mark). Never auto-applies and never
 // pretends index 0 is current when the on-screen lyrics came from elsewhere.
@@ -1608,6 +1633,19 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (![p isKindOfClass:[NSString class]] || !((NSString *)p).length) return;
     self.providerIndex = idx;
     [self ytmu_refreshProviderSwitcher];
+    // Paint from device RAM first (instant, untranslated), then let the select
+    // call deliver the translation and cache this one provider. The RAM copy
+    // is never cached: it dies with the process.
+    NSString *ramLyrics = YTMUProviderLyricsForProvider(self.loadingVideoID, (NSString *)p);
+    if (ramLyrics.count > 0) {
+        if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+        // Deliberately NOT g_lyricsCache / YTMULyricsCacheSave: the file cache
+        // only ever holds the provider the server confirmed.
+        self.currentIndex = -1;
+        self.activeIndexes = nil;
+        self.lastColorKey = nil;
+        [self updateLyrics:ramLyrics];
+    }
     [self ytmu_selectProvider:(NSString *)p];
 }
 
@@ -2129,9 +2167,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             // Metadata + provider list come from the server for the new song:
             // two tiny reads, no provider traffic. They land whether the
             // lyrics come from the network, the server cache or the device
-            // file cache.
+            // file cache. The lyrics of every provider then move into device
+            // RAM so the source switcher is instant.
             [self ytmu_requestSongMetaForVideo:videoID];
             [self ytmu_loadProviderMetaForVideo:videoID];
+            [self ytmu_loadProviderLyricsForVideo:videoID];
             [self ytmu_updateLandscapeMetadata];
             [self fetchLyricsForVideo:videoID];
         });
@@ -2403,6 +2443,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // switcher are right even when the lyrics turn out to be a cache hit.
     [self ytmu_requestSongMetaForVideo:videoID];
     [self ytmu_loadProviderMetaForVideo:videoID];
+    [self ytmu_loadProviderLyricsForVideo:videoID];
 
     if (g_lyricsCache[videoID]) {
         UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
@@ -2781,6 +2822,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.providerIndex = -1;
     [self.providerCache removeObjectForKey:g_currentVideoID];
     self.providerMetaVideoID = nil;
+    self.providerDataVideoID = nil;
+    YTMUProviderLyricsDrop(g_currentVideoID);
     [self ytmu_refreshProviderSwitcher];
     self.lastProvider = nil;
     self.lastSongTitle = nil;

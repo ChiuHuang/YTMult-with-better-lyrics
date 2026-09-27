@@ -117,6 +117,7 @@
 @property (nonatomic, copy) NSString *lastSongArtist;
 @property (nonatomic, copy) NSString *songMetaVideoID;
 @property (nonatomic, copy) NSString *providerMetaVideoID;
+@property (nonatomic, copy) NSString *providerDataVideoID;
 @property (nonatomic, assign) double clockRawTime;
 @property (nonatomic, assign) NSTimeInterval clockRawWall;
 @property (nonatomic, assign) BOOL landscapeIsPlaying;
@@ -162,6 +163,11 @@ extern "C" {
 #endif
 
 void YTMUReleaseGlobalFetch(void);
+// Device-side RAM store for every provider's lyrics (never persisted).
+void YTMUProviderLyricsStore(NSString *videoID, NSArray *entries);
+NSArray *YTMUProviderLyricsForProvider(NSString *videoID, NSString *provider);
+NSUInteger YTMUProviderLyricsCount(NSString *videoID);
+void YTMUProviderLyricsDrop(NSString *videoID);
 BOOL YTMULyricsPreference(NSString *key, BOOL fallback);
 double YTMULyricsOffsetForVideoID(NSString *videoID);
 void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset);
@@ -190,6 +196,7 @@ void YTMULyricsCacheClearAll(void);
 NSString *YTMULyricsContentHash(NSString *videoID);
 NSArray  *YTMULyricsCacheEntries(void);
 void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull);
+void YTMUPrefetchProviderLyrics(NSArray *videoIDs, NSString *lang);
 void YTMUAutoSyncIfDue(void);
 NSString *YTMUResolveCurrentVideoID(void);
 UIViewController *topMostViewController(void);
