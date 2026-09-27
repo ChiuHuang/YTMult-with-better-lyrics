@@ -7,6 +7,12 @@ static NSString *const YTMUThemeChanged = @"YTMUThemeChanged";
 static UIColor *YTMUPrimaryColor;
 static UIColor *YTMUSecondaryColor;
 static const void *kThemeGradient = &kThemeGradient;
+// Dedupe/throttle for the setImage: hook below. Both are written from whatever
+// thread set the image and read only to decide whether to skip work, so a torn
+// read can at worst publish once more or once less -- no invariant depends on
+// them. The image is one retained artwork, not a cache.
+static UIImage *YTMULastThemeImage;
+static CFTimeInterval YTMULastThemeAt;
 
 // wholeAppSongThemeEnabled / playerSongThemeEnabled, both ANDed with the
 // tweak master and the iOS 13 material gate by the shared helper.
@@ -39,10 +45,25 @@ static UIColor *YTMUColor(UIColor *color, CGFloat saturation, CGFloat brightness
 }
 static void YTMUPublishTheme(UIImage *image) {
     if (!image || image.size.width < 80 || image.size.height < 80) return;
+    // This runs from a %hook on UIImageView -setImage:, so it is on the path of
+    // EVERY image the app ever sets. Three reasons to bail before the bitmap
+    // draw: both theme switches are off (the only reader, YTMUApplyTheme,
+    // returns early without them); this exact artwork was just published (YT
+    // re-sets the same thumbnail on every relayout); or a burst of images is
+    // still in flight, in which case only the last one is worth sampling.
+    if (!YTMUThemePref(@"wholeAppSongThemeEnabled") && !YTMUThemePref(@"playerSongThemeEnabled")) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (image == YTMULastThemeImage && now - YTMULastThemeAt < 1.0) return;
+    YTMULastThemeImage = image; YTMULastThemeAt = now;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIColor *average = YTMUAverage(image); if (!average) return;
         UIColor *primary = YTMUColor(average,.18,.90), *secondary = YTMUColor(average,.02,.48);
-        dispatch_async(dispatch_get_main_queue(), ^{ YTMUPrimaryColor=primary; YTMUSecondaryColor=secondary;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Only announce an actual change: the notification has no observer
+            // in the tweak today, and a repaint on an identical colour is pure
+            // layout churn on a song change.
+            if ([YTMUPrimaryColor isEqual:primary]) return;
+            YTMUPrimaryColor=primary; YTMUSecondaryColor=secondary;
             [[NSNotificationCenter defaultCenter] postNotificationName:YTMUThemeChanged object:nil]; });
     });
 }

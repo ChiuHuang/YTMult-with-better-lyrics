@@ -12,7 +12,10 @@
     @autoreleasepool {
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         NSMutableDictionary *p = [[defaults dictionaryForKey:@"YTMUltimate"] mutableCopy] ?: [NSMutableDictionary dictionary];
-        BOOL changed = NO;
+        // __block: the block below assigns it. A plain BOOL is captured by
+        // value, so `changed = YES` is "variable is not assignable" and the
+        // bootstrap would also never have written the seeds back.
+        __block BOOL changed = NO;
         for (NSDictionary<NSString *, NSNumber *> *seed in @[YTMULGDefaultPreferences(), YTMULGV1DefaultPreferences()]) {
             [seed enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSNumber *value, BOOL *stop) {
                 if (p[key] == nil) { p[key] = value; changed = YES; }
