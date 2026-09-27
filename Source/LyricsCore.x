@@ -5,10 +5,24 @@ BOOL _safe_cache_component(NSString *s);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 void YTMUAutoSyncIfDue(void);
 
+// Every accessor the queue walk below probes. They are declared, not
+// implemented: the category exists so the direct calls compile, and each one is
+// only ever reached behind respondsToSelector + @try, so a name that the app
+// does not implement just reads as "not found".
 @interface NSObject (YTMUQueuePrecache)
+- (NSArray *)upNextItems;
 - (NSArray *)queueItems;
+- (NSArray *)nextItems;
+- (NSArray *)items;
 - (NSString *)videoId;
 - (NSString *)contentVideoId;
+- (id)queueController;
+- (id)queueStore;
+- (id)queue;
+- (id)watchNextResponse;
+- (id)upNextResponse;
+- (id)response;
+- (id)queueModel;
 @end
 
 double g_currentPlaybackTime = 0.0;
@@ -187,6 +201,41 @@ NSString *YTMUAutoZhParam(void) {
 }
 NSString *YTMUUrlEncode(NSString *s) {
     return [s stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]] ?: s;
+}
+
+// ------------------------------------------------------------
+// Streaming translation + typewriter reveal settings
+// ------------------------------------------------------------
+// The lyric tick reads the reveal speed every frame, so the value is cached
+// instead of deserializing NSUserDefaults 60-120 times a second. The settings
+// page writes the pref and calls YTMUTypewriterCPSSet() to drop the cache.
+static double s_typewriterCPS = 30.0;
+static BOOL s_typewriterCPSLoaded = NO;
+static const double YTMU_TYPEWRITER_CPS_DEFAULT = 30.0;
+static const double YTMU_TYPEWRITER_CPS_MAX = 400.0;
+
+double YTMUTypewriterCPS(void) {
+    if (!s_typewriterCPSLoaded) {
+        NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+        id v = settings[@"lyricsTypewriterCPS"];
+        double cps = v ? [v doubleValue] : YTMU_TYPEWRITER_CPS_DEFAULT;
+        if (cps < 0) cps = 0;
+        if (cps > YTMU_TYPEWRITER_CPS_MAX) cps = YTMU_TYPEWRITER_CPS_MAX;
+        s_typewriterCPS = cps;
+        s_typewriterCPSLoaded = YES;
+    }
+    return s_typewriterCPS;
+}
+void YTMUTypewriterCPSSet(double cps) {
+    if (cps < 0) cps = 0;
+    if (cps > YTMU_TYPEWRITER_CPS_MAX) cps = YTMU_TYPEWRITER_CPS_MAX;
+    s_typewriterCPS = cps;
+    s_typewriterCPSLoaded = YES;
+}
+// Streamed translation (server pushes each translated line as the model
+// writes it). Read only when a fetch starts, so no cache needed.
+BOOL YTMULyricsStreamTranslateEnabled(void) {
+    return YTMULyricsPreference(@"lyricsStreamTranslate", YES);
 }
 
 NSDictionary *YTMUAppSettings(void) {
@@ -664,53 +713,175 @@ void YTMUAutoSyncIfDue(void) {
     }] resume];
 }
 
-// Queue precache trigger - hook into queue model changes
-%hook YTMQueueConfigImpl
+// ============================================================
+// Queue precache trigger
+//
+// This used to hang off `%hook YTMQueueConfigImpl -setQueueModel:`. That class
+// is a *config* -- every other hook on it in this tweak is a plain getter
+// (autoplayEnabled, isMobileAudioTierScreenedCastEnabled, noVideoModeEnabled*)
+// and it has no setQueueModel: setter, so the hook installed a method nobody
+// ever called. YTMULyricsPrecacheQueue was dead code and no POST to
+// /api/lyrics/precache ever left the phone, which is why the "Precache queue
+// (next 5)" switch did nothing.
+//
+// Two triggers that the app is known to run drive it now:
+//   1. YTMUSongDidChange, the notification the whole lyrics system already uses
+//      (posted on every track change), so the sweep runs as soon as a song
+//      starts -- minutes before those tracks are needed.
+//   2. A 20s queue snapshot on the main queue, for when the queue changes while
+//      the same track keeps playing.
+// The snapshot only POSTs when the up-next id list actually changed, so the
+// sweep is idempotent and cannot spam the server.
+// ============================================================
+static const NSInteger YTMU_PRECACHE_MAX = 5;       // "next 5" from the setting
+static const NSTimeInterval YTMU_PRECACHE_MIN_GAP = 15.0;
+static NSString *g_ytmuPrecacheSignature = nil;
+static NSTimeInterval g_ytmuPrecacheLastPost = 0.0;
+static BOOL g_ytmuPrecacheWarnedNoQueue = NO;
+static dispatch_source_t g_ytmuPrecacheTimer = nil;
 
-- (void)setQueueModel:(id)queueModel {
-    %orig(queueModel);
-    
-    // Extract up-next video IDs for precaching
-    if (!YTMULyricsPreference(@"lyricsPrecacheQueue", YES)) return;
-    
-    NSArray *items = nil;
-    if ([queueModel respondsToSelector:@selector(items)]) {
-        items = [queueModel items];
-    } else if ([queueModel respondsToSelector:@selector(queueItems)]) {
-        items = [queueModel queueItems];
-    }
-    
-    if (!items || items.count <= 1) return; // Only current playing
-    
-    NSMutableArray *upNext = [NSMutableArray array];
-    NSInteger maxPrecache = 5; // Next 5 songs
-    for (id item in items) {
-        if ([upNext count] >= maxPrecache) break;
-        
-        NSString *vid = nil;
-        if ([item respondsToSelector:@selector(videoId)]) {
-            @try { vid = [item videoId]; } @catch (NSException *e) { vid = nil; }
-        } else if ([item respondsToSelector:@selector(contentVideoId)]) {
-            @try { vid = [item contentVideoId]; } @catch (NSException *e) { vid = nil; }
-        }
-        
-        if (vid && vid.length && _safe_cache_component(vid)) {
-            // Skip currently playing
-            if (![vid isEqualToString:g_currentVideoID]) {
-                [upNext addObject:vid];
-            }
-        }
-    }
-    
-    if ([upNext count] > 0) {
-        // Use fast pipeline for speed
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
-            YTMULyricsPrecacheQueue(upNext, YTMUTargetLang(), NO);
-        });
-    }
+// A hop that answered with something that is not an object (a selector we
+// guessed exists but is declared to return a scalar on the real class) must
+// never be messaged. Small values are what a scalar return looks like.
+static BOOL ytmu_isObj(id o) {
+    return o && o != (id)[NSNull null] && ((uintptr_t)o) > 0x1000;
 }
 
-%end
+static NSString *ytmu_itemVideoID(id item) {
+    if (!ytmu_isObj(item)) return nil;
+    if ([item isKindOfClass:[NSString class]]) return (NSString *)item;
+    if ([item respondsToSelector:@selector(videoId)]) {
+        @try { id v = [item videoId]; if ([v isKindOfClass:[NSString class]]) return v; }
+        @catch (NSException *e) { /* optional selector */ }
+    }
+    if ([item respondsToSelector:@selector(contentVideoId)]) {
+        @try { id v = [item contentVideoId]; if ([v isKindOfClass:[NSString class]]) return v; }
+        @catch (NSException *e) { /* optional selector */ }
+    }
+    return nil;
+}
+
+// Walk up to `depth` hops from `obj` looking for something that answers one of
+// the item-list selectors. Probed, never assumed, so a renamed selector costs
+// us the list and nothing else.
+static NSArray *ytmu_queueItemsWithinDepth(id obj, NSInteger depth) {
+    if (!ytmu_isObj(obj)) return nil;
+    NSArray *cands = nil;
+    if ([obj respondsToSelector:@selector(upNextItems)]) {
+        @try { cands = [obj upNextItems]; } @catch (NSException *e) { cands = nil; }
+    }
+    if (![cands isKindOfClass:[NSArray class]] && [obj respondsToSelector:@selector(queueItems)]) {
+        @try { cands = [obj queueItems]; } @catch (NSException *e) { cands = nil; }
+    }
+    if (![cands isKindOfClass:[NSArray class]] && [obj respondsToSelector:@selector(nextItems)]) {
+        @try { cands = [obj nextItems]; } @catch (NSException *e) { cands = nil; }
+    }
+    // `items` last: on a store it is the whole queue including what is playing,
+    // which the caller filters, but on unrelated objects it is something else.
+    if (![cands isKindOfClass:[NSArray class]] && [obj respondsToSelector:@selector(items)]) {
+        @try { cands = [obj items]; } @catch (NSException *e) { cands = nil; }
+    }
+    if ([cands isKindOfClass:[NSArray class]] && cands.count >= 2) return cands;
+    if (depth <= 1) return nil;
+
+    // Hops, most specific first. ytmu_queueItemsWithinDepth no-ops on a nil or
+    // non-object argument, so a miss just falls through to the next one.
+    if ([obj respondsToSelector:@selector(queueController)]) {
+        id n = nil; @try { n = [obj queueController]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(queueStore)]) {
+        id n = nil; @try { n = [obj queueStore]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(queue)]) {
+        id n = nil; @try { n = [obj queue]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(watchNextResponse)]) {
+        id n = nil; @try { n = [obj watchNextResponse]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(upNextResponse)]) {
+        id n = nil; @try { n = [obj upNextResponse]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(response)]) {
+        id n = nil; @try { n = [obj response]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    if ([obj respondsToSelector:@selector(queueModel)]) {
+        id n = nil; @try { n = [obj queueModel]; } @catch (NSException *e) { n = nil; }
+        NSArray *f = ytmu_queueItemsWithinDepth(n, depth - 1); if (f) return f;
+    }
+    return nil;
+}
+
+// Up-next video ids, current track removed, capped at the setting's count.
+static NSArray *ytmu_upNextVideoIDs(void) {
+    UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
+    // Read the weak globals into strong locals first: they can be cleared by
+    // the time they are used, and a weak read passed straight as an argument
+    // is a write-back access the compiler rejects.
+    id player = g_activePlayer;
+    id nowPlaying = g_activeNowPlayingVC;
+    id rootVC = keyWin.rootViewController;
+    NSMutableArray *roots = [NSMutableArray array];
+    if (ytmu_isObj(player)) [roots addObject:player];
+    if (ytmu_isObj(nowPlaying)) [roots addObject:nowPlaying];
+    if (ytmu_isObj(keyWin)) [roots addObject:keyWin];
+    if (ytmu_isObj(rootVC)) [roots addObject:rootVC];
+
+    NSArray *items = nil;
+    for (id root in roots) {
+        items = ytmu_queueItemsWithinDepth(root, 3);
+        if (items) break;
+    }
+    if (items.count < 2) return nil;
+
+    NSString *current = YTMUResolveCurrentVideoID();
+    NSMutableArray *upNext = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    for (id item in items) {
+        if (upNext.count >= YTMU_PRECACHE_MAX) break;
+        NSString *vid = ytmu_itemVideoID(item);
+        if (!vid.length || !_safe_cache_component(vid)) continue;
+        if (current.length && [vid isEqualToString:current]) continue;
+        if ([seen containsObject:vid]) continue;
+        [seen addObject:vid];
+        [upNext addObject:vid];
+    }
+    return upNext.count ? upNext : nil;
+}
+
+static void ytmu_precacheQueueTick(void) {
+    if (!YTMULyricsPreference(@"lyricsPrecacheQueue", YES)) return;
+
+    NSArray *upNext = ytmu_upNextVideoIDs();
+    if (upNext.count == 0) {
+        // One shot, so a build where the queue walk finds nothing says why
+        // instead of looking like a dead switch.
+        if (!g_ytmuPrecacheWarnedNoQueue) {
+            g_ytmuPrecacheWarnedNoQueue = YES;
+            sendDebugLog(@"[PRECACHE] queue walk found no up-next list - nothing to precache");
+        }
+        return;
+    }
+    g_ytmuPrecacheWarnedNoQueue = NO;
+
+    NSString *sig = [upNext componentsJoinedByString:@","];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if ([g_ytmuPrecacheSignature isEqualToString:sig]) return;
+    if (now - g_ytmuPrecacheLastPost < YTMU_PRECACHE_MIN_GAP) return;
+    g_ytmuPrecacheSignature = sig;
+    g_ytmuPrecacheLastPost = now;
+
+    sendDebugLog([NSString stringWithFormat:@"[PRECACHE] queue changed, precaching %lu: %@",
+                  (unsigned long)upNext.count, sig]);
+    // The immediate next track gets the full pipeline, the rest the fast one
+    // (see YTMULyricsPrecacheQueue).
+    YTMULyricsPrecacheQueue(upNext, YTMUTargetLang(), NO);
+}
 
 NSString *YTMUResolveCurrentVideoID(void) {
     if (g_currentVideoID.length) return g_currentVideoID;
@@ -979,5 +1150,23 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     };
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
+    // Queue precache triggers: the song-change notification (fires for every
+    // track, so the up-next tracks are covered minutes before they play) plus a
+    // slow snapshot for a queue that is edited mid-track. Both land on the main
+    // queue because the walk touches view controllers.
+    [[NSNotificationCenter defaultCenter] addObserverForName:@"YTMUSongDidChange" object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+        ytmu_precacheQueueTick();
+    }];
+    // The timer source has to outlive this scope: under ARC a local
+    // dispatch_source_t is released on return, and releasing a resumed source
+    // cancels it, so it is parked in a file-scope static.
+    g_ytmuPrecacheTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    if (g_ytmuPrecacheTimer) {
+        // 20s only bounds how stale the up-next list can get; the tick itself
+        // no-ops unless the list actually changed.
+        dispatch_source_set_timer(g_ytmuPrecacheTimer, dispatch_time(DISPATCH_TIME_NOW, 20 * NSEC_PER_SEC), 20 * NSEC_PER_SEC, 5 * NSEC_PER_SEC);
+        dispatch_source_set_event_handler(g_ytmuPrecacheTimer, ^{ ytmu_precacheQueueTick(); });
+        dispatch_resume(g_ytmuPrecacheTimer);
+    }
     YTMURegisterLandscapeAutoOpen();
 }

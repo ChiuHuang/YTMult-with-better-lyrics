@@ -126,3 +126,67 @@
 "AUTO_SYNC_DESC" = "每 6 小时将服务器翻译静默拉回本地缓存";
 "DOWNLOAD" = "下载";
 "UPDATE_WHATS_NEW" = "更新内容：\n%@";
+
+"LYRICS_ENGINE" = "歌词引擎";
+
+"LYRICS_ENGINE_FOOTER" = "服务器负责抓取歌词并翻译成下方指定的语言。已经是该中文字体的歌词只会做简繁转换，不会送去翻译。流式翻译会在模型输出的当下逐行显示，打字机效果则会在当前歌词下方逐字显示译文。";
+
+"STREAM_TRANSLATE" = "流式翻译";
+
+"STREAM_TRANSLATE_DESC" = "在模型输出的当下逐行显示译文，不必等整首歌翻完";
+
+"TYPEWRITER" = "打字机效果";
+
+"TYPEWRITER_DESC" = "在当前歌词下方逐字显示译文（0 = 关闭）";
+
+"DEBUG_SETTINGS" = "调试";
+
+"DEBUG_STREAM" = "流式翻译";
+
+"DEBUG_STATE" = "状态";
+
+"DEBUG_VIDEO" = "上一段视频";
+
+"DEBUG_PROGRESS" = "事件 / 行数";
+
+"DEBUG_LAST_LINE" = "最后串流的行";
+
+"DEBUG_REVEAL" = "打字机速度";
+
+"DEBUG_UPLOAD" = "调试数据上传";
+
+"DEBUG_LOG_LEVEL" = "记录等级";
+
+"DEBUG_LOG_LEVEL_DESC" = "关闭 = 不上传，Err = 只传失败，All = 信息 + 警告 + 错误";
+
+"DEBUG_SEND" = "将调试数据发送到服务器";
+
+"DEBUG_SEND_DESC" = "将调试事件上传到歌词服务器，可在仪表板中查看";
+
+"DEBUG_SCREENSHOT" = "发送截图调试数据";
+
+"DEBUG_SCREENSHOT_DESC" = "只有在你截图时才上传 UI 层级数据";
+
+"DEBUG_ACTIONS" = "操作";
+
+"DEBUG_COPY" = "复制诊断信息";
+
+"DEBUG_TEST_LOG" = "发送测试记录";
+
+"DEBUG_COPIED" = "诊断信息已复制到剪贴板";
+
+"DEBUG_IDLE" = "空闲";
+
+"DEBUG_ENDPOINT" = "端点";
+
+"DEBUG_NOW_PLAYING" = "当前播放：%@";
+
+"DEBUG_LAST_EVENT" = "最后事件 %@ 毫秒";
+
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- 当前被阻止：总开关关闭，或记录等级不是 All";
+
+"DEBUG_UPLOAD_OFF" = "upload_logs = 关闭";
+
+"DEBUG_TEST_SENT" = "已以 info 记录发送，现在就会出现在服务器仪表板。";
+
+"DEBUG_TEST_BLOCKED" = "未发送。上传被总开关、记录等级或服务器的 upload_logs 开关阻止。";

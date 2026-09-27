@@ -135,6 +135,7 @@
     if (!d[@"lyricsPrecacheQueue"]) d[@"lyricsPrecacheQueue"] = @YES;
     if (!d[@"lyricsAutoUpdate"]) d[@"lyricsAutoUpdate"] = @YES;
     if (!d[@"lyricsAutoSync"]) d[@"lyricsAutoSync"] = @YES;
+    if (!d[@"lyricsStreamTranslate"]) d[@"lyricsStreamTranslate"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
     if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
     if (!d[@"lyricsAutoZhConvert"]) d[@"lyricsAutoZhConvert"] = @YES;
@@ -187,9 +188,28 @@
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 6; }
 
+// Data-driven layout for section 0. The row count and the row contents both
+// come from here, so they cannot drift apart the way the old parallel icon
+// array + `if (idx > 6) idx -= 1;` offset hack could. A descriptor with an
+// empty "key" renders the typewriter slider row instead of a switch.
+// The debug rows (Send debug to server / Log level / Send screenshot debug
+// data) live on the Debug page now.
+- (NSArray *)displaySectionRows {
+    return @[
+        @{@"title": @"Always show translated lyrics", @"desc": @"Auto-show custom panel when lyrics load", @"icon": @"quote.bubble", @"key": @"lyricsAlwaysOn"},
+        @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"icon": @"internaldrive", @"key": @"lyricsCacheEnabled"},
+        @{@"title": @"Selectable lyrics", @"desc": @"Allow selecting / copying text inside the lyrics panel", @"icon": @"textformat.abc", @"key": @"selectableLyrics"},
+        @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"icon": @"speedometer", @"key": @"lyricsFpsMeter"},
+        @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"icon": @"arrow.triangle.2.circlepath", @"key": @"lyricsPrecacheQueue"},
+        @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"icon": @"arrow.2.circlepath", @"key": @"lyricsAutoUpdate"},
+        @{@"title": LOC(@"AUTO_SYNC_TITLE"), @"desc": LOC(@"AUTO_SYNC_DESC"), @"icon": @"antenna.radiowaves.left.and.right", @"key": @"lyricsAutoSync"},
+        @{@"title": LOC(@"TYPEWRITER"), @"desc": LOC(@"TYPEWRITER_DESC"), @"icon": @"keyboard", @"key": @""}
+    ];
+}
+
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 10;
-    if (section == 1) return 3;
+    if (section == 0) return (NSInteger)[self displaySectionRows].count;
+    if (section == 1) return 4;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
     if (section == 4) return 5;
@@ -199,7 +219,7 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return @"Lyrics Display";
-    if (section == 1) return @"Translation";
+    if (section == 1) return LOC(@"LYRICS_ENGINE");
     if (section == 2) return @"Client Cache";
     if (section == 3) return @"Preview (most recent cached)";
     if (section == 4) return @"Actions";
@@ -208,8 +228,8 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Always show translated lyrics auto-opens the panel, storage is on-device, and debug uploads default to off.";
-    if (section == 1) return @"Server used to fetch and translate lyrics, and the language lyrics get translated into. Lines already in that Chinese script (Simplified or Traditional) are never sent to the translator — they just get their script normalized. Auto-convert inlines the script change (e.g. zh-CN to zh-TW) right into the lyrics and skips the translate row; lines already in your language never show a duplicate translate row. Examples: zh-TW, zh-CN, en, ja, ko.";
+    if (section == 0) return @"Always show translated lyrics auto-opens the panel and storage is on-device.";
+    if (section == 1) return LOC(@"LYRICS_ENGINE_FOOTER");
     if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
     if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
     if (section == 4) return @"Sync pulls songs already translated on the server straight into your local cache — it never re-runs translation, so it's fast and free even for a large backlog.";
@@ -239,37 +259,44 @@
     cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
 
     if (indexPath.section == 0) {
-        if (indexPath.row == 7) {
-            cell.textLabel.text = @"Log level";
-            cell.detailTextLabel.text = @"Off = no uploads, Errors = failures only, All = info + warnings + errors";
-            cell.imageView.image = [UIImage systemImageNamed:@"waveform.badge.exclamationmark"];
-            UISegmentedControl *segment = [[UISegmentedControl alloc] initWithItems:@[@"Off", @"Err", @"All"]];
-            segment.selectedSegmentIndex = MIN(MAX([dict[@"debugLogLevel"] integerValue], 0), 2);
-            segment.accessibilityIdentifier = @"debugLogLevel";
-            [segment addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
-            cell.accessoryView = segment;
-            return cell;
-        }
-        NSArray *items = @[
-            @{@"title": @"Always show translated lyrics", @"desc": @"Auto-show custom panel when lyrics load", @"key": @"lyricsAlwaysOn"},
-            @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"key": @"lyricsCacheEnabled"},
-            @{@"title": @"Selectable lyrics", @"desc": @"Allow selecting / copying text inside the lyrics panel", @"key": @"selectableLyrics"},
-            @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
-            @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"key": @"lyricsPrecacheQueue"},
-            @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"key": @"lyricsAutoUpdate"},
-            @{@"title": LOC(@"AUTO_SYNC_TITLE"), @"desc": LOC(@"AUTO_SYNC_DESC"), @"key": @"lyricsAutoSync"},
-            @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
-            @{@"title": @"Send screenshot debug data", @"desc": @"Upload a UI hierarchy only after you take a screenshot", @"key": @"sendLyricsScreenshotDebug"}
-        ];
-        NSInteger idx = indexPath.row;
-        if (idx > 6) idx -= 1; // rows past the Log level segment shift down one
-        NSDictionary *it = items[idx];
+        NSArray *rows = [self displaySectionRows];
+        if (indexPath.row < 0 || indexPath.row >= (NSInteger)rows.count) return cell;
+        NSDictionary *it = rows[indexPath.row];
         cell.textLabel.text = it[@"title"];
         cell.detailTextLabel.text = it[@"desc"];
-        cell.imageView.image = [UIImage systemImageNamed:@[@"quote.bubble", @"internaldrive", @"textformat.abc", @"speedometer", @"arrow.triangle.2.circlepath", @"arrow.2.circlepath", @"antenna.radiowaves.left.and.right", @"ladybug", @"icloud.and.arrow.down"][idx]];
+        cell.imageView.image = [UIImage systemImageNamed:it[@"icon"]];
+        NSString *key = it[@"key"];
+        if (!key.length) {
+            // Typewriter speed: slider + live "<n> cps" readout. 0 turns the
+            // reveal off (see LyricsStream.x, which bails on cps <= 0).
+            // The readout shows the effective speed even when a hand-edited
+            // pref is above the slider's range; the thumb just pins to max.
+            double cps = YTMUTypewriterCPS();
+            if (cps < 0.0) cps = 0.0;
+            double sliderCps = MIN(cps, 120.0);
+            UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(0, 0, 150, 32)];
+            slider.minimumValue = 0.0;
+            slider.maximumValue = 120.0;
+            slider.value = (float)sliderCps;
+            slider.continuous = YES;
+            slider.accessibilityIdentifier = @"lyricsTypewriterCPS";
+            [slider addTarget:self action:@selector(typewriterSliderChanged:) forControlEvents:UIControlEventValueChanged];
+            UILabel *value = [[UILabel alloc] initWithFrame:CGRectMake(154, 0, 52, 32)];
+            value.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
+            value.textColor = [UIColor secondaryLabelColor];
+            value.textAlignment = NSTextAlignmentRight;
+            value.adjustsFontSizeToFitWidth = YES;
+            value.minimumFontSize = 9;
+            value.text = [NSString stringWithFormat:@"%ld cps", (long)lround(cps)];
+            UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 210, 32)];
+            [box addSubview:slider];
+            [box addSubview:value];
+            cell.accessoryView = box;
+            return cell;
+        }
         UISwitch *sw = [[UISwitch alloc] init];
-        sw.accessibilityIdentifier = it[@"key"];
-        sw.on = [dict[it[@"key"]] boolValue];
+        sw.accessibilityIdentifier = key;
+        sw.on = [dict[key] boolValue];
         [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
         return cell;
@@ -317,6 +344,20 @@
             UISwitch *sw = [[UISwitch alloc] init];
             sw.accessibilityIdentifier = @"lyricsAutoZhConvert";
             sw.on = [dict[@"lyricsAutoZhConvert"] boolValue];
+            [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = sw;
+            return cell;
+        }
+        if (indexPath.row == 3) {
+            // Streamed translation: the server pushes each line as the model
+            // writes it. Defaults to on, same as YTMULyricsStreamTranslateEnabled().
+            cell.textLabel.text = LOC(@"STREAM_TRANSLATE");
+            cell.detailTextLabel.text = LOC(@"STREAM_TRANSLATE_DESC");
+            // `waveform` is SF Symbols 1 (iOS 13), unlike waveform.path.ecg.
+            cell.imageView.image = [UIImage systemImageNamed:@"waveform"];
+            UISwitch *sw = [[UISwitch alloc] init];
+            sw.accessibilityIdentifier = @"lyricsStreamTranslate";
+            sw.on = dict[@"lyricsStreamTranslate"] ? [dict[@"lyricsStreamTranslate"] boolValue] : YES;
             [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = sw;
             return cell;
@@ -495,12 +536,24 @@
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
 }
 
-- (void)segmentChanged:(UISegmentedControl *)sender {
-    NSString *key = sender.accessibilityIdentifier;
-    if (!key.length) return;
+// Typewriter reveal speed. The lyric tick reads this every frame, so the
+// value is written to the prefs AND pushed into the cached copy via
+// YTMUTypewriterCPSSet() -- no respring needed to see the new speed.
+- (void)typewriterSliderChanged:(UISlider *)sender {
+    double cps = round((double)sender.value);
+    if (cps < 0.0) cps = 0.0;
+    if (cps > 120.0) cps = 120.0;
+    sender.value = (float)cps;
+    for (UIView *sub in sender.superview.subviews) {
+        if ([sub isKindOfClass:[UILabel class]]) {
+            ((UILabel *)sub).text = [NSString stringWithFormat:@"%ld cps", (long)cps];
+            break;
+        }
+    }
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
-    d[key] = @(sender.selectedSegmentIndex);
+    d[@"lyricsTypewriterCPS"] = @(cps);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+    YTMUTypewriterCPSSet(cps);
 }
 
 #pragma mark - Sync cache from server

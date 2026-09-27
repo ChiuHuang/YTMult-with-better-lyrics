@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Silnik tekstów";
+"LYRICS_ENGINE_FOOTER" = "Serwer pobiera teksty i tłumaczy je na język ustawiony poniżej. Wersje już zapisane tym pismem chińskim są tylko normalizowane i nigdy nie trafiają do tłumacza. Strumieniowe tłumaczenie rysuje każdy wiersz w trakcie pisania modelu, a efekt maszyny do pisania wypisuje tłumaczenie pod aktywnym wierszem.";
+"STREAM_TRANSLATE" = "Strumieniowe tłumaczenie";
+"STREAM_TRANSLATE_DESC" = "Rysuj każdy przetłumaczony wiersz w trakcie pisania modelu, zamiast czekać na cały utwór";
+"TYPEWRITER" = "Efekt maszyny do pisania";
+"TYPEWRITER_DESC" = "Wypisuj tłumaczenie pod aktywnym wierszem, litera po literze (0 = wyłączone)";
+"DEBUG_SETTINGS" = "Debugowanie";
+"DEBUG_STREAM" = "Tłumaczenie strumieniowe";
+"DEBUG_STATE" = "Stan";
+"DEBUG_VIDEO" = "Ostatnie wideo";
+"DEBUG_PROGRESS" = "Zdarzenia / wiersze";
+"DEBUG_LAST_LINE" = "Ostatni strumieniowany wiersz";
+"DEBUG_REVEAL" = "Prędkość maszyny do pisania";
+"DEBUG_UPLOAD" = "Wysyłanie danych diagnostycznych";
+"DEBUG_LOG_LEVEL" = "Poziom logowania";
+"DEBUG_LOG_LEVEL_DESC" = "Wyłącz = brak wysyłania, Err = tylko błędy, All = info + ostrzeżenia + błędy";
+"DEBUG_SEND" = "Wyślij dane diagnostyczne do serwera";
+"DEBUG_SEND_DESC" = "Wysyłaj zdarzenia diagnostyczne do serwera tekstów, widoczne w pulpicie";
+"DEBUG_SCREENSHOT" = "Wyślij dane diagnostyczne zrzutu ekranu";
+"DEBUG_SCREENSHOT_DESC" = "Wysyłaj hierarchię UI tylko po zrobieniu zrzutu ekranu";
+"DEBUG_ACTIONS" = "Akcje";
+"DEBUG_COPY" = "Kopiuj diagnostykę";
+"DEBUG_TEST_LOG" = "Wyślij dziennik testowy";
+"DEBUG_COPIED" = "Skopiowano diagnostykę do schowka";
+"DEBUG_IDLE" = "bezczynny";
+
+"DEBUG_ENDPOINT" = "Punkt końcowy";
+"DEBUG_NOW_PLAYING" = "teraz odtwarzane: %@";
+"DEBUG_LAST_EVENT" = "Ostatnie zdarzenie %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- zablokowane teraz: główny przełącznik jest wyłączony albo poziom logowania to nie All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_TEST_SENT" = "Wysłano jako wpis informacyjny. Trafia teraz do pulpitu serwera.";
+"DEBUG_TEST_BLOCKED" = "Nie wysłano. Wysyłanie blokuje główny przełącznik, poziom logowania albo przełącznik upload_logs serwera.";

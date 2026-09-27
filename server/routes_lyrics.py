@@ -657,6 +657,9 @@ def api_lyrics_precache():
         _pool_contribute(jwt_token, node_id='device')
     
     job_id = _secrets.token_hex(8)
+    print(f"[PRECACHE] job={job_id} queued videos={len(valid_vids)} lang={translate_to} "
+          f"full={bool(use_full)} jwt={bool(jwt_token)} ip={request.remote_addr} "
+          f"vids={valid_vids[:6]}")
     job = {
         'status': 'queued',
         'total': len(valid_vids),
@@ -686,27 +689,45 @@ def api_lyrics_precache():
 
 
 def _run_precache_job(job_id, video_ids, translate_to, use_full, jwt_token):
-    job = _playlist_jobs.get(job_id)
+    with _playlist_jobs_lock:
+        job = _playlist_jobs.get(job_id)
     if not job:
         return
     
     job['status'] = 'running'
+    print(f"[PRECACHE] job={job_id} start videos={len(video_ids)} lang={translate_to} full={bool(use_full)}")
     
     for video_id in video_ids:
-        full_cache_key = f"{video_id}:{translate_to}"
+        t_vid = time_module.time()
+        # The fast pipeline's result belongs on the FAST key. Writing it under
+        # the full key made the later full request a plain cache hit, so the
+        # wbw upgrade never ran for a precached track (and the check below
+        # would skip a good full entry for a stale fast one).
+        cache_key = f"{video_id}:{translate_to}" if use_full else f"{video_id}:{translate_to}:fast"
+        print(f"  [PRECACHE] {video_id} start/full={bool(use_full)} lang={translate_to} key={cache_key}")
         
-        # Skip if already cached
-        if get_cached(full_cache_key):
+        # Skip if already cached. A fast job is also satisfied by a full entry
+        # (strictly better) -- the reverse is not true, that is the point of
+        # keeping the two keys apart.
+        full_cache_key = f"{video_id}:{translate_to}"
+        have = get_cached(cache_key)
+        if not have and not use_full:
+            have = get_cached(full_cache_key)
+        if have:
             job['cached'] += 1
             job['done'] += 1
+            print(f"  [PRECACHE] {video_id} skip already-cached cached=1 {(time_module.time()-t_vid)*1000:.0f}ms")
             continue
         
         # Try node cache first
-        node_data = ask_nodes_for_cache(full_cache_key, timeout=2.0)
+        node_data = ask_nodes_for_cache(cache_key, timeout=2.0)
+        if not node_data and not use_full:
+            node_data = ask_nodes_for_cache(full_cache_key, timeout=2.0)
         if node_data:
-            set_cached(full_cache_key, node_data)
+            set_cached(cache_key, node_data)
             job['cached'] += 1
             job['done'] += 1
+            print(f"  [PRECACHE] {video_id} node-cache-hit cached=1 {(time_module.time()-t_vid)*1000:.0f}ms")
             continue
         
         # Fetch song info
@@ -715,6 +736,7 @@ def _run_precache_job(job_id, video_ids, translate_to, use_full, jwt_token):
             if not song_info:
                 job['failed'] += 1
                 job['done'] += 1
+                print(f"  [PRECACHE] {video_id} no-song-info cached=0 {(time_module.time()-t_vid)*1000:.0f}ms")
                 continue
         except Exception as e:
             job['failed'] += 1
@@ -723,6 +745,8 @@ def _run_precache_job(job_id, video_ids, translate_to, use_full, jwt_token):
             continue
         
         # Fetch lyrics
+        result = None
+        cached_ok = False
         try:
             if use_full:
                 result = fetch_all_lyrics(video_id, song_info, translate_to, jwt_token)
@@ -730,18 +754,25 @@ def _run_precache_job(job_id, video_ids, translate_to, use_full, jwt_token):
                 result = fetch_fast_lyrics(video_id, song_info, translate_to)
             
             if result and not is_not_found_result(result):
-                set_cached(full_cache_key, result)
+                set_cached(cache_key, result)
                 job['cached'] += 1
+                cached_ok = True
             else:
                 job['failed'] += 1
         except Exception as e:
             job['failed'] += 1
             print(f"  [PRECACHE] {video_id} fetch failed: {e}")
         
+        print(f"  [PRECACHE] {video_id} done cached={1 if cached_ok else 0} "
+              f"source={(result or {}).get('source', '?')} "
+              f"lines={len((result or {}).get('lyrics') or [])} "
+              f"{(time_module.time()-t_vid)*1000:.0f}ms")
         job['done'] += 1
     
     job['status'] = 'complete'
     job['finished'] = datetime.now().isoformat()
+    print(f"[PRECACHE] job={job_id} complete done={job['done']}/{job['total']} "
+          f"cached={job['cached']} failed={job['failed']}")
 
 
 @app.route('/api/lyrics/precache/status/<job_id>', methods=['GET'])

@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Şarkı sözleri motoru";
+"LYRICS_ENGINE_FOOTER" = "Sunucu şarkı sözlerini alır ve aşağıda ayarlanan dile çevirir. Zaten bu Çince yazıyla yazılmış satırlar yalnızca yazı biçimi bakımından normalleştirilir, çevirmeye hiç gönderilmez. Akışlı çeviri model yazarken her satırı boyar, dakika yazımı ise çeviriyi etkin satırın altına harf harf yazar.";
+"STREAM_TRANSLATE" = "Akışlı çeviri";
+"STREAM_TRANSLATE_DESC" = "Model yazarken her çevrilmiş satırı boy, tüm şarkıyı bekleme";
+"TYPEWRITER" = "Dakika yazımı";
+"TYPEWRITER_DESC" = "Çeviriyi etkin satırın altına harf harf yaz (0 = kapalı)";
+"DEBUG_SETTINGS" = "Hata ayıklama";
+"DEBUG_STREAM" = "Akışlı çeviri";
+"DEBUG_STATE" = "Durum";
+"DEBUG_VIDEO" = "Son video";
+"DEBUG_PROGRESS" = "Olaylar / satırlar";
+"DEBUG_LAST_LINE" = "Son akış satırı";
+"DEBUG_REVEAL" = "Dakika yazımı hızı";
+"DEBUG_UPLOAD" = "Hata ayıklama yüklemeleri";
+"DEBUG_LOG_LEVEL" = "Günlük düzeyi";
+"DEBUG_LOG_LEVEL_DESC" = "Kapalı = yükleme yok, Err = yalnızca hatalar, All = bilgi + uyarılar + hatalar";
+"DEBUG_SEND" = "Hata ayıklamayı sunucuya gönder";
+"DEBUG_SEND_DESC" = "Hata ayıklama olaylarını şarkı sözleri sunucusuna yükle, panelde okunur";
+"DEBUG_SCREENSHOT" = "Ekran görüntüsü hata ayıklaması gönder";
+"DEBUG_SCREENSHOT_DESC" = "UI hiyerarşisini yalnızca ekran görüntüsü aldıktan sonra yükle";
+"DEBUG_ACTIONS" = "Eylemler";
+"DEBUG_COPY" = "Tanılamayı kopyala";
+"DEBUG_TEST_LOG" = "Test günlüğünü gönder";
+"DEBUG_COPIED" = "Tanılama panoya kopyalandı";
+"DEBUG_IDLE" = "boşta";
+
+"DEBUG_ENDPOINT" = "Sunucu adresi";
+"DEBUG_NOW_PLAYING" = "ş u an çalıyor: %@";
+"DEBUG_LAST_EVENT" = "son olay %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- ş u an engellendi: ana anahtar kapalı, ya da günlük düzeyi All değil";
+"DEBUG_UPLOAD_OFF" = "upload_logs = kapalı";
+"DEBUG_TEST_SENT" = "Bilgi günlüğu olarak gönderildi. şimdi sunucu paneline ulaştı.";
+"DEBUG_TEST_BLOCKED" = "Gönderilmedi. Yüklemeleri ana anahtar, günlük düzeyi ya da sunucunun upload_logs anahtarı engelliyor.";

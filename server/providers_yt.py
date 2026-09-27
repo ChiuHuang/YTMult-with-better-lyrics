@@ -85,6 +85,32 @@ def get_song_info(video_id):
         return None
 
 
+# --- Thumbnail URLs -------------------------------------------------------
+# Pure string build from the video id: no request, no ytmusicapi, so it is
+# safe to call on the hot path (the `meta` SSE event) and it never fails. The
+# server ships the URLs so the client and the lyrics/meta payload can never
+# disagree on the quality name, and so the next track's art can be requested
+# before its lyrics exist.
+#
+#   hq  -> hqdefault.jpg      480x360, always present for a real video
+#   max -> maxresdefault.jpg  1280x720, 404s for low-res uploads
+#                              (and for shorts), so `hq` must stay the fallback
+_YT_VIDEO_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+_YT_COVER_BASE = 'https://i.ytimg.com/vi/'
+
+
+def yt_cover_url(video_id, quality='hq'):
+    """YouTube thumbnail URL for `video_id`, or '' if the id is unusable.
+
+    `quality` is 'hq' (default) or 'max'; anything else falls back to 'hq'
+    rather than raising -- a bad query string must not 500 a lookup."""
+    vid = (video_id or '').strip() if isinstance(video_id, str) else ''
+    if not _YT_VIDEO_ID_RE.match(vid):
+        return ''
+    name = 'maxresdefault.jpg' if quality == 'max' else 'hqdefault.jpg'
+    return f'{_YT_COVER_BASE}{vid}/{name}'
+
+
 def fetch_yt_lyrics(video_id):
     try:
         ytm = get_ytmusic()

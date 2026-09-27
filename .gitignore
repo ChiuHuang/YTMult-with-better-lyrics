@@ -7,6 +7,10 @@ logs/
 tmp/
 *.tar.gz
 session-*.md
+# Local AI context packs: generated, never pushed.
+/log_pack.py
+/pack.json
+/client_edits_pack.py
 # Python
 __pycache__/
 .venv/

@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Liedtext-Engine";
+"LYRICS_ENGINE_FOOTER" = "Der Server lädt die Liedtexte und übersetzt sie in die unten eingestellte Sprache. Zeilen, die bereits in dieser chinesischen Schrift vorliegen, werden nur in die Schrift normalisiert und nie an den Übersetzer geschickt. Streaming-Übersetzung malt jede Zeile, während das Modell schreibt, und die Schreibmaschinen-Anzeige tippt die Übersetzung unter der aktiven Zeile aus.";
+"STREAM_TRANSLATE" = "Streaming-Übersetzung";
+"STREAM_TRANSLATE_DESC" = "Jede übersetzte Zeile malen, während das Modell schreibt, statt auf den ganzen Song zu warten";
+"TYPEWRITER" = "Schreibmaschinen-Anzeige";
+"TYPEWRITER_DESC" = "Die Übersetzung Buchstabe für Buchstabe unter der aktiven Zeile tippen (0 = aus)";
+"DEBUG_SETTINGS" = "Debug";
+"DEBUG_STREAM" = "Streaming-Übersetzung";
+"DEBUG_STATE" = "Status";
+"DEBUG_VIDEO" = "Letztes Video";
+"DEBUG_PROGRESS" = "Events / Zeilen";
+"DEBUG_LAST_LINE" = "Letzte gestreamte Zeile";
+"DEBUG_REVEAL" = "Schreibmaschinen-Tempo";
+"DEBUG_UPLOAD" = "Debug-Uploads";
+"DEBUG_LOG_LEVEL" = "Log-Level";
+"DEBUG_LOG_LEVEL_DESC" = "Off = keine Uploads, Err = nur Fehler, All = Infos + Warnungen + Fehler";
+"DEBUG_SEND" = "Debug an den Server senden";
+"DEBUG_SEND_DESC" = "Debug-Events an den Liedtext-Server hochladen, im Dashboard lesbar";
+"DEBUG_SCREENSHOT" = "Debug-Daten zum Screenshot senden";
+"DEBUG_SCREENSHOT_DESC" = "Die UI-Hierarchie nur hochladen, nachdem du einen Screenshot gemacht hast";
+"DEBUG_ACTIONS" = "Aktionen";
+"DEBUG_COPY" = "Diagnose kopieren";
+"DEBUG_TEST_LOG" = "Testlog senden";
+"DEBUG_COPIED" = "Diagnose in die Zwischenablage kopiert";
+"DEBUG_IDLE" = "inaktiv";
+
+"DEBUG_ENDPOINT" = "Endpunkt";
+"DEBUG_NOW_PLAYING" = "aktuelle Wiedergabe: %@";
+"DEBUG_LAST_EVENT" = "letztes Event %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- derzeit blockiert: Hauptschalter aus oder Log-Level ist nicht All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = aus";
+"DEBUG_TEST_SENT" = "Als Info-Log gesendet. Erreicht jetzt das Server-Dashboard.";
+"DEBUG_TEST_BLOCKED" = "Nicht gesendet. Uploads werden durch den Hauptschalter, das Log-Level oder den upload_logs-Schalter des Servers blockiert.";

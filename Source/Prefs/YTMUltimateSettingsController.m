@@ -1,5 +1,6 @@
 #import "YTMUltimateSettingsController.h"
 #import "LyricsSettingsController.h"
+#import "DebugSettingsController.h"
 #import "../Headers/Localization.h"
 
 #ifndef TWEAK_GIT_COMMIT
@@ -90,7 +91,7 @@
         case 0:
             return 1;
         case 1:
-            return 6;
+            return 7;
         case 2:
             return 1;
         case 3:
@@ -141,7 +142,8 @@
             @{@"title": LOC(@"THEME_SETTINGS"), @"image": @"paintbrush"},
             @{@"title": LOC(@"NAVBAR_SETTINGS"), @"image": @"sidebar.trailing"},
             @{@"title": LOC(@"TABBAR_SETTINGS"), @"image": @"dock.rectangle"},
-            @{@"title": @"Lyrics System", @"image": @"music.note.list"}
+            @{@"title": @"Lyrics System", @"image": @"music.note.list"},
+            @{@"title": LOC(@"DEBUG_SETTINGS"), @"image": @"ladybug"}
         ];
 
         NSDictionary *settingData = settingsData[indexPath.row];
@@ -235,7 +237,8 @@
                                  [ThemeSettingsController class],
                                  [NavBarSettingsController class],
                                  [OtherSettingsController class],
-                                 [LyricsSettingsController class]];
+                                 [LyricsSettingsController class],
+                                 [DebugSettingsController class]];
 
         if (indexPath.row >= 0 && indexPath.row < controllers.count) {
             UIViewController *controller = [[controllers[indexPath.row] alloc] init];
