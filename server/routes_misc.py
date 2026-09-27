@@ -80,8 +80,42 @@ _BADGE_GLYPHS = {
     'tracks': 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z',
     'nodes': 'M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z',
 }
-_BADGE_CHAR_W = 7.4   # px per char at 13px/500 Roboto
-_BADGE_RESERVED = 42  # chip (28) + text start gap
+_BADGE_TEXT_X = 33    # label start: chip (28) + 5px gap
+_BADGE_PAD_R = 10     # room after the label, so a wider fallback font still fits
+_BADGE_MIN_W = 88
+# Advance widths (px) of Roboto Medium at 13px for ASCII 0x20..0x7E, straight
+# out of the font's hmtx (unitsPerEm 2048); font-weight:500 picks Medium when
+# Roboto is installed. A flat 7.4px/char average over-stretched short labels
+# (up to 23%), and textLength then squashed the glyphs to fit -- that is what
+# made the digits on "Lyrics 397" look fat. Measure per character instead.
+_BADGE_ASCII_W = (
+    '3.237 3.485 4.215 7.935 7.389 9.547 8.309 2.196 4.532 4.583 5.745 '
+    '7.243 2.856 4.266 3.631 5.142 7.389 7.389 7.389 7.389 7.389 7.389 '
+    '7.389 7.389 7.389 7.389 3.447 3.091 6.608 7.274 6.767 6.322 '
+    '11.629 8.652 8.201 8.487 8.493 7.351 7.141 8.849 9.236 3.669 '
+    '7.217 8.195 7.033 11.381 9.229 8.976 8.309 8.976 8.112 7.846 '
+    '7.890 8.474 8.411 11.438 8.227 7.922 7.827 3.561 5.434 3.561 '
+    '5.554 5.865 4.189 7.033 7.319 6.805 7.338 6.976 4.608 7.370 7.217 '
+    '3.320 3.256 6.786 3.320 11.312 7.230 7.401 7.319 7.382 4.570 '
+    '6.709 4.323 7.224 6.430 9.661 6.538 6.329 6.538 4.361 3.263 4.361 '
+    '8.639 '
+)
+_BADGE_W = [float(v) for v in _BADGE_ASCII_W.split()]
+
+
+def _badge_text_width(text):
+    """Advance width of `text` at 13px/500 Roboto. Unknown codepoints get a
+    rough latin/CJK width so a stray character cannot break the pill."""
+    total = 0.0
+    for ch in text:
+        cp = ord(ch)
+        if 32 <= cp <= 126:
+            total += _BADGE_W[cp - 32]
+        elif cp > 0x2E80:                 # CJK and friends: full width
+            total += 13.0
+        else:
+            total += 7.0
+    return total
 
 
 def _xml_esc(s):
@@ -92,9 +126,13 @@ def _badge_svg(text, aria=None, glyph='release'):
     """Server-rendered MD3 pill. Plain %s substitution: str.format would
     choke on the CSS braces. textLength forces an exact fit, so measure the
     WHOLE string (prefix + value) -- measuring the value alone squeezed a
-    long prefix down to ~2px per char."""
+    long prefix down to ~2px per char. It is set to the string's REAL width,
+    so the glyphs are never distorted; only a font whose metrics differ from
+    Roboto (Segoe UI ~3%, Calibri ~13%) gets rescaled, and a wider one still
+    cannot spill out of the pill."""
     text = (text or '')[:44]
-    w = max(88, int(38 + _BADGE_CHAR_W * len(text)))
+    tw = round(_badge_text_width(text), 2)
+    w = max(_BADGE_MIN_W, int(round(_BADGE_TEXT_X + tw + _BADGE_PAD_R)))
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="32" '
         'viewBox="0 0 %d 32" role="img" aria-label="%s">'
@@ -110,11 +148,11 @@ def _badge_svg(text, aria=None, glyph='release'):
         '<g transform="translate(10,10) scale(0.5)">'
         '<path class="glyph" d="%s"/>'
         '</g>'
-        '<text class="fg" x="33" y="20.5" textLength="%d" '
+        '<text class="fg" x="%d" y="20.5" textLength="%s" '
         'lengthAdjust="spacingAndGlyphs">%s</text></svg>'
     ) % (w, w, _xml_esc(aria or text), w,
          _BADGE_GLYPHS.get(glyph, _BADGE_GLYPHS['release']),
-         max(10, w - _BADGE_RESERVED), _xml_esc(text))
+         _BADGE_TEXT_X, ('%.2f' % tw), _xml_esc(text))
 
 
 def _badge_tracks_cached():
