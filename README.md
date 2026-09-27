@@ -1,61 +1,85 @@
-# YTMusicUltimate
-<p align="center">
-<img src=https://user-images.githubusercontent.com/38832025/235781424-06d81647-b3db-4d9b-94dc-cd65cdf09145.png?raw=true) />
-</p>    
+# YTMusicUltimate (with better lyrics)
 
-<p align="center">
-<img src=https://user-images.githubusercontent.com/38832025/235781207-6d1ad44e-0c32-4aec-9c75-cb928ca8a0d3.png?raw=true) />
-</p>
+YouTube Music iOS tweak + a self-hosted lyrics server: synced and
+word-synced lyrics, multi-provider race, translation, and an admin dashboard.
+Open source — forks and pull requests welcome.
 
-<p align="center">
-The best tweak for the YouTube Music on iOS.
-</p>
-traslate addon
-<img width="1284" height="2778" alt="image" src="https://github.com/user-attachments/assets/d24dae25-171d-4868-96af-351c5122435a" />
+## Download
 
-## Download Links
+- **Releases (IPA):** https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases
+  Every push to `main` builds `YTMusicUltimate.ipa` as `build-N`.
+- **Asia mirror:** prefix any release URL with the worker proxy, e.g.
+  `http://workersproxy.codefoxy.workers.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-160/YTMusicUltimate.ipa`
+  The in-app updater opens this proxied link automatically.
+- **AltStore:** add this source URL (or paste it on altdirect.app):
+  `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
+- **Jailbreak (.deb):** build locally with Theos (below).
 
-* **Jailbreak:**
-Add __[https://ginsu.dev/repo](https://ginsu.dev/repo)__ to your favorite installer and download latest version from there, or from __[Releases](https://github.com/ginsudev/YTMusicUltimate/releases)__ page.
+You need a **decrypted** YouTube Music IPA as the base (cannot be provided
+here for legal reasons). Upload it somewhere with a direct link
+(filebin.net, Dropbox, or your own file host).
 
-(arm.deb version for Rootful and arm64.deb version for Rootless devices)
+## Build your own IPA with GitHub Actions
 
-* **Sideloading:**
-  We no longer provide a sideloading IPA but you can build one yourself, keep reading:
+1. Fork this repo.
+2. Fork settings → Actions → enable Read and Write permissions.
+3. Actions tab → "Build and Release YTMusicUltimate" → Run workflow,
+   paste your decrypted IPA URL (plus optional app name / bundle ID).
+4. The IPA appears under your fork's Releases. Optional repo secrets for
+   the Asia mirror step: `FILE_UPLOAD_URL`, `FILE_UPLOAD_TOKEN`,
+   `FILE_UPLOAD_FIELD` (multipart field name, default `file`).
 
-## How to build a YTMusicUltimate IPA by yourself using Github actions
+Build troubleshooting: 99% of failures are the base IPA (must be decrypted
+`.ipa`, direct link). If the run is green but you can't find output, append
+`/releases` to your fork URL.
 
-If this is your first time here, start from step 1. If you built a YTMU IPA before, skip steps 1 and 2. Instead, click on the "Sync fork" button to get the latest version of the tweak and continue through step 3.
+## Build the .deb locally
 
-1. Fork this repository using the fork button on the top right.
-2. On your forked repository, go to Repository Settings > Actions, enable Read and Write permissions.
-3. Go to the Actions tab on your forked repo, click on "Build and Release YTMusicUltimate" located on the left side. Click "Run workflow" button located on the right side.
-4. Find a decrypted YTMusic .ipa file (we cannot provide you this due to legal reasons) and upload it to a file provider(filebin.net or Dropbox is recommended). Paste the url to the necessary field and click "Run workflow".
-5. Wait for the build to finish. You can download the tweaked IPA from the releases section of your forked repo. (If you can't find the releases section, go to your forked repo and add /releases to the url. i.e github.com/user/YTMusicUltimate/releases)
+1. Install [Theos](https://theos.dev/docs/installation).
+2. Clone this repo, then:
+   - `make clean package` — rootful jailbreak
+   - `make clean package ROOTLESS=1` — rootless jailbreak
+   - `make clean package SIDELOADING=1` — for IPA injection
+     (see [Azule](https://github.com/Al4ise/Azule) for injection)
 
-## IPA building troubleshooting(I can't build the IPA/Github action fails/I can't find the releases section etc.)
+## Lyrics server
 
-99.9% of the time, the culprit is the IPA URL you provided. You HAVE TO provide a decryped IPA. It cannot be any other extension, it has to be a **.ipa** file. Find a decrypted YTMusic IPA(we can't help you with that), upload it to filebin.net or Dropbox, give the direct link to the GitHub action. If you find a working ipa and upload it properly, everything will start working perfectly, pinky promise.
+The tweak fetches lyrics from the included Python server (default
+`https://ytmtranslate.chiuhuang.dev`, changeable in tweak settings).
 
-If the github action works and you cannot find where you can download the result, you need to add /releases to the url of your forked repository. It'll probably look like this: https://github.com/YOURUSERNAME/YTMusicUltimate/releases, don't forget to replace the YOURUSERNAME part with your username. It may seem invisible but if the github action is successful, IPA will be there.
+```sh
+python proxy_server.py        # listens on :20016
+```
 
+- First run copies: `config/ai_providers.example.json` →
+  `config/ai_providers.json` (translation/retitle keys, gitignored),
+  `config/app_settings.example.json` → `config/app_settings.json`
+  (tweak remote config). Never commit the real files.
+- Extra keys via env: `YTMU_COHERE_KEYS`, `ORCAROUTER_API_KEY`
+  (`YTMU_ORCA_BASE`, `YTMU_ORCA_MODEL`).
+- Dashboard (password-gated): live logs, library manager (rebase, bulk
+  refetch, retitle, translate queue), JWT pool, nodes, self-update, crash
+  logs, and the **App** tab (tweak remote config served at
+  `/api/app/settings`).
+- Device debug uploads land in `logs/`; on-device lyrics cache is never
+  poisoned by not-found results.
 
-## How to build the package by yourself on your device
-1. Install __[Theos](https://theos.dev/docs/installation)__
-2. Clone this repo __[using git](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository)__
-3. Cd your YTMusicUltimate folder and run:
+## Tweak features (highlights)
 
-   • '**make clean package**' to build deb for rootful device
-   
-   • '**make clean package ROOTLESS=1**' to build deb for rootless device
-   
-   • '**make clean package SIDELOADING=1**' to build deb for injecting in to ipa
-   
-   
+- Apple-Music-style sliding word highlight, 120fps link, extrapolated clock
+- Provider race (Cubey/QQ/KuGou/BiniLyrics/LRCLib/Unison/AMLL/YouTube),
+  per-video provider switcher, probe-and-pick from dashboard
+- Background auto-sync of server translations into the on-device cache
+  (every 6h, toggle in Lyrics settings)
+- Liquid Glass mini-player surface, landscape lyrics, FPS meter
+- In-app update check (Settings → Check for updates) with proxied download
 
-   • To learn how to inject tweaks in to ipa visit __[here (Azule)](https://github.com/Al4ise/Azule)__
+## Repo layout
 
+- `Source/` — the tweak (Theos/Logos)
+- `server/` — lyrics server (`proxy_server.py` is a thin shim)
+- `static/dash.js`, `templates/index.html` — admin dashboard
+- `.github/workflows/main.yml` — build + release + mirror
 
-
-
-Made with ❤ by Ginsu and Dayanch96
+Fork of [YTMusicUltimate](https://github.com/ginsudev/YTMusicUltimate)
+by Ginsu and Dayanch96. Lyrics system, server, and dashboard by ChiuHuang.
