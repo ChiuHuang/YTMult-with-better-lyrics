@@ -72,11 +72,17 @@ def api_update():
     if not latest_commit:
         return jsonify({'error': 'Update service unavailable'}), 503
     is_current = bool(client_commit) and latest_commit.lower().startswith(client_commit)
+    from .release_info import latest_release, worker_url
+    rel = latest_release()
+    dl = (rel or {}).get('download_url')
     return jsonify({
         'current_commit': client_commit or None,
         'latest_commit': latest_commit,
         'update_available': bool(client_commit) and not is_current,
-        'repository': 'https://github.com/ChiuHuang/ytmusicultimate'
+        'repository': 'https://github.com/ChiuHuang/ytmusicultimate',
+        'build': (rel or {}).get('tag'),
+        'download_url': dl,
+        'download_url_proxy': worker_url(dl) if dl else None,
     })
 
 @app.route('/api/lyrics', methods=['GET'])
