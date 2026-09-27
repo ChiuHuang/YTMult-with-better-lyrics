@@ -75,7 +75,11 @@ def api_app_stats():
 # assets/badges/*.svg, so dynamic and static badges look identical.
 _BADGE_GLYPHS = {
     'release': 'M5,20h14v-2H5V20z M19,9h-4V3H9v6H5l7,7L19,9z',
-    'lyrics': 'M14,9c0-2.04,1.24-3.79,3-4.57V4c0-1.1-0.9-2-2-2H4C2.9,2,2.01,2.9,2.01,4L2,22l4-4h9c1.1,0,2-0.9,2-2v-2.42 C15.24,12.8,14,11.05,14,9z M10,14H6v-2h4V14z M13,11H6V9h7V11z M13,8H6V6h7V8z',
+    # 'subtitles', not Material's 'lyrics': that one is a chat bubble with a
+    # note in it, and the previous entry was the plain 'chat' bubble, so a
+    # lyrics counter read as a message counter. The caption box is what a lyric
+    # line actually looks like on screen.
+    'lyrics': 'M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zM4 12h4v2H4v-2zm10 6H4v-2h10v2zm6 0h-4v-2h4v2zm0-4H10v-2h10v2z',
     'devices': 'M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z',
     'tracks': 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z',
     'nodes': 'M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z',
