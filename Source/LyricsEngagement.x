@@ -1,5 +1,16 @@
 #import "LyricsShared.h"
 
+// The Liquid Glass V2 settings page (Source/Prefs/LiquidGlassSettingsController.m)
+// exposes a "keep the lyrics entry button visible" switch, key
+// `lyricsEntryButtonEnabled`, default YES. The four hooks below are the ONLY
+// thing that makes the entry button un-hideable (YT hides it on its own), so
+// the switch has to be read here -- reading it in the V2 files was a no-op row.
+// Default YES keeps every existing install exactly as it was; the switch only
+// stops the force, it never hides anything by itself.
+static BOOL YTMULyricsEntryButtonWanted(void) {
+    return YTMULyricsPreference(@"lyricsEntryButtonEnabled", YES);
+}
+
 %hook YTEngagementPanelContainerViewController
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -175,7 +186,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 %hook UIControl
 
 - (void)setEnabled:(BOOL)enabled {
-    if (!enabled && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+    if (!enabled && YTMULyricsEntryButtonWanted() && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
         %orig(YES);
         return;
     }
@@ -187,7 +198,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 %hook UIView
 
 - (void)setUserInteractionEnabled:(BOOL)enabled {
-    if (!enabled && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+    if (!enabled && YTMULyricsEntryButtonWanted() && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
         %orig(YES);
         return;
     }
@@ -195,7 +206,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 }
 
 - (void)setAlpha:(CGFloat)alpha {
-    if (alpha < 0.8 && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+    if (alpha < 0.8 && YTMULyricsEntryButtonWanted() && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
         %orig(1.0);
         return;
     }
@@ -203,7 +214,7 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 }
 
 - (void)setHidden:(BOOL)hidden {
-    if (hidden && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+    if (hidden && YTMULyricsEntryButtonWanted() && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
         %orig(NO);
         return;
     }
