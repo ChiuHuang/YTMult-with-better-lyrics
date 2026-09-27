@@ -1,20 +1,14 @@
 # Split from proxy_server.py -- edit HERE, not the old monolith (now a thin shim).
 # See AGENTS.md architecture section.
 #
-# Per-video provider candidates (RAM-first) + same-line word-timing graft.
+# Persisted per-video provider candidates + same-line word-timing graft.
 #
-# probe_providers() / fetch_all_lyrics() find every provider's lyrics but only
-# the winner ever reaches the lyrics cache. This module keeps the FULL snapshot
-# per video (latest run wins) so re-race, the device provider switcher and
-# anything else can reuse every provider without re-fetching:
-#   save_candidates(video_id, song_info, candidates)  # probe + full-fetch path
+# probe_providers() finds every provider's lyrics but only the winner used
+# to survive (everything else was discarded). This module persists the FULL
+# snapshot per video (latest probe wins) so re-race, the device provider
+# switcher, and anything else can reuse all providers without re-fetching:
+#   save_candidates(video_id, song_info, candidates)  # called by probe_providers
 #   load_candidates(video_id)                         # fresh snapshot or None
-#
-# Storage is IN MEMORY ONLY by default: the switcher, the re-race and the
-# select path all read it straight out of the process, and the only thing
-# that ever touches disk is the lyrics cache of the single provider actually
-# serving. Writing per-provider snapshots to disk for every song is pure
-# bloat, so it is opt-in via YTMU_PERSIST_CANDIDATES=1 (or persist=True).
 #
 # graft_wbw_parts() handles the "same lines, but word-timed elsewhere"
 # case: when the winning candidate is line-sync/plain but another provider
@@ -23,9 +17,7 @@
 import copy
 import json
 import os
-import threading
 import time as time_module
-from collections import OrderedDict
 from datetime import datetime
 
 _CAND_DIR = 'cache/candidates'
@@ -33,64 +25,22 @@ _CAND_DIR = 'cache/candidates'
 # anyway, so this only guards videos probed once long ago).
 _CAND_MAX_AGE_S = 7 * 86400
 
-# --- RAM store -------------------------------------------------------------
-# Bounded LRU: enough room for a listening session (plus the prefetched queue),
-# small enough that a long-running server never grows without limit.
-_RAM_MAX_VIDEOS = 32
-_ram_lock = threading.RLock()
-_ram_snapshots = OrderedDict()  # video_id -> payload (same shape as on disk)
-# Opt-in disk persistence (dashboard/analysis runs only).
-_PERSIST_TO_DISK = os.environ.get('YTMU_PERSIST_CANDIDATES', '').strip().lower() in (
-    '1', 'true', 'yes', 'on')
-
-
-def _ram_put(video_id, payload):
-    """Store a snapshot in RAM, evicting the least-recently-used video."""
-    with _ram_lock:
-        _ram_snapshots.pop(video_id, None)
-        _ram_snapshots[video_id] = payload
-        while len(_ram_snapshots) > _RAM_MAX_VIDEOS:
-            _ram_snapshots.popitem(last=False)
-
-
-def _ram_get(video_id):
-    """Deep copy of the RAM snapshot (callers mutate what they get), or None."""
-    with _ram_lock:
-        payload = _ram_snapshots.get(video_id)
-        if payload is None:
-            return None
-        _ram_snapshots.move_to_end(video_id)
-    try:
-        return copy.deepcopy(payload)
-    except Exception:
-        return payload
-
-
-def ram_videos():
-    """Video IDs currently held in RAM (newest last). Debug/dashboard aid."""
-    with _ram_lock:
-        return list(_ram_snapshots.keys())
-
 
 def _cand_path(video_id):
     from .cache import _cache_filename
     return os.path.join(_CAND_DIR, _cache_filename(video_id) + '.json')
 
 
-def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=None,
-                    persist=None):
-    """Store a full probe snapshot. Latest wins. Skipped for partial
+def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=None):
+    """Persist a full probe snapshot. Latest wins. Skipped for partial
     (only_source) probes so a filtered re-probe never clobbers the full set.
     Stored lyrics are raw (translations stripped -- the select path
     re-translates into whatever lang the client asks for). Plain-tier
     entries are pruned when a line-or-better entry exists (wbw never prunes
     line -- line stays as the fallback switch option). outcomes maps
     provider -> {status: found|missed|error|skipped, tier?, ts} so later
-    runs know what each provider gave without re-trying.
-
-    The snapshot lands in RAM (bounded LRU). Disk is opt-in: pass
-    persist=True, or set YTMU_PERSIST_CANDIDATES=1 for the whole process.
-    Returns True when the snapshot was accepted (RAM or disk)."""
+    runs know what each provider gave without re-trying. Returns True when
+    written."""
     if only_source or not video_id or (not candidates and not outcomes):
         return False
     try:
@@ -135,6 +85,7 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
                 print(f"  [CAND] pruned plain provider(s) for {video_id}: {', '.join(dropped)}")
         if not slim and not outcomes:
             return False
+        os.makedirs(_CAND_DIR, exist_ok=True)
         payload = {
             'v': 1,
             'video_id': video_id,
@@ -144,17 +95,11 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
             'outcomes': outcomes or {},
             'candidates': slim,
         }
-        _ram_put(video_id, payload)
-        if persist is None:
-            persist = _PERSIST_TO_DISK
-        if persist:
-            os.makedirs(_CAND_DIR, exist_ok=True)
-            tmp = _cand_path(video_id) + '.tmp'
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(payload, f, ensure_ascii=False)
-            os.replace(tmp, _cand_path(video_id))
-        print(f"  [CAND] {len(slim)} provider(s) for {video_id} in RAM"
-              f"{' +disk' if persist else ''}")
+        tmp = _cand_path(video_id) + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, _cand_path(video_id))
+        print(f"  [CAND] saved {len(slim)} provider(s) for {video_id}")
         return True
     except Exception as e:
         print(f"  [CAND] [FAIL] save {video_id}: {e}")
@@ -171,39 +116,28 @@ def load_candidates(video_id, max_age_s=_CAND_MAX_AGE_S):
 
 
 def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
-    """Full snapshot payload (candidates + outcomes + song/artist/ts).
-    RAM first (that is where every save lands now); on-disk files are only
-    read when nothing is held for this video (legacy/opted-in snapshots)."""
+    """Full snapshot payload (candidates + outcomes + song/artist/ts)."""
     if not video_id:
         return None
-    ram = _ram_get(video_id)
-    if ram and _snapshot_usable(ram, max_age_s):
-        return ram
     try:
         path = _cand_path(video_id)
         if not os.path.exists(path):
-            return ram
+            return None
         with open(path, 'r', encoding='utf-8') as f:
             payload = json.load(f)
-        if not _snapshot_usable(payload, max_age_s):
-            return ram
+        cands = payload.get('candidates')
+        if not cands and not payload.get('outcomes'):
+            return None
+        if max_age_s and payload.get('ts'):
+            try:
+                age = (datetime.now() - datetime.fromisoformat(payload['ts'])).total_seconds()
+            except Exception:
+                age = 0  # unparseable ts: keep the data, don't drop it
+            if age > max_age_s:
+                return None
         return payload
     except Exception:
-        return ram
-
-
-def _snapshot_usable(payload, max_age_s=_CAND_MAX_AGE_S):
-    cands = (payload or {}).get('candidates')
-    if not cands and not (payload or {}).get('outcomes'):
-        return False
-    if max_age_s and payload.get('ts'):
-        try:
-            age = (datetime.now() - datetime.fromisoformat(payload['ts'])).total_seconds()
-        except Exception:
-            age = 0  # unparseable ts: keep the data, don't drop it
-        if age > max_age_s:
-            return False
-    return True
+        return None
 
 
 def _norm_text(t):

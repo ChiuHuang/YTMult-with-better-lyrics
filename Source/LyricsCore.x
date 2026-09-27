@@ -22,6 +22,63 @@ BOOL g_globalLoadingInFlight = NO;
 NSDate *g_loadingSince = nil;
 __weak id g_activeEngagementPanelContainer = nil;
 
+// ============================================================
+// Provider lyrics held in RAM on the device
+// ============================================================
+// Every provider a song's full fetch raced is kept here, in memory, keyed by
+// video id then provider name. Nothing here is ever written to disk: the only
+// provider lyrics that get cached are the ones the user actually selects
+// (YTMULyricsCacheSave, called from the select path). Bounded LRU so a long
+// listening session cannot grow without limit; the next song re-fills.
+NSMutableDictionary *g_providerLyricsRAM = nil;  // vid -> {provider: lyrics}
+static NSMutableArray *g_providerRAMOrder = nil; // vids, oldest first
+static const NSUInteger YTMU_PROVIDER_RAM_VIDEOS = 8;
+
+static void ytmu_providerRAMInit(void) {
+    if (!g_providerLyricsRAM) g_providerLyricsRAM = [NSMutableDictionary dictionary];
+    if (!g_providerRAMOrder) g_providerRAMOrder = [NSMutableArray array];
+}
+
+void YTMUProviderLyricsStore(NSString *videoID, NSArray *entries) {
+    if (!videoID.length || ![entries isKindOfClass:[NSArray class]] || entries.count == 0) return;
+    ytmu_providerRAMInit();
+    NSMutableDictionary *byProvider = [NSMutableDictionary dictionary];
+    for (NSDictionary *e in entries) {
+        if (![e isKindOfClass:[NSDictionary class]]) continue;
+        NSString *prov = e[@"provider"];
+        NSArray *lyrics = e[@"lyrics"];
+        if (![prov isKindOfClass:[NSString class]] || !prov.length) continue;
+        if (![lyrics isKindOfClass:[NSArray class]] || lyrics.count == 0) continue;
+        byProvider[prov] = lyrics;
+    }
+    if (byProvider.count == 0) return;
+    g_providerLyricsRAM[videoID] = byProvider;
+    [g_providerRAMOrder removeObject:videoID];
+    [g_providerRAMOrder addObject:videoID];
+    while (g_providerRAMOrder.count > YTMU_PROVIDER_RAM_VIDEOS) {
+        NSString *old = g_providerRAMOrder.firstObject;
+        [g_providerRAMOrder removeObjectAtIndex:0];
+        if (old.length) [g_providerLyricsRAM removeObjectForKey:old];
+    }
+}
+
+NSArray *YTMUProviderLyricsForProvider(NSString *videoID, NSString *provider) {
+    if (!videoID.length || !provider.length) return nil;
+    NSDictionary *byProvider = g_providerLyricsRAM[videoID];
+    NSArray *lyrics = byProvider[provider];
+    return [lyrics isKindOfClass:[NSArray class]] ? lyrics : nil;
+}
+
+NSUInteger YTMUProviderLyricsCount(NSString *videoID) {
+    return [g_providerLyricsRAM[videoID] count];
+}
+
+void YTMUProviderLyricsDrop(NSString *videoID) {
+    if (!videoID.length) return;
+    [g_providerLyricsRAM removeObjectForKey:videoID];
+    [g_providerRAMOrder removeObject:videoID];
+}
+
 void YTMUReleaseGlobalFetch(void) {
     g_globalLoadingInFlight = NO;
     g_globalLoadingVideoID = nil;
@@ -505,6 +562,46 @@ void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull) {
     if (validVids.count > 1) {
         ytmu_precachePost([validVids subarrayWithRange:NSMakeRange(1, validVids.count - 1)], lang, NO);
     }
+    YTMUPrefetchProviderLyrics(validVids, lang);
+}
+
+// Prefetch every provider's lyrics for the tracks that are about to play, into
+// device RAM. The server already raced them (see YTMULyricsPrecacheQueue), so
+// this is one small read per track and no provider traffic at all: when the
+// next song starts its switcher is already warm. RAM only -- nothing on disk.
+void YTMUPrefetchProviderLyrics(NSArray *videoIDs, NSString *lang) {
+    if (!videoIDs.length) return;
+    NSMutableArray *todo = [NSMutableArray array];
+    for (NSString *vid in videoIDs) {
+        if (![vid isKindOfClass:[NSString class]] || !vid.length) continue;
+        if (!_safe_cache_component(vid)) continue;
+        if (YTMUProviderLyricsCount(vid) > 0) continue;  // already warm
+        [todo addObject:vid];
+        if (todo.count >= 2) break;
+    }
+    if (todo.count == 0) return;
+    NSString *target = lang.length ? lang : YTMUTargetLang();
+    // The full precache is still running for the first track, so give it a
+    // moment to land the snapshot before asking for it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        for (NSString *vid in todo) {
+            NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/providers/data?v=%@&lang=%@",
+                                YTMUApiBase(), vid, target];
+            NSURL *url = [NSURL URLWithString:urlStr];
+            if (!url) continue;
+            [[[NSURLSession sharedSession] dataTaskWithURL:url
+                completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+                if (err || !data) return;
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                NSArray *entries = json[@"providers"];
+                if (![json[@"found"] boolValue] || ![entries isKindOfClass:[NSArray class]]) return;
+                YTMUProviderLyricsStore(vid, entries);
+                sendDebugLog([NSString stringWithFormat:@"[MUSIC] prefetch %lu provider(s) into RAM for %@",
+                              (unsigned long)YTMUProviderLyricsCount(vid), vid]);
+            }] resume];
+        }
+    });
 }
 
 BOOL _safe_cache_component(NSString *s) {

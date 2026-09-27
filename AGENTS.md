@@ -125,36 +125,46 @@
   `extern "C"` guard in `LyricsShared.h` or the link fails with
   `declaration possibly missing 'extern "C"'`. Untested on device: needs a
   video whose intro is a `music_offtopic` segment.
-- all providers in RAM + switcher press feedback + fullscreen title fix:
-  `server/candidates.py` is now RAM-first: every provider a fetch or probe
-  tried is kept in a bounded LRU (32 videos, deep-copied on read) and NOTHING
-  is written to `cache/candidates` anymore (opt-in via
-  `YTMU_PERSIST_CANDIDATES=1` / `save_candidates(..., persist=True)`); only
-  the provider actually serving reaches the on-disk lyrics cache, and
-  selecting another one re-caches just that one. `routes_lyrics` grew
-  `_provider_meta()` (RAM list + saved choice), attaches it to every
-  `/api/lyrics` payload (transport-only, never persisted) and to
-  `/api/lyrics/check`, plus two new reads:
-  `GET /api/lyrics/song?v=` (title/artist, served from the cached entry or
-  `providers_yt.get_song_info_cached` 30min TTL/LRU) and
-  `GET /api/lyrics/providers/candidates?v=`. iOS arms the switcher from
-  whichever payload carries the list (fast/full/check/candidates), so the
-  menu is ready as the song plays with zero extra provider traffic; queue
-  precache now runs the FULL pipeline for the immediate next track (all
-  providers raced, winner cached) and fast for the rest
-  (`ytmu_precachePost` in LyricsCore.x). Fullscreen title/artist: server
-  metadata outranks `playerResponse` (whose title is the video title --
-  `ytmu_cleanVideoTitle` strips `(Official Video)`/`- Topic`/`【MV】`/`| 4K`),
-  the label scrape now ranks by font size, skips hidden/zero-size and
-  audio-quality rows, and only fills gaps; the per-song `ytmu_requestSongMetaForVideo:`
-  request (guarded by `songMetaVideoID`) fixes the "stuck on Now Playing"
-  case where the lyrics came from the device cache and no payload carried
-  metadata. [<] [>] steppers grow into a filled pill while held
-  (`ytmu_wireStepperPress:` -> `ytmu_stepperPressIn:`/`Out:`, transform-based
-  so layout passes cannot cut the spring). Verified: py_compile all server
-  files, imports, node --check, plus a stubbed end-to-end run (4 providers in
-  RAM / 0 snapshot files, list on the payload, winner-only cache, select
-  from RAM with every fetcher raising).
+- every provider in **iPhone RAM** (not the server) + switcher press feedback
+  + fullscreen title fix. Read the user literally: "provider in ram only no
+  cache only cache the one" means the DEVICE holds all providers in memory and
+  only the selected provider is ever cached -- `server/candidates.py` is back to
+  its original disk snapshots (an earlier attempt moved them to server RAM;
+  reverted, do not redo it). The RAM lives in `LyricsCore.x`:
+  `g_providerLyricsRAM` (vid -> {provider: raw lyrics}) behind
+  `YTMUProviderLyricsStore` / `YTMUProviderLyricsForProvider` /
+  `YTMUProviderLyricsCount` / `YTMUProviderLyricsDrop`, an 8-video LRU
+  (`g_providerRAMOrder`), memory only, never `YTMULyricsCacheSave`. Filled by
+  `GET /api/lyrics/providers/data?v=&lang=` (`routes_lyrics`, up to 8
+  providers / 200KB, raw pre-translation lyrics straight from the stored
+  snapshot) via `ytmu_loadProviderLyricsForVideo:`, called on song change, on
+  every `fetchLyricsForVideo:`, and when the provider menu opens. Switching
+  paints from RAM first (`ytmu_applyProviderAtIndex:`, deliberately NOT into
+  `g_lyricsCache`), then `/providers/select` returns the translation and caches
+  that one provider. `YTMUPrefetchProviderLyrics` (called from
+  `YTMULyricsPrecacheQueue`, 12s delay so the full race has landed) warms the
+  next 2 queue tracks; `ytmu_precachePost` runs the FULL pipeline for the
+  immediate next track (all providers raced, winner cached) and fast for the
+  rest. Menu arming: `_provider_meta()` (slim rows) rides along on every
+  `/api/lyrics` payload and `/api/lyrics/check`; `GET
+  /api/lyrics/providers/candidates?v=` is the standalone read. Fullscreen
+  title/artist: `GET /api/lyrics/song?v=` (cached entry, else
+  `providers_yt.get_song_info_cached`, 30min TTL/LRU) via
+  `ytmu_requestSongMetaForVideo:` (guarded by `songMetaVideoID`) -- the fix for
+  "stuck on Now Playing", which happened whenever the lyrics came from the
+  device cache and no payload carried metadata. Server track name outranks
+  `playerResponse` (a video title -- `ytmu_cleanVideoTitle` strips
+  `(Official Video)`/`- Topic`/`【MV】`/`| 4K`), the label scrape ranks by font
+  size and skips hidden/zero-size plus audio-quality rows, and only fills gaps.
+  [<] [>] steppers grow into a filled pill while held
+  (`ytmu_wireStepperPress:` -> `ytmu_stepperPressIn:`/`Out:`, transform-based so
+  layout passes cannot cut the spring). Verified: py_compile all server files,
+  imports, node --check, stubbed endpoint runs (all providers shipped raw with
+  timing, no translation leak, byte budget caps a fat snapshot, 400 on a bad
+  id) and a stubbed fetch (winner-only disk cache, select served without
+  network). Build traps fixed on the way (see the intro-skip entry):
+  `UIControlEventTouchDown` (there is no `TouchDownInside`), the `extern "C"`
+  guard for `.xm` callers, and declaring `%new` helpers.
 - compact provider menu (better-lyrics dock style): collapsed trigger shows
   the current tier icon (wbw blue / line mint / plain dim, redrawn bars, no
   upstream SVG copied), tap expands a native anchored UIMenu (iOS 14+) with

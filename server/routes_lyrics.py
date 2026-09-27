@@ -50,8 +50,8 @@ _update_cache = {'commit': None, 'checked_at': 0.0}
 
 def _provider_meta(video_id):
     """{providers: [...], saved: 'X'} for a video, or None when nothing is
-    held. Providers are read straight from the RAM snapshot; this never
-    fetches and never writes anything to disk."""
+    held. Slim rows only (no lyrics) so it is cheap to ride along on every
+    lyrics payload and arm the device switcher with zero extra requests."""
     if not video_id:
         return None
     try:
@@ -513,6 +513,56 @@ def api_providers_candidates():
                     'saved': meta.get('saved', '')})
 
 
+@app.route('/api/lyrics/providers/data', methods=['GET'])
+def api_providers_data():
+    """Every provider's raw lyrics for a video, from the stored probe/fetch
+    snapshot. The device pulls this once per song and keeps it in RAM, so
+    flipping the source is instant and never re-races the providers. Nothing
+    here is cached: the snapshots are pre-translation, the device renders
+    them raw until it asks /providers/select for the one it wants (that is
+    the only provider whose lyrics ever get cached)."""
+    video_id = (request.args.get('v') or '').strip()
+    if not _safe_cache_component(video_id):
+        return jsonify({'ok': False, 'error': 'Invalid video ID'}), 400
+    lang = (request.args.get('lang') or 'zh-TW').strip()
+    if not _safe_cache_component(lang):
+        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+    try:
+        from .candidates import load_candidates
+        cands = load_candidates(video_id)
+    except Exception:
+        cands = None
+    if not cands:
+        return jsonify({'ok': True, 'video_id': video_id, 'found': False, 'providers': []})
+
+    out = []
+    budget = _PROVIDER_DATA_MAX_BYTES
+    for c in cands:
+        if len(out) >= _PROVIDER_DATA_MAX:
+            break
+        if not isinstance(c, dict):
+            continue
+        data = c.get('data') or {}
+        lyrics = data.get('lyrics') or []
+        if not lyrics or not c.get('provider'):
+            continue
+        cost = sum(len(str(l.get('text', ''))) +
+                   48 * len(l.get('parts') or []) for l in lyrics if isinstance(l, dict))
+        if cost > budget:
+            break
+        budget -= cost
+        out.append({
+            'provider': c.get('provider', ''),
+            'source': c.get('source', ''),
+            'tier': c.get('tier', ''),
+            'lines': len(lyrics),
+            'score': c.get('score', 0),
+            'lyrics': lyrics,  # raw: no translations (device fills them in later)
+        })
+    return jsonify({'ok': True, 'video_id': video_id, 'found': bool(out),
+                    'providers': out})
+
+
 _TIER_RANK = {'raw': 0, 'line': 1, 'wbw': 2}
 
 
@@ -715,6 +765,12 @@ def api_precache_status(job_id):
 # dashboard, which can watch the same race.
 _provider_jobs = {}
 _provider_jobs_lock = threading.Lock()
+
+# Caps for /api/lyrics/providers/data (device RAM fill, one request per song):
+# enough providers to switch freely, bounded so a fat wbw set cannot ship
+# hundreds of KB.
+_PROVIDER_DATA_MAX = 8
+_PROVIDER_DATA_MAX_BYTES = 200000
 
 
 def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
