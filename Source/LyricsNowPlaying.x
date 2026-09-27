@@ -137,7 +137,12 @@
     for (UIView *child in official.subviews) {
         objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    official.hidden = YES;
+    // Don't hide the official button: ours sits exactly on top of it, so it
+    // stays invisible while ours works, and remains as a fallback entry point
+    // if ours ever fails to show.
+    official.hidden = NO;
+    official.alpha = 1.0;
+    if ([official isKindOfClass:[UIControl class]]) [(UIControl *)official setEnabled:YES];
 
     NSString *chipTitle = @"歌詞";
     if ([official isKindOfClass:[UILabel class]] && ((UILabel *)official).text.length) {

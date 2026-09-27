@@ -133,6 +133,7 @@
     if (!d[@"lyricsFpsMeter"]) d[@"lyricsFpsMeter"] = @YES;
     if (!d[@"lyricsPrecacheQueue"]) d[@"lyricsPrecacheQueue"] = @YES;
     if (!d[@"lyricsAutoUpdate"]) d[@"lyricsAutoUpdate"] = @YES;
+    if (!d[@"lyricsAutoSync"]) d[@"lyricsAutoSync"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
     if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
     if (!d[@"lyricsAutoZhConvert"]) d[@"lyricsAutoZhConvert"] = @YES;
@@ -186,7 +187,7 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 6; }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 9;
+    if (section == 0) return 10;
     if (section == 1) return 3;
     if (section == 2) return 3;
     if (section == 3) return (NSInteger)self.previewLyrics.count + 1;
@@ -255,6 +256,7 @@
             @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"key": @"lyricsFpsMeter"},
             @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"key": @"lyricsPrecacheQueue"},
             @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"key": @"lyricsAutoUpdate"},
+            @{@"title": @"Auto-sync in background", @"desc": @"Silently pull server translations into local cache (every 6h)", @"key": @"lyricsAutoSync"},
             @{@"title": @"Send debug to server", @"desc": @"Upload debug events to ytmtranslate.chiuhuang.dev", @"key": @"sendDebugLogsToServer"},
             @{@"title": @"Send screenshot debug data", @"desc": @"Upload a UI hierarchy only after you take a screenshot", @"key": @"sendLyricsScreenshotDebug"}
         ];
@@ -263,7 +265,7 @@
         NSDictionary *it = items[idx];
         cell.textLabel.text = it[@"title"];
         cell.detailTextLabel.text = it[@"desc"];
-        cell.imageView.image = [UIImage systemImageNamed:@[@"quote.bubble", @"internaldrive", @"textformat.abc", @"speedometer", @"arrow.triangle.2.circlepath", @"arrow.2.circlepath", @"antenna.radiowaves.left.and.right", @"ladybug"][idx]];
+        cell.imageView.image = [UIImage systemImageNamed:@[@"quote.bubble", @"internaldrive", @"textformat.abc", @"speedometer", @"arrow.triangle.2.circlepath", @"arrow.2.circlepath", @"antenna.radiowaves.left.and.right", @"ladybug", @"icloud.and.arrow.down"][idx]];
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = it[@"key"];
         sw.on = [dict[it[@"key"]] boolValue];

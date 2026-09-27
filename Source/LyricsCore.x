@@ -2,6 +2,7 @@
 #import <CommonCrypto/CommonDigest.h>
 
 BOOL _safe_cache_component(NSString *s);
+void YTMUAutoSyncIfDue(void);
 
 @interface NSObject (YTMUQueuePrecache)
 - (NSArray *)queueItems;
@@ -196,10 +197,30 @@ NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID) {
     if (![dict isKindOfClass:[NSDictionary class]]) return 0;
     return [dict[@"cv"] integerValue];
 }
+BOOL YTMULyricsIsUsable(NSArray *lyrics, NSDictionary *dict) {
+    // Mirrors the server's is_not_found_result: empty, flagged, error-source,
+    // or single "No lyrics found" line. Guards both disk and memory caches.
+    if (![lyrics isKindOfClass:[NSArray class]] || lyrics.count == 0) return NO;
+    if ([dict[@"not_found"] boolValue]) return NO;
+    id src = dict[@"source"];
+    if ([src isKindOfClass:[NSString class]] &&
+        ([src isEqualToString:@"none"] || [src isEqualToString:@"error"])) return NO;
+    if (lyrics.count == 1 && [lyrics[0] isKindOfClass:[NSDictionary class]]) {
+        id t = lyrics[0][@"text"];
+        if ([t isKindOfClass:[NSString class]] && [t containsString:@"No lyrics found"]) return NO;
+    }
+    return YES;
+}
 void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics) {
-    if (!YTMULyricsCacheEnabled() || !videoID.length || !lyrics) return;
+    if (!YTMULyricsCacheEnabled() || !videoID.length) return;
     NSString *path = YTMULyricsCachePathForVideoID(videoID);
     if (!path) return;
+    // Never persist not-found/empty results: drop any stale file instead so
+    // a later fetch retries instead of serving a cached miss forever.
+    if (![lyrics isKindOfClass:[NSArray class]] || lyrics.count == 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        return;
+    }
     NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID, @"cv": @(YTMULyricsCacheFormatVersion())};
     NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
     if (data) [data writeToFile:path atomically:YES];
@@ -426,6 +447,60 @@ BOOL _safe_cache_component(NSString *s) {
     if (!s || !s.length) return NO;
     NSCharacterSet *invalid = [NSCharacterSet characterSetWithCharactersInString:@":/\\?%*|\"<>"];
     return [s rangeOfCharacterFromSet:invalid].location == NSNotFound;
+}
+
+void YTMUAutoSyncIfDue(void) {
+    // Silent background batch sync: hash local cache -> POST /api/lyrics/sync
+    // -> save need[] entries. No UI, no regen job, 6h throttle, on by default.
+    if (!YTMULyricsPreference(@"lyricsAutoSync", YES)) return;
+    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - [ud doubleForKey:@"YTMUAutoSyncAt"] < 6 * 3600) return;
+    NSArray *cacheEntries = YTMULyricsCacheEntries();
+    if (!cacheEntries.count) return;
+    [ud setDouble:now forKey:@"YTMUAutoSyncAt"];
+    NSMutableArray *entries = [NSMutableArray array];
+    for (NSDictionary *e in cacheEntries) {
+        NSString *vid = e[@"video_id"];
+        NSString *hash = e[@"hash"];
+        if (!vid.length || !hash.length) continue;
+        [entries addObject:@{@"video_id": vid, @"hash": hash,
+                             @"cv": e[@"cv"] ?: @(YTMULyricsCacheFormatVersion()),
+                             @"tier": e[@"tier"] ?: @""}];
+        if (entries.count >= 500) break;
+    }
+    if (!entries.count) return;
+    NSDictionary *body = @{@"lang": YTMUTargetLang(),
+                           @"auto_zh": @(YTMULyricsPreference(@"lyricsAutoZhConvert", YES)),
+                           @"entries": entries,
+                           @"regenerate": @NO,
+                           @"max_items": @500};
+    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    if (!bodyData) return;
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/lyrics/sync", YTMUApiBase()]];
+    if (!url) return;
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.HTTPBody = bodyData;
+    req.timeoutInterval = 30.0;
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        if (err || !data) return;
+        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![root isKindOfClass:[NSDictionary class]]) return;
+        NSInteger saved = 0;
+        for (NSDictionary *entry in root[@"need"]) {
+            if (![entry isKindOfClass:[NSDictionary class]]) continue;
+            NSString *vid = entry[@"videoID"];
+            NSArray *lyrics = entry[@"lyrics"];
+            if (!vid.length || !YTMULyricsIsUsable(lyrics, entry)) continue;
+            YTMULyricsCacheSave(vid, lyrics);
+            if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+            g_lyricsCache[vid] = lyrics;
+            saved++;
+        }
+        sendDebugLog([NSString stringWithFormat:@"[SYNC] background auto-sync saved %ld", (long)saved]);
+    }] resume];
 }
 
 // Queue precache trigger - hook into queue model changes
@@ -719,6 +794,7 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
         YTMUFetchAppSettings();
+        YTMUAutoSyncIfDue();
     });
     return result;
 }
@@ -737,6 +813,7 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     void (^prewarmJWT)(NSNotification *) = ^(NSNotification *note) {
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
         YTMUFetchAppSettings();
+        YTMUAutoSyncIfDue();
     };
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationWillEnterForegroundNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:prewarmJWT];
