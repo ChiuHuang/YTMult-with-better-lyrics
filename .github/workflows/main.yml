@@ -130,7 +130,22 @@ jobs:
           echo "MIRROR_URL=$MIRROR_URL" >> $GITHUB_ENV
           echo "::notice::Asia mirror: $MIRROR_URL"
 
-<<<<<<< HEAD
+      - name: Fetch server stats
+        env:
+          SERVER_HOOK_URL: ${{ secrets.SERVER_HOOK_URL }}
+        run: |
+          STATS_SECTION=""
+          BASE="${SERVER_HOOK_URL%/api/app/release-hook}"
+          if [ -n "$BASE" ]; then
+            MD=$(curl -sL "$BASE/api/app/stats" --max-time 20 | python3 -c "import sys,json; print(json.load(sys.stdin).get('stats_md',''))") || true
+            if [ -n "$MD" ]; then
+              STATS_SECTION="### Stats"$'\n'"$MD"
+            fi
+          fi
+          echo "STATS_SECTION<<EOF" >> $GITHUB_ENV
+          echo "$STATS_SECTION" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
       - name: Create Release
         uses: softprops/action-gh-release@v2.5.0
         with:
@@ -151,6 +166,8 @@ jobs:
             ### 📦 Downloads
             - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
             - **[Asia Mirror](${{ env.MIRROR_URL }})** 
+
+            ${{ env.STATS_SECTION }}
 
             ### AltStore Source
             Add our source to your sideloading app to get updates easily! :)

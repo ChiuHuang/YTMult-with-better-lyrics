@@ -127,6 +127,16 @@ def api_lyrics():
         `set_cached`, and cache-hit loads are fresh reads from disk."""
         if isinstance(data, dict) and isinstance(data.get('lyrics'), list):
             apply_display_transforms(data['lyrics'], translate_to, auto_zh)
+        try:
+            from .usage_stats import record_serve
+            if isinstance(data, dict) and not is_not_found_result(data):
+                lyrics = data.get('lyrics') or []
+                tier = ('wbw' if any(isinstance(l, dict) and l.get('wordSynced') for l in lyrics)
+                        else ('line' if data.get('synced') else 'plain'))
+                record_serve(video_id, data.get('song', ''), data.get('artist', ''),
+                             translate_to, tier, data.get('source', ''), client_ip)
+        except Exception:
+            pass
         return jsonify(data)
 
     def _is_final_grade(data):
