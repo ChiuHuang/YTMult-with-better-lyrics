@@ -163,17 +163,20 @@ jobs:
 
             Hello! Here is the latest automated build of YTMusicUltimate :3
 
+            > **Before v1.0:** builds land fast, so expect the updater to ask you to reinstall often. It settles down after v1.0.
+
             ### 📦 Downloads
             - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
             - **[Asia Mirror](${{ env.MIRROR_URL }})** 
 
             ${{ env.STATS_SECTION }}
 
-            ### AltStore Source
-            Add our source to your sideloading app to get updates easily! :)
-            ```text
-            [https://ytmtranslate.chiuhuang.dev/api/app/altstore](https://ytmtranslate.chiuhuang.dev/api/app/altstore)
-            ```
+            ### 📡 Sideload
+            <h3 align="center">
+            <a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200"></a>
+            &nbsp;
+            <a href="${{ env.MIRROR_URL }}"><img src="https://altdirect.app/assets/png/Download_Blue.png" width="200"></a>
+            </h3>
 
             ---
             *Build: `#${{ github.run_number }}` • App Name: `${{ env.DISPLAY_NAME }}` • Bundle: `${{ env.BUNDLE_ID }}`*

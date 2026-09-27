@@ -101,6 +101,23 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- README/dashboard usage badges: `/api/app/badge?type=` now covers
+  `release|lyrics|devices|tracks|nodes` (one glyph per type, short
+  `<label> <value>` text, no link in the README). The MD3 pill renderer lives
+  in `routes_misc.py` and measures the WHOLE string -- `textLength` forces an
+  exact fit, so measuring only the value squeezed a long prefix to ~2px/char
+  (the `Download Last Build: ` prefix the user added). `lyrics` is estimated
+  from `logs/server.log` + `.1` (one `Returning` line per response, one
+  `[Stream] push FINAL` per stream, 30s TTL cache), NOT from
+  `usage_stats.served` -- that counter only counts since the process started,
+  so it reads low after a redeploy; `devices` still comes from usage_stats.
+  Count lines, never distinct `req_id`s: `req_id` is `token_hex(3)` and
+  repeats. `tracks` counts distinct `(video_id, lang)` from cache filenames
+  only (`:fast` siblings deduped) -- `scan_cache()` opens every JSON file.
+  Gotcha for the dashboard: `mdui-dialog`'s shadow `.body` is
+  `overflow:auto`, so an overfull dialog shows a scroll bar; hide it with
+  `::part(body)` (mdui shadow roots are open). Release body now uses the
+  official altdirect image embed instead of a fenced raw source URL.
 - intro skip becomes the song offset: a `music_offtopic` segment at the head
   of a video delays the song, so the lyric timeline (which starts at line 1)
   ran late by exactly the segment length. `Source/SponsorBlock.x` now stores
