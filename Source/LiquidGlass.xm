@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import "LyricsShared.h"
 
 static BOOL YTMULiquidGlassEnabled(void) {
     NSDictionary *prefs = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
@@ -66,6 +67,28 @@ static void YTMUStyleGlassButton(UIView *button) {
     border.frame = button.bounds;
     border.path = [UIBezierPath bezierPathWithRoundedRect:CGRectInset(button.bounds, 0.5, 0.5)
                                                cornerRadius:MAX(0.0, radius - 0.5)].CGPath;
+}
+
+// Nudge the mini player's right-side buttons (cast + play/pause) left a little
+// so the pair stops hugging the screen edge. Frame-based, not a transform: the
+// parent layout hook re-applies it every pass and YT's own collapse/expand
+// animations stay intact.
+static const CGFloat kYTMUMiniButtonShiftX = 6.0;
+
+static BOOL YTMUIsMiniPlayerButton(UIView *view) {
+    Class floatingClass = NSClassFromString(@"MDCFloatingButton");
+    if (floatingClass && [view isKindOfClass:floatingClass]) return YES;
+    if (![view isKindOfClass:UIControl.class]) return NO;
+    CGFloat width = CGRectGetWidth(view.bounds);
+    CGFloat height = CGRectGetHeight(view.bounds);
+    if (width < 28.0 || width > 88.0) return NO;
+    return fabs(width - height) <= 4.0;
+}
+
+static void YTMUShiftMiniPlayerButton(UIView *button) {
+    CGRect frame = button.frame;
+    CGFloat x = MAX(0.0, CGRectGetMinX(frame) - kYTMUMiniButtonShiftX);
+    button.frame = CGRectMake(x, CGRectGetMinY(frame), CGRectGetWidth(frame), CGRectGetHeight(frame));
 }
 
 static void YTMUCleanMiniPlayerTree(UIView *root, CGFloat compactWidth) {
@@ -148,10 +171,29 @@ static void YTMUCleanMiniPlayerTree(UIView *root, CGFloat compactWidth) {
 
     Class buttonClass = NSClassFromString(@"MDCFloatingButton");
     Class scrubberClass = NSClassFromString(@"YTMStoryboardScrubber");
+    NSMutableString *dump = nil;
     for (UIView *view in self.subviews) {
         if (buttonClass && [view isKindOfClass:buttonClass]) YTMUStyleGlassButton(view);
         if (scrubberClass && [view isKindOfClass:scrubberClass] && CGRectGetHeight(view.bounds) <= 2.0) {
             view.alpha = 0.0;
+        }
+        if (YTMUIsMiniPlayerButton(view)) {
+            if (!dump) dump = [NSMutableString stringWithString:@"[MINI] shifted buttons:"];
+            [dump appendFormat:@"\n  %@ frame=(%.0f,%.0f;%.0f,%.0f) label=\"%@\"",
+                NSStringFromClass([view class]),
+                CGRectGetMinX(view.frame), CGRectGetMinY(view.frame),
+                CGRectGetWidth(view.frame), CGRectGetHeight(view.frame),
+                [view accessibilityLabel] ?: @""];
+            YTMUShiftMiniPlayerButton(view);
+        }
+    }
+    if (dump) {
+        // One log line per distinct button set -- layoutSubviews runs on every
+        // collapse/expand and song change, no per-pass spam.
+        static NSString *lastDump = nil;
+        if (![dump isEqualToString:lastDump]) {
+            lastDump = [dump copy];
+            sendDebugLog(dump);
         }
     }
 }
