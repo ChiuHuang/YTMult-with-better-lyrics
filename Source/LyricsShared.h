@@ -50,6 +50,9 @@
 @property (nonatomic, strong) UILabel *wipeLabel;
 @property (nonatomic, strong) CAShapeLayer *wipeMask;
 @property (nonatomic, assign) CGFloat wipeProgress;
+@property (nonatomic, copy) NSString *cachedWordLayoutKey;
+@property (nonatomic, strong) NSArray *cachedWordRects;
+@property (nonatomic, copy) NSString *lastColorKey;
 - (void)setWipeProgress:(CGFloat)progress;
 - (void)clearWipe;
 @end
@@ -59,6 +62,7 @@
 @property (nonatomic, strong) NSArray *lyrics;
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, assign) NSInteger currentIndex;
+@property (nonatomic, strong) NSIndexSet *activeIndexes;
 @property (nonatomic, assign) BOOL isLoading;
 @property (nonatomic, copy) NSString *loadingVideoID;
 @property (nonatomic, strong) UIImageView *artworkImageView;
