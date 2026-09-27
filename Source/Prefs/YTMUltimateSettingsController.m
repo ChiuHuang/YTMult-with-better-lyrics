@@ -340,7 +340,10 @@
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:updateAvailable ? @"Update available" : @"Up to date" message:message preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             if (updateAvailable) {
-                NSString *dlURL = result[@"download_url_proxy"];
+                NSString *dlURL = result[@"asia_url"];
+                if (![dlURL isKindOfClass:[NSString class]] || !dlURL.length) {
+                    dlURL = result[@"download_url_proxy"];
+                }
                 if (![dlURL isKindOfClass:[NSString class]] || !dlURL.length) {
                     dlURL = @"https://github.com/ChiuHuang/ytmusicultimate";
                 }
