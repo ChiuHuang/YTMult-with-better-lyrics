@@ -58,6 +58,28 @@ def api_app_settings():
     return jsonify({'ok': True, 'settings': get_all()})
 
 
+@app.route('/api/app/release-hook', methods=['POST'])
+def api_app_release_hook():
+    """Actions webhook: instant release info (incl. Asia mirror URL) without
+    waiting for GitHub API polling. Secret-gated via X-YTMU-Hook header
+    (YTMU_HOOK_SECRET env or admin_config hook_secret). Body: {tag,
+    download_url, asia_url?, published_at?, size?, icon_url?, notes?}."""
+    import secrets as _secrets_mod
+    from .release_info import hook_secret, update_cache
+    secret = hook_secret()
+    if not secret:
+        return jsonify({'ok': False, 'error': 'hook not configured'}), 403
+    provided = (request.headers.get('X-YTMU-Hook') or '').strip()
+    if not provided or not _secrets_mod.compare_digest(provided, secret):
+        return jsonify({'ok': False, 'error': 'bad hook secret'}), 403
+    body = request.get_json(silent=True) or {}
+    if update_cache(body):
+        print(f"[Release] [OK] webhook push tag={body.get('tag')} "
+              f"asia={'yes' if body.get('asia_url') else 'no'}")
+        return jsonify({'ok': True, 'tag': body.get('tag')})
+    return jsonify({'ok': False, 'error': 'need tag + download_url'}), 400
+
+
 @app.route('/api/app/altstore', methods=['GET'])
 def api_app_altstore():
     """AltStore source JSON, always pointing at the newest build-N release
@@ -71,6 +93,8 @@ def api_app_altstore():
     version = tag[6:] if tag.startswith('build-') else tag
     icon_url = (rel.get('icon_url') or ALTSTORE_ICON or
                 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
+    # Asia file CDN is the fastest direct link; worker-proxied GitHub second.
+    dl = rel.get('asia_url') or worker_url(rel['download_url'])
     return jsonify({
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',
@@ -81,7 +105,7 @@ def api_app_altstore():
             'version': version,
             'versionDate': rel.get('published_at') or '',
             'versionDescription': f'YTMusicUltimate ({tag})',
-            'downloadURL': worker_url(rel['download_url']),
+            'downloadURL': dl,
             'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
             'iconURL': icon_url,
             'size': rel.get('size') or 0,

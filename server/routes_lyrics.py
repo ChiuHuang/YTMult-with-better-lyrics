@@ -75,6 +75,7 @@ def api_update():
     from .release_info import latest_release, worker_url
     rel = latest_release()
     dl = (rel or {}).get('download_url')
+    asia = (rel or {}).get('asia_url')
     return jsonify({
         'current_commit': client_commit or None,
         'latest_commit': latest_commit,
@@ -83,6 +84,7 @@ def api_update():
         'build': (rel or {}).get('tag'),
         'download_url': dl,
         'download_url_proxy': worker_url(dl) if dl else None,
+        'asia_url': asia,
         'release_notes': (rel or {}).get('notes') or '',
     })
 

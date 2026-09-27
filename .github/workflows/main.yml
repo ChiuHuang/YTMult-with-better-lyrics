@@ -130,6 +130,7 @@ jobs:
           echo "MIRROR_URL=$MIRROR_URL" >> $GITHUB_ENV
           echo "::notice::Asia mirror: $MIRROR_URL"
 
+<<<<<<< HEAD
       - name: Create Release
         uses: softprops/action-gh-release@v2.5.0
         with:
@@ -159,6 +160,30 @@ jobs:
 
             ---
             *Build: `#${{ github.run_number }}` • App Name: `${{ env.DISPLAY_NAME }}` • Bundle: `${{ env.BUNDLE_ID }}`*
+
+      - name: Notify server webhook
+        env:
+          SERVER_HOOK_URL: ${{ secrets.SERVER_HOOK_URL }}
+          HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+        run: |
+          if [ -z "$SERVER_HOOK_URL" ] || [ -z "$HOOK_SECRET" ]; then
+            echo "::warning::SERVER_HOOK_URL/HOOK_SECRET not set, skipping webhook (server falls back to GitHub API polling)"
+            exit 0
+          fi
+          IPA_SIZE=$(stat -f%z YTMusicUltimate.ipa 2>/dev/null || stat -c%s YTMusicUltimate.ipa)
+          python3 -c "import json; print(json.dumps({
+            'tag': 'build-${{ github.run_number }}',
+            'download_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa',
+            'asia_url': '${{ env.MIRROR_URL }}' or None,
+            'size': int('$IPA_SIZE'),
+            'icon_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png',
+          }))" > hook.json
+          curl -sL -X POST "$SERVER_HOOK_URL" \
+            -H "X-YTMU-Hook: $HOOK_SECRET" \
+            -H "Content-Type: application/json" \
+            --data @hook.json --max-time 30
+          echo ""
+          echo "::notice::Server webhook notified"
 
       - name: Output Release URL
         run: |
