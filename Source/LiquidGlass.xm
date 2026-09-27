@@ -2,11 +2,16 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "LyricsShared.h"
+#import "YTMULiquidGlassPreferences.h"
 
+// V1 mini-player glass. Stands down whenever the V2 replacement
+// (Source/MiniPlayerLiquidGlassV3.xm, key `liquidGlassV2Enabled`) is on, so the
+// two generations can never both blur the same view. See the policy block in
+// Source/YTMULiquidGlassPreferences.h.
 static BOOL YTMULiquidGlassEnabled(void) {
     NSDictionary *prefs = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     id explicitValue = prefs[@"liquidGlassEnabled"];
-    return [prefs[@"YTMUltimateIsEnabled"] boolValue] && (explicitValue == nil || [explicitValue boolValue]);
+    return YTMULGV1Allowed(@"liquidGlassV2Enabled") && (explicitValue == nil || [explicitValue boolValue]);
 }
 
 static const void *kYTMUGlassBlurKey = &kYTMUGlassBlurKey;

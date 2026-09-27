@@ -1,13 +1,19 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import "YTMULiquidGlassPreferences.h"
 
 #pragma mark - Full-player Liquid Glass preferences
 
+// V1 full-player glass. Stands down whenever the V2 replacement
+// (Source/FullPlayerLiquidGlassV2.xm, key `fullPlayerV2Enabled`) is on, so the
+// two generations can never both blur the same artwork card, transport button
+// or header capsule. See the policy block in
+// Source/YTMULiquidGlassPreferences.h.
 static BOOL YTMUFullGlassEnabled(void) {
     NSDictionary *prefs = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     id explicitValue = prefs[@"fullPlayerLiquidGlassEnabled"];
-    return [prefs[@"YTMUltimateIsEnabled"] boolValue] && (explicitValue == nil || [explicitValue boolValue]);
+    return YTMULGV1Allowed(@"fullPlayerV2Enabled") && (explicitValue == nil || [explicitValue boolValue]);
 }
 
 static const void *kYTMUFullBlurKey = &kYTMUFullBlurKey;
