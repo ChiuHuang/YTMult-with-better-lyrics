@@ -2092,17 +2092,40 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+- (BOOL)ytmu_lyricHasTiming:(NSDictionary *)lyric {
+    if ([lyric[@"startTimeMs"] doubleValue] > 0) return YES;
+    if ([lyric[@"time"] doubleValue] > 0) return YES;
+    if ([lyric[@"durationMs"] doubleValue] > 0) return YES;
+    if ([lyric[@"duration"] doubleValue] > 0) return YES;
+    if ([lyric[@"wordSynced"] boolValue]) {
+        for (NSDictionary *p in (NSArray *)lyric[@"parts"]) {
+            if ([p[@"startTimeMs"] doubleValue] > 0) return YES;
+        }
+    }
+    return NO;
+}
+
 - (double)ytmu_startMsForLyric:(NSDictionary *)lyric {
     double s = [lyric[@"startTimeMs"] doubleValue];
     if (s <= 0) s = [lyric[@"time"] doubleValue] * 1000.0;
-    return s;
+    return MAX(s, 0.0);
+}
+
+- (BOOL)ytmu_lyricAtIndexHasTiming:(NSInteger)index {
+    NSDictionary *lyric = self.lyrics[index];
+    if ([self ytmu_lyricHasTiming:lyric]) return YES;
+    // Leading [00:00.00] opener carries start 0 with no other keys; in a
+    // synced list that is a real timestamp, not missing data.
+    return index == 0 && [self ytmu_startMsForLyric:lyric] == 0;
 }
 
 - (double)ytmu_endMsForLyricAtIndex:(NSInteger)index {
     if (index < 0 || index >= self.lyrics.count) return 0;
     NSDictionary *lyric = self.lyrics[index];
+    // A start of exactly 0 is valid (first line at [00:00.00]); lines with
+    // no timing keys at all are untimed and never active.
+    if (![self ytmu_lyricAtIndexHasTiming:index]) return 0;
     double start = [self ytmu_startMsForLyric:lyric];
-    if (start <= 0) return 0;
     // Explicit duration from the payload.
     double explicitEnd = 0;
     double durMs = [lyric[@"durationMs"] doubleValue];
@@ -2134,8 +2157,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (NSIndexSet *)ytmu_activeIndexesAtMs:(double)nowMs {
     NSMutableIndexSet *set = [NSMutableIndexSet indexSet];
     for (NSInteger i = 0; i < self.lyrics.count; i++) {
-        double start = [self ytmu_startMsForLyric:self.lyrics[i]];
-        if (start <= 0 || nowMs < start) continue;
+        NSDictionary *lyric = self.lyrics[i];
+        if (![self ytmu_lyricAtIndexHasTiming:i]) continue;
+        double start = [self ytmu_startMsForLyric:lyric];
+        if (nowMs < start) continue;
         double end = [self ytmu_endMsForLyricAtIndex:i];
         if (end > start && nowMs < end) [set addIndex:i];
     }
@@ -2190,13 +2215,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         // Extrapolated media clock (braccato tickView parity): the player
         // clock updates discretely, so rebasing on every sample and
         // extrapolating locally keeps the wipe smooth between samples.
-        // A clock that stops advancing (paused/stall) freezes after 0.5s
+        // A clock that stops advancing (paused/stall) freezes after 0.2s
         // instead of running ahead; seeks rebase via the sample jump.
         if (fabs(rawTime - self.clockRawTime) > 0.0005) {
             self.clockRawTime = rawTime;
             self.clockRawWall = tickNow;
         }
-        if (tickNow - self.clockRawWall < 0.5) {
+        if (tickNow - self.clockRawWall < 0.2) {
             currentTime = self.clockRawTime + (tickNow - self.clockRawWall);
         } else {
             currentTime = self.clockRawTime;
