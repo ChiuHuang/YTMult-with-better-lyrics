@@ -673,6 +673,79 @@
       `chat` icon (bubble + tail = "a message icon with a dot"). Now
       `subtitles` (the caption box) - Material's own `lyrics` icon is a rounded
       bubble WITH a note in it, so it reads the same way. Commit `337c7d5`.
+  - New request (2026-09-27, three screenshots), commit `6ffc5a6` -> `b4dac11`.
+    All CODE-DONE, NOT device-verified. Read the two open points at the end of
+    this block before rebuilding.
+  19. `[done]` no glass elements in the lyrics. The user's words: "why tf one
+      line have its own bow its ugly as fuck" (box). `LyricsLiquidGlassV2.xm`
+      drew a rounded `UIVisualEffectView` behind EVERY row
+      (`YTMULyricCard` + the `%hook YTMULyricsCell layoutSubviews`), so a full
+      page of lyrics read as a stack of notification cards. Card, associated
+      object and cell hook deleted; the `YTMULyricsCell` @interface in that
+      file went with them. `lyricsV2Enabled` is NOT dead - it still owns
+      `blurView.alpha = .82` and the table chrome, and the file now says that
+      in a comment so nobody re-adds the cards.
+  20. `[done]` "only show translate animation if it hasnt cached". New
+      `typewriterLive` BOOL (`LyricsShared.h:150`), NO by default, so every
+      cache path paints whole. Armed by the stream on `lyrics stage=raw` and on
+      any `tline`; armed by a blocking response the server tagged `cached:0`.
+      Gated in BOTH `ytmu_typeStep` AND `ytmu_typeRow:activate:` - the second
+      one is the trap: it calls `ytmu_advanceRow:` with `dt=0`, so ungated it
+      leaves `shown` at 0 and installs a mask that BLANKS the whole
+      translation of a cache hit. Disarmed on song change, on both
+      `fetchLyricsForVideo:` cache branches (RAM + on-disk), and on the
+      provider switch + `/providers/select` paths, which always return a
+      finished payload (otherwise a live fetch earlier in the song would carry
+      the animation into a provider the user switched to).
+      Server side: `routes_lyrics.serve(data, cached)` tags every response -
+      True on the disk, in-flight-dedup and node hits, False on the two paths
+      that just ran a pipeline. Transport-only, like `pro`: tagged after
+      `set_cached`, never on disk (verified). `routes_stream` sends the same
+      flag on its `raw` / `final` / `cached` events. Older servers omit it and
+      the client falls back to `stage != 'cached'`, which is exact anyway.
+  21. `[done]` mini player has no background, and the song colour now reaches
+      the whole app.
+      - Deleted the mini player's frosted card (`kMiniBlur`) and its
+        white-to-black `YTMUMiniSongTheme` gradient. The artwork rounding and
+        the drop shadow stay; the shadow follows the subviews' own alpha, so it
+        still renders with a clear `backgroundColor`. V1 `LiquidGlass.xm` hooks
+        the same class and would put a card back, but its
+        `YTMULGV1Allowed(@"liquidGlassV2Enabled")` gate stands it down.
+      - ROOT CAUSE of "the whole app is never tinted", found by reading the
+        publish path instead of guessing at opaque views:
+        `YTMUPublishTheme` rejected any image under 80pt, and the mini
+        player's thumbnail is a 40pt `UIImage` (YT loads it at screen scale, so
+        `.size` is 40 points, not 120). On the home tab that is the only
+        artwork on screen, so `YTMUPrimaryColor` stayed nil and the app fell
+        back to a near-black placeholder. Floor is 24pt now; the
+        `YTMUArtworkAncestor` check, not the size, is what keeps this to real
+        cover art. Symptom to remember: tinted full player, black everywhere
+        else.
+      - Full player ("great colors tho", just the geometry was wrong): the
+        tint moved from `YTMNowPlayingView` (title/artist/chips strip only,
+        hence the hard-edged purple rectangle) to
+        `YTMNowPlayingViewController.view`, so the SAME three stops now run
+        from behind the album art down past the transport row.
+        `YTMNowPlayingView` must never become a theme host again: its opaque
+        `backgroundColor` would cover the controller's gradient and restore
+        the rectangle. `YTMUStyleLyricsEntries` deliberately STAYED on the old
+        host - `ytmuPlaceLyricsBesideThreeDot` sets that chip's
+        `cornerRadius` to a full pill on every pass, so moving the styler to
+        the controller would start the two fighting over views that used to be
+        out of each other's reach.
+      - `LG_LYRICS_V2_DESC` and `LG_SONG_THEME_PLAYER_DESC` rewritten in all
+        14 languages (they promised "lyric cards" and "V1 mini-player").
+  - OPEN, needs a device check on the next build: (a) does the home tab now
+    actually tint? `wholeAppSongThemeEnabled` must be ON and the mini player
+    must be the thing that published the colour - if the home screen is still
+    black with a tint on the full player, the 24pt floor did not fix it and
+    the next suspect is an opaque sibling covering
+    `YTMContentViewController.view` (the tab bar and the mini-player container
+    are the likely ones; `HomeLiquidGlassV2.xm` already clears
+    `YTMBrowseContainerView` + its scroll views and the shelf cells).
+    (b) open a song the server already has, confirm the translation appears
+    whole with no letter-by-letter reveal, then a song it does NOT have and
+    confirm the reveal still runs.
   - Residual risk worth knowing: the queue walk probes YT selectors by name;
     if a YT update renames all of them the feature degrades to a no-op again.
     The one-shot `[PRECACHE] queue walk found no up-next list` line in the
