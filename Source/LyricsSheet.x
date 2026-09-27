@@ -98,6 +98,46 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
     return (CGFloat)(0.299 * r + 0.587 * g + 0.114 * b);
 }
 
+// Provider tier icons (concept: better-lyrics lyricsDock syncTypeIcons —
+// 3 top bars + full-width bottom bar, full-vs-dim count encodes richness,
+// same sync colors). Redrawn from scratch with UIBezierPath; no upstream
+// SVG data is copied in.
+static UIColor *YTMUTierColor(NSString *tier) {
+    if ([tier isEqualToString:@"wbw"])
+        return [UIColor colorWithRed:0xAA / 255.0 green:0xD1 / 255.0 blue:0xFF / 255.0 alpha:1.0];
+    if ([tier isEqualToString:@"line"])
+        return [UIColor colorWithRed:0xC9 / 255.0 green:0xF8 / 255.0 blue:0xDA / 255.0 alpha:1.0];
+    return [[UIColor whiteColor] colorWithAlphaComponent:0.7]; // plain / unknown
+}
+
+static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
+    if (size <= 0) size = 18;
+    // Full bars in left->right order; the bottom bar always stays dim.
+    // wbw = 2 (word), line = 3, plain/unknown = 0.
+    NSInteger full = 0;
+    if ([tier isEqualToString:@"wbw"]) full = 2;
+    else if ([tier isEqualToString:@"line"]) full = 3;
+    UIColor *base = YTMUTierColor(tier);
+    CGFloat baseAlpha = CGColorGetAlpha(base.CGColor);
+    CGFloat s = size / 1024.0;
+    CGRect bars[4] = {
+        CGRectMake(0, 239 * s, 277 * s, 233 * s),
+        CGRectMake(337 * s, 240 * s, 219 * s, 233 * s),
+        CGRectMake(636 * s, 239 * s, 390 * s, 233 * s),
+        CGRectMake(0, 552 * s, 1024 * s, 233 * s),
+    };
+    UIGraphicsBeginImageContextWithOptions(CGSizeMake(size, size), NO, 0);
+    for (int i = 0; i < 4; i++) {
+        BOOL isFull = (i < 3 && i < full);
+        UIColor *c = isFull ? base : [base colorWithAlphaComponent:baseAlpha * 0.5];
+        [c setFill];
+        [[UIBezierPath bezierPathWithRoundedRect:bars[i] cornerRadius:48 * s] fill];
+    }
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return [img imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+}
+
 %hook YTMLightweightMusicDescriptionShelfCell
 
 - (void)layoutSubviews {
@@ -356,6 +396,8 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (void)ytmu_resolveProviderIndexSaved:(NSString *)saved;
 - (void)ytmu_applyProviderAtIndex:(NSInteger)idx;
 - (void)ytmu_stepProvider:(UIButton *)sender;
+- (NSString *)ytmu_currentTier;
+- (UIMenu *)ytmu_providerMenu;
 - (void)ytmu_refreshProviderSwitcher;
 - (void)ytmu_setProbing:(BOOL)probing;
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
@@ -1193,8 +1235,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         sendDebugLog(@"[MUSIC] provider menu: no video ID");
         return;
     }
-    // Switch anytime: a cached probe for this video opens instantly with no
-    // re-probe and no popup.
+    // Switch anytime: on iOS 14+ the armed UIMenu opens on tap with zero
+    // re-probe, so this path only fires while unarmed (or iOS 13 fallback).
     NSDictionary *hit = self.providerCache[vid];
     NSArray *cached = hit[@"cands"];
     if ([cached isKindOfClass:[NSArray class]] && cached.count > 0) {
@@ -1245,7 +1287,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             self.providerJobID = jobID;
             self.providerProbeVideoID = vid;
             // No popup while probing: the provider buttons dim (see
-            // ytmu_setProbing:) and the menu opens when candidates land.
+            // ytmu_setProbing:) and the compact menu arms on them when
+            // candidates land (tap to expand).
             self.providerPollTimer = [NSTimer scheduledTimerWithTimeInterval:1.2 target:self selector:@selector(ytmu_pollProviderJob:) userInfo:nil repeats:YES];
         });
     }];
@@ -1286,7 +1329,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     self.providerCandidates = cands;
                     [self ytmu_resolveProviderIndexSaved:savedName];
                     [self ytmu_refreshProviderSwitcher];
-                    [self ytmu_showProviderMenu:cands saved:savedName fromView:anchor];
+                    if (@available(iOS 14.0, *)) {
+                        // Compact menu is live on the buttons now; UIMenu has
+                        // no programmatic open, so it waits for the next tap.
+                        sendDebugLog(@"[MUSIC] provider probe complete (menu ready)");
+                    } else {
+                        [self ytmu_showProviderMenu:cands saved:savedName fromView:anchor];
+                    }
                 } else {
                     sendDebugLog(@"[MUSIC] provider probe error (no popup)");
                 }
@@ -1344,6 +1393,65 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self ytmu_applyProviderAtIndex:idx];
 }
 
+// Tier of the provider serving the current lyrics (better-lyrics dock
+// trigger shows the current sync-type icon): last-serving match first,
+// then the switcher index, then best-first. Nil when nothing is known.
+- (NSString *)ytmu_currentTier {
+    NSArray *cands = self.providerCandidates;
+    if (![cands isKindOfClass:[NSArray class]] || cands.count == 0) return nil;
+    for (NSDictionary *c in cands) {
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        id p = c[@"provider"];
+        if (self.lastProvider.length && [p isKindOfClass:[NSString class]] && [p isEqualToString:self.lastProvider]) {
+            id t = c[@"tier"];
+            return ([t isKindOfClass:[NSString class]] && ((NSString *)t).length) ? t : @"plain";
+        }
+    }
+    NSDictionary *cur = nil;
+    if (self.providerIndex >= 0 && self.providerIndex < (NSInteger)cands.count) cur = cands[self.providerIndex];
+    else cur = cands[0];
+    if (![cur isKindOfClass:[NSDictionary class]]) return @"plain";
+    id t = cur[@"tier"];
+    return ([t isKindOfClass:[NSString class]] && ((NSString *)t).length) ? t : @"plain";
+}
+
+// Compact anchored provider menu (Image-1 style, iOS 14+): rows carry the
+// provider name + tier icon in better-lyrics sync colors, with the detail
+// (index, tier, line count) as subtitle, current row checked, auto row on
+// top. iOS 13 falls back to ytmu_showProviderMenu's sheet.
+- (UIMenu *)ytmu_providerMenu {
+    NSArray *cands = self.providerCandidates;
+    if (![cands isKindOfClass:[NSArray class]] || cands.count == 0) return nil;
+    __weak typeof(self) weakSelf = self;
+    NSMutableArray *rows = [NSMutableArray array];
+    UIImage *autoImg = nil;
+    if (@available(iOS 13.0, *)) autoImg = [UIImage systemImageNamed:@"sparkles"];
+    UIAction *autoAction = [UIAction actionWithTitle:@"Best available (auto)" image:autoImg identifier:nil handler:^(__unused UIAction *a) {
+        [weakSelf forceReloadLyrics];
+    }];
+    autoAction.state = (self.providerIndex < 0) ? UIMenuElementStateOn : UIMenuElementStateOff;
+    [rows addObject:autoAction];
+    for (NSInteger i = 0; i < (NSInteger)cands.count; i++) {
+        NSDictionary *c = cands[i];
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        NSString *prov = c[@"provider"];
+        if (![prov isKindOfClass:[NSString class]] || !prov.length) continue;
+        NSString *tier = ([c[@"tier"] isKindOfClass:[NSString class]]) ? c[@"tier"] : @"";
+        NSInteger lines = [c[@"lines"] integerValue];
+        NSInteger rowIdx = i;
+        UIAction *a = [UIAction actionWithTitle:prov image:YTMUTierIcon(tier, 18) identifier:nil handler:^(__unused UIAction *act) {
+            [weakSelf ytmu_applyProviderAtIndex:rowIdx];
+        }];
+        a.state = (i == self.providerIndex) ? UIMenuElementStateOn : UIMenuElementStateOff;
+        if (@available(iOS 15.0, *)) {
+            a.subtitle = [NSString stringWithFormat:@"%ld/%lu · %@ · %ld lines",
+                (long)i + 1, (unsigned long)cands.count, tier.length ? tier : @"?", (long)lines];
+        }
+        [rows addObject:a];
+    }
+    return [UIMenu menuWithTitle:@"" children:rows];
+}
+
 - (void)ytmu_refreshProviderSwitcher {
     NSArray *cands = self.providerCandidates;
     NSString *name = nil;
@@ -1365,6 +1473,28 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.providerNextButton.enabled = multi;
     self.providerPrevButton.alpha = multi ? 1.0 : 0.4;
     self.providerNextButton.alpha = multi ? 1.0 : 0.4;
+    // Collapsed trigger: current tier icon (better-lyrics dock style).
+    NSString *tier = [self ytmu_currentTier];
+    UIImage *tierIcon = tier ? YTMUTierIcon(tier, 20) : nil;
+    if (tierIcon) {
+        [self.headerMenuButton setImage:tierIcon forState:UIControlStateNormal];
+        [self.landscapeProviderButton setImage:tierIcon forState:UIControlStateNormal];
+    } else if (@available(iOS 13.0, *)) {
+        UIImage *listImg = [UIImage systemImageNamed:@"list.bullet"];
+        if (listImg) {
+            [self.headerMenuButton setImage:listImg forState:UIControlStateNormal];
+            [self.landscapeProviderButton setImage:listImg forState:UIControlStateNormal];
+        }
+    }
+    // Compact anchored menu (iOS 14+); tap expands it, so the touchUpInside
+    // probe path only fires while no candidates are known.
+    if (@available(iOS 14.0, *)) {
+        UIMenu *menu = [self ytmu_providerMenu];
+        self.headerMenuButton.menu = menu;
+        self.headerMenuButton.showsMenuAsPrimaryAction = (menu != nil);
+        self.landscapeProviderButton.menu = menu;
+        self.landscapeProviderButton.showsMenuAsPrimaryAction = (menu != nil);
+    }
 }
 
 - (void)ytmu_setProbing:(BOOL)probing {
