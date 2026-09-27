@@ -1,7 +1,9 @@
 # YTMusicUltimate (with better lyrics)
 
-[![Build](https://github.com/ChiuHuang/YTMult-with-better-lyrics/actions/workflows/main.yml/badge.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/actions)
-[![Downloads](https://img.shields.io/github/downloads/ChiuHuang/YTMult-with-better-lyrics/total)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
+[![AltStore](assets/badges/altstore.svg)](https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore)
+[![iOS](assets/badges/ios.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics)
+[![Nightly IPA](assets/badges/release.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
+[![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 
 YouTube Music iOS tweak + a self-hosted lyrics server: synced and
 word-synced lyrics, multi-provider race, translation, and an admin dashboard.
