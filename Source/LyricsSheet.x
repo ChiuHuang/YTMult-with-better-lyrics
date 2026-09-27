@@ -1636,9 +1636,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // Paint from device RAM first (instant, untranslated), then let the select
     // call deliver the translation and cache this one provider. The RAM copy
     // is never cached: it dies with the process.
-    NSString *ramLyrics = YTMUProviderLyricsForProvider(self.loadingVideoID, (NSString *)p);
+    NSArray *ramLyrics = YTMUProviderLyricsForProvider(self.loadingVideoID, (NSString *)p);
     if (ramLyrics.count > 0) {
-        if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
         // Deliberately NOT g_lyricsCache / YTMULyricsCacheSave: the file cache
         // only ever holds the provider the server confirmed.
         self.currentIndex = -1;
