@@ -287,11 +287,8 @@ static NSUInteger YTMUCommonCharacterCount(NSString *a, NSString *b) {
 
 #pragma mark - Cell reveal mask
 
-@interface YTMULyricsCell (Typewriter)
-- (void)ytmu_setTypeFraction:(CGFloat)fraction;
-- (void)ytmu_clearType;
-@end
-
+// Declared once in Source/LyricsShared.h (see the note on the view
+// controller's category below).
 @implementation YTMULyricsCell (Typewriter)
 
 // fraction 0 hides the row's text, 1 shows all of it. The mask lives on the
@@ -360,23 +357,18 @@ static NSUInteger YTMUCommonCharacterCount(NSString *a, NSString *b) {
 // turning the whole column into a wall of half-typed text.
 static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
 
-@interface YTMULyricsViewController (Typewriter)
-- (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
-- (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
-- (void)ytmu_updateLandscapeMetadata;
-- (void)fetchFullLyricsForVideo:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
-- (void)ytmu_streamFallbackForVideoID:(NSString *)videoID jwt:(NSString *)jwt;
-- (void)ytmu_handleStreamEvent:(NSString *)name json:(NSDictionary *)json forVideoID:(NSString *)videoID;
-- (void)ytmu_applyTranslateLine:(NSString *)text toRow:(NSInteger)row;
-- (NSMutableDictionary *)ytmu_typeStates;
-- (NSMutableSet *)ytmu_typeRowSet;
-- (BOOL)ytmu_isRowActive:(NSInteger)row;
-- (NSString *)ytmu_revealTextForLyric:(NSDictionary *)lyric;
-- (BOOL)ytmu_rowCanReveal:(NSInteger)row;
-- (NSArray<NSNumber *> *)ytmu_revealCandidateRows;
-- (void)ytmu_advanceRow:(NSInteger)row cell:(YTMULyricsCell *)cell now:(NSTimeInterval)now dt:(NSTimeInterval)dt;
-@end
-
+// NOTE: the (Typewriter) category DECLARATIONS live in Source/LyricsShared.h,
+// once, for this file and Source/LyricsSheet.x both. Repeating them here was
+// -Werror,-Wobjc-duplicate-category-definition. Declaring the four methods this
+// file only CALLS (ytmuIsInstrumentalLyric:, ytmu_applyProviderMeta:...,
+// ytmu_updateLandscapeMetadata, fetchFullLyricsForVideo:...) here is what
+// produced the four -Werror,-Wincomplete-implementation errors: a declaration
+// in a category obliges the @implementation of that same category in the same
+// file, and those four are defined in LyricsSheet.x's primary @implementation.
+//
+// Everything below is private to this file -- no other file calls it, so it
+// needs no declaration at all (clang sees every method in an @implementation
+// regardless of order).
 @implementation YTMULyricsViewController (Typewriter)
 
 #pragma mark Stream lifecycle
@@ -610,7 +602,15 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     if (row < 0 || row >= self.lyrics.count) return NO;
     // boolValue, not a plain test: the tombstone stores @NO when the text is
     // rewritten, and an @NO NSNumber is a non-nil object.
-    if ([[self ytmu_typeStates][@(row)] objectForKey:@"done"] boolValue) return NO;
+    // The subscript is its own statement because the chained form --
+    // if ([[self ytmu_typeStates][@(row)] objectForKey:@"done"] boolValue) --
+    // failed to compile: clang reported "expected ')'" pointing at the if (,
+    // with the caret after boolValue. Splitting it is unambiguous and costs
+    // nothing. (Note: subscripting a message-send result is legal in general,
+    // Source/SponsorBlock.x:8 and Source/LyricsCore.x:559 both do it, so this
+    // is about that particular nesting, not a general rule.)
+    NSDictionary *state = [self ytmu_typeStates][@(row)];
+    if ([state[@"done"] boolValue]) return NO;
     return [[self ytmu_revealTextForLyric:self.lyrics[row]] length] > 0;
 }
 
