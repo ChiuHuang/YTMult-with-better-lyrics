@@ -2,6 +2,7 @@
 #import <CommonCrypto/CommonDigest.h>
 
 BOOL _safe_cache_component(NSString *s);
+BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 void YTMUAutoSyncIfDue(void);
 
 @interface NSObject (YTMUQueuePrecache)
@@ -31,6 +32,21 @@ BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     id value = settings[key];
     return value ? [value boolValue] : fallback;
+}
+// Central gate for every device->server debug upload (log POSTs, DEBUG_
+// pings, screenshot dumps). Default OFF on all three inputs: the local
+// master toggle, the log-level segment, and the server remote switch.
+BOOL YTMUDebugUploadAllowed(NSString *level) {
+    if (!YTMULyricsPreference(@"sendDebugLogsToServer", NO)) return NO;
+    if (!YTMUAppSettingBool(@"upload_logs", YES)) return NO;
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    NSInteger cfg = MIN(MAX([settings[@"debugLogLevel"] integerValue], 0), 2);
+    if (cfg <= 0) return NO;
+    if (cfg == 1) {
+        NSString *low = [[NSString stringWithFormat:@"%@", level ?: @""] lowercaseString];
+        return [low containsString:@"error"] || [low containsString:@"fail"] || [low containsString:@"warn"];
+    }
+    return YES;
 }
 
 static NSString *YTMULyricsOffsetKey(NSString *videoID) {
@@ -131,13 +147,13 @@ void sendDebugLog(NSString *msg) {
         full = [NSString stringWithFormat:@"%@ [v=%@ t=%.1f]", msg, g_currentVideoID, g_currentPlaybackTime];
     }
     NSLog(@"[YTMU] %@", full);
-    if (!YTMUAppSettingBool(@"upload_logs", YES)) return;
+    if (!YTMUDebugUploadAllowed(@"info")) return;
     NSString *encodedMsg = YTMUUrlEncode(full);
     NSString *serverURL = [NSString stringWithFormat:@"%@/api/lyrics?v=DEBUG_%@", YTMUApiBase(), encodedMsg];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:serverURL]] resume];
 }
 void __attribute__((unused)) sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload) {
-    if (!YTMUAppSettingBool(@"upload_logs", YES)) {
+    if (!YTMUDebugUploadAllowed(@"info")) {
         sendDebugLog([NSString stringWithFormat:@"%@: %@ %@", event, msg, payload ?: @{}]);
         return;
     }
@@ -649,6 +665,7 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
 }
 
 static void sendUIDump(void) {
+    if (!YTMUDebugUploadAllowed(@"info")) return;
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
     [dump appendFormat:@"Tweak Build: %@\n", @TWEAK_GIT_COMMIT];
@@ -803,7 +820,7 @@ BOOL isLyricsViewVisibleOnScreen(void) {
 %ctor {
     %init;
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationUserDidTakeScreenshotNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-        if (YTMULyricsPreference(@"sendLyricsScreenshotDebug", NO)) {
+        if (YTMULyricsPreference(@"sendLyricsScreenshotDebug", NO) && YTMUDebugUploadAllowed(@"info")) {
             sendUIDump();
         }
     }];
