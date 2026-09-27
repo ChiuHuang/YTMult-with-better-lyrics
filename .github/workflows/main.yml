@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: "URL to the decrypted IPA file"
-        default: "https://file.chiuhuang.dev/dl/8d2a6b4f-8af4-4b1e-9f5e-e2524f5b06ab"
-        required: true
+        description: "URL to the decrypted IPA file (or set BASE_IPA_URL repo secret)"
+        default: ""
+        required: false
         type: string
 
       display_name:
@@ -24,7 +24,7 @@ on:
         type: string
 
 env:
-  IPA_URL: ${{ inputs.ipa_url || 'https://file.chiuhuang.dev/dl/8d2a6b4f-8af4-4b1e-9f5e-e2524f5b06ab' }}
+  IPA_URL: ${{ inputs.ipa_url || secrets.BASE_IPA_URL }}
   DISPLAY_NAME: ${{ inputs.display_name || 'YouTube Music' }}
   BUNDLE_ID: ${{ inputs.bundle_id || 'com.google.ios.youtubemusic' }}
 
@@ -48,6 +48,10 @@ jobs:
 
       - name: Validate IPA URL
         run: |
+          if [ -z "${{ env.IPA_URL }}" ]; then
+            echo "::error::No base IPA URL. Pass ipa_url at dispatch or set the BASE_IPA_URL repo secret."
+            exit 1
+          fi
           curl -L -r 0-1023 -o sample.part "${{ env.IPA_URL }}" > /dev/null 2>&1
           
           file_type=$(file --mime-type -b sample.part)
