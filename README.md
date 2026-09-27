@@ -12,6 +12,7 @@ Open source — forks and pull requests welcome.
 <a href="https://stikstore.app/altdirect/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore" target="_blank">
    <img src="https://raw.githubusercontent.com/StikStore/altdirect/refs/heads/main/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"/>
 </a>
+
 - **AltStore:** add this source URL (or paste it on altdirect.app):
   `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
 - **Jailbreak (.deb):** build locally with Theos (below).
