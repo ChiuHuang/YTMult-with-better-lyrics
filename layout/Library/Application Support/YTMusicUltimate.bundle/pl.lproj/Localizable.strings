@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = off";
 "DEBUG_TEST_SENT" = "Wysłano jako wpis informacyjny. Trafia teraz do pulpitu serwera.";
 "DEBUG_TEST_BLOCKED" = "Nie wysłano. Wysyłanie blokuje główny przełącznik, poziom logowania albo przełącznik upload_logs serwera.";
+
+"LYRICS_FULLSCREEN" = "Pełny ekran po obrocie";
+"LYRICS_FULLSCREEN_DESC" = "Obróć telefon w poziom, a tekst piosenki otworzy się sam na pełnym ekranie";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Motyw";
+"LG_SECTION_PLAYER" = "Odtwarzacz";
+"LG_SECTION_APP" = "Aplikacja";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Główny przełącznik materiału wizualnego.";
+"LG_SONG_THEME_WHOLE" = "Motyw utworu w całej aplikacji";
+"LG_SONG_THEME_WHOLE_DESC" = "Klimat kolorów w stylu Apple Music w całej aplikacji.";
+"LG_SONG_THEME_PLAYER" = "Motyw utworu w odtwarzaczu";
+"LG_SONG_THEME_PLAYER_DESC" = "Używa kolorów okładki w mini-odtwarzaczu V1 i w widoku Teraz odtwarzane.";
+"LG_FULLPLAYER_V2" = "Pełnoekranowy odtwarzacz V2";
+"LG_FULLPLAYER_V2_DESC" = "Karta okładki, szklane sterowanie, suwak i podzielony nagłówek.";
+"LG_LYRICS_V2" = "Tekst utworu V2";
+"LG_LYRICS_V2_DESC" = "Tło immersyjne i karty aktywnego wiersza.";
+"LG_LYRICS_BUTTON" = "Przycisk tekstu";
+"LG_LYRICS_BUTTON_DESC" = "Zachowuje widoczne wejście do tekstu w V1 i V2.";
+"LG_QUEUE_V2" = "Kolejka V2";
+"LG_QUEUE_V2_DESC" = "Szklana lista „Następne” i nagłówek kolejki.";
+"LG_HOME_V2" = "Główna V2";
+"LG_HOME_V2_DESC" = "Zaokrąglone okładki, przezroczyste półki i szklane kafelki.";
+"LG_PIVOT_V2" = "Dolna nawigacja V2";
+"LG_PIVOT_V2_DESC" = "Unoszący się pasek nawigacji z materiału.";
+"LG_SHEETS_V2" = "Arkusze V2";
+"LG_SHEETS_V2_DESC" = "Zaokrąglone szklane arkusze akcji i arkusze dolne.";
+"LG_ENTRY_BUTTON" = "Ustawienia Liquid Glass";

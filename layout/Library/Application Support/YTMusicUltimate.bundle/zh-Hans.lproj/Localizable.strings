@@ -190,3 +190,32 @@
 "DEBUG_TEST_SENT" = "已以 info 记录发送，现在就会出现在服务器仪表板。";
 
 "DEBUG_TEST_BLOCKED" = "未发送。上传被总开关、记录等级或服务器的 upload_logs 开关阻止。";
+
+"LYRICS_FULLSCREEN" = "旋转时全屏";
+"LYRICS_FULLSCREEN_DESC" = "转到横屏时自动全屏显示歌词";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "主题";
+"LG_SECTION_PLAYER" = "播放器";
+"LG_SECTION_APP" = "应用";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "可视材质的总开关。";
+"LG_SONG_THEME_WHOLE" = "全局歌曲主题";
+"LG_SONG_THEME_WHOLE_DESC" = "整个应用采用 Apple Music 风格的配色氛围。";
+"LG_SONG_THEME_PLAYER" = "播放器歌曲主题";
+"LG_SONG_THEME_PLAYER_DESC" = "在 V1 迷你播放器和正在播放界面使用封面配色。";
+"LG_FULLPLAYER_V2" = "全屏播放器 V2";
+"LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制区、进度条和分栏标题栏。";
+"LG_LYRICS_V2" = "歌词 V2";
+"LG_LYRICS_V2_DESC" = "沉浸式背景和当前歌词卡片。";
+"LG_LYRICS_BUTTON" = "歌词按钮";
+"LG_LYRICS_BUTTON_DESC" = "在 V1 和 V2 中保留一个可见的歌词入口。";
+"LG_QUEUE_V2" = "队列 V2";
+"LG_QUEUE_V2_DESC" = "玻璃质感的待播列表和队列标题栏。";
+"LG_HOME_V2" = "首页 V2";
+"LG_HOME_V2_DESC" = "圆角封面、透明货架和玻璃标签。";
+"LG_PIVOT_V2" = "底部导航 V2";
+"LG_PIVOT_V2_DESC" = "悬浮的材质导航栏。";
+"LG_SHEETS_V2" = "面板 V2";
+"LG_SHEETS_V2_DESC" = "圆角玻璃操作面板和底部面板。";
+"LG_ENTRY_BUTTON" = "Liquid Glass 设置";

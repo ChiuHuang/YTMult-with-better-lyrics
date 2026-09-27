@@ -160,3 +160,32 @@
 "DEBUG_UPLOAD_OFF" = "upload_logs = off";
 "DEBUG_TEST_SENT" = "Išsiųstas kaip informacinis žurnalo įrašas. Dabar jis pasiekė serverio skydelį.";
 "DEBUG_TEST_BLOCKED" = "Nesiųsta. Siuntimą blokuoja pagrindinis jungiklis, žurnalo lygis arba serverio upload_logs jungiklis.";
+
+"LYRICS_FULLSCREEN" = "Pilnas ekranas sukant";
+"LYRICS_FULLSCREEN_DESC" = "Sukant į gulsčią padėtį, dainos žodžiai atsiveria visame ekrane";
+
+"LG_TITLE" = "Liquid Glass V2";
+"LG_SECTION_THEME" = "Tema";
+"LG_SECTION_PLAYER" = "Grotuvas";
+"LG_SECTION_APP" = "Programa";
+"LG_MASTER" = "Liquid Glass";
+"LG_MASTER_DESC" = "Pagrindinis vaizdinės medžiagos jungiklis.";
+"LG_SONG_THEME_WHOLE" = "Visos programos dainos tema";
+"LG_SONG_THEME_WHOLE_DESC" = "Apple Music stiliaus spalvų atmosfera visoje programoje.";
+"LG_SONG_THEME_PLAYER" = "Grotuvo dainos tema";
+"LG_SONG_THEME_PLAYER_DESC" = "Naudoja albumo viršelio spalvas V1 mini grotuve ir ekrane Dabar groja.";
+"LG_FULLPLAYER_V2" = "Viso ekrano grotuvas V2";
+"LG_FULLPLAYER_V2_DESC" = "Viršelio kortelė, stiklinė valdymo juosta, slankiklis ir padalinta antraštė.";
+"LG_LYRICS_V2" = "Dainos žodžiai V2";
+"LG_LYRICS_V2_DESC" = "Įtraukiantis fonas ir aktyvios eilutės kortelės.";
+"LG_LYRICS_BUTTON" = "Dainos žodžių mygtukas";
+"LG_LYRICS_BUTTON_DESC" = "Išlaiko matomą dainos žodžių įėjimą V1 ir V2.";
+"LG_QUEUE_V2" = "Eilė V2";
+"LG_QUEUE_V2_DESC" = "Stiklinis eilės sąrašas ir eilės antraštė.";
+"LG_HOME_V2" = "Namai V2";
+"LG_HOME_V2_DESC" = "Suapvalinti albumo viršeliai, skaidrios lentynos ir stikliniai žetonai.";
+"LG_PIVOT_V2" = "Apatinė navigacija V2";
+"LG_PIVOT_V2_DESC" = "Plūdžioji medžiagos navigacijos juosta.";
+"LG_SHEETS_V2" = "Lapai V2";
+"LG_SHEETS_V2_DESC" = "Suapvalinti stikliniai veiksmų ir apatiniai lapai.";
+"LG_ENTRY_BUTTON" = "Liquid Glass nustatymai";
