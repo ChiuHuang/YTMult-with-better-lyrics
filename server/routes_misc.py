@@ -66,25 +66,26 @@ def api_app_stats():
     return jsonify({'ok': True, **snapshot()})
 
 
-@app.route('/api/app/badge', methods=['GET'])
-def api_app_badge():
-    """Server-rendered MD3 badge (same theme as assets/badges/). Currently
-    ?type=release -> latest build tag. SVG, no-store."""
-    from .release_info import latest_release
-    btype = (request.args.get('type') or 'release').strip()
-    label = 'release'
-    if btype == 'release':
-        try:
-            rel = latest_release()
-            label = (rel or {}).get('tag') or 'none yet'
-        except Exception:
-            label = 'unknown'
-    label = label[:24]
-    # width fits the text; textLength forces exact fit (no overflow).
-    # Plain %s substitution: str.format would choke on the CSS braces.
-    w = max(88, int(38 + 7.4 * len(label)))
-    esc = label.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    svg = (
+# ------------------------------------------------------------
+# MD3 badge renderer (same look as assets/badges/*.svg)
+# ------------------------------------------------------------
+_BADGE_GLYPH = 'M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z'  # download arrow
+_BADGE_CHAR_W = 7.4   # px per char at 13px/500 Roboto
+_BADGE_RESERVED = 42  # chip (28) + text start gap
+
+
+def _xml_esc(s):
+    return (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _badge_svg(text, aria=None):
+    """Server-rendered MD3 pill. Plain %s substitution: str.format would
+    choke on the CSS braces. textLength forces an exact fit, so measure the
+    WHOLE string (prefix + value) -- measuring the value alone squeezed a
+    long prefix down to ~2px per char."""
+    text = (text or '')[:44]
+    w = max(88, int(38 + _BADGE_CHAR_W * len(text)))
+    return (
         '<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="32" '
         'viewBox="0 0 %d 32" role="img" aria-label="%s">'
         '<style>.bg{fill:#D3E3FD}.fg{fill:#041E49;'
@@ -98,12 +99,76 @@ def api_app_badge():
         '<rect class="bg" width="%d" height="32" rx="16"/>'
         '<circle class="chip" cx="16" cy="16" r="12"/>'
         '<g transform="translate(9,9)">'
-        '<path class="glyph" d="M7 2v4.5L4 9M7 2l3 2.5M3.5 9.5h7V12h-7z"/>'
+        '<path class="glyph" d="%s"/>'
         '</g>'
         '<text class="fg" x="33" y="20.5" textLength="%d" '
         'lengthAdjust="spacingAndGlyphs">%s</text></svg>'
-    ) % (w, w, esc, w, max(10, w - 42), esc)
-    return Response(svg, mimetype='image/svg+xml',
+    ) % (w, w, _xml_esc(aria or text), w, _BADGE_GLYPH,
+         max(10, w - _BADGE_RESERVED), _xml_esc(text))
+
+
+def _badge_tracks_cached():
+    """Distinct cached (video_id, lang) pairs. Filenames only -- scan_cache()
+    would open every JSON file, far too slow for a badge."""
+    from .cache import _cache_key_from_filename
+    try:
+        names = os.listdir(os.path.join('cache', 'lyrics'))
+    except OSError:
+        return 0
+    keys = set()
+    for fname in names:
+        key = _cache_key_from_filename(fname)
+        if not key:
+            continue
+        parts = key.split(':')
+        if parts and parts[-1] == 'fast':
+            parts.pop()
+        if len(parts) >= 2:
+            keys.add(':'.join(parts))
+    return len(keys)
+
+
+def _badge_nodes_online():
+    from .nodes import connected_nodes, _connected_nodes_lock
+    with _connected_nodes_lock:
+        return len(connected_nodes)
+
+
+def _badge_text(btype):
+    """'<prefix>: <value>' for a badge type, or None when unknown."""
+    if btype == 'release':
+        from .release_info import latest_release
+        try:
+            tag = (latest_release() or {}).get('tag') or 'none yet'
+        except Exception:
+            tag = 'unknown'
+        return f'Download Last Build: {tag[:24]}'
+    if btype in ('lyrics', 'devices'):
+        from .usage_stats import snapshot
+        key = 'served' if btype == 'lyrics' else 'users'
+        prefix = 'Lyrics served' if btype == 'lyrics' else 'Devices'
+        return f'{prefix}: {int(snapshot().get(key, 0)):,}'
+    if btype == 'tracks':
+        return f'Tracks cached: {_badge_tracks_cached():,}'
+    if btype == 'nodes':
+        return f'Nodes online: {_badge_nodes_online()}'
+    return None
+
+
+@app.route('/api/app/badge', methods=['GET'])
+def api_app_badge():
+    """Server-rendered MD3 badge (same theme as assets/badges/), used in the
+    README. ?type=release|lyrics|devices|tracks|nodes. SVG, no-store.
+    Any failure degrades to an 'unknown' pill, never a broken image."""
+    btype = (request.args.get('type') or 'release').strip()
+    try:
+        text = _badge_text(btype)
+    except Exception as e:
+        print(f"[BADGE] [WARN] type={btype} failed: {e}")
+        text = None
+    if text is None:
+        text = f'{(btype or "badge")[:20]}: unknown'
+    return Response(_badge_svg(text), mimetype='image/svg+xml',
                     headers={'Cache-Control': 'no-store'})
 
 
