@@ -40,6 +40,7 @@ for the same node_id.
 import hashlib
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -252,6 +253,10 @@ def on_message(ws, raw):
 
     if mtype == 'hello_ack':
         if msg.get('ok'):
+            # The server accepted this node: the reconnect loop resets its
+            # backoff on this, so a socket that lived for hours does not
+            # hand the next outage a 10s wait.
+            _SESSION['authed_at'] = time.time()
             print(f"[node] connected and authenticated as {NODE_ID}")
             if not _maybe_self_update(msg.get('code_sha')):
                 _maybe_contribute_jwt(ws)
@@ -312,11 +317,48 @@ def _to_wss(url):
     return url
 
 
+# ------------------------------------------------------------------
+# Reconnect pacing + liveness
+# ------------------------------------------------------------------
+# A node is a background helper, not a user-facing client: it only ever
+# has to be back online within a few seconds of the server, so the floor
+# is 1s and the cap only 10s. The old 2s-doubling-to-60s curve meant a
+# server restart (or a 3am wifi blip after a long healthy session) left
+# the node dark for up to a minute, and nothing ever reset the curve -- one
+# bad afternoon cost the whole day.
+_RECONNECT_MIN = 1.0
+_RECONNECT_MAX = 10.0
+_RECONNECT_GROWTH = 1.5
+# Jitter so a fleet of nodes that all dropped at the same moment (a
+# deploy) does not come back in lockstep. It only ever LENGTHENS the wait,
+# and the result is clamped back to _RECONNECT_MAX, so both ends of the
+# band stay exactly 1s and 10s.
+_RECONNECT_JITTER = 0.15
+# Liveness: ping every 30s, but wait 120s for the pong. The pong is
+# recorded by the READER thread, which is the same thread on_message runs
+# on, so a relayed http task (20s timeout, and they can queue) blocks it.
+# With ping_timeout=10 a single slow fetch was enough for the client to
+# call a healthy socket dead and tear it down.
+_PING_INTERVAL = 30
+_PING_TIMEOUT = 120
+
+# Written by on_message, cleared before every dial: the loop uses this to
+# tell "a working session ended" (reset the curve) from "the dial never got
+# anywhere" / "the server rejected us" (keep growing, so neither a revoked
+# key nor a proxy that kills every socket can spin at 1s forever).
+_SESSION = {'authed_at': 0.0}
+# ...but a session must have lived at least this long to earn the reset: a
+# socket that dies a second after auth is a fault to back off from, not an
+# outage to retry quickly.
+_SESSION_RESET_MIN = 15.0
+
+
 def run_forever_with_backoff():
-    backoff = 2
+    backoff = _RECONNECT_MIN
     url = SERVER_WS_URL
     state = {'upgrade': False}
     while True:
+        _SESSION['authed_at'] = 0.0
 
         def _on_error(ws, error):
             msg = str(error)
@@ -333,17 +375,27 @@ def run_forever_with_backoff():
                 on_error=_on_error,
                 on_close=on_close,
             )
-            ws.run_forever(ping_interval=30, ping_timeout=10)
+            ws.run_forever(ping_interval=_PING_INTERVAL, ping_timeout=_PING_TIMEOUT)
         except Exception as e:
             print(f"[node] connection loop error: {e}")
+        authed_at = _SESSION['authed_at']
+        if authed_at:
+            held = time.time() - authed_at
+            if held >= _SESSION_RESET_MIN:
+                backoff = _RECONNECT_MIN
+                print(f"[node] session lasted {held:.0f}s")
+            else:
+                print(f"[node] session lasted only {held:.0f}s, keeping backoff")
         if state['upgrade']:
             url = _to_wss(url)
             state['upgrade'] = False
-            backoff = 2
+            backoff = _RECONNECT_MIN
             print(f"[node] server requires HTTPS websocket, upgraded to {url}")
-        print(f"[node] reconnecting in {backoff}s…")
-        time.sleep(backoff)
-        backoff = min(backoff * 2, 60)
+        wait = min(backoff * (1.0 + _RECONNECT_JITTER * random.random()),
+                   _RECONNECT_MAX)
+        print(f"[node] reconnecting in {wait:.1f}s…")
+        time.sleep(wait)
+        backoff = min(backoff * _RECONNECT_GROWTH, _RECONNECT_MAX)
 
 
 if __name__ == "__main__":

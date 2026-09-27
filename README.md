@@ -74,10 +74,13 @@ The tweak fetches lyrics from the included Python server (default
 python proxy_server.py        # listens on :20016
 ```
 
-- First run copies: `config/ai_providers.example.json` →
-  `config/ai_providers.json` (translation/retitle keys, gitignored),
-  `config/app_settings.example.json` → `config/app_settings.json`
-  (tweak remote config). Never commit the real files.
+- Config files are gitignored and created on first use:
+  `config/ai_providers.json` (translation/retitle keys, see
+  `config/ai_providers.example.json`), `config/app_settings.json` (tweak
+  remote config, see `config/app_settings.example.json`),
+  `config/admin_config.json` (dashboard password). The `.example.json` files
+  are templates to read, nothing copies them at startup. Never commit the
+  real files.
 - Extra keys via env: `YTMU_COHERE_KEYS`, `ORCAROUTER_API_KEY`
   (`YTMU_ORCA_BASE`, `YTMU_ORCA_MODEL`).
 - Dashboard (password-gated): live logs, library manager (rebase, bulk
@@ -87,6 +90,8 @@ python proxy_server.py        # listens on :20016
 - Device debug uploads land in `logs/`; on-device lyrics cache is never
   poisoned by not-found results.
 - Public read-only endpoints (also what the badges above render):
+  - `/api/app/settings` — tweak remote config, open by design (non-secret
+    values only). Full reference: [`docs/settings-api.md`](docs/settings-api.md).
   - `/api/app/stats` — JSON usage counter (lyrics served, devices, last song).
   - `/api/app/badge?type=release|lyrics|devices|tracks|nodes` — MD3 badge
     SVG, same look as `assets/badges/`. Self-hosters can drop the README

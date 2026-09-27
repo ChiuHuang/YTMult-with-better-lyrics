@@ -135,7 +135,12 @@ def admin_app_settings_del():
     """Delete one override key (defaults still apply). Body: {key}."""
     from .app_settings import delete_one
     body = request.get_json(silent=True) or {}
-    removed = delete_one(body.get('key') or '')
+    try:
+        removed = delete_one(body.get('key') or '')
+    except (ValueError, TypeError) as e:
+        # Same 400 as POST: a malformed key is a client error, and the 500
+        # handler would report it as a crash.
+        return jsonify({'ok': False, 'error': str(e)}), 400
     from .app_settings import get_all
     return jsonify({'ok': True, 'removed': removed, 'settings': get_all()})
 
