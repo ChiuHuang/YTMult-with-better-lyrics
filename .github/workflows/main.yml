@@ -148,7 +148,6 @@ jobs:
             Hello! Here is the latest automated build of YTMusicUltimate :3
 
             ### 📦 Downloads
-            - **[Download IPA]**
             - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
             - **[Asia Mirror](${{ env.MIRROR_URL }})** 
 
