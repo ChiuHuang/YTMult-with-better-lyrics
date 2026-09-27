@@ -101,6 +101,30 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- intro skip becomes the song offset: a `music_offtopic` segment at the head
+  of a video delays the song, so the lyric timeline (which starts at line 1)
+  ran late by exactly the segment length. `Source/SponsorBlock.x` now stores
+  `-(segment end)` per video and the loop adds it (lookup = playback +
+  offset, so song time 0 lands where the seek landed; tap-to-seek already
+  compensates the same way). `LyricsCore.x` keeps it under its own
+  `lyricsSponsorOffset_<vid>` key next to the manual `lyricsTimingOffset_`
+  one and `YTMULyricsOffsetForVideoID` returns the sum (both setters drop
+  the per-video cache). Applied as soon as the segment list lands, reset to
+  0 when the list has no head segment (stale shifts cannot survive), again
+  on skip, cleared on unskip. Only head segments qualify (start <= 5s:
+  `YTMU_INTRO_SEGMENT_MAX_START`) -- a mid-song segment needs a piecewise
+  timeline, not one constant. New switch in Player settings next to
+  SponsorBlock ("Shift lyrics for skipped intro", `lyricsSponsorOffset`,
+  default on; turning it off drops the live shift). Lyrics settings section
+  "Timing Offset" shows the manual number in the field and the auto one in
+  the subtitle. Gotchas hit while landing it: Logos `%new` helpers are not
+  visible to the type checker at earlier call sites -- declare them
+  (`Headers/YTPlayerViewController.h` + `LyricsShared.h`); the skipSegments
+  response is a list, so the local typed `NSDictionary *` breaks the call
+  under `-Werror`; and a `.xm` caller of these C functions needs the
+  `extern "C"` guard in `LyricsShared.h` or the link fails with
+  `declaration possibly missing 'extern "C"'`. Untested on device: needs a
+  video whose intro is a `music_offtopic` segment.
 - all providers in RAM + switcher press feedback + fullscreen title fix:
   `server/candidates.py` is now RAM-first: every provider a fetch or probe
   tried is kept in a bounded LRU (32 videos, deep-copied on read) and NOTHING
