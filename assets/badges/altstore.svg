@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="102" height="32" viewBox="0 0 102 32" role="img" aria-label="AltStore">
+  <style>
+    .bg { fill: #D3E3FD; }
+    .fg { fill: #041E49; font-family: Roboto, -apple-system, 'Segoe UI', sans-serif; font-size: 13px; font-weight: 500; }
+    .chip { fill: #041E49; }
+    .glyph { stroke: #D3E3FD; stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #004A77; }
+      .fg { fill: #D3E3FD; }
+      .chip { fill: #D3E3FD; }
+      .glyph { stroke: #004A77; }
+    }
+  </style>
+  <rect class="bg" width="102" height="32" rx="16"/>
+  <circle class="chip" cx="16" cy="16" r="12"/>
+  <g transform="translate(9,9)">
+    <path class="glyph" d="M7 2v7m0 0L4.5 6.5M7 9l2.5-2.5M3 12h8"/>
+  </g>
+  <text class="fg" x="33" y="20.5">AltStore</text>
+</svg>
