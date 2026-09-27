@@ -52,15 +52,46 @@ BOOL YTMUDebugUploadAllowed(NSString *level) {
 static NSString *YTMULyricsOffsetKey(NSString *videoID) {
     return [NSString stringWithFormat:@"lyricsTimingOffset_%@", videoID];
 }
-// Per-tick callers (120fps lyric loop) must not deserialize NSUserDefaults
+// Automatic shift for a video whose head is a skipped non-music intro
+// (SponsorBlock music_offtopic at 0). Kept in its own key so a manual
+// nudge never eats it, unskip can drop it, and the settings field can
+// show both numbers separately.
+static NSString *YTMULyricsSponsorOffsetKey(NSString *videoID) {
+    return [NSString stringWithFormat:@"lyricsSponsorOffset_%@", videoID];
+}
+// Per-tick callers (30fps lyric loop) must not deserialize NSUserDefaults
 // every frame: cache the value per video, invalidate on set.
 static NSString *g_offsetVideoID = nil;
 static double g_offsetValue = 0.0;
+static void YTMULyricsOffsetCacheDrop(void) {
+    g_offsetVideoID = nil;
+    g_offsetValue = 0.0;
+}
+static void YTMULyricsOffsetStore(NSString *key, double value) {
+    NSMutableDictionary *d = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"] mutableCopy];
+    if (!d) d = [NSMutableDictionary dictionary];
+    if (value == 0.0) [d removeObjectForKey:key];
+    else d[key] = @(value);
+    [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+    YTMULyricsOffsetCacheDrop();
+}
+double YTMULyricsManualOffsetForVideoID(NSString *videoID) {
+    if (!videoID.length) return 0.0;
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    return [settings[YTMULyricsOffsetKey(videoID)] doubleValue];
+}
+double YTMULyricsSponsorOffsetForVideoID(NSString *videoID) {
+    if (!videoID.length) return 0.0;
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    return [settings[YTMULyricsSponsorOffsetKey(videoID)] doubleValue];
+}
+// Total the lyric loop applies: playback time + manual + intro skip.
 double YTMULyricsOffsetForVideoID(NSString *videoID) {
     if (!videoID.length) return 0.0;
     if (g_offsetVideoID && [videoID isEqualToString:g_offsetVideoID]) return g_offsetValue;
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
-    double v = [settings[YTMULyricsOffsetKey(videoID)] doubleValue];
+    double v = [settings[YTMULyricsOffsetKey(videoID)] doubleValue]
+             + [settings[YTMULyricsSponsorOffsetKey(videoID)] doubleValue];
     g_offsetVideoID = [videoID copy];
     g_offsetValue = v;
     return v;
@@ -69,13 +100,13 @@ void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset) {
     if (!videoID.length) return;
     if (offset > 30.0) offset = 30.0;
     if (offset < -30.0) offset = -30.0;
-    NSMutableDictionary *d = [[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"] mutableCopy];
-    if (!d) d = [NSMutableDictionary dictionary];
-    if (offset == 0.0) [d removeObjectForKey:YTMULyricsOffsetKey(videoID)];
-    else d[YTMULyricsOffsetKey(videoID)] = @(offset);
-    [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
-    g_offsetVideoID = [videoID copy];
-    g_offsetValue = offset;
+    YTMULyricsOffsetStore(YTMULyricsOffsetKey(videoID), offset);
+}
+void YTMULyricsSetSponsorOffsetForVideoID(NSString *videoID, double offset) {
+    if (!videoID.length) return;
+    if (offset > 0.0) offset = 0.0;
+    if (offset < -900.0) offset = -900.0;
+    YTMULyricsOffsetStore(YTMULyricsSponsorOffsetKey(videoID), offset);
 }
 
 NSString *YTMUApiBase(void) {

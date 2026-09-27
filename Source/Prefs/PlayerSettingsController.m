@@ -1,4 +1,5 @@
 #import "PlayerSettingsController.h"
+#import "../LyricsShared.h"
 
 @implementation PlayerSettingsController
 
@@ -33,7 +34,7 @@
     if (section == 0) {
         return 6;
     } if (section == 2) {
-        return 3;
+        return 4;
     } if (section == 3) {
         return 2;
     } else {
@@ -151,6 +152,26 @@
 
             return cell;
         }
+
+        if (indexPath.row == 3) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"sbLyricsOffsetCell"];
+
+            cell.textLabel.text = LOC(@"SB_LYRICS_OFFSET");
+            cell.textLabel.adjustsFontSizeToFitWidth = YES;
+            cell.detailTextLabel.text = LOC(@"SB_LYRICS_OFFSET_DESC");
+            cell.detailTextLabel.numberOfLines = 0;
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+            ABCSwitch *lyricsOffset = [[NSClassFromString(@"ABCSwitch") alloc] init];
+            lyricsOffset.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
+            [lyricsOffset addTarget:self action:@selector(toggleSBLyricsOffset:) forControlEvents:UIControlEventValueChanged];
+            // Absent key = the %ctor default (on).
+            id stored = YTMUltimateDict[@"lyricsSponsorOffset"];
+            lyricsOffset.on = stored ? [stored boolValue] : YES;
+            cell.accessoryView = lyricsOffset;
+
+            return cell;
+        }
     }
     
     if (indexPath.section == 3) {
@@ -226,6 +247,20 @@
 
     [YTMUltimateDict setObject:@([sender isOn]) forKey:@"sponsorBlock"];
     [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+}
+
+- (void)toggleSBLyricsOffset:(UISwitch *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *YTMUltimateDict = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+
+    [YTMUltimateDict setObject:@([sender isOn]) forKey:@"lyricsSponsorOffset"];
+    [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+
+    // Turning it off has to take effect now, not on the next skip: drop the
+    // shift the current song is still carrying.
+    if (![sender isOn] && g_currentVideoID.length) {
+        YTMULyricsSetSponsorOffsetForVideoID(g_currentVideoID, 0.0);
+    }
 }
 
 - (void)controlSbSelect:(UISegmentedControl *)sender {

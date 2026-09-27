@@ -36,6 +36,8 @@
 "SB_SKIP" = "Überspringen";
 "SB_ASK" = "Fragen";
 "SB_NOTIF_DURATION" = "Benachrichtigungsdauer (Sek.)";
+"SB_LYRICS_OFFSET" = "Liedtext bei ubersprungenem Intro verschieben";
+"SB_LYRICS_OFFSET_DESC" = "Setzt den Liedtext auf den Liedbeginn, wenn ein Nicht-Musik-Intro ubersprungen wird";
 
 "SEEK_BUTTONS" = "Vor/Zurück-Buttons durch Vor- und Rückspul-Buttons ersetzen";
 "SEEK_TIME_FOOTER" = "Sprungzeit in Sekunden festlegen\n\nStandardwerte:\nRückwärts springen = 10 Sek.\nVorwärts springen = 30 Sek.\n\nZum nächsten bzw. vorherigen Titel springen durch langes Drücken der Buttons.";

@@ -36,6 +36,8 @@
 "SB_SKIP" = "Salta";
 "SB_ASK" = "Chiedi";
 "SB_NOTIF_DURATION" = "Durata notifica (sec)";
+"SB_LYRICS_OFFSET" = "Sposta il testo se l'intro viene saltato";
+"SB_LYRICS_OFFSET_DESC" = "Porta il testo all'inizio del brano quando viene saltata una intro non musicale";
 
 "SEEK_BUTTONS" = "Cambia bottoni successivo/precedente con forward/backward"; 
 "SEEK_TIME_FOOTER" = "Seleziona un tempo in secondi\n\nDefault:\nIndietro = 10 sec.\nAvanti = 30 sec.\n\nPassa alla canzone successiva o precedente tenendo premuto i bottoni.";

@@ -149,10 +149,21 @@ extern BOOL g_globalLoadingInFlight;
 extern NSDate *g_loadingSince;
 extern __weak id g_activeEngagementPanelContainer;
 
+// Everything below is defined in the .x (C) translation units. A .xm file
+// (Logos compiles it as C++) that includes this header would otherwise
+// reference them with C++ linkage and fail at link time with
+// `Undefined symbols ... declaration possibly missing 'extern "C"'`.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void YTMUReleaseGlobalFetch(void);
 BOOL YTMULyricsPreference(NSString *key, BOOL fallback);
 double YTMULyricsOffsetForVideoID(NSString *videoID);
 void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset);
+double YTMULyricsManualOffsetForVideoID(NSString *videoID);
+double YTMULyricsSponsorOffsetForVideoID(NSString *videoID);
+void YTMULyricsSetSponsorOffsetForVideoID(NSString *videoID, double offset);
 NSString *YTMUApiBase(void);
 NSString *YTMUTargetLang(void);
 NSString *YTMUUrlEncode(NSString *s);

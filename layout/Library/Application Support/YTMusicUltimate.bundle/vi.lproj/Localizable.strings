@@ -36,6 +36,8 @@
 "SB_SKIP" = "Bỏ qua";
 "SB_ASK" = "Hỏi";
 "SB_NOTIF_DURATION" = "Thời lượng thông báo (giây)";
+"SB_LYRICS_OFFSET" = "Doi loi khi bo dan dau";
+"SB_LYRICS_OFFSET_DESC" = "Chuyen loi veo dau bai hat khi bo qua phan dau khong phai nhac";
 
 "SEEK_BUTTONS" = "Thay thế nút trước hoặc tiếp theo bằng nút tua nhạc";
 "SEEK_TIME_FOOTER" = "Chọn thời lượng tua theo đơn vị giây\n\nMặc định:\nTua lại = 10 giây.\nTua đi = 30 giây.\n\nBạn có thể nhấn giữ nút tua đế chuyển đến bản nhạc trước hoặc tiếp theo tương ứng.";

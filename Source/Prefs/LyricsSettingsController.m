@@ -213,7 +213,7 @@
     if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
     if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
     if (section == 4) return @"Sync pulls songs already translated on the server straight into your local cache — it never re-runs translation, so it's fast and free even for a large backlog.";
-    if (section == 5) return @"Per-song timing offset in seconds. Positive = lyrics ahead of audio. Range: -30 to +30 seconds. Applies to current song only.";
+    if (section == 5) return @"Per-song timing offset in seconds. Positive = lyrics ahead of audio. Range: -30 to +30 seconds. Applies to current song only. A skipped non-music intro (SponsorBlock) adds its own shift on top, so the first line lands on the first second of the song.";
     return nil;
 }
 
@@ -422,12 +422,17 @@
     }
     if (indexPath.section == 5) {
         cell.textLabel.text = @"Current song offset";
-        cell.detailTextLabel.text = @"Adjust lyrics timing for this song only";
+        NSString *vid = g_currentVideoID ?: @"";
+        double manual = YTMULyricsManualOffsetForVideoID(vid);
+        double autoOffset = YTMULyricsSponsorOffsetForVideoID(vid);
+        if (fabs(autoOffset) >= 0.05) {
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"Skipped intro: %+.1fs (automatic, cleared when unskipped)", autoOffset];
+        } else {
+            cell.detailTextLabel.text = @"Adjust lyrics timing for this song only";
+        }
         cell.imageView.image = [UIImage systemImageNamed:@"clock.arrow.circlepath"];
         UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
-        NSString *vid = g_currentVideoID ?: @"";
-        double offset = YTMULyricsOffsetForVideoID(vid);
-        tf.text = [NSString stringWithFormat:@"%.1f", offset];
+        tf.text = [NSString stringWithFormat:@"%.1f", manual];
         tf.borderStyle = UITextBorderStyleRoundedRect;
         tf.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
         tf.textAlignment = NSTextAlignmentRight;

@@ -36,6 +36,8 @@
 "SB_SKIP" = "跳過";
 "SB_ASK" = "詢問";
 "SB_NOTIF_DURATION" = "通知持續時間（秒）";
+"SB_LYRICS_OFFSET" = "跳過的片頭自動對齊歌詞";
+"SB_LYRICS_OFFSET_DESC" = "跳過非音樂開頭時，把歌詞移到歌曲開始處";
 
 "SEEK_BUTTONS" = "將「下一首/上一首」替換為「快轉/倒轉」按鈕";
 "SEEK_TIME_FOOTER" = "選擇一個「快轉/倒轉」時間/秒\n\n預設:\n倒轉 = 10秒\n快轉 = 30秒\n\n長按按鈕可跳到「下一首/上一首」曲目";
