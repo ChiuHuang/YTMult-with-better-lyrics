@@ -57,6 +57,34 @@ def api_app_settings():
     from .app_settings import get_all
     return jsonify({'ok': True, 'settings': get_all()})
 
+
+@app.route('/api/app/altstore', methods=['GET'])
+def api_app_altstore():
+    """AltStore source JSON, always pointing at the newest build-N release
+    (download via the worker proxy for Asia). Submit this URL on
+    altdirect.app to get direct-install links."""
+    from .release_info import latest_release, worker_url
+    rel = latest_release()
+    if not rel or not rel.get('download_url'):
+        return jsonify({'error': 'No release with an IPA asset found'}), 503
+    tag = rel.get('tag') or 'build-?'
+    version = tag[6:] if tag.startswith('build-') else tag
+    return jsonify({
+        'name': 'YTMusicUltimate',
+        'identifier': 'dev.chiuhuang.ytmult',
+        'apps': [{
+            'name': 'YouTube Music',
+            'bundleIdentifier': 'com.google.ios.youtubemusic',
+            'developerName': 'ChiuHuang',
+            'version': version,
+            'versionDate': rel.get('published_at') or '',
+            'versionDescription': f'YTMusicUltimate ({tag})',
+            'downloadURL': worker_url(rel['download_url']),
+            'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
+            'size': rel.get('size') or 0,
+        }],
+    })
+
 def _dump_screen_name(dump_content):
     """Topmost screen from the VC hierarchy section (presented wins, else deepest child)."""
     try:

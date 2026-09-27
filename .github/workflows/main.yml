@@ -116,6 +116,23 @@ jobs:
           files: YTMusicUltimate.ipa
           draft: false
 
+      - name: Mirror IPA to file host
+        env:
+          FILE_UPLOAD_URL: ${{ secrets.FILE_UPLOAD_URL }}
+          FILE_UPLOAD_TOKEN: ${{ secrets.FILE_UPLOAD_TOKEN }}
+          FILE_UPLOAD_FIELD: ${{ secrets.FILE_UPLOAD_FIELD }}
+        run: |
+          if [ -z "$FILE_UPLOAD_URL" ]; then
+            echo "::warning::FILE_UPLOAD_URL secret not set, skipping Asia mirror"
+            exit 0
+          fi
+          FIELD="${FILE_UPLOAD_FIELD:-file}"
+          curl -f -X POST "$FILE_UPLOAD_URL" \
+            -H "Authorization: Bearer $FILE_UPLOAD_TOKEN" \
+            -F "$FIELD=@YTMusicUltimate.ipa;type=application/octet-stream" \
+            --max-time 600
+          echo "::notice::Mirrored YTMusicUltimate.ipa to file host"
+
       - name: Output Release URL
         run: |
           echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"

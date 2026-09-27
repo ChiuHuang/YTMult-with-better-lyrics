@@ -335,8 +335,12 @@
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:updateAvailable ? @"Update available" : @"Up to date" message:message preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
             if (updateAvailable) {
-                [alert addAction:[UIAlertAction actionWithTitle:@"Open downloads" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-                    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:@"https://github.com/ChiuHuang/ytmusicultimate"] options:@{} completionHandler:nil];
+                NSString *dlURL = result[@"download_url_proxy"];
+                if (![dlURL isKindOfClass:[NSString class]] || !dlURL.length) {
+                    dlURL = @"https://github.com/ChiuHuang/ytmusicultimate";
+                }
+                [alert addAction:[UIAlertAction actionWithTitle:@"Download" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                    [[UIApplication sharedApplication] openURL:[NSURL URLWithString:dlURL] options:@{} completionHandler:nil];
                 }]];
             }
             [self presentViewController:alert animated:YES completion:nil];
