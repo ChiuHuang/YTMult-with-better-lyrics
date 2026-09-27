@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "所有下載的音訊"; //keep it lowercase
 "DELETE" = "刪除";
 "RENAME" = "重新命名";
+
+"AUTO_SYNC_TITLE" = "背景自動同步";
+"AUTO_SYNC_DESC" = "每 6 小時將伺服器翻譯靜默拉回本地快取";
+"DOWNLOAD" = "下載";
+"UPDATE_WHATS_NEW" = "更新內容：\n%@";

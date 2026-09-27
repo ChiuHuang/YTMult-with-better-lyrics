@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "todas las descargas"; //keep it lowercase
 "DELETE" = "Eliminar";
 "RENAME" = "Renombrar";
+
+"AUTO_SYNC_TITLE" = "Sincronización automática en segundo plano";
+"AUTO_SYNC_DESC" = "Descarga las traducciones del servidor en silencio (cada 6 h)";
+"DOWNLOAD" = "Descargar";
+"UPDATE_WHATS_NEW" = "Novedades:\n%@";

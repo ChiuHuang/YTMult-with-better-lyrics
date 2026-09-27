@@ -130,22 +130,32 @@ def _parse_numbered_lines(translated_text, texts):
     return [result_map.get(i + 1, texts[i]) for i in range(len(texts))]
 
 
+def _translate_prompt(texts, target_lang):
+    """Strict numbered-translation prompt shared by Cohere + Orca. The
+    contract matters more than the wording: exactly one output line per
+    input line, translation only, never echoing the original or adding
+    romanization (mixed-script karaoke lines otherwise come back as
+    original + romaji + translation glued together)."""
+    lang_name = LANG_NAMES.get(target_lang, target_lang)
+    numbered = [f"[{i+1}] {t}" for i, t in enumerate(texts)]
+    return (
+        f"Translate the following song lyrics into {lang_name}. "
+        f"Keep the same numbered format [1], [2], etc., exactly one output line per input line. "
+        f"These are song lyrics, so keep the poetic style and meaning intact. "
+        f"IMPORTANT: Do not translate onomatopoeia, scat singing, or nonsense words (like 'ba ba', 'la la') literally. Leave them as-is or transliterate them. "
+        f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
+        f"STRICT OUTPUT RULES: output ONLY the translated lines with their numbers. "
+        f"Never repeat the original text. Never add romanization, transliteration, "
+        f"or explanations. Never merge lines. Never add extra lines.\n\n"
+        f"{chr(10).join(numbered)}"
+    )
+
+
 def orca_chat_translate(texts, target_lang='zh-TW'):
     """Translate lines via OrcaRouter. Returns list or None. Never raises."""
     if not texts:
         return []
-    lang_name = LANG_NAMES.get(target_lang, target_lang)
-    numbered = [f"[{i+1}] {t}" for i, t in enumerate(texts)]
-    prompt = (
-        f"Translate the following song lyrics into {lang_name}. "
-        f"Keep the same numbered format [1], [2], etc. "
-        f"These are song lyrics, so keep the poetic style and meaning intact. "
-        f"IMPORTANT: Do not translate onomatopoeia, scat singing, or nonsense words (like 'ba ba', 'la la') literally. Leave them as-is or transliterate them. "
-        f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
-        f"Return ONLY the translated lines with their numbers, nothing else.\n\n"
-        f"{chr(10).join(numbered)}"
-    )
-    text = orca_chat([{'role': 'user', 'content': prompt}], timeout=90)
+    text = orca_chat([{'role': 'user', 'content': _translate_prompt(texts, target_lang)}], timeout=90)
     if not text:
         return None
     try:
@@ -324,15 +334,29 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
     if to_translate_idx:
         subset = [texts[i] for i in to_translate_idx]
         translated_subset = _cohere_translate_raw(subset, target_lang)
+        used_orca = False
         if translated_subset is None and orca_enabled():
             print('  [Cohere] all keys failed, trying chat-provider fallback...')
             translated_subset = orca_chat_translate(subset, target_lang)
+            used_orca = translated_subset is not None
         if translated_subset is None:
             # Total API failure: serve originals but do NOT cache them, or
             # every later lookup would serve the failure as a translation.
             if chinese_target:
                 results = _apply_zh_script(results, target_lang)
             return results
+        # Redo once: a translated line that still embeds its original
+        # (model echoed original + romanization + translation as one blob,
+        # common on mixed-script karaoke lines) gets one strict retry.
+        bad = [i for i in range(len(subset))
+               if _echoes_original(subset[i], translated_subset[i])]
+        if bad:
+            print(f"  [Cohere] {len(bad)} line(s) echo the original, retrying once...")
+            fn = orca_chat_translate if used_orca else _cohere_translate_raw
+            retry = fn([subset[i] for i in bad], target_lang)
+            if retry is not None:
+                for k, i in enumerate(bad):
+                    translated_subset[i] = retry[k]
         for local_i, global_i in enumerate(to_translate_idx):
             results[global_i] = translated_subset[local_i]
     else:
@@ -343,6 +367,18 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
 
     set_translate_cached(cache_key, results)
     return results
+
+
+def _echoes_original(orig, trans):
+    """True when a translation embeds its whole original line (model echoed
+    original + romanization + translation as one blob). Short originals
+    (interjections, proper nouns kept as-is) don't count."""
+    if not orig or not trans or trans == orig:
+        return False
+    o = orig.strip()
+    if len(o) < 4:
+        return False
+    return o in trans
 
 
 def _cohere_translate_raw(texts, target_lang):
@@ -357,19 +393,7 @@ def _cohere_translate_raw(texts, target_lang):
 
     lang_name = LANG_NAMES.get(target_lang, target_lang)
 
-    # Join all lines with a numbered marker for reliable splitting
-    numbered = [f"[{i+1}] {t}" for i, t in enumerate(texts)]
-    joined = '\n'.join(numbered)
-
-    prompt = (
-        f"Translate the following song lyrics into {lang_name}. "
-        f"Keep the same numbered format [1], [2], etc. "
-        f"These are song lyrics, so keep the poetic style and meaning intact. "
-        f"IMPORTANT: Do not translate onomatopoeia, scat singing, or nonsense words (like 'ba ba', 'la la') literally. Leave them as-is or transliterate them. "
-        f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
-        f"Return ONLY the translated lines with their numbers, nothing else.\n\n"
-        f"{joined}"
-    )
+    prompt = _translate_prompt(texts, target_lang)
 
     for attempt in range(len(keys)):
         try:

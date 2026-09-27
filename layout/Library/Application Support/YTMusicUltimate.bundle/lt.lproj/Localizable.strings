@@ -119,3 +119,8 @@
 "ALL_DOWNLOADS" = "visą atsiųstą muziką"; //keep it lowercase
 "DELETE" = "Panaikinti";
 "RENAME" = "Pervardyti";
+
+"AUTO_SYNC_TITLE" = "Auto-sync in background";
+"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
+"DOWNLOAD" = "Download";
+"UPDATE_WHATS_NEW" = "What's new:\n%@";
