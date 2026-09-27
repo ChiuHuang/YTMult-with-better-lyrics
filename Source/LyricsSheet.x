@@ -283,6 +283,7 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
     self.wipeLabel.text = nil;
     self.wipeLabel.attributedText = nil;
     self.wipeMask.path = nil;
+    self.lastColorKey = nil;
 }
 
 - (void)prepareForReuse {
@@ -423,6 +424,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [super viewDidLoad];
 
     self.currentIndex = -1;
+    self.activeIndexes = nil;
     self.suppressWordSeekRow = -1;
     self.view.backgroundColor = [UIColor colorWithDynamicProvider:^UIColor *(UITraitCollection *tc) {
         return tc.userInterfaceStyle == UIUserInterfaceStyleLight ? [UIColor systemBackgroundColor] : [[UIColor blackColor] colorWithAlphaComponent:0.95];
@@ -1696,6 +1698,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 // song opens at the old song's position.
                 self.clockRawTime = 0;
                 self.clockRawWall = 0;
+                self.activeIndexes = nil;
                 self.lastColorKey = nil;
                 self.cachedWordLayoutKey = nil;
                 self.cachedWordRects = nil;
@@ -1974,6 +1977,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (![videoID isEqualToString:self.loadingVideoID]) {
         self.currentIndex = -1;
+        self.activeIndexes = nil;
         self.lyrics = @[];
         [self.tableView reloadData];
         if (self.isModal) self.view.hidden = NO;
@@ -2212,47 +2216,37 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (currentTime <= 0) return;
 
-    // Incremental scan: line times are sorted, so resume just behind the
-    // current line instead of walking all N lines every tick (braccato
-    // never re-measures mid-tick either). Falls back to a full scan after
-    // any backward seek.
-    NSInteger newIndex = -1;
-    NSInteger start = 0;
-    if (self.currentIndex > 2 && self.currentIndex < self.lyrics.count) {
-        NSDictionary *probe = self.lyrics[self.currentIndex - 2];
-        double pt = [probe[@"time"] doubleValue];
-        if (pt <= 0) pt = [probe[@"startTimeMs"] doubleValue] / 1000.0;
-        if (currentTime >= pt) start = self.currentIndex - 2;
-    }
-    for (NSInteger i = start; i < self.lyrics.count; i++) {
-        NSDictionary *lyric = self.lyrics[i];
-        double time = [lyric[@"time"] doubleValue];
-        // Instrumental gap rows carry startTimeMs only (no time key).
-        if (time <= 0) time = [lyric[@"startTimeMs"] doubleValue] / 1000.0;
+    // Multi-line active set: every line whose [start, end) window covers
+    // now lights up, so overlapping payloads (duets, backing vocals, TTML
+    // with explicit durations past the next start) highlight 2+ lines at
+    // once. Sequential line-timed lyrics still collapse to a single line
+    // because each line ends where the next starts.
+    double nowMs = currentTime * 1000.0;
+    NSIndexSet *newActive = [self ytmu_activeIndexesAtMs:nowMs];
+    NSInteger newIndex = (NSInteger)newActive.lastIndex;
+    if (newIndex == NSNotFound) newIndex = -1;
+    NSIndexSet *oldActive = self.activeIndexes ?: [NSIndexSet indexSet];
+    NSInteger oldIndex = self.currentIndex;
 
-        if (currentTime >= time) {
-            newIndex = i;
-        } else {
-            break;
-        }
-    }
-
-    if (newIndex != self.currentIndex) {
-        NSInteger oldIndex = self.currentIndex;
+    if (![newActive isEqualToIndexSet:oldActive]) {
+        self.activeIndexes = newActive;
         self.currentIndex = newIndex;
 
-        if (oldIndex >= 0 && oldIndex < self.lyrics.count) {
-            YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:oldIndex inSection:0]];
+        NSMutableIndexSet *deactivated = [oldActive mutableCopy];
+        [deactivated removeIndexes:newActive];
+        NSMutableIndexSet *activated = [newActive mutableCopy];
+        [activated removeIndexes:oldActive];
+        for (NSUInteger i = [deactivated firstIndex]; i != NSNotFound; i = [deactivated indexGreaterThanIndex:i]) {
+            YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (oldCell) {
-                [self configureCell:oldCell atIndex:oldIndex isActive:NO currentTime:currentTime];
+                [self configureCell:oldCell atIndex:(NSInteger)i isActive:NO currentTime:currentTime];
             }
         }
-
-        if (newIndex >= 0 && newIndex < self.lyrics.count) {
-            YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
+        for (NSUInteger i = [activated firstIndex]; i != NSNotFound; i = [activated indexGreaterThanIndex:i]) {
+            YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (newCell) {
-                [self configureCell:newCell atIndex:newIndex isActive:YES currentTime:currentTime];
-                NSDictionary *nl = self.lyrics[newIndex];
+                [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:currentTime];
+                NSDictionary *nl = self.lyrics[i];
                 if (!([nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0)) {
                     newCell.lyricLabel.alpha = 0.3;
                 }
@@ -2262,7 +2256,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                     newCell.lyricLabel.transform = CGAffineTransformIdentity;
                 } completion:nil];
             }
+        }
 
+        if (newIndex >= 0 && newIndex < self.lyrics.count) {
             if (!self.tableView.isDragging && !self.tableView.isDecelerating && !self.tableView.isTracking) {
                 // Near: smooth-scroll with the song. Far (tap-jump / seek):
                 // jump instantly instead of stacking competing animated
@@ -2272,12 +2268,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:!far];
             }
         }
-    } else if (newIndex >= 0) {
-        YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:newIndex inSection:0]];
-        if (cell) {
-            NSDictionary *lyric = self.lyrics[newIndex];
-            if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
-                [self applyWordColorsToCell:cell lyric:lyric index:newIndex currentTime:currentTime force:NO];
+    } else if (newActive.count > 0) {
+        // Same set: keep every active word-synced wipe advancing.
+        for (NSUInteger i = [newActive firstIndex]; i != NSNotFound; i = [newActive indexGreaterThanIndex:i]) {
+            YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
+            if (cell) {
+                NSDictionary *lyric = self.lyrics[i];
+                if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
+                    [self applyWordColorsToCell:cell lyric:lyric index:(NSInteger)i currentTime:currentTime force:NO];
+                }
             }
         }
     }
@@ -2301,6 +2300,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.lastSongArtist = nil;
     self.clockRawTime = 0;
     self.clockRawWall = 0;
+    self.activeIndexes = nil;
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
     statusLabel.text = @"Force Reloading...";
@@ -2343,6 +2343,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (!self.isSynced) {
         self.currentIndex = -1;
     }
+    self.activeIndexes = nil;
     self.lastColorKey = nil;
     self.cachedWordLayoutKey = nil;
     self.cachedWordRects = nil;
@@ -2688,7 +2689,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         }
     }
 
-    BOOL isActive = self.isSynced && (indexPath.row == self.currentIndex);
+    BOOL isActive = NO;
+    if (self.isSynced && indexPath.row >= 0 && indexPath.row < self.lyrics.count) {
+        if (self.activeIndexes && self.activeIndexes.count > 0) {
+            isActive = [self.activeIndexes containsIndex:(NSUInteger)indexPath.row];
+        } else {
+            isActive = (indexPath.row == self.currentIndex);
+        }
+    }
     [self configureCell:cell atIndex:indexPath.row isActive:isActive currentTime:currentTime];
 
     return cell;
@@ -2715,7 +2723,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         }
         [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSeekToTime" object:@(seekTime)];
 
-        NSInteger oldIndex = self.currentIndex;
+        NSIndexSet *oldActive = self.activeIndexes ?: [NSIndexSet indexSet];
         self.currentIndex = indexPath.row;
         g_currentPlaybackTime = seekTime;
         // Rebase the extrapolated clock too, or the next tick extrapolates
@@ -2723,15 +2731,28 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.clockRawTime = seekTime;
         self.clockRawWall = CACurrentMediaTime();
 
-        if (oldIndex >= 0 && oldIndex < self.lyrics.count && oldIndex != indexPath.row) {
-            YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:oldIndex inSection:0]];
+        double nowMs = seekTime * 1000.0;
+        if (g_currentVideoID.length) {
+            nowMs += YTMULyricsOffsetForVideoID(g_currentVideoID) * 1000.0;
+        }
+        NSIndexSet *newActive = [self ytmu_activeIndexesAtMs:nowMs];
+        if (newActive.count == 0) {
+            newActive = [NSIndexSet indexSetWithIndex:(NSUInteger)indexPath.row];
+        }
+        self.activeIndexes = newActive;
+        NSMutableIndexSet *deactivated = [oldActive mutableCopy];
+        [deactivated removeIndexes:newActive];
+        for (NSUInteger i = [deactivated firstIndex]; i != NSNotFound; i = [deactivated indexGreaterThanIndex:i]) {
+            YTMULyricsCell *oldCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (oldCell) {
-                [self configureCell:oldCell atIndex:oldIndex isActive:NO currentTime:g_currentPlaybackTime];
+                [self configureCell:oldCell atIndex:(NSInteger)i isActive:NO currentTime:g_currentPlaybackTime];
             }
         }
-        YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:indexPath];
-        if (newCell) {
-            [self configureCell:newCell atIndex:indexPath.row isActive:YES currentTime:g_currentPlaybackTime];
+        for (NSUInteger i = [newActive firstIndex]; i != NSNotFound; i = [newActive indexGreaterThanIndex:i]) {
+            YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
+            if (newCell) {
+                [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:g_currentPlaybackTime];
+            }
         }
     }
 }
