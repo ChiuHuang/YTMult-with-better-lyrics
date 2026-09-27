@@ -75,6 +75,8 @@
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, strong) NSDate *loadingSince;
 @property (nonatomic, copy) NSString *artworkVideoID;
+@property (nonatomic, copy) NSString *displayedVideoID;
+@property (nonatomic, strong) UIView *songTintView;
 @property (nonatomic, strong) UILabel *fpsLabel;
 @property (nonatomic, strong) UIButton *offsetButton;
 @property (nonatomic, assign) NSInteger suppressWordSeekRow;
