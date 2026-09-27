@@ -163,12 +163,20 @@ def api_lyrics():
     if only_provider and not re.fullmatch(r'[A-Za-z/]+', only_provider):
         return jsonify({"error": "Invalid provider"}), 400
 
-    def serve(data):
+    def serve(data, cached=False):
         """Apply per-display transforms to an outgoing lyrics payload. Safe to
         mutate in place: primary results were already written to disk by
-        `set_cached`, and cache-hit loads are fresh reads from disk."""
+        `set_cached`, and cache-hit loads are fresh reads from disk.
+
+        `cached` says whether this payload came out of a cache (disk, in-flight
+        dedup wait or a node) instead of a live provider fetch. The device uses
+        it to decide whether the translation is worth animating in: a live fetch
+        is translated by the model as the client watches, a cache hit is not.
+        Transport-only, like `pro` -- tagged here, after `set_cached` ran."""
         if isinstance(data, dict) and isinstance(data.get('lyrics'), list):
             apply_display_transforms(data['lyrics'], translate_to, auto_zh)
+        if isinstance(data, dict):
+            data['cached'] = bool(cached)
         # Arm the device switcher with every provider this video has in RAM
         # (transport-only: set_cached already ran on this dict, so the extra
         # keys never reach disk).
@@ -258,7 +266,7 @@ def api_lyrics():
             print(f"[OK] [REQ {req_id}] Got result from in-flight wait source={cached.get('source')} lines={len(cached.get('lyrics',[]))} synced={cached.get('synced')}")
             print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight)")
             print("=" * 60)
-            return serve(cached)
+            return serve(cached, cached=True)
         # Fell through (timeout or no cache) — return empty
         print(f"[WARN] [REQ {req_id}] [In-Flight] No cache after wait (timeout or miss) - returning none")
         print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (in-flight miss)")
@@ -302,7 +310,7 @@ def api_lyrics():
                 # Transport-only (in-memory hit, never written to disk).
                 cached['pro'] = True
             print("=" * 60)
-            return serve(cached)
+            return serve(cached, cached=True)
         else:
             print(f"  [REQ {req_id}] [Cache] miss for both full and fast keys")
             node_data = ask_nodes_for_cache(full_cache_key, timeout=2.0)
@@ -320,7 +328,7 @@ def api_lyrics():
                             del _in_flight[dedup_key]
                 print(f"  [REQ {req_id}] elapsed={(time_module.time()-_req_start)*1000:.0f}ms (node cache)")
                 print("=" * 60)
-                return serve(node_data)
+                return serve(node_data, cached=True)
     else:
         print(f"  [REQ {req_id}] [Cache] bypassed (force mode)")
 
@@ -349,7 +357,7 @@ def api_lyrics():
                 })
             print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
             print("=" * 60)
-            return serve(result)
+            return serve(result, cached=False)
 
         song_info = get_song_info(video_id)
         print(f"  [REQ {req_id}] get_song_info took {(time_module.time()-t_song)*1000:.0f}ms")
@@ -409,7 +417,7 @@ def api_lyrics():
     print(f"[SEND] [REQ {req_id}] Returning {len(result.get('lyrics', []))} lines from {result.get('source', '?')} synced={result.get('synced')} elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
     print("=" * 60)
 
-    return serve(result)
+    return serve(result, cached=False)
 
 
 @app.route('/api/cache/list', methods=['GET'])

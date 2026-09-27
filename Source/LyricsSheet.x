@@ -2298,6 +2298,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.currentIndex = -1;
         self.activeIndexes = nil;
         self.lastColorKey = nil;
+        // Switching provider is not a live translation: this copy (and the one
+        // /providers/select returns) arrives whole, so it paints whole. Without
+        // this a live fetch that armed the reveal earlier in the song would
+        // carry the animation over to a provider the user switched to.
+        self.typewriterLive = NO;
         [self updateLyrics:ramLyrics];
     }
     [self ytmu_selectProvider:(NSString *)p];
@@ -2552,6 +2557,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 [self ytmu_refreshProviderSwitcher];
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
                 if (statusLabel) statusLabel.text = @"";
+                // Same reasoning as the RAM paint above: /providers/select
+                // returns a finished, translated payload, never a live one.
+                self.typewriterLive = NO;
                 [self updateLyrics:lyrics];
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad" object:vid userInfo:@{@"lyrics": lyrics}];
                 sendDebugLog([NSString stringWithFormat:@"[MUSIC] provider selected: %@", provider]);
@@ -2928,6 +2936,10 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             [self ytmu_setProbing:NO];
             [self ytmu_cancelTranslateStream];
             [self ytmu_typeResetAll];
+            // Disarm the reveal: a new song's translation is a cached payload
+            // until a live fetch proves otherwise, and a leftover YES from the
+            // previous song would animate this one for no reason.
+            self.typewriterLive = NO;
             // One gate for everything a new song must forget, keyed on the song
             // that actually changed -- the DISPLAY ids, not loadingVideoID.
             // That field is rewritten by other writers (ytmu_selectProvider
@@ -3266,6 +3278,12 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 NSDictionary *fullDict = [NSJSONSerialization JSONObjectWithData:fullData options:0 error:nil];
                 if (YTMULyricsIsUsable(fullDict[@"lyrics"], fullDict)) {
                     statusLabel.text = @"";
+                    // Same rule as the fast request: only a live pipeline may
+                    // animate. This branch is the stream-off / stream-dead
+                    // path, where the translation lands in one piece, so the
+                    // reveal is off unless the server ran one just now.
+                    id cf = fullDict[@"cached"];
+                    self.typewriterLive = (cf != nil) && ![cf boolValue];
                     if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                     g_lyricsCache[videoID] = fullDict[@"lyrics"];
                     YTMULyricsCacheSave(videoID, fullDict[@"lyrics"]);
@@ -3370,6 +3388,8 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         statusLabel.text = @"";
         self.loadingVideoID = videoID;
         self.isLoading = NO;
+        // RAM cache hit: the translation already exists, so it paints whole.
+        self.typewriterLive = NO;
         [self ytmu_requestArtworkOnce:videoID];
         [self updateLyrics:g_lyricsCache[videoID]];
         [self ytmuCheckServerUpgradeForVideoID:videoID];
@@ -3384,6 +3404,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             statusLabel.text = @"";
             self.loadingVideoID = videoID;
             self.isLoading = NO;
+            self.typewriterLive = NO;  // on-device cache hit, same reasoning
             [self ytmu_requestArtworkOnce:videoID];
             [self updateLyrics:fileCached];
             [self ytmuCheckServerUpgradeForVideoID:videoID];
@@ -3445,6 +3466,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 if (YTMULyricsIsUsable(dict[@"lyrics"], dict)) {
                     statusLabel.text = @"";
+                    // Server says cached:1 -> the lines came off disk (full key,
+                    // fast key or a node), so there is nothing being written and
+                    // nothing to reveal. cached:0 -> a live pipeline ran and the
+                    // translation arrived with the response, which is the one
+                    // case a reveal is still honest about.
+                    id cf = dict[@"cached"];
+                    self.typewriterLive = (cf != nil) && ![cf boolValue];
                     id fs = dict[@"song"], fa = dict[@"artist"];
                     if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
                     if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;

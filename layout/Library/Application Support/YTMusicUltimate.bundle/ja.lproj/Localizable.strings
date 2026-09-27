@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "アプリ全体の曲テーマ";
 "LG_SONG_THEME_WHOLE_DESC" = "アプリ全体に Apple Music 風の配色を適用します";
 "LG_SONG_THEME_PLAYER" = "プレーヤーの曲テーマ";
-"LG_SONG_THEME_PLAYER_DESC" = "V1 のミニプレーヤーと再生中の画面にジャケットの色を使います";
+"LG_SONG_THEME_PLAYER_DESC" = "ジャケットの色を全画面プレーヤーの背景に使用します";
 "LG_FULLPLAYER_V2" = "フルプレーヤー V2";
 "LG_FULLPLAYER_V2_DESC" = "ジャケットカード、ガラスの操作部、シークバー、分割ヘッダー";
 "LG_LYRICS_V2" = "歌詞 V2";
-"LG_LYRICS_V2_DESC" = "没入型の背景とアクティブ行のカード";
+"LG_LYRICS_V2_DESC" = "歌詞背後のぼかしたジャケットによる没入型背景";
 "LG_LYRICS_BUTTON" = "歌詞ボタン";
 "LG_LYRICS_BUTTON_DESC" = "V1 と V2 に常に見える歌詞の入口を残します";
 "LG_QUEUE_V2" = "キュー V2";

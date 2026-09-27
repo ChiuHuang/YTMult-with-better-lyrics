@@ -173,11 +173,11 @@
 "LG_SONG_THEME_WHOLE" = "Motyw utworu w całej aplikacji";
 "LG_SONG_THEME_WHOLE_DESC" = "Klimat kolorów w stylu Apple Music w całej aplikacji.";
 "LG_SONG_THEME_PLAYER" = "Motyw utworu w odtwarzaczu";
-"LG_SONG_THEME_PLAYER_DESC" = "Używa kolorów okładki w mini-odtwarzaczu V1 i w widoku Teraz odtwarzane.";
+"LG_SONG_THEME_PLAYER_DESC" = "Używa kolorów okładki jako tła odtwarzacza na pełnym ekranie.";
 "LG_FULLPLAYER_V2" = "Pełnoekranowy odtwarzacz V2";
 "LG_FULLPLAYER_V2_DESC" = "Karta okładki, szklane sterowanie, suwak i podzielony nagłówek.";
 "LG_LYRICS_V2" = "Tekst utworu V2";
-"LG_LYRICS_V2_DESC" = "Tło immersyjne i karty aktywnego wiersza.";
+"LG_LYRICS_V2_DESC" = "Tło immersyjne z rozmytą okładką za tekstem piosenki.";
 "LG_LYRICS_BUTTON" = "Przycisk tekstu";
 "LG_LYRICS_BUTTON_DESC" = "Zachowuje widoczne wejście do tekstu w V1 i V2.";
 "LG_QUEUE_V2" = "Kolejka V2";

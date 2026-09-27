@@ -44,7 +44,14 @@ static UIColor *YTMUColor(UIColor *color, CGFloat saturation, CGFloat brightness
     return [UIColor colorWithHue:h saturation:MIN(.82,MAX(.30,s+saturation)) brightness:MIN(.78,MAX(.20,b*brightness)) alpha:1];
 }
 static void YTMUPublishTheme(UIImage *image) {
-    if (!image || image.size.width < 80 || image.size.height < 80) return;
+    // 24pt, not 80: the mini player's thumbnail is a 40pt image (YT loads it at
+    // screen scale, so UIImage.size is 40 points, not 120) and it is the ONLY
+    // artwork on screen while the user browses the home tab. The old 80pt
+    // floor threw it away, so YTMUPrimaryColor stayed nil everywhere except
+    // the open full player -- which is exactly why the full player was tinted
+    // and the whole app was not. The ancestor check below, not the size, is
+    // what keeps this to real cover art.
+    if (!image || image.size.width < 24 || image.size.height < 24) return;
     // This runs from a %hook on UIImageView -setImage:, so it is on the path of
     // EVERY image the app ever sets. Three reasons to bail before the bitmap
     // draw: both theme switches are off (the only reader, YTMUApplyTheme,
@@ -98,7 +105,26 @@ static void YTMUStyleLyricsEntries(UIView *root) {
 %end
 @interface YTMNowPlayingView:UIView@end
 %hook YTMNowPlayingView
-- (void)layoutSubviews { %orig; YTMUApplyTheme(self,NO); YTMUStyleLyricsEntries(self); }
+- (void)layoutSubviews { %orig; YTMUStyleLyricsEntries(self); }
+%end
+// The song tint is painted on the whole PLAYER, not on the metadata block.
+// It used to go on YTMNowPlayingView, which is only the title/artist/chips
+// strip, so it rendered as a hard-edged rectangle floating in the middle of a
+// black screen with the transport row sitting on flat black below it. The
+// colours and the three stops are unchanged -- only the host grew, so the same
+// gradient now runs from behind the album art down past the transport
+// controls.
+//
+// YTMNowPlayingView must therefore NOT be a theme host any more: its own
+// opaque backgroundColor would cover the controller's gradient and put the
+// rectangle straight back. Only the chip styling stays behind, on the same
+// host it always had -- it must NOT move to the controller, because
+// -ytmuPlaceLyricsBesideThreeDot sets that chip's cornerRadius to a full pill
+// on every pass, and the two would start fighting over views that used to be
+// out of each other's reach.
+@interface YTMNowPlayingViewController:UIViewController@end
+%hook YTMNowPlayingViewController
+- (void)viewDidLayoutSubviews { %orig; if (CGRectGetWidth(self.view.bounds) < 300) return; YTMUApplyTheme(self.view, NO); }
 %end
 @interface YTMContentViewController:UIViewController@end
 %hook YTMContentViewController

@@ -236,7 +236,13 @@ def api_lyrics_tstream():
                 print(f"[OK] [REQ {req_id}] [TStream] cache hit source={cached.get('source')} "
                       f"lines={len(cached.get('lyrics', []))}")
                 _record_serve(cached, video_id, translate_to, client_ip)
-                yield _sse_event('lyrics', stream_payload(cached, stage='cached', elapsed_ms=elapsed_ms()))
+                # cached=True is the device's "do not animate the translation"
+                # signal: nothing was translated on this request, the lines came
+                # off disk. The `stage` value says the same thing, both are sent
+                # so the client does not have to infer one from the other.
+                yield _sse_event('lyrics', stream_payload(cached, stage='cached',
+                                                          cached=True,
+                                                          elapsed_ms=elapsed_ms()))
                 yield _sse_event('done', {'ok': True, 'source': cached.get('source'),
                                           'synced': cached.get('synced'),
                                           'stages': ['cached'], 'translated': True})
@@ -293,7 +299,8 @@ def api_lyrics_tstream():
                 record_unlyriced(video_id, title, artist, translate_to)
             except Exception:
                 pass
-        yield _sse_event('lyrics', stream_payload(result, stage='raw', elapsed_ms=elapsed_ms()))
+        yield _sse_event('lyrics', stream_payload(result, stage='raw', cached=False,
+                                                 elapsed_ms=elapsed_ms()))
 
         # --- Translation, streamed ---
         stages = ['raw:' + str(result.get('source', ''))]
@@ -341,7 +348,8 @@ def api_lyrics_tstream():
         sanitize_lyrics_parts(result['lyrics'])
         set_cached(full_cache_key, result)
         _record_serve(result, video_id, translate_to, client_ip)
-        yield _sse_event('lyrics', stream_payload(result, stage='final', elapsed_ms=elapsed_ms()))
+        yield _sse_event('lyrics', stream_payload(result, stage='final', cached=False,
+                                                 elapsed_ms=elapsed_ms()))
         yield _sse_event('done', {'ok': True, 'source': result.get('source'),
                                   'synced': result.get('synced'), 'stages': stages,
                                   'translated': translated})
