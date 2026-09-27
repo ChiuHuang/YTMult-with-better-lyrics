@@ -112,24 +112,8 @@ jobs:
       - name: Inject tweak into provided IPA
         run: cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -n "${{ env.DISPLAY_NAME }}" -b ${{ env.BUNDLE_ID }}
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2.5.0
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: YTMusicUltimate (build ${{ github.run_number }})
-          files: |
-            YTMusicUltimate.ipa
-            main/Resources/icon.png
-          draft: false
-          body: |
-            ![YTMusicUltimate](https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png)
-
-            Automated build of YTMusicUltimate.
-
-            - Asia mirror: each build is also uploaded to the file CDN, see the workflow log (`Asia mirror:` line).
-            - AltStore source: https://ytmtranslate.chiuhuang.dev/api/app/altstore
-
       - name: Mirror IPA to file host
+        id: mirror
         env:
           FILE_FOLDER_ID: ${{ secrets.FILE_FOLDER_ID }}
         run: |
@@ -142,7 +126,40 @@ jobs:
             echo "::error::File host upload failed (no download_url in response)"
             exit 1
           fi
+          # Save the URL to GITHUB_ENV so the release step can use it! :3
+          echo "MIRROR_URL=$MIRROR_URL" >> $GITHUB_ENV
           echo "::notice::Asia mirror: $MIRROR_URL"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2.5.0
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: YTMusicUltimate (Build ${{ github.run_number }})
+          files: |
+            YTMusicUltimate.ipa
+            main/Resources/icon.png
+          draft: false
+          body: |
+            <div align="center">
+              <img src="https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png" width="128" height="128" alt="YTMusicUltimate Icon">
+              <h2>YTMusicUltimate</h2>
+            </div>
+
+            Hello! Here is the latest automated build of YTMusicUltimate :3
+
+            ### 📦 Downloads
+            - **[Download IPA]**
+            - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)
+            - **[Asia Mirror](${{ env.MIRROR_URL }})** 
+
+            ### AltStore Source
+            Add our source to your sideloading app to get updates easily! :)
+            ```text
+            [https://ytmtranslate.chiuhuang.dev/api/app/altstore](https://ytmtranslate.chiuhuang.dev/api/app/altstore)
+            ```
+
+            ---
+            *Build: `#${{ github.run_number }}` • App Name: `${{ env.DISPLAY_NAME }}` • Bundle: `${{ env.BUNDLE_ID }}`*
 
       - name: Output Release URL
         run: |
