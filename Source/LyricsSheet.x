@@ -615,15 +615,25 @@ static BOOL s_retranslateRunning = NO;
 //   s_ytmuArtRequestKey  video id whose cover this instance already asked for
 //   s_ytmuBlurStyleKey   last blur style this instance applied
 //   s_ytmuBlurHaveKey    whether that last style is meaningful
+//   s_ytmuClosedByRotationKey  this instance was closed by the rotate-to-
+//                              portrait path or by the auto-open switch going
+//                              off, and no late payload may un-hide it again
 static char s_ytmuArtRequestKey;
 static char s_ytmuBlurStyleKey;
 static char s_ytmuBlurHaveKey;
+static char s_ytmuClosedByRotationKey;
 
 // Private selectors used across the controller
 @interface YTMULyricsViewController (LandscapePrivate)
 - (void)ytmu_assertOnTop;
 - (void)ytmu_collapseHostingPanel;
 - (void)ytmu_restoreHostingPanelChrome;
+- (void)ytmu_collapseRevealedNativeLyrics;
+- (UIViewController *)ytmu_resolveHostingPanel;
+- (BOOL)ytmu_tryCollapseTarget:(id)target;
+- (void)ytmu_closeFullscreenWithReason:(NSString *)reason;
+- (void)ytmu_enforceFullscreenAutoOpen;
+- (void)ytmu_settingsChanged:(NSNotification *)note;
 - (void)ytmu_applyHeaderButtonsForLandscape:(BOOL)landscape;
 - (void)ytmu_requestArtworkOnce:(NSString *)videoID;
 - (NSString *)ytmu_artworkTargetVideoID;
@@ -673,6 +683,7 @@ static char s_ytmuBlurHaveKey;
 - (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
 - (void)ytmu_loadProviderMetaForVideo:(NSString *)videoID;
 - (void)ytmu_loadProviderLyricsForVideo:(NSString *)videoID;
+- (void)ytmu_startFullFetchForVideoID:(NSString *)videoID force:(BOOL)force from:(NSString *)from;
 @end
 
 BOOL YTMUIsInterfaceLandscape(void) {
@@ -705,6 +716,77 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
     [obj performSelector:sel];
 #pragma clang diagnostic pop
+}
+
+// "This instance was closed and must stay closed." Latched by the
+// rotate-to-portrait close and by the auto-open switch going off while the
+// panel is up, and consulted by every path that can bring the view back:
+// updateLyrics: un-hides on any payload, and YTMULyricsDidLoad is a
+// PROCESS-WIDE notification filtered only by video id, so a sibling
+// instance's fetch used to resurrect a panel the user had just dismissed.
+// Per-instance on purpose (associated object, not a file static) for the same
+// reason as the other keys above: the modal and the embedded panel are
+// frequently alive at the same time.
+static BOOL YTMUIsClosedByRotation(id target) {
+    if (!target) return NO;
+    return [objc_getAssociatedObject(target, &s_ytmuClosedByRotationKey) boolValue];
+}
+static void YTMUSetClosedByRotation(id target, BOOL closed) {
+    if (!target) return;
+    objc_setAssociatedObject(target, &s_ytmuClosedByRotationKey, @(closed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Orientation generation. Every orientation DECISION bumps it, and the two
+// self-rescheduling retry chains (the landscape open chain and the post-tap
+// fallback present) carry the value they were armed with: a decision that
+// lands while a chain is mid-flight invalidates it instead of racing it.
+// Without this, a chain armed for a landscape that is being rotated away still
+// gets ~2.75s of retries to present behind the close.
+static NSUInteger s_ytmuOrientationGeneration = 0;
+static NSUInteger YTMUBumpOrientationGeneration(void) {
+    return ++s_ytmuOrientationGeneration;
+}
+static NSUInteger YTMUCurrentOrientationGeneration(void) {
+    return s_ytmuOrientationGeneration;
+}
+
+// The landscape fullscreen is a feature with a switch, not a behaviour: a
+// missing key means ON, so an install that predates the settings row keeps
+// auto-opening exactly as before.
+static BOOL YTMULandscapeAutoOpenEnabled(void) {
+    return YTMULyricsPreference(@"lyricsFullscreenAutoOpen", YES);
+}
+
+// True when `view` really lives inside `ancestor`'s view hierarchy. The
+// nextResponder walk answers the NEAREST controller, so the collapse path
+// needs this before it acts on a host: a controller that merely sits above us
+// in the responder chain owns something else entirely.
+static BOOL YTMUViewIsInsideView(UIView *view, UIView *ancestor) {
+    if (!view || !ancestor) return NO;
+    for (UIView *v = view; v; v = v.superview) {
+        if (v == ancestor) return YES;
+    }
+    return NO;
+}
+
+// The tag-9999 view (our embedded lyrics) if one is really on screen. The
+// close path uses it as the "is a lyrics-shaped view still up" test, which is
+// what isLyricsViewVisibleOnScreen() answers but hands back the view itself.
+static UIView *YTMULyricsTaggedViewOnScreen(void) {
+    UIWindow *win = [UIApplication sharedApplication].keyWindow;
+    if (!win) {
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (w.isKeyWindow || w.rootViewController) { win = w; break; }
+        }
+    }
+    if (!win) return nil;
+    UIView *tagged = [win viewWithTag:9999];
+    if (!tagged || tagged.hidden || tagged.alpha < 0.05 || !tagged.window) return nil;
+    CGRect screenBounds = [UIScreen mainScreen].bounds;
+    CGRect r = [tagged convertRect:tagged.bounds toView:nil];
+    CGRect isect = CGRectIntersection(screenBounds, r);
+    if (!(isect.size.width > 50 && isect.size.height > 100)) return nil;
+    return tagged;
 }
 
 @implementation YTMULyricsViewController
@@ -1075,6 +1157,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleSongChange:) name:@"YTMUSongDidChange" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLyricsDidLoad:) name:@"YTMULyricsDidLoad" object:nil];
+    // The auto-open switch can be flipped while this panel is up (from the
+    // settings page), and the user expects it to go away rather than stay
+    // stranded until the next rotation. The tick re-checks at ~1/s as a backstop
+    // for a write that does not raise the notification.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(ytmu_settingsChanged:)
+                                                 name:NSUserDefaultsDidChangeNotification
+                                               object:nil];
 
     // Two-rate tick: the link runs at 120fps so ANIMATIONS (wipe mask,
     // activation pop, scrolling) stay smooth, but lyric STATE work stays
@@ -1125,22 +1215,107 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)dismissModal {
     if (self.presentingViewController || self.navigationController.presentingViewController) {
         [self dismissViewControllerAnimated:YES completion:nil];
+        // Whatever this sheet was covering is about to become visible. If it is
+        // another lyrics surface, the user is left looking at two of them and
+        // the second one has no close control they know about, so it goes too.
+        // Deferred past the dismissal animation: the panel only becomes the
+        // top-most controller once our view is out of the way.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self ytmu_collapseRevealedNativeLyrics];
+        });
         return;
     }
     // Embedded (engagement panel tag 9999): leaving means putting the panel
     // back exactly as we found it. ytmu_assertOnTop hides our siblings (and the
     // panel's own header, so only one close control is ever on screen) and
     // nothing un-hid them before, which left a blank panel after leaving.
-    [self ytmu_restoreHostingPanelChrome];
+    // The whole branch is behind the superview test: with no container we are
+    // not embedded in anything (the panel already dropped us, or this was a
+    // sheet that never landed in one), and un-hiding a panel we never touched
+    // or collapsing a host that does not own us would take an unrelated view
+    // down on the way out.
     if (self.view.superview) {
+        [self ytmu_restoreHostingPanelChrome];
         self.view.hidden = YES;
         sendDebugLog(@"[MUSIC] landscape exit: hid embedded lyrics view");
+        // The panel itself has to go too, otherwise a landscape user who
+        // reached this state through the embedded panel is left looking at it.
+        // Safe by construction: if no collapse selector answers, the panel
+        // simply shows its own content again, with its own close control back
+        // in the header.
+        [self ytmu_collapseHostingPanel];
     }
-    // The panel itself has to go too, otherwise a landscape user who reached
-    // this state through the embedded panel is left looking at it. Safe by
-    // construction: if no collapse selector answers, the panel simply shows
-    // its own content again, with its own close control back in the header.
-    [self ytmu_collapseHostingPanel];
+}
+
+// Close the fullscreen, whoever asked for it (rotate to portrait, the auto-open
+// switch going off, and the exit buttons keep their own path through
+// dismissModal). Two things this adds on top of the dismissal itself:
+//
+//   1. The "stay closed" latch. updateLyrics: un-hides the view on any
+//      payload, and YTMULyricsDidLoad is process-wide and filtered only by
+//      video id, so a fetch belonging to a sibling instance landed here after
+//      the close and brought the panel straight back.
+//   2. The state a close must release. Left latched, the next open sits at
+//      "Waiting..." until the 45s fetch-slot reclaim, because this instance
+//      still owns the instance slot and possibly the process-wide one.
+- (void)ytmu_closeFullscreenWithReason:(NSString *)reason {
+    if (YTMUIsClosedByRotation(self)) {
+        sendDebugLog(@"[MUSIC] landscape fullscreen already closed, ignoring repeat close");
+        return;
+    }
+    YTMUSetClosedByRotation(self, YES);
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape fullscreen closing: %@",
+                  reason.length ? reason : @"unspecified"]);
+
+    // Producers first, in the order that stops them from repainting a view
+    // that is on its way out: the provider probe, the retranslate latch (which
+    // also restores the toolbar) and the translate stream. The stream is
+    // cancelled BEFORE the dismissal, so a line cannot land between the close
+    // and the teardown.
+    [self ytmu_stopProviderPoll];
+    [self ytmu_setProbing:NO];
+    if (s_retranslateRunning) [self ytmu_endRetranslate:NO];
+    [self ytmu_cancelTranslateStream];
+
+    self.isLoading = NO;
+    self.loadingSince = nil;
+    // Only the instance that claimed the process-wide slot may hand it back: a
+    // sibling instance fetching the same song would otherwise lose its own.
+    NSString *mine = self.loadingVideoID;
+    if (g_globalLoadingInFlight && mine.length && [g_globalLoadingVideoID isEqualToString:mine]) {
+        YTMUReleaseGlobalFetch();
+    }
+    // Visible: from here the view is never on screen again for this instance
+    // (dismissModal hides the embedded one, the dismissal takes the modal's
+    // view out of the window), and every re-show path now checks the latch.
+    [self dismissModal];
+}
+
+// The auto-open switch has the final word over the panel it owns. Read from the
+// tick (~1/s) and from the settings-changed notification, so switching it off
+// while the fullscreen is up takes the panel down immediately instead of
+// stranding it until the next rotation.
+- (void)ytmu_enforceFullscreenAutoOpen {
+    if (YTMULandscapeAutoOpenEnabled()) return;
+    // The switch governs the LANDSCAPE fullscreen only: a portrait bottom sheet
+    // opened by a tap belongs to that tap, and must survive the switch.
+    if (!YTMUIsInterfaceLandscape()) return;
+    if (YTMUIsClosedByRotation(self)) return;
+    if (self.view.hidden || self.view.alpha < 0.05 || !self.view.window) return;
+    [self ytmu_closeFullscreenWithReason:@"lyricsFullscreenAutoOpen switched off"];
+}
+
+- (void)ytmu_settingsChanged:(NSNotification *)note {
+    // App defaults churn (YT writes its own keys constantly), so keep this to
+    // one dictionary read and a pointer-free decision. NSUserDefaults posts on
+    // whichever thread wrote; the work itself is main-thread UI.
+    if ([NSThread isMainThread]) {
+        [self ytmu_enforceFullscreenAutoOpen];
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self ytmu_enforceFullscreenAutoOpen];
+    });
 }
 
 // Undo everything ytmu_assertOnTop hid while our lyrics were on top. The panel
@@ -1151,28 +1326,48 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     for (UIView *sub in container.subviews) {
         if (sub != self.view && sub.tag != 9999) sub.hidden = NO;
     }
+    // The re-order below is meaningless without a parent, and the header is a
+    // child of it: bail rather than un-hide views in a container the window has
+    // already torn down.
+    UIView *parent = container.superview;
+    if (!parent) return;
     UIView *panelHeader = YTMUPanelHeaderSibling(container);
     if (panelHeader) {
         panelHeader.hidden = NO;
-        [container.superview bringSubviewToFront:panelHeader];
+        [parent bringSubviewToFront:panelHeader];
     }
-    [container.superview bringSubviewToFront:container];
+    [parent bringSubviewToFront:container];
 }
 
-// Collapse/dismiss the panel our view is embedded in. Every hop is behind
-// respondsToSelector + @try, and the call is wrapped: an unknown YT selector
-// must never cost the user their way out of the panel.
-- (void)ytmu_collapseHostingPanel {
-    UIViewController *host = [self.view _viewControllerForAncestor];
-    if (!host) host = (UIViewController *)self.view.superview.superview.nextResponder;
-    if (![host isKindOfClass:[UIViewController class]] || host == (UIViewController *)self) {
-        sendDebugLog(@"[MUSIC] landscape exit: no host view controller, panel left as-is");
-        return;
+// The panel our view is embedded in, or nil. _viewControllerForAncestor
+// answers the NEAREST controller, which for our own view is this very
+// controller (and for the embedded instance the next hop up is whatever sheet
+// happens to be above us), so walk the responder chain and keep the first
+// controller that is neither us nor a sibling of ours AND that demonstrably
+// contains our view. A host we cannot prove owns us is a host we must not
+// collapse: that was how the last-resort dismissal could take an unrelated
+// view controller down with it.
+- (UIViewController *)ytmu_resolveHostingPanel {
+    for (UIView *v = self.view; v; v = v.superview) {
+        // nextResponder is typed UIResponder *, so the class test and the cast
+        // both have to happen here.
+        id responder = [v nextResponder];
+        if (![responder isKindOfClass:[UIViewController class]]) continue;
+        UIViewController *vc = (UIViewController *)responder;
+        if ((UIViewController *)self == vc) continue;
+        if ([vc isKindOfClass:[YTMULyricsViewController class]]) continue;
+        if (!YTMUViewIsInsideView(self.view, vc.view)) continue;
+        return vc;
     }
-    NSMutableArray *targets = [NSMutableArray array];
-    if (host) [targets addObject:host];
-    id container = g_activeEngagementPanelContainer;
-    if (container && ![container isEqual:host]) [targets addObject:container];
+    return nil;
+}
+
+// One guarded pass of the collapse selector list over one target. Every hop is
+// behind respondsToSelector + @try, and the call is wrapped: an unknown YT
+// selector must never cost the user their way out of the panel. YES when a
+// selector actually answered, so the caller knows whether to keep looking.
+- (BOOL)ytmu_tryCollapseTarget:(id)target {
+    if (!target) return NO;
     SEL oneArgBool[] = {
         @selector(dismissEngagementPanelAnimated:),
         @selector(closeEngagementPanelAnimated:),
@@ -1182,41 +1377,119 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         @selector(collapseEngagementPanel),
         @selector(dismissEngagementPanel),
     };
-    for (id target in targets) {
-        for (NSUInteger i = 0; i < sizeof(oneArgBool) / sizeof(oneArgBool[0]); i++) {
-            if (![target respondsToSelector:oneArgBool[i]]) continue;
-            @try {
+    for (NSUInteger i = 0; i < sizeof(oneArgBool) / sizeof(oneArgBool[0]); i++) {
+        if (![target respondsToSelector:oneArgBool[i]]) continue;
+        @try {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-                [target performSelector:oneArgBool[i] withObject:@YES];
+            [target performSelector:oneArgBool[i] withObject:@YES];
 #pragma clang diagnostic pop
-                sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
-                              NSStringFromSelector(oneArgBool[i])]);
-                return;
-            } @catch (NSException *e) {
-                sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
-            }
-        }
-        for (NSUInteger i = 0; i < sizeof(noArg) / sizeof(noArg[0]); i++) {
-            if (![target respondsToSelector:noArg[i]]) continue;
-            @try {
-                YTMUInvokeNoArgs(target, noArg[i]);
-                sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
-                              NSStringFromSelector(noArg[i])]);
-                return;
-            } @catch (NSException *e) {
-                sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
-            }
+            sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
+                          NSStringFromSelector(oneArgBool[i])]);
+            return YES;
+        } @catch (NSException *e) {
+            sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
         }
     }
+    for (NSUInteger i = 0; i < sizeof(noArg) / sizeof(noArg[0]); i++) {
+        if (![target respondsToSelector:noArg[i]]) continue;
+        @try {
+            YTMUInvokeNoArgs(target, noArg[i]);
+            sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
+                          NSStringFromSelector(noArg[i])]);
+            return YES;
+        } @catch (NSException *e) {
+            sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
+        }
+    }
+    return NO;
+}
+
+// Collapse/dismiss the panel our view is embedded in.
+- (void)ytmu_collapseHostingPanel {
+    UIViewController *host = [self ytmu_resolveHostingPanel];
+    if (!host) {
+        sendDebugLog(@"[MUSIC] landscape exit: no host view controller, panel left as-is");
+        return;
+    }
+    NSMutableArray *targets = [NSMutableArray array];
+    [targets addObject:host];
+    id container = g_activeEngagementPanelContainer;
+    if (container && ![container isEqual:host]) [targets addObject:container];
+    for (id target in targets) {
+        if ([self ytmu_tryCollapseTarget:target]) return;
+    }
     // Last resort: the panel VC is itself presented, so dismissing it is the
-    // one exit that always exists.
-    if (host.presentedViewController || host.presentingViewController) {
+    // one exit that always exists. Gated on the host really containing our view
+    // (the resolver proved that) and on it not already going away: with the
+    // view detached -- the panel collapsed itself first, say -- there is
+    // nothing of ours left in it, and dismissing it would take a controller
+    // the user never had on screen down with them.
+    if (YTMUViewIsInsideView(self.view, host.view) && !host.isBeingDismissed &&
+        (host.presentedViewController || host.presentingViewController)) {
         [host dismissViewControllerAnimated:YES completion:nil];
         sendDebugLog(@"[MUSIC] landscape exit: dismissed hosting panel");
         return;
     }
     sendDebugLog(@"[MUSIC] landscape exit: no collapse selector, native panel left visible");
+}
+
+// Nothing lyrics-shaped may survive our fullscreen. Closing it can uncover the
+// native panel we were covering (tag 9999's host, the engagement panel behind
+// the sheet, or a lyrics panel presented under us), and a second lyrics view
+// with no close control of its own is worse than no lyrics view at all. Runs
+// after the dismissal animation, so the thing we are looking for is on top by
+// then.
+//
+// Two ways to tell something is still up: our own tag-9999 view is on screen,
+// or the top-most controller IS a lyrics panel. Both are proofs, not guesses,
+// which is what lets the dismissal fallback below stay safe.
+//
+// Reachability, most precise first: the controller that owns the tag-9999 view,
+// the tracked engagement panel container, and the top-most controller when it
+// is itself a lyrics panel. Same guarded selector pass as the hosting-panel
+// collapse, and the same "refuse unless it owns us" rule on the dismissal.
+- (void)ytmu_collapseRevealedNativeLyrics {
+    UIView *tagged = YTMULyricsTaggedViewOnScreen();
+    UIViewController *top = topMostViewController();
+    BOOL topIsLyricsPanel = isLyricsEngagementPanel(top);
+    if (!tagged && !topIsLyricsPanel) {
+        sendDebugLog(@"[MUSIC] landscape exit: nothing lyrics-shaped left behind, no collapse needed");
+        return;
+    }
+    NSMutableArray *targets = [NSMutableArray array];
+    UIViewController *panelHost = nil;
+    for (UIView *v = tagged; v && !panelHost; v = v.superview) {
+        id responder = [v nextResponder];
+        if (![responder isKindOfClass:[UIViewController class]]) continue;
+        UIViewController *vc = (UIViewController *)responder;
+        if ([vc isKindOfClass:[YTMULyricsViewController class]]) continue;
+        if (!YTMUViewIsInsideView(tagged, vc.view)) continue;
+        panelHost = vc;
+    }
+    if (panelHost) [targets addObject:panelHost];
+    id container = g_activeEngagementPanelContainer;
+    if (container && ![container isEqual:panelHost]) [targets addObject:container];
+    if (top && topIsLyricsPanel && ![targets containsObject:top]) [targets addObject:top];
+
+    for (id target in targets) {
+        if ([self ytmu_tryCollapseTarget:target]) return;
+    }
+    // Fallbacks, each behind a proof: the controller that demonstrably contains
+    // the lyrics view, or a top-most controller already identified as a lyrics
+    // panel. Never this controller, and never a view controller we cannot show
+    // is lyrics-shaped.
+    UIViewController *dismissible = panelHost ?: (topIsLyricsPanel ? top : nil);
+    UIView *proof = tagged ?: top.view;
+    if (dismissible && dismissible != (UIViewController *)self && !dismissible.isBeingDismissed &&
+        YTMUViewIsInsideView(proof, dismissible.view) &&
+        (dismissible.presentedViewController || dismissible.presentingViewController)) {
+        [dismissible dismissViewControllerAnimated:YES completion:nil];
+        sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: dismissed revealed %@",
+                      panelHost ? @"native lyrics panel" : @"lyrics panel"]);
+        return;
+    }
+    sendDebugLog(@"[WARN] landscape exit: a lyrics view is still on screen and no collapse path answered");
 }
 
 // Video titles carry qualifiers the track name does not ("(Official Video)",
@@ -1731,18 +2004,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.loadingVideoID = videoID;
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] retranslate requested for %@", videoID]);
 
-    __block BOOL jwtResolved = NO;
-    [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-        if (jwtResolved) return;
-        jwtResolved = YES;
-        [self fetchFullLyricsForVideo:videoID jwt:jwt force:YES];
-    }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (jwtResolved) return;
-        jwtResolved = YES;
-        sendDebugLog(@"[WARN] JWT timeout, retranslate without JWT");
-        [self fetchFullLyricsForVideo:videoID jwt:nil force:YES];
-    });
+    // No Turnstile gate: fire it now and let the server pool cover the JWT.
+    // The 10s "JWT timeout" fallback that used to race this is gone -- there is
+    // no second fetch to fall back to, so the request is never duplicated and
+    // the toolbar can never sit dimmed waiting on a challenge.
+    [self ytmu_startFullFetchForVideoID:videoID force:YES from:@"retranslate"];
     // Same 45s watchdog the fetch slots use: a stream or a full fetch that
     // never reports back must not leave the toolbar dimmed forever.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -2521,6 +2787,72 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+// Rotating INTO landscape is the auto-open path's business (the device
+// orientation observer), never ours. Rotating back to portrait closes us: the
+// landscape fullscreen is a landscape layout, and surviving the rotation left a
+// fullscreen PORTRAIT sheet the user never asked for.
+//
+// This is the INTERFACE orientation hook, which is what makes it safe where
+// UIDeviceOrientationDidChangeNotification is not: a face-up jitter in
+// landscape never gets here, so it can never close the panel.
+- (void)viewWillTransitionToSize:(CGSize)toSize
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    [super viewWillTransitionToSize:toSize withTransitionCoordinator:coordinator];
+    if (toSize.width > toSize.height) return;
+
+    // Both configurations reach this (the embedded instance's view is inside
+    // the rotating window), but only an instance that is actually the thing on
+    // screen may act. A parked, hidden embedded instance is just sitting in the
+    // panel: closing it would restore chrome and collapse a panel the user is
+    // happily using.
+    if (self.view.hidden || self.view.alpha < 0.05 || !self.view.window) return;
+    // Only the fullscreen presentation is "the fullscreen": the tap fallback is
+    // a page sheet, which has always followed the rotation and keeps doing so.
+    if (self.isModal && self.modalPresentationStyle != UIModalPresentationFullScreen) return;
+    // Anything presented above us owns the screen right now. A sibling lyrics
+    // instance closes itself (one rotation must not tear the same panel down
+    // twice), and a foreign sheet above us -- the settings page, say -- must
+    // never have the view under it pulled out from underneath it.
+    if (self.presentedViewController) return;
+    UIViewController *topMost = topMostViewController();
+    if (topMost != self && [topMost isKindOfClass:[YTMULyricsViewController class]]) {
+        sendDebugLog(@"[MUSIC] rotate to portrait: another lyrics instance is on top, standing down");
+        return;
+    }
+
+    // Bump now, not at completion: a chain armed for the landscape orientation
+    // that is ending must be dead before anything can present behind the close.
+    // The value is re-checked in the completion block, so a decision taken
+    // since (a rotate back to landscape) wins over this one.
+    NSUInteger generation = YTMUBumpOrientationGeneration();
+    void (^close)(void) = ^{
+        if (generation != YTMUCurrentOrientationGeneration()) {
+            sendDebugLog(@"[MUSIC] rotate to portrait: superseded by a newer orientation decision");
+            return;
+        }
+        // Re-check the INTERFACE: a rotation back to landscape inside the same
+        // gesture (or one that started before this close landed) must keep the
+        // panel up, not close it and let the stale chain re-present it.
+        if (YTMUIsInterfaceLandscape()) {
+            sendDebugLog(@"[MUSIC] rotate to portrait: interface is landscape again, keeping the panel");
+            return;
+        }
+        [self ytmu_closeFullscreenWithReason:@"rotated back to portrait"];
+    };
+    if (coordinator) {
+        [coordinator animateAlongsideTransition:nil
+                                    completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+            close();
+        }];
+    } else {
+        // No coordinator: fall back to one rotation-animation's worth of delay
+        // so we never dismiss mid-rotation.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            close();
+        });
+    }
+}
+
 // The song whose cover this instance is showing or has claimed: the DISPLAY
 // intent first, then the loading slot, then the global. Deliberately not
 // loadingVideoID alone -- ytmu_selectProvider writes that one back from the id
@@ -2551,6 +2883,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    // Appearing IS a new open, so the rotate/pref close latch is dropped here:
+    // it guards the close, not the lifetime of the instance (the embedded one
+    // outlives every close and is reused by the panel).
+    YTMUSetClosedByRotation(self, NO);
     [self ytmu_assertOnTop];
     NSString *vid = YTMUResolveCurrentVideoID();
     if (vid) {
@@ -2564,6 +2900,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)handleLyricsDidLoad:(NSNotification *)notif {
+    // A closed instance stays closed. This notification is process-wide and
+    // filtered only by video id, so a fetch belonging to a sibling instance
+    // (the modal and the embedded panel are both alive during a rotation) used
+    // to re-show a panel the user had just dismissed.
+    if (YTMUIsClosedByRotation(self)) return;
     NSString *videoID = notif.object;
     NSArray *lyrics = notif.userInfo[@"lyrics"];
     if (videoID && lyrics && [videoID isEqualToString:g_currentVideoID]) {
@@ -2853,6 +3194,36 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }] resume];
 }
 
+// The ONLY way a full fetch is started. Turnstile is never a gate here.
+//
+// The server falls back to its own shared JWT pool whenever a request carries
+// no `jwt` param (server/pipeline.py does `if not jwt_token: jwt_token =
+// pick_jwt()`), and that pool is kept warm by every device that contributes a
+// token on any /api/lyrics request. So a missing token costs us NOTHING: the
+// request just goes out immediately and the server picks one. Waiting for a
+// local challenge instead meant a cold start sat idle for up to 10s on the
+// very request that is also the SSE translation stream (see
+// YTMULyricsStreamTranslateEnabled in fetchFullLyricsForVideo: below), which
+// is the whole point of that fetch.
+//
+// Route taken:
+//   cached token  a token is already on the manager, so it rides along for free
+//   pool          none cached, so the request goes out with none and the server
+//                 pool answers it; the challenge is kicked off in the
+//                 background purely to keep the manager warm for later requests
+//                 and to contribute a token to that pool on the next call.
+//                 Fire-and-forget: the completion is nil, so a token that
+//                 arrives later never triggers a second fetch.
+- (void)ytmu_startFullFetchForVideoID:(NSString *)videoID force:(BOOL)force from:(NSString *)from {
+    NSString *cached = [YTMUTurnstileManager sharedManager].jwtToken;
+    BOOL haveCached = (cached.length > 0);
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] full fetch without waiting for Turnstile (%@, %@)",
+                  haveCached ? @"cached token" : @"pool", from ?: @"fetch"]);
+    [self fetchFullLyricsForVideo:videoID jwt:(haveCached ? cached : nil) force:force];
+    if (haveCached) return;
+    [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
+}
+
 - (void)fetchFullLyricsForVideo:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force {
     if (![self.loadingVideoID isEqualToString:videoID]) {
         self.isLoading = NO;
@@ -2960,10 +3331,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self ytmu_updateLandscapeMetadata];
             if ([dict[@"upgrade"] boolValue]) {
                 sendDebugLog(@"[MUSIC] Server has a better lyrics tier, upgrading");
-                [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-                    if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
-                    [self fetchFullLyricsForVideo:videoID jwt:jwt force:NO];
-                }];
+                // Same still-current check the old Turnstile completion did,
+                // just moved in front of the call instead of inside it: a
+                // stale check must not fetch for a song that already moved on.
+                if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
+                [self ytmu_startFullFetchForVideoID:videoID force:NO from:@"upgrade"];
             }
         });
     }] resume];
@@ -2971,6 +3343,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)fetchLyricsForVideo:(NSString *)videoID {
     if (!videoID || videoID.length == 0) return;
+
+    // Being asked for lyrics again is an open, so the close latch goes: the
+    // re-open path (settings toggle, the panel coming back, a song change)
+    // lands here and must be able to paint again.
+    YTMUSetClosedByRotation(self, NO);
 
     if (!g_lyricsCache) {
         g_lyricsCache = [[NSMutableDictionary alloc] init];
@@ -3097,19 +3474,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 }
             }
 
-            __block BOOL jwtResolved = NO;
-            [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-                if (jwtResolved) return;
-                jwtResolved = YES;
-                [self fetchFullLyricsForVideo:videoID jwt:jwt force:NO];
-            }];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                if (!jwtResolved && [self.loadingVideoID isEqualToString:videoID]) {
-                    jwtResolved = YES;
-                    sendDebugLog(@"[WARN] JWT timeout, full fetch without JWT");
-                    [self fetchFullLyricsForVideo:videoID jwt:nil force:NO];
-                }
-            });
+            // Upgrade needed. Go straight at it: no Turnstile gate, no 10s
+            // wait for a local challenge. fetchFullLyricsForVideo: re-checks
+            // loadingVideoID on its own (and releases the slots it claimed if
+            // the song moved on), so the guard the old timeout branch did is
+            // still covered.
+            [self ytmu_startFullFetchForVideoID:videoID force:NO from:@"fast"];
         });
     }] resume];
 }
@@ -3259,6 +3629,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     static int ytmuTopAssertTick = 0;
     if ((++ytmuTopAssertTick % 120) == 0) {
         [self ytmu_assertOnTop];
+    }
+    // Backstop for the auto-open switch (the settings notification is the fast
+    // path): same ~1/s rate, one NSUserDefaults dictionary read.
+    static int ytmuAutoOpenTick = 0;
+    if ((++ytmuAutoOpenTick % 120) == 0) {
+        [self ytmu_enforceFullscreenAutoOpen];
     }
     if (self.landscapeInfoPanel && !self.landscapeInfoPanel.hidden) {
         [self ytmu_updateLandscapeProgress];
@@ -3449,19 +3825,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     objc_setAssociatedObject(self, &s_ytmuArtRequestKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
     [self ytmu_requestArtworkOnce:g_currentVideoID];
 
-    __block BOOL jwtResolved = NO;
-    [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
-        if (jwtResolved) return;
-        jwtResolved = YES;
-        [self fetchFullLyricsForVideo:g_currentVideoID jwt:jwt force:YES];
-    }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!jwtResolved && [self.loadingVideoID isEqualToString:g_currentVideoID]) {
-            jwtResolved = YES;
-            sendDebugLog(@"[WARN] JWT timeout, force reload without JWT");
-            [self fetchFullLyricsForVideo:g_currentVideoID jwt:nil force:YES];
-        }
-    });
+    // Force still forces; it just no longer waits on Turnstile. force=1 makes
+    // the server re-race every provider, and the server pool supplies the JWT.
+    // The id is snapshotted here (the old timeout branch re-read the global up
+    // to 10s later) and fetchFullLyricsForVideo: validates it against
+    // loadingVideoID, which was just set to the same value above.
+    [self ytmu_startFullFetchForVideoID:g_currentVideoID force:YES from:@"force"];
 }
 
 - (void)updateLyrics:(NSArray *)newLyrics {
@@ -3536,6 +3905,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         [self.tableView reloadData];
     }
 
+    // A closed instance must not come back. Everything above still runs (the
+    // rows are kept warm for the next open), but the un-hide below is the one
+    // line that puts a view the user just dismissed back on screen.
+    if (YTMUIsClosedByRotation(self)) {
+        sendDebugLog(@"[MUSIC] lyrics payload landed on a closed view, staying hidden");
+        return;
+    }
     if (newLyrics.count > 0 && (self.isModal || YTMULyricsPreference(@"lyricsAlwaysOn", YES))) {
         self.view.hidden = NO;
         [self ytmu_assertOnTop];
@@ -3958,7 +4334,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 @end
 
 
-static void __attribute__((unused)) YTMUAttemptFallbackPresent(NSString *resolvedVideoID, int attempt) {
+// Post-tap fallback: present the bottom sheet when the native panel path did
+// not put anything on screen. Retries three times at 0.2s, so it is a
+// self-rescheduling chain too and needs the same cancellation as the landscape
+// chain: the generation it was armed with must still be the current one.
+static void __attribute__((unused)) YTMUAttemptFallbackPresent(NSString *resolvedVideoID, int attempt, NSUInteger generation) {
+    if (generation != YTMUCurrentOrientationGeneration()) {
+        sendDebugLog(@"[MUSIC] fallback present cancelled: a newer orientation decision won");
+        return;
+    }
     if (isLyricsViewVisibleOnScreen()) {
         sendDebugLog(@"[MUSIC] Native lyrics panel already visible on screen, skipping fallback");
         return;
@@ -3978,7 +4362,7 @@ static void __attribute__((unused)) YTMUAttemptFallbackPresent(NSString *resolve
 
     if (attempt < 3) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            YTMUAttemptFallbackPresent(resolvedVideoID, attempt + 1);
+            YTMUAttemptFallbackPresent(resolvedVideoID, attempt + 1, generation);
         });
         return;
     }
@@ -4034,7 +4418,7 @@ void openLyricsFromViewController(UIViewController *parentVC) {
         sendDebugLog(@"[WARN] openLyrics: no active engagement panel container captured, native panel path skipped entirely");
     }
 
-    YTMUAttemptFallbackPresent(resolvedVideoID, 0);
+    YTMUAttemptFallbackPresent(resolvedVideoID, 0, YTMUCurrentOrientationGeneration());
 }
 
 void openLyricsFullscreenForLandscape(void) {
@@ -4043,6 +4427,13 @@ void openLyricsFullscreenForLandscape(void) {
         return;
     }
     if (!YTMUIsInterfaceLandscape()) return;
+    // Read at the present site too, not only where the chain is armed: this is
+    // the last gate before a view controller exists, and the switch may have
+    // been flipped while a chain was mid-flight.
+    if (!YTMULandscapeAutoOpenEnabled()) {
+        sendDebugLog(@"[MUSIC] landscape open suppressed: lyricsFullscreenAutoOpen is off");
+        return;
+    }
 
     UIViewController *top = topMostViewController();
     if (!top) return;
@@ -4073,12 +4464,26 @@ void openLyricsFullscreenForLandscape(void) {
 // the video ID isn't resolved yet. Keep trying while the phone stays
 // landscape; every attempt re-checks visibility first so we never double
 // present.
-static void YTMUAttemptLandscapeOpenChain(int left) {
+//
+// `generation` is the orientation decision that armed it. A newer decision --
+// a rotate back to portrait, a close, the switch going off -- bumps the
+// generation, and a stale chain stops instead of spending its remaining ~2.75s
+// of retries looking for a chance to present.
+static void YTMUAttemptLandscapeOpenChain(int left, NSUInteger generation) {
     if (left <= 0) return;
+    if (generation != YTMUCurrentOrientationGeneration()) {
+        sendDebugLog(@"[MUSIC] landscape open chain cancelled: superseded by a newer decision");
+        return;
+    }
+    // Re-read per step: the switch can go off while the chain is in flight.
+    if (!YTMULandscapeAutoOpenEnabled()) {
+        sendDebugLog(@"[MUSIC] landscape open chain cancelled: lyricsFullscreenAutoOpen is off");
+        return;
+    }
     if (isLyricsViewVisibleOnScreen()) return;
     if (!YTMUIsInterfaceLandscape()) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            YTMUAttemptLandscapeOpenChain(left - 1);
+            YTMUAttemptLandscapeOpenChain(left - 1, generation);
         });
         return;
     }
@@ -4086,11 +4491,34 @@ static void YTMUAttemptLandscapeOpenChain(int left) {
     UIViewController *top = topMostViewController();
     if (!vid.length || !top || top.presentedViewController || top.isBeingPresented || top.isBeingDismissed) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            YTMUAttemptLandscapeOpenChain(left - 1);
+            YTMUAttemptLandscapeOpenChain(left - 1, generation);
         });
         return;
     }
     openLyricsFullscreenForLandscape();
+}
+
+// The single arming point. The device notification PRECEDES the interface
+// rotation, so the interface is only trusted after a deferral longer than a
+// rotation animation: a face-up jitter in landscape must not arm a chain, and
+// a rotate to portrait must not re-arm one for the landscape it just left.
+static void YTMULandscapeArm(int budget) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!YTMULandscapeAutoOpenEnabled()) {
+            sendDebugLog(@"[MUSIC] landscape open not armed: lyricsFullscreenAutoOpen is off");
+            // A decision not to open still invalidates whatever a previous
+            // orientation armed, so its chain cannot present behind the switch.
+            YTMUBumpOrientationGeneration();
+            return;
+        }
+        if (!YTMUIsInterfaceLandscape()) {
+            sendDebugLog(@"[MUSIC] landscape open not armed: interface is portrait");
+            YTMUBumpOrientationGeneration();
+            return;
+        }
+        NSUInteger generation = YTMUBumpOrientationGeneration();
+        YTMUAttemptLandscapeOpenChain(budget, generation);
+    });
 }
 
 static void YTMULandscapeOrientationChanged(NSNotification *note) {
@@ -4098,15 +4526,13 @@ static void YTMULandscapeOrientationChanged(NSNotification *note) {
     BOOL deviceLandscape = (o == UIDeviceOrientationLandscapeLeft || o == UIDeviceOrientationLandscapeRight);
     if (!deviceLandscape) {
         // Missed earlier (flat rotation, late observer, already landscape on
-        // entry): if the interface is landscape anyway, still try.
-        if (!YTMUIsInterfaceLandscape()) return;
-        YTMUAttemptLandscapeOpenChain(2);
+        // entry): try anyway, but only once the interface has settled -- this
+        // branch also catches the device going flat in an existing landscape,
+        // where arming immediately used to re-arm on every jitter.
+        YTMULandscapeArm(2);
         return;
     }
-    // Defer past the rotation animation so top VC is stable, then retry.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        YTMUAttemptLandscapeOpenChain(4);
-    });
+    YTMULandscapeArm(4);
 }
 
 void YTMURegisterLandscapeAutoOpen(void) {
