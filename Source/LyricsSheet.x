@@ -1869,7 +1869,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
             if (fullData && !fullErr) {
                 NSDictionary *fullDict = [NSJSONSerialization JSONObjectWithData:fullData options:0 error:nil];
-                if (fullDict && fullDict[@"lyrics"]) {
+                if (YTMULyricsIsUsable(fullDict[@"lyrics"], fullDict)) {
                     statusLabel.text = @"";
                     if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                     g_lyricsCache[videoID] = fullDict[@"lyrics"];
@@ -2019,7 +2019,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             }
             if (data && !err) {
                 NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                if (dict && dict[@"lyrics"]) {
+                if (YTMULyricsIsUsable(dict[@"lyrics"], dict)) {
                     statusLabel.text = @"";
                     id fs = dict[@"song"], fa = dict[@"artist"];
                     if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
