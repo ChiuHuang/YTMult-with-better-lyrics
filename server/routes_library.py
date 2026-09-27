@@ -624,13 +624,28 @@ def api_cache_preview():
                     print(f"[LIBRARY] [FAIL] cache preview fallback {key}: {e}")
 
     if data is None:
-        # On-demand fetch: try pipeline if not cached
+        # On-demand fetch: run the pipeline for a miss. fetch_all_lyrics
+        # takes (video_id, song_info, translate_to, jwt_token) -- it has NO
+        # `lang` kwarg, and song_info is required (title/artist/duration are
+        # what every provider query is built from). The requested language
+        # goes in as translate_to, which is also the lang the entry is cached
+        # under below, exactly like routes_lyrics does.
         try:
             from .pipeline import fetch_all_lyrics
             from .jwt_pool import pick_jwt
+            try:
+                song_info = get_song_info(video_id)
+            except Exception as e:
+                print(f"[LIBRARY] [FAIL] cache preview song lookup v={video_id}: {e}")
+                song_info = None
+            if not song_info:
+                # Unchanged miss shape: this used to die as a TypeError and
+                # land on the same 404 below.
+                print(f"[LIBRARY] [FAIL] cache preview no song info v={video_id}")
+                return jsonify({'error': 'Not cached'}), 404
             jwt_token = pick_jwt()
             print(f"[LIBRARY] [OK] cache preview on-demand fetch v={video_id} lang={lang}")
-            data = fetch_all_lyrics(video_id, lang=lang, jwt_token=jwt_token)
+            data = fetch_all_lyrics(video_id, song_info, translate_to=lang, jwt_token=jwt_token)
             if data and data.get('lyrics') and not is_not_found_result(data):
                 from .cache import set_cached
                 set_cached(f"{video_id}:{lang}", data)

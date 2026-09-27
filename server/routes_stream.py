@@ -212,7 +212,12 @@ def api_lyrics_tstream():
         return int((time_module.time() - _req_start) * 1000)
 
     print("=" * 60)
-    print(f"[REQ] [REQ {req_id}] Lyrics T-STREAM: {video_id} [{'JWT' if jwt_token else 'Normal'}] "
+    # Not "Normal": the device sending no jwt does not mean Cubey is out --
+    # fetch_all_lyrics falls back to the shared pool and logs the [JWT] line
+    # saying which credential it used. This line only states what the request
+    # itself carried.
+    print(f"[REQ] [REQ {req_id}] Lyrics T-STREAM: {video_id} "
+          f"[{'device JWT' if jwt_token else 'no device JWT'}] "
           f"lang={translate_to} tstream={int(tstream)}")
     print("=" * 60)
 
@@ -259,6 +264,10 @@ def api_lyrics_tstream():
                                   'art_maxres': yt_cover_url(video_id, 'max')})
 
         # --- The pipeline, untranslated: it used to block on Cohere here ---
+        # jwt_token is None when the device sent no `jwt`; fetch_all_lyrics
+        # then takes the shared pool token itself (4th positional arg) and
+        # prints the [JWT] line, so Cubey still runs. Nothing here waits for
+        # a device Turnstile token.
         stage_log = []
 
         def _on_stage(name, status, detail=''):

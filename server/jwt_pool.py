@@ -18,8 +18,11 @@
 # every restart/update wipes the pool and Cubey goes dark until devices
 # re-contribute). Only hashes are ever served to clients. A background
 # thread re-probes each live token on a timer; a token is evicted only
-# after two consecutive dead verdicts (twice rule). pick_jwt()
-# round-robins the survivors.
+# after two consecutive dead verdicts (twice rule). pick_jwt() is the
+# primary credential for a request that carried no JWT of its own: it
+# round-robins the survivors (never a token a probe already called dead,
+# unless every one is), and with_meta=True hands back log-safe metadata so
+# the caller can print which token it used without printing the token.
 import json
 import os
 import threading
@@ -200,23 +203,77 @@ def list_jwt():
         return items
 
 
-def pick_jwt():
-    """Best available token, or None. Prefers tokens already verified good,
-    then unverified fresh ones, rotating across survivors round-robin.
-    Once-dead (twice-rule probation) tokens sort last but still serve."""
+def _entry_age_s(entry, now=None):
+    """Seconds since the contribution, or -1.0 when 'added' is unusable."""
+    now = time_module.time() if now is None else now
+    try:
+        return max(0.0, now - datetime.fromisoformat(entry.get('added') or '').timestamp())
+    except Exception:
+        return -1.0
+
+
+def _entry_meta(entry, now=None, pool_size=0, probation=False):
+    """Log-safe view of one entry -- id/counters/verdict only, never the raw
+    token, so a caller can print it without leaking a credential."""
+    now = time_module.time() if now is None else now
+    return {
+        'id': entry.get('id'),
+        'age_s': _entry_age_s(entry, now),
+        'successes': _safe_int(entry.get('successes')),
+        'fails': _safe_int(entry.get('fails')),
+        'last_ok': entry.get('last_ok'),
+        'ok': bool(entry.get('ok')),
+        'verdict': entry.get('verdict') or 'unverified',
+        'pool_size': pool_size,
+        # True when the served token itself carries an unevicted dead strike
+        # (every live token did) -- the caller should say so out loud.
+        'probation': bool(probation),
+    }
+
+
+def _pick_sort_key(e):
+    return (0 if e.get('ok') else 1,
+            _safe_int(e.get('fails')),
+            float(e.get('last_used') or 0.0))
+
+
+def pick_jwt(with_meta=False):
+    """Best available token, or None -- the server's primary Cubey credential,
+    so a device request no longer has to wait for its own Turnstile token.
+
+    Selection: verified-good first, then unverified/fresh, then fewest fails,
+    then least recently used; round-robin over that order so the pool spreads
+    load instead of hammering one token. with_meta=True returns
+    (token, meta) where meta is _entry_meta() (no token) so the caller can log
+    which one it used; the default return stays the bare token.
+
+    Fix vs the first version: a token a probe already declared dead
+    (fails >= 1, verdict 'dead xN') is no longer handed out while a healthier
+    one exists -- rotation used to walk the whole sorted list, so a known-dead
+    token served 1-in-N requests and burned a whole Cubey stage on 401s. The
+    twice rule still owns eviction; if EVERY live token is dead-once we serve
+    the least-bad of them (probation=True) rather than skipping Cubey, so a
+    stale pool degrades instead of blacking out the best provider. Purely
+    in-memory: never probes the network, so it cannot stall a lyrics request.
+    """
     global _rr_counter
     now = time_module.time()
     with _lock:
-        candidates = [e for e in _pool.values() if e.get('token')]
-        if not candidates:
-            return None
-        candidates.sort(key=lambda e: (0 if e.get('ok') else 1,
-                                        int(e.get('fails', 0)),
-                                        e.get('last_used', 0.0)))
-        chosen = candidates[_rr_counter % len(candidates)]
+        live = [e for e in _pool.values() if e.get('token')]
+        if not live:
+            return (None, {'id': None, 'pool_size': 0}) if with_meta else None
+        live.sort(key=_pick_sort_key)
+        best_fails = _safe_int(live[0].get('fails'))
+        survivors = [e for e in live if _safe_int(e.get('fails')) <= best_fails]
+        chosen = survivors[_rr_counter % len(survivors)]
         _rr_counter += 1
         chosen['last_used'] = now
-        return chosen['token']
+        if not with_meta:
+            return chosen['token']
+        # probation = the token we are handing out still carries an unevicted
+        # dead strike (true only when every live token did).
+        return chosen['token'], _entry_meta(chosen, now=now, pool_size=len(live),
+                                           probation=_safe_int(chosen.get('fails')) > 0)
 
 
 def _probe_token(token, via_node=None):
@@ -253,6 +310,70 @@ def _probe_token(token, via_node=None):
     return None
 
 
+def _strike_dead(jid, now_iso, via, evict=True):
+    """Book ONE definite-dead (401/403) strike against a pool entry: fails
+    += 1, ok False, verdict 'dead xN'. The TWICE rule still owns removal --
+    evict only once the second consecutive strike lands, exactly as the
+    prober has always done. An entry that vanished meanwhile is left alone.
+
+    Shared by check_all and note_failure so a live Cubey 401 counts with
+    identical semantics to a probe verdict. Returns (fails, known); an entry
+    that is not in the pool (unknown token, or one that vanished mid-sweep)
+    is a silent no-op -- there is nothing to strike.
+    """
+    with _lock:
+        cur = _pool.get(jid)
+        known = cur is not None
+        fails = int(cur.get('fails', 0)) + 1 if known else 1
+        if known:
+            cur['fails'] = fails
+            cur['ok'] = False
+            cur['verdict'] = f'dead x{fails}'
+            cur['last_checked'] = now_iso
+    if not known:
+        return fails, False
+    # Only remove when proven unusable twice in a row.
+    if fails >= 2:
+        print(f"  [JWT] {jid} {via} DEAD twice, evicting")
+        if evict:
+            remove_jwt(jid)
+    else:
+        print(f"  [JWT] {jid} {via} DEAD once, keeping (twice rule)")
+    return fails, known
+
+
+def note_failure(token, reason=''):
+    """Report a definite Cubey auth failure (401/403) seen by a LIVE request,
+    so a dead token leaves rotation immediately instead of staying the pool's
+    first pick until the next 300s probe sweep -- each request in the meantime
+    burned a whole Cubey stage on it. Same bookkeeping as the prober
+    (_strike_dead): one strike only demotes, the second consecutive one
+    evicts, and the pick policy/threshold are untouched.
+
+    Only a definite 401/403 may be reported. A 429, a timeout or any other
+    unknown outcome must NOT be reported here: the pool's own rule is that
+    only proven-dead verdicts count (see _probe_token), and a rate limit
+    would otherwise evict a perfectly good token.
+
+    Never raises, never logs the raw token, no-op for a None/unknown token.
+    Returns True when the token was known to the pool."""
+    try:
+        if not isinstance(token, str) or not token:
+            return False
+        jid = _token_id(token)
+        # Reason is caller text that lands in a log line: collapse it to one
+        # short single-line token so a weird value cannot inject log lines.
+        tag = ' '.join((reason or '').split())[:40] or 'api'
+        fails, known = _strike_dead(jid, datetime.now().isoformat(),
+                                   f'note_failure({tag})')
+        if known and fails < 2:
+            _persist()
+        return known
+    except Exception as e:
+        print(f"  [JWT] note_failure error: {e}")
+        return False
+
+
 def check_all(evict=True):
     """Re-probe every live token, update metadata, evict the twice-dead.
     Twice rule: a token is removed only after TWO consecutive definite-dead
@@ -277,23 +398,11 @@ def check_all(evict=True):
                     cur['last_ok'] = now_iso
                     cur['last_checked'] = now_iso
         elif verdict is False:
-            with _lock:
-                cur = _pool.get(entry['id'])
-                fails = int((cur or {}).get('fails', 0)) + 1 if cur else 1
-                if cur is not None:
-                    cur['fails'] = fails
-                    cur['ok'] = False
-                    cur['verdict'] = f'dead x{fails}'
-                    cur['last_checked'] = now_iso
-            # Only remove when proven unusable twice in a row.
+            fails, _known = _strike_dead(entry['id'], now_iso, 'probe', evict=evict)
             if fails >= 2:
                 dead_n += 1
-                print(f"  [JWT] {entry['id']} probed DEAD twice, evicting")
-                if evict:
-                    remove_jwt(entry['id'])
             else:
                 unknown_n += 1
-                print(f"  [JWT] {entry['id']} probed DEAD once, keeping (twice rule)")
         else:
             unknown_n += 1
             with _lock:

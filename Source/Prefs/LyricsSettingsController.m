@@ -128,6 +128,7 @@
     if (!d[@"lyricsCacheMaxCount"]) d[@"lyricsCacheMaxCount"] = @200;
     if (!d[@"lyricsCacheMaxSizeMB"]) d[@"lyricsCacheMaxSizeMB"] = @50;
     if (!d[@"lyricsAlwaysOn"]) d[@"lyricsAlwaysOn"] = @YES;
+    if (!d[@"lyricsFullscreenAutoOpen"]) d[@"lyricsFullscreenAutoOpen"] = @YES;
     if (!d[@"sendLyricsScreenshotDebug"]) d[@"sendLyricsScreenshotDebug"] = @NO;
     if (!d[@"sendDebugLogsToServer"]) d[@"sendDebugLogsToServer"] = @NO;
     if (!d[@"debugLogLevel"]) d[@"debugLogLevel"] = @0;
@@ -191,7 +192,9 @@
 // Data-driven layout for section 0. The row count and the row contents both
 // come from here, so they cannot drift apart the way the old parallel icon
 // array + `if (idx > 6) idx -= 1;` offset hack could. A descriptor with an
-// empty "key" renders the typewriter slider row instead of a switch.
+// empty "key" renders the typewriter slider row instead of a switch, and an
+// optional "defaultOn" flag makes the switch render ON when the pref is
+// absent.
 // The debug rows (Send debug to server / Log level / Send screenshot debug
 // data) live on the Debug page now.
 - (NSArray *)displaySectionRows {
@@ -203,6 +206,11 @@
         @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"icon": @"arrow.triangle.2.circlepath", @"key": @"lyricsPrecacheQueue"},
         @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"icon": @"arrow.2.circlepath", @"key": @"lyricsAutoUpdate"},
         @{@"title": LOC(@"AUTO_SYNC_TITLE"), @"desc": LOC(@"AUTO_SYNC_DESC"), @"icon": @"antenna.radiowaves.left.and.right", @"key": @"lyricsAutoSync"},
+        // "iphone" is SF Symbols 1 (iOS 13), so the row never renders a blank
+        // icon on the oldest supported device. defaultOn covers a user who has
+        // never opened this page (and so was never seeded in viewDidLoad);
+        // LyricsSheet.x reads the same key as YTMULyricsPreference(..., YES).
+        @{@"title": LOC(@"LYRICS_FULLSCREEN"), @"desc": LOC(@"LYRICS_FULLSCREEN_DESC"), @"icon": @"iphone", @"key": @"lyricsFullscreenAutoOpen", @"defaultOn": @YES},
         @{@"title": LOC(@"TYPEWRITER"), @"desc": LOC(@"TYPEWRITER_DESC"), @"icon": @"keyboard", @"key": @""}
     ];
 }
@@ -296,7 +304,10 @@
         }
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = key;
-        sw.on = [dict[key] boolValue];
+        // A descriptor that carries "defaultOn" renders ON for a user who
+        // never flipped it (absent key -> that default). Descriptors without
+        // the field keep the plain absent-key-is-off behaviour.
+        sw.on = dict[key] ? [dict[key] boolValue] : [it[@"defaultOn"] boolValue];
         [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = sw;
         return cell;
