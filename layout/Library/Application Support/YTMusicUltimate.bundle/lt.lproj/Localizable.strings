@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Dainos žodžių variklis";
+"LYRICS_ENGINE_FOOTER" = "Serveris gauna dainos žodžius ir verčia juos į žemiau nustatytą kalbą. Eilutės, jau parašytos tuo kinų rašmenų sistemos šriftu, tik suvienodinamos pagal rašmenų sistemą ir niekada neperduodamos vertėjui. Srautinis vertimas piešia kiekvieną eilutę ties modeliui rašant, o rašomosios mašinos efektas rašo vertimą po aktyvia eilute.";
+"STREAM_TRANSLATE" = "Srautinis vertimas";
+"STREAM_TRANSLATE_DESC" = "Pieš kiekvieną verčią eilutę, kol modelis rašo, nesulaukdamas visos dainos";
+"TYPEWRITER" = "Rašomosios mašinos efektas";
+"TYPEWRITER_DESC" = "Rašyti vertimą po aktyvia eilute po raidės (0 = išjungta)";
+"DEBUG_SETTINGS" = "Derinimas";
+"DEBUG_STREAM" = "Srautinis vertimas";
+"DEBUG_STATE" = "Būsena";
+"DEBUG_VIDEO" = "Paskutinis vaizdas";
+"DEBUG_PROGRESS" = "Įvykiai / eilutės";
+"DEBUG_LAST_LINE" = "Paskutinė srauto eilutė";
+"DEBUG_REVEAL" = "Rašomosios mašinos greitis";
+"DEBUG_UPLOAD" = "Derinimo duomenų siuntimas";
+"DEBUG_LOG_LEVEL" = "Žurnalo lygis";
+"DEBUG_LOG_LEVEL_DESC" = "Išj. = nieko nesiunčiama, Err = tik klaidos, All = informacija + įspėjimai + klaidos";
+"DEBUG_SEND" = "Siųsti derinimą į serverį";
+"DEBUG_SEND_DESC" = "Siųsti derinimo įvykius į dainos žodžių serverį, matomus skydelyje";
+"DEBUG_SCREENSHOT" = "Siųsti ekrano nuotraukos derinimą";
+"DEBUG_SCREENSHOT_DESC" = "Siųsti UI hierarchiją tik po ekrano nuotraukos";
+"DEBUG_ACTIONS" = "Veiksmai";
+"DEBUG_COPY" = "Kopijuoti diagnostiką";
+"DEBUG_TEST_LOG" = "Siųsti testo žurnalą";
+"DEBUG_COPIED" = "Diagnostika nukopijuota į iškarpinę";
+"DEBUG_IDLE" = "laisva";
+
+"DEBUG_ENDPOINT" = "G.Failas";
+"DEBUG_NOW_PLAYING" = "dabar groja: %@";
+"DEBUG_LAST_EVENT" = "Paskutinis įvykis %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- užblokuotas dabar: pagrindinis jungiklis išjungtas arba žurnalo lygis nėra All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_TEST_SENT" = "Išsiųstas kaip informacinis žurnalo įrašas. Dabar jis pasiekė serverio skydelį.";
+"DEBUG_TEST_BLOCKED" = "Nesiųsta. Siuntimą blokuoja pagrindinis jungiklis, žurnalo lygis arba serverio upload_logs jungiklis.";

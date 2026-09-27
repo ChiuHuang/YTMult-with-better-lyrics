@@ -125,3 +125,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Motore dei testi";
+"LYRICS_ENGINE_FOOTER" = "Il server recupera i testi e li traduce nella lingua impostata qui sotto. Le righe già in quello script cinese vengono solo normalizzate, non vengono mai inviate al traduttore. La traduzione in streaming dipinge ogni riga mentre il modello la scrive, e il effetto macchina da scrivere compone la traduzione sotto la riga attiva.";
+"STREAM_TRANSLATE" = "Traduzione in streaming";
+"STREAM_TRANSLATE_DESC" = "Dipinge ogni riga tradotta mentre il modello la scrive, invece di attendere il brano intero";
+"TYPEWRITER" = "Effetto macchina da scrivere";
+"TYPEWRITER_DESC" = "Componi la traduzione sotto la riga attiva, lettera per lettera (0 = disattivato)";
+"DEBUG_SETTINGS" = "Debug";
+"DEBUG_STREAM" = "Traduzione in streaming";
+"DEBUG_STATE" = "Stato";
+"DEBUG_VIDEO" = "Ultimo video";
+"DEBUG_PROGRESS" = "Eventi / righe";
+"DEBUG_LAST_LINE" = "Ultima riga trasmessa";
+"DEBUG_REVEAL" = "Velocità macchina da scrivere";
+"DEBUG_UPLOAD" = "Invii di debug";
+"DEBUG_LOG_LEVEL" = "Livello di log";
+"DEBUG_LOG_LEVEL_DESC" = "Off = nessun invio, Err = solo errori, All = info + avvisi + errori";
+"DEBUG_SEND" = "Invia debug al server";
+"DEBUG_SEND_DESC" = "Carica gli eventi di debug sul server dei testi, leggibili nella dashboard";
+"DEBUG_SCREENSHOT" = "Invia dati di debug dello screenshot";
+"DEBUG_SCREENSHOT_DESC" = "Carica la gerarchia della UI solo dopo aver fatto uno screenshot";
+"DEBUG_ACTIONS" = "Azioni";
+"DEBUG_COPY" = "Copia diagnostica";
+"DEBUG_TEST_LOG" = "Invia log di prova";
+"DEBUG_COPIED" = "Diagnostica copiata negli appunti";
+"DEBUG_IDLE" = "inattivo";
+
+"DEBUG_ENDPOINT" = "Endpoint";
+"DEBUG_NOW_PLAYING" = "in riproduzione: %@";
+"DEBUG_LAST_EVENT" = "ultimo evento %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- bloccato adesso: interruttore principale spento o livello di log non è All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = spento";
+"DEBUG_TEST_SENT" = "Inviato come log di informazione. Ora raggiunge la dashboard del server.";
+"DEBUG_TEST_BLOCKED" = "Non inviato. Gli invii sono bloccati dall'interruttore principale, dal livello di log o dall'interruttore upload_logs del server.";

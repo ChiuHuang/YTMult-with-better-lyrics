@@ -126,3 +126,67 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Lyrics Engine";
+
+"LYRICS_ENGINE_FOOTER" = "The server fetches the lyrics and translates them into the language set below. Lines already in that Chinese script only get their script normalized, they are never sent to the translator. Stream translation paints every line while the model writes it, and the typewriter reveal types the translation under the active line.";
+
+"STREAM_TRANSLATE" = "Stream translation";
+
+"STREAM_TRANSLATE_DESC" = "Paint every translated line as the model writes it, instead of waiting for the whole song";
+
+"TYPEWRITER" = "Typewriter reveal";
+
+"TYPEWRITER_DESC" = "Type the translation under the active line, letter by letter (0 = off)";
+
+"DEBUG_SETTINGS" = "Debug";
+
+"DEBUG_STREAM" = "Streaming translation";
+
+"DEBUG_STATE" = "State";
+
+"DEBUG_VIDEO" = "Last video";
+
+"DEBUG_PROGRESS" = "Events / lines";
+
+"DEBUG_LAST_LINE" = "Last streamed line";
+
+"DEBUG_REVEAL" = "Typewriter speed";
+
+"DEBUG_UPLOAD" = "Debug uploads";
+
+"DEBUG_LOG_LEVEL" = "Log level";
+
+"DEBUG_LOG_LEVEL_DESC" = "Off = no uploads, Err = failures only, All = info + warnings + errors";
+
+"DEBUG_SEND" = "Send debug to server";
+
+"DEBUG_SEND_DESC" = "Upload debug events to the lyrics server, readable in the dashboard";
+
+"DEBUG_SCREENSHOT" = "Send screenshot debug data";
+
+"DEBUG_SCREENSHOT_DESC" = "Upload a UI hierarchy only after you take a screenshot";
+
+"DEBUG_ACTIONS" = "Actions";
+
+"DEBUG_COPY" = "Copy diagnostics";
+
+"DEBUG_TEST_LOG" = "Send test log";
+
+"DEBUG_COPIED" = "Diagnostics copied to the clipboard";
+
+"DEBUG_IDLE" = "idle";
+
+"DEBUG_ENDPOINT" = "Endpoint";
+
+"DEBUG_NOW_PLAYING" = "now playing: %@";
+
+"DEBUG_LAST_EVENT" = "last event %@ ms";
+
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- blocked right now: master switch off, or log level is not All";
+
+"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+
+"DEBUG_TEST_SENT" = "Sent as an info log. It reaches the server dashboard now.";
+
+"DEBUG_TEST_BLOCKED" = "Not sent. Uploads are blocked by the master switch, the log level, or the server's upload_logs switch.";

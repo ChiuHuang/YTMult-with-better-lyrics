@@ -60,6 +60,14 @@
   `.venv\Scripts\python -c "from server import main; main()"`.
   DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
   providers/translate/cache; routes->all, nothing imports routes.
+  Streaming translation: `translate.translate_stream` is the generator,
+  `routes_stream._stream_translate` runs it on a worker thread and drains it
+  into SSE, and the device reads `GET /api/lyrics/tstream` (its full-fetch
+  path). `/api/lyrics/stream` is the older provider-race endpoint and shares
+  the same helper. `routes_stream` imports `fetch_all_lyrics`,
+  `ask_nodes_for_cache`, `is_not_found_result` and `_log_crash` at module
+  level, and `_provider_meta` lazily from `routes_lyrics` (routes_lyrics is
+  imported first in `server/__init__.py`, so that direction is safe).
   Dashboard refetch-from-URL feature: `pipeline.probe_providers()` fetches
   EVERY provider independently (Cubey split into inner `Cubey/Musixmatch`,
   `Cubey/QQ`, `Cubey/bLyrics`, `Cubey/BiniLyrics`, `Cubey/NetEase`,
@@ -79,9 +87,27 @@
   (fallback sheet + engagement-panel embed tag 9999), sliding wipe highlight,
   client file cache (`YTMU_LyricsCache`, count+size limits), ELM tap hijack,
   `YTIButtonRenderer` unlock, JWT pre-warm hooks.
+- `Source/LyricsStream.x`: SSE client for `GET /api/lyrics/tstream`
+  (`YTMULyricsSSEClient`), the typewriter reveal (per-row state in
+  `typeState`/`typeRows`, gradient mask on `transLabel`, driven from
+  `updatePlaybackTime`), the stream event handlers and
+  `YTMUDebugStreamStatus()`. The VC's stream/type methods are declared in
+  `LyricsShared.h` (Logos does not see `%new`/category helpers from another
+  .x, and a category cannot synthesize the property ivars it needs -- the lazy
+  `ytmu_typeStates` / `ytmu_typeRowSet` accessors exist for that reason).
 - `Source/Prefs/LyricsSettingsController.{h,m}`: own Lyrics System settings
   page (display, cache limits, preview, actions). Integrated as 6th row in
   `YTMUltimateSettingsController` section 1.
+- `Source/Prefs/DebugSettingsController.{h,m}`: Debug page (7th row of
+  `YTMUltimateSettingsController` section 1) holding everything about
+  diagnostics: live streaming-translation status read from
+  `YTMUDebugStreamStatus()` on a 1s timer, the log level segment and the
+  debug-upload switches (moved out of the lyrics page), copy-diagnostics and
+  send-test-log actions. New settings strings live in all 14
+  `layout/Library/Application Support/YTMusicUltimate.bundle/*.lproj/Localizable.strings`
+  (the .strings files are UTF-8 no-BOM **CRLF**, unlike the rest of the
+  repo -- match the file you are editing; untranslated languages get the
+  English source string as a placeholder, that is the project convention).
 - `Source/YTMUTurnstileManager.h`: Turnstile WKWebView -> JWT. Lesson: commit
   `480ec09` replaced the real `/challenge` iframe HTML with a placeholder and
   silently killed all JWT fetching; restored in `dee2c0a`. Never stub this.
@@ -101,6 +127,101 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **precache actually works now** (it had never run): the only caller of
+  `YTMULyricsPrecacheQueue` was a Logos hook on `YTMQueueConfigImpl
+  -setQueueModel:`, a setter nothing calls - every other hook on that class in
+  this tweak is a getter, and the queue actually lives in
+  `YTMQueueCollectionViewController` / `YTMWatchNextResponseViewController`.
+  A declared-but-guessed selector is how it got in, so the replacement probes
+  a candidate list behind `respondsToSelector` + `@try` at depth 3 from the
+  player / now-playing VC / key window / root VC, capped at 5, dropping the
+  current track via `YTMUResolveCurrentVideoID` (not the lazy global). Two
+  reliable triggers instead of one dead hook: a main-queue `YTMUSongDidChange`
+  observer (the same notification the whole lyrics system runs on, so the
+  up-next tracks are covered minutes before they play) and a 20s snapshot
+  timer parked in a file-scope static (a `dispatch_source_t` in a local would
+  be released on return, and a resumed source is cancelled on release).
+  Requests only go out when the id list actually changes, 15s floor. Server
+  side had a second bug: `_run_precache_job` wrote EVERY result to the full
+  key `<vid>:<lang>`, so a fast precache shadowed the real wbw full fetch
+  forever (fast results now go to `<vid>:<lang>:fast`, and a fast job is
+  satisfied by a full entry but not the reverse). Added per-video
+  `[PRECACHE]` log lines - the job previously logged only on exceptions, so
+  "it silently did nothing" had no trace in the dashboard either. Verified
+  with the Flask test client and the exact device body: 2 jobs, 5 cache
+  files, no `translated` leak, and the fast entry no longer shadowing the full
+  pipeline call.
+- **streamed translate + typewriter reveal** (the "translate as a stream" ask):
+  translation is no longer awaited. `server/translate.py` grew
+  `translate_stream(texts, target_lang, song_lang)`, a generator yielding
+  `{'i', 'text', 'done'}` per line, on top of `_NumberedStreamParser` (splits
+  the numbered `[n] text` format across token deltas, emits a completed line
+  on the newline and a throttled ~45ms partial while the line is still being
+  written), `_cohere_translate_stream` (Cohere v2 `/v2/chat` with
+  `stream:true`, key rotation on 429) and `_chat_stream_deltas` (the
+  OpenAI-compatible provider). Contract matches `cohere_translate` exactly:
+  same cache key, same "Han-script lines for a zh target never hit the API"
+  bucketing, same echo-original retry, never negative-caches a failure, and
+  always terminates with every line (falls back to the blocking call).
+  **Encoding trap, same class as node.py:** Cohere and the chat providers
+  answer `text/event-stream` with NO charset, so requests defaults to
+  ISO-8859-1 and every CJK delta is mojibake. `_sse_data_lines` sets
+  `resp.encoding = 'utf-8'` first. Both also send a `data: [DONE]` sentinel
+  on `message-end` -- it is not valid JSON, so parse defensively. Cohere emits
+  one token per `content-delta`; a model may also append a bonus `[n+1]` line,
+  so out-of-range line numbers are dropped in `translate_stream`.
+  `server/routes_stream.py` added `GET /api/lyrics/tstream`: the SAME work as
+  `/api/lyrics` (full-cache gate, node cache, `fetch_all_lyrics` run
+  UNTRANSLATED, disk cache, unlyriced, provider meta, usage stats) but pushes
+  `lyrics` stage=raw the moment the winner is ranked, one `tline`
+  `{i,row,text,done}` per translated line while the model writes, then
+  `lyrics` stage=final + `done`. It is deliberately NOT in the in-flight
+  gate: the device's fast request shares that gate, so waiting would stall the
+  stream behind a fast-grade result. `_stream_translate()` runs the
+  translate on a worker thread and drains a bounded queue with 1.5s SSE
+  keepalives; `stop` is set in the generator's `finally`, so a disconnect
+  never leaks a worker (verified: thread gone within 3s of `gen.close()`).
+  The pre-existing `/api/lyrics/stream` now uses the same helper; the Google
+  interim only runs with `tstream=0` (two overlapping fills of one row read
+  as a flicker). Client: new `Source/LyricsStream.x` -- `YTMULyricsSSEClient`
+  (byte-level SSE parser, chunks are never UTF-8 decoded before the frame
+  delimiter is found or a CJK char gets cut at a chunk boundary; serial
+  delegate queue; `onError` only when nothing was delivered),
+  `fetchFullLyricsForVideo:jwt:force:` routes to the stream when
+  `lyricsStreamTranslate` is on and falls back to the blocking JSON fetch if
+  the stream dies before any lyrics, and `YTMUDebugStreamStatus()` for the
+  Debug page. The typewriter reveal paints the translated row (the line under
+  the lyric) letter by letter at `lyricsTypewriterCPS` chars/sec (default 30,
+  cached in `YTMUTypewriterCPS()` because the tick reads it every frame).
+  It is a `CAGradientLayer` mask on `transLabel`, NOT a text swap: the label
+  keeps the full string so row heights never change mid-reveal, and the edge
+  maps through the laid-out TEXT width (`sizeThatFits:`) because the label is
+  stretched by its constraints. Only ACTIVE rows type (synced lyrics); a row
+  that leaves the active set snaps to full, and streamed growth continues an
+  in-flight reveal while a rewritten line (echo retry, OpenCC) keeps the common
+  prefix via `YTMUCommonCharacterCount`. `updateLyrics:` only resets the
+  per-row state on a song change or a row-count change, so `raw` -> `final`
+  does not restart typing. The tick wiring is three lines in
+  `updatePlaybackTime` and is easy to lose: `ytmu_typeRow:activate:NO` on every
+  deactivated row, `ytmu_typeRow:activate:YES` on every activated row, and
+  `ytmu_typeStep` as the LAST statement of the method -- so a line that became
+  current in this tick starts moving in the same frame (`configureCell` runs
+  `clearWipe`, which now also calls `ytmu_clearType`, so a reconfigure always
+  drops a stale mask; `ytmu_typeRow:activate:` alone would freeze the row at
+  fraction 0 forever). `tstreamFallbackUsed` latches the blocking retry:
+  without it `fetchFullLyricsForVideo:` routes that retry straight back into
+  the stream and a deterministic failure (400 from a bad lang, a dead
+  endpoint) reconnects forever. The SSE client must deliver exactly ONE
+  terminal callback (onError XOR onClose), or the retry it just started gets
+  cancelled and reopened. Settings: the lyrics page grew a Stream
+  translation switch and a Typewriter speed slider, its "Translation" section
+  is now "Lyrics Engine", and the three debug rows moved to a new Debug page
+  (`Prefs/DebugSettingsController.m`, 7th row of the main settings).
+  Verified: py_compile, live Cohere stream (correct UTF-8, 3 lines, partials
+  then done), full SSE order `meta,status,lyrics(raw),tline*,lyrics(final),done`
+  with gap-row mapping, cache hit, `tstream=0`, 400s, no-key and non-SSE-body
+  fallbacks, no thread leak on disconnect, cache-key parity with the blocking
+  path. Untested on device: needs a rebuild.
 - README/dashboard usage badges: `/api/app/badge?type=` now covers
   `release|lyrics|devices|tracks|nodes` (one glyph per type, short
   `<label> <value>` text, no link in the README). The MD3 pill renderer lives
@@ -403,6 +524,116 @@
 - `058bba0`/`6fbc5c0` client cache + Lyrics System page + warning fixes.
 
 ## Open / pending
+- **REQUEST LIST (user's words, 2026-09-27, do not lose this again).** Work
+  these in this order; tick each line off here as it lands. Anything unclear
+  gets a one-line note under the item instead of a silent guess. Status:
+  everything below is CODE-DONE but NOT device-verified (no rebuild yet).
+  1. `[done]` more left/right space on lyric rows, portrait AND fullscreen:
+      gutters 48/-28 -> 64/-40 from `YTMULyricGutterLeading/Trailing()`,
+      landscape gap 12 -> 24 on BOTH sides.
+  2. `[done]` typewriter reveals up to 2 lines at once: `ytmu_revealCandidateRows`
+      = every active row + the next typable row, capped by
+      `YTMU_TYPEWRITER_MAX_CONCURRENT 2`, each at the full cps. Finished rows
+      keep their state with a `done` flag (deleting it made "finished"
+      indistinguishable from "never started" and the lookahead restarted the
+      line from zero).
+  3. `[done]` scroll + highlight share one `YTMUTransitionDuration` (0.28s);
+      `ytmu_scrollToRow:instant:` animates only when no animated scroll is in
+      flight (`s_scrollInFlightRow`), otherwise it jumps - no stacked scrolls.
+  4. `[done]` fullscreen retranslate button (toolbar tag 7105, `globe`/`T`):
+      keeps the caches, dims via `ytmu_setProbing:YES`, 10s JWT fallback then
+      `fetchFullLyricsForVideo:jwt:force:YES`, 45s watchdog, no re-entry, and
+      the provider switcher stays compact (`[<] [list] [>] [name i/n] [R] [T]`).
+  5. `[done]` next song in fullscreen paints immediately: `handleSongChange:`
+      requests the cover and fills the title/artist labels BEFORE the
+      metadata / provider / JWT / lyrics work, so nothing waits on the server.
+      The device builds the same `i.ytimg.com` URL the new endpoint returns (no
+      invented notification in `LyricsStream.x`; `meta=1` is the slow uncached
+      variant while `/api/lyrics/song` is the cached one), and
+      `ytmu_requestArtworkOnce:` keeps it to exactly one request per song.
+  6. `[done]` activation pop 1.04/alpha 0.3/0.5s -> 1.018/0.6/0.28s; word-synced
+      rows animate only the wipe label, so the pop cannot fight the word mask.
+  7. `[done]` dark overlay 0.30 -> 0.22 (light) / 0.48 -> 0.40 (dark), one
+      helper for both copies. Blur styles untouched.
+  8. `[done]` `YTMULyricInk` blends 14% toward the artwork mean colour (dark
+      branch) and uses an artwork-hued dark ink for the light branch
+      (`k = 0.18 + 0.27*luma`), falling back to the old ink when
+      `|luma(ink) - luma(backdrop)| < 0.18`; with no cover sampled it returns
+      the previous colour exactly. The mean is sampled once per song in
+      `ytmu_probeArtworkBrightness:` and cleared on a song change.
+  9. `[done - root cause]` precache never fired: its only caller was a Logos
+      hook on `YTMQueueConfigImpl -setQueueModel:`, a setter nothing calls
+      (the queue lives in the VCs), so the feature made zero requests ever.
+      Replaced with two reliable triggers (a `YTMUSongDidChange` observer and
+      a 20s snapshot timer in `%ctor`) + a guarded, depth-3 selector walk
+      (every hop behind `respondsToSelector` + `@try`, no `performSelector:`
+      which would trip `-Warc-performSelector-leaks`). Server: a fast result
+      was being written to the FULL cache key, shadowing the real wbw fetch -
+      now `full ? "<vid>:<lang>" : "<vid>:<lang>:fast"`, plus per-video
+      `[PRECACHE]` log lines so a future failure is visible.
+  10. `[done]` `GET /api/lyrics/image?v=&q=&meta=1` (instant, zero network
+      without `meta=1`; `yt_cover_url()` in `providers_yt.py`) and the stream
+      `meta` event now carries `art` + `art_maxres`.
+  11. `[done]` the instrumental note (U+266A) shows only while it is that row's
+      turn, on the LEFT (`NSTextAlignmentNatural`, the 64pt lyric gutter)
+      instead of centred, and the row COLLAPSES when it is not its turn:
+      `YTMURowPadTop/Gap/Bottom` are now named constraints plus a
+      `transLabel.heightAnchor == 0` constraint (`flat`, inactive at init), and
+      `ytmu_setRowCollapsed:` flips them - a hidden label still sizes itself
+      through its constraints, so the collapse needed an explicit mechanism.
+      The text branch and `prepareForReuse` always re-expand, so a recycled
+      collapsed cell can never show a lyric at zero height. Judgement call: an
+      UNTIMED payload (`!isSynced`) keeps the note up for the whole song, since
+      there is no window to judge "its turn" by and the row would otherwise
+      read as an empty gap.
+  12. `[done]` one X per configuration: the header `closeBtn` + `menuBtn` are
+      hidden for the whole landscape branch (`ytmu_applyHeaderButtonsForLandscape:`,
+      reached from `viewDidLayoutSubviews`), which also removes the
+      menu/exit-button overlap. `ytmu_assertOnTop` now also hides YT's own
+      `YTEngagementPanelHeaderView` (found one level above our container by
+      `YTMUPanelHeaderSibling()`) and the landscape layout calls it too, so a
+      rotation cannot let it reappear. Leaving the embedded panel:
+      `dismissModal` -> `ytmu_restoreHostingPanelChrome` (un-hides every
+      sibling it hid + the panel header, re-orders) -> hide -> collapse via
+      `ytmu_collapseHostingPanel` (5 guarded selector names, each behind
+      `respondsToSelector` + `@try`), so nobody is trapped in landscape.
+  13. `[done]` `artworkVideoID` is now the display INTENT (written on song
+      change, in `fetchLyricsForVideo:` before every branch, in `forceReloadLyrics`)
+      and `ytmu_applyArtworkImage:forVideoID:` validates against it +
+      `YTMUResolveCurrentVideoID()` - a stale response is dropped with a log
+      line, the current song's is adopted. No art guard reads `loadingVideoID`
+      any more (which is what `ytmu_selectProvider` used to roll back to the
+      previous video after a skip). The song-change reset of both images +
+      `g_ytmu_bgLight` + `s_ytmuArtworkMean` is unconditional, the landscape
+      card is painted FIRST (so it never waits on the background image), and
+      `ytmu_applyLandscapeTheme`'s process-wide `static s_lastStyle` became
+      per-instance associated state (the second live VC used to inherit the
+      first one's decision). `ytmu_requestArtworkOnce:` + `s_ytmuArtRequestKey`
+      keep it to one request per song.
+  - Residual risk worth knowing: the queue walk probes YT selectors by name;
+    if a YT update renames all of them the feature degrades to a no-op again.
+    The one-shot `[PRECACHE] queue walk found no up-next list` line in the
+    device log is the signal to add a selector. Also, a probed accessor that
+    returned a SCALAR would hand back a bogus pointer; the return value is
+    `isKindOfClass:`-checked but a scalar return would crash before that.
+  - After all of it: rebuild `client_edits_pack.py` (the 7z/LZMA python pack)
+    and commit + push. Everything above is CODE-DONE and NOT device-verified -
+    after a rebuild, check: the single X in all four panel configurations, the
+    `♪` appearing/collapsing, the art+title switching on the next song, the
+    retranslate button, the typewriter on two lines, the new ink tint, the
+    wider gutters, and the `[PRECACHE]` lines in the dashboard log (item 9 is
+    code-done but has never actually fired on a device).
+  - Not touched, still open: `pack.json` / `session-ses_f5af.md` /
+    `BRACCATO_COMPARISON.md` show as deleted in `git status` from an earlier
+    session - decide whether to restore or commit the deletion.
+- Streamed translate + typewriter reveal: needs a device rebuild. Check, in
+  this order: (1) a song with no server cache -- the lyric lines appear
+  untranslated first and each translation types in; (2) the Debug page shows
+  state `opening` -> `done` with a non-zero `Events / lines`; (3) the
+  typewriter speed slider changes the rate without a respring; (4) turning
+  `Stream translation` off restores the old blocking fetch (status line
+  "Loading..." then everything at once); (5) a song change mid-translation
+  leaves no half-typed row and no lingering request.
 - Exact ELM lyrics node key: watch server logs for `Lyrics ELM tap key=...`,
   then pin it like `music_download_badge_1`.
 - Device was a build behind on wipe overlay — retest on latest build.

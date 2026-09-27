@@ -57,8 +57,14 @@
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, copy) NSString *lastColorKey;
+// Typewriter reveal mask (Source/LyricsStream.x drives it). The label keeps
+// its FULL text the whole time, so the row height never changes mid-reveal.
+@property (nonatomic, strong) CAGradientLayer *typeMask;
 - (void)setWipeProgress:(CGFloat)progress;
 - (void)clearWipe;
+// fraction 0 hides the text, 1 shows all of it.
+- (void)ytmu_setTypeFraction:(CGFloat)fraction;
+- (void)ytmu_clearType;
 @end
 
 @interface YTMULyricsViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
@@ -124,12 +130,30 @@
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
 @property (nonatomic, assign) float lastVolume;
+// --- Streaming translation (Source/LyricsStream.x) ---
+@property (nonatomic, strong) id tstreamClient;
+@property (nonatomic, copy) NSString *tstreamVideoID;
+@property (nonatomic, assign) BOOL tstreamGotLyrics;
+@property (nonatomic, assign) BOOL tstreamGotFinal;
+// Latched when the stream failed and the blocking fetch took over: without it
+// a deterministic failure (400 from a bad lang, a dead endpoint) would re-enter
+// the stream path forever.
+@property (nonatomic, assign) BOOL tstreamFallbackUsed;
+// --- Typewriter reveal state, keyed by lyric row ---
+@property (nonatomic, strong) NSMutableDictionary *typeState;
+@property (nonatomic, strong) NSMutableSet *typeRows;
+@property (nonatomic, assign) NSTimeInterval typeLastWall;
 - (void)updateLyrics:(NSArray *)newLyrics;
 - (void)fetchLyricsForVideo:(NSString *)videoID;
 - (void)loadArtworkForVideo:(NSString *)videoID;
 - (void)forceReloadLyrics;
 - (void)dismissModal;
 - (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges;
+- (void)ytmu_openTranslateStream:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
+- (void)ytmu_cancelTranslateStream;
+- (void)ytmu_typeRow:(NSInteger)row activate:(BOOL)activate;
+- (void)ytmu_typeResetAll;
+- (void)ytmu_typeStep;
 @end
 
 @interface YTPlayerViewController (YTMU_Lyrics)
@@ -181,6 +205,8 @@ NSString *YTMUAutoZhParam(void);
 NSString *YTMULyricsTier(NSArray *lyrics);
 void sendDebugLog(NSString *msg);
 void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload);
+BOOL YTMUDebugUploadAllowed(NSString *level);
+BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 NSString *YTMULyricsCacheDirectory(void);
 NSString *YTMULyricsCachePathForVideoID(NSString *vid);
 BOOL YTMULyricsCacheEnabled(void);
@@ -197,6 +223,14 @@ NSString *YTMULyricsContentHash(NSString *videoID);
 NSArray  *YTMULyricsCacheEntries(void);
 void YTMULyricsPrecacheQueue(NSArray *videoIDs, NSString *lang, BOOL useFull);
 void YTMUPrefetchProviderLyrics(NSArray *videoIDs, NSString *lang);
+// Streaming translation + typewriter reveal. CPS (characters per second) is
+// cached because the lyric tick reads it every frame; the settings page calls
+// the setter so a change takes effect without a respring.
+double YTMUTypewriterCPS(void);
+void YTMUTypewriterCPSSet(double cps);
+BOOL YTMULyricsStreamTranslateEnabled(void);
+// Live snapshot of the streaming path for the Debug settings page.
+NSDictionary *YTMUDebugStreamStatus(void);
 void YTMUAutoSyncIfDue(void);
 NSString *YTMUResolveCurrentVideoID(void);
 UIViewController *topMostViewController(void);

@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Descarga las traducciones del servidor en silencio (cada 6 h)";
 "DOWNLOAD" = "Descargar";
 "UPDATE_WHATS_NEW" = "Novedades:\n%@";
+
+"LYRICS_ENGINE" = "Motor de letras";
+"LYRICS_ENGINE_FOOTER" = "El servidor descarga las letras y las traduce al idioma configurado abajo. Las líneas que ya están en esa escritura china solo se normalizan, nunca se envían al traductor. La traducción en directo pinta cada línea mientras el modelo la escribe, y el efecto de máquina de escribir teclea la traducción bajo la línea activa.";
+"STREAM_TRANSLATE" = "Traducción en directo";
+"STREAM_TRANSLATE_DESC" = "Pinta cada línea traducida mientras el modelo la escribe, en lugar de esperar al final de la canción";
+"TYPEWRITER" = "Efecto de máquina de escribir";
+"TYPEWRITER_DESC" = "Teclea la traducción bajo la línea activa, letra a letra (0 = desactivado)";
+"DEBUG_SETTINGS" = "Depuración";
+"DEBUG_STREAM" = "Traducción en directo";
+"DEBUG_STATE" = "Estado";
+"DEBUG_VIDEO" = "Último video";
+"DEBUG_PROGRESS" = "Eventos / líneas";
+"DEBUG_LAST_LINE" = "Última línea transmitida";
+"DEBUG_REVEAL" = "Velocidad de la máquina de escribir";
+"DEBUG_UPLOAD" = "Subidas de depuración";
+"DEBUG_LOG_LEVEL" = "Nivel de registro";
+"DEBUG_LOG_LEVEL_DESC" = "Off = sin subidas, Err = solo errores, All = info + avisos + errores";
+"DEBUG_SEND" = "Enviar depuración al servidor";
+"DEBUG_SEND_DESC" = "Sube los eventos de depuración al servidor de letras, legibles en el panel";
+"DEBUG_SCREENSHOT" = "Enviar datos de depuración de la captura";
+"DEBUG_SCREENSHOT_DESC" = "Sube la jerarquía de la interfaz solo después de hacer una captura";
+"DEBUG_ACTIONS" = "Acciones";
+"DEBUG_COPY" = "Copiar diagnóstico";
+"DEBUG_TEST_LOG" = "Enviar registro de prueba";
+"DEBUG_COPIED" = "Diagnóstico copiado al portapapeles";
+"DEBUG_IDLE" = "inactivo";
+
+"DEBUG_ENDPOINT" = "Punto de conexión";
+"DEBUG_NOW_PLAYING" = "reproduciendo: %@";
+"DEBUG_LAST_EVENT" = "último evento %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- bloqueado ahora mismo: interruptor principal desactivado o el nivel de registro no es All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = desactivado";
+"DEBUG_TEST_SENT" = "Enviado como registro de información. Ya llega al panel del servidor.";
+"DEBUG_TEST_BLOCKED" = "No enviado. Las subidas están bloqueadas por el interruptor principal, el nivel de registro o el interruptor upload_logs del servidor.";

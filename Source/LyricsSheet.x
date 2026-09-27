@@ -61,12 +61,52 @@ static BOOL YTMUBgIsLight(UIView *refView) {
     return NO;
 }
 
+// Mean artwork color for the current song, nil until the first cover lands.
+// Sampled once per song in ytmu_probeArtworkBrightness: and read by every
+// YTMULyricInk call (per cell configure, per chrome refresh), so it must
+// never be resampled from inside the ink itself.
+static UIColor *s_ytmuArtworkMean = nil;
+static void YTMUSetArtworkMeanColor(UIColor *mean) {
+    s_ytmuArtworkMean = mean;
+}
+static CGFloat YTMUColorLuma(CGFloat r, CGFloat g, CGFloat b) {
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+// Luminance of the backdrop the ink sits on, from the brightness bucket: the
+// light wash lands near white, the dark one near black.
+static CGFloat YTMULyricBackdropLuma(UIView *refView) {
+    return YTMUBgIsLight(refView) ? 0.90 : 0.08;
+}
 // Same alpha tuning as YTMUAdaptiveInk, keyed on background brightness
-// instead of the OS theme.
+// instead of the OS theme, then pulled a little toward the artwork so the
+// lyrics read as part of the cover instead of pasted pure black/white on it.
+// A tinted ink that lands too close to the backdrop falls back to the plain
+// one; with no cover sampled yet this returns the old color untouched.
 static UIColor *YTMULyricInk(CGFloat darkAlpha, CGFloat lightAlpha, UIView *refView) {
     BOOL light = YTMUBgIsLight(refView);
-    return [(light ? [UIColor blackColor] : [UIColor whiteColor])
-            colorWithAlphaComponent:(light ? lightAlpha : darkAlpha)];
+    CGFloat alpha = light ? lightAlpha : darkAlpha;
+    UIColor *plain = [(light ? [UIColor blackColor] : [UIColor whiteColor])
+                      colorWithAlphaComponent:alpha];
+    UIColor *mean = s_ytmuArtworkMean;
+    if (!mean) return plain;
+    CGFloat ar = 0, ag = 0, ab = 0;
+    if (![mean getRed:&ar green:&ag blue:&ab alpha:NULL]) return plain;
+    CGFloat r, g, b;
+    if (light) {
+        // Pure black is too flat on the light wash: take the artwork's own hue
+        // at a darkness its luminance asks for (0.18..0.45), never at 0.
+        CGFloat k = 0.18 + 0.27 * YTMUColorLuma(ar, ag, ab);
+        r = ar * k; g = ag * k; b = ab * k;
+    } else {
+        // 14% toward the artwork hue: the text stays as light as the pure
+        // white it replaces, so the contrast it had is preserved.
+        const CGFloat k = 0.14;
+        r = 1.0 - (1.0 - ar) * k;
+        g = 1.0 - (1.0 - ag) * k;
+        b = 1.0 - (1.0 - ab) * k;
+    }
+    if (fabs(YTMUColorLuma(r, g, b) - YTMULyricBackdropLuma(refView)) < 0.18) return plain;
+    return [UIColor colorWithRed:r green:g blue:b alpha:alpha];
 }
 static UIColor *YTMULyricShadow(UIView *refView) {
     if (YTMUBgIsLight(refView))
@@ -88,6 +128,16 @@ static UIColor *YTMUBgBaseColor(UIView *refView) {
 }
 static UIBlurEffectStyle YTMUBgBlurStyle(UIView *refView) {
     return YTMUBgIsLight(refView) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark;
+}
+// Scrim over the blur. Light enough to let the cover read through, dark
+// enough for the white ink; keyed on the same brightness bucket as the wash
+// above. Both copies (viewDidLoad + ytmu_refreshBgDerivedInk) read it, so the
+// two can never drift apart.
+static CGFloat YTMUBgOverlayAlpha(UIView *refView) {
+    return YTMUBgIsLight(refView) ? 0.22 : 0.40;
+}
+static UIColor *YTMUBgOverlayColor(UIView *refView) {
+    return [[UIColor blackColor] colorWithAlphaComponent:YTMUBgOverlayAlpha(refView)];
 }
 // Mean artwork color for the song-tinted background wash.
 static UIColor *YTMUArtworkAverageColor(UIImage *img) {
@@ -138,6 +188,24 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
     }
     r /= 64.0; g /= 64.0; b /= 64.0;
     return (CGFloat)(0.299 * r + 0.587 * g + 0.114 * b);
+}
+
+// One timing for the whole "a line arrives" gesture: the table scroll and the
+// activation pop run on the same curve and the same clock, so the line lands
+// and lights up as one motion. It also bounds how long a scroll may be treated
+// as in flight (see ytmu_scrollToRow:instant:).
+static const NSTimeInterval YTMUTransitionDuration = 0.28;
+// Restrained activation pop: the old 1.04 / alpha 0.3 / 0.5s read as a jump.
+static const CGFloat YTMUPopScale = 1.018;
+static const CGFloat YTMUPopStartAlpha = 0.6;
+// Row of the animated scroll currently in flight, -1 when the table is at
+// rest. A second target arriving inside the transition would queue behind the
+// first and the two fight, so the caller jumps instead (see the method below).
+static NSInteger s_scrollInFlightRow = -1;
+static NSTimeInterval s_scrollStartedAt = 0;
+static void YTMUResetScrollTracking(void) {
+    s_scrollInFlightRow = -1;
+    s_scrollStartedAt = 0;
 }
 
 // Provider tier icons (concept: better-lyrics lyricsDock syncTypeIcons —
@@ -266,6 +334,28 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 %end
 
 
+// Lyric row gutters. Portrait and the fullscreen landscape layout share this
+// one table, so the margins are cell constraints built once at init (never
+// recomputed per row or per payload): they therefore hold through a song
+// change, a raw -> final swap and a rotation with no jump. The landscape
+// album column butts against the table, which is why the left side is deeper.
+static CGFloat YTMULyricGutterLeading(void) { return 64.0; }
+static CGFloat YTMULyricGutterTrailing(void) { return 40.0; }
+
+// Row vertical padding, held in one place so -ytmu_setRowCollapsed: can take it
+// to zero. A hidden label still reports its intrinsic size through its
+// constraints, so an "empty" row keeps a full lyric line's height unless the
+// padding itself is collapsed.
+static const CGFloat YTMURowPadTop = 14.0;
+static const CGFloat YTMURowPadGap = 6.0;
+static const CGFloat YTMURowPadBottom = 14.0;
+
+@interface YTMULyricsCell (SheetRows)
+// Returns YES when the row's height state actually changed, so the caller can
+// ask the table to re-measure the self-sizing row.
+- (BOOL)ytmu_setRowCollapsed:(BOOL)collapsed;
+@end
+
 @implementation YTMULyricsCell
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
@@ -331,25 +421,61 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
         self.transLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.transLabel];
 
-        // Content sits well in from the left edge: the landscape album column
-        // butts against the table, so the lyrics need a clear gutter.
+        // Content sits well in from both edges; see YTMULyricGutter* above.
+        CGFloat gutterLead = YTMULyricGutterLeading();
+        CGFloat gutterTrail = YTMULyricGutterTrailing();
         [NSLayoutConstraint activateConstraints:@[
-            [self.lyricLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor constant:14],
-            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:48],
-            [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-28],
+            [self.lyricLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
+            [self.lyricLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
 
             [self.wipeLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.topAnchor],
             [self.wipeLabel.leadingAnchor constraintEqualToAnchor:self.lyricLabel.leadingAnchor],
             [self.wipeLabel.trailingAnchor constraintEqualToAnchor:self.lyricLabel.trailingAnchor],
             [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
 
-            [self.transLabel.topAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:6],
-            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:48],
-            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-28],
-            [self.transLabel.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-14]
+            [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
+            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
         ]];
+        // The three vertical padding constraints are kept (not inline) because
+        // -ytmu_setRowCollapsed: rewrites their constants: an instrumental
+        // marker that is not its turn must take no vertical space. The fourth
+        // one pins the translation label to zero for the same reason -- the
+        // ONLY height constraint on that anchor, so nothing can conflict with
+        // it and normal rows keep sizing themselves.
+        NSLayoutConstraint *padTop = [self.lyricLabel.topAnchor
+            constraintEqualToAnchor:self.contentView.topAnchor constant:YTMURowPadTop];
+        NSLayoutConstraint *padGap = [self.transLabel.topAnchor
+            constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:YTMURowPadGap];
+        NSLayoutConstraint *padBottom = [self.transLabel.bottomAnchor
+            constraintEqualToAnchor:self.contentView.bottomAnchor constant:-YTMURowPadBottom];
+        [NSLayoutConstraint activateConstraints:@[padTop, padGap, padBottom]];
+        NSLayoutConstraint *flat = [self.transLabel.heightAnchor constraintEqualToConstant:0.0];
+        flat.active = NO;
+        objc_setAssociatedObject(self, @selector(ytmu_setRowCollapsed:),
+                                 @[padTop, padGap, padBottom, flat],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return self;
+}
+
+// Zero-height row (an instrumental marker outside its own window) or the
+// normal auto-sized one. Only the vertical padding moves, so horizontal
+// gutters and the automatic row height of a normal line are untouched.
+- (BOOL)ytmu_setRowCollapsed:(BOOL)collapsed {
+    NSArray *pack = objc_getAssociatedObject(self, @selector(ytmu_setRowCollapsed:));
+    if (pack.count != 4) return NO;
+    NSLayoutConstraint *padTop = pack[0];
+    NSLayoutConstraint *padGap = pack[1];
+    NSLayoutConstraint *padBottom = pack[2];
+    NSLayoutConstraint *flat = pack[3];
+    BOOL changed = (padTop.constant != (collapsed ? 0.0 : YTMURowPadTop)) || (flat.active != collapsed);
+    padTop.constant = collapsed ? 0.0 : YTMURowPadTop;
+    padGap.constant = collapsed ? 0.0 : YTMURowPadGap;
+    padBottom.constant = collapsed ? 0.0 : -YTMURowPadBottom;
+    if (flat.active != collapsed) flat.active = collapsed;
+    [self setNeedsUpdateConstraints];
+    [self setNeedsLayout];
+    return changed;
 }
 
 - (void)setWipeProgress:(CGFloat)progress {
@@ -368,6 +494,10 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
     self.wipeLabel.attributedText = nil;
     self.wipeMask.path = nil;
     self.lastColorKey = nil;
+    // A cell is reconfigured (not only recycled) on every activation change and
+    // on reloadData, so the typewriter mask has to be dropped here too --
+    // otherwise a half-revealed row survives a reconfigure of the same cell.
+    [self ytmu_clearType];
 }
 
 - (void)prepareForReuse {
@@ -380,6 +510,10 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
     self.wipeMask.path = nil;
     self.lyricLabel.attributedText = nil;
     self.lastColorKey = nil;
+    // A collapsed (zero-height) row must never be recycled as a normal line.
+    [self ytmu_setRowCollapsed:NO];
+    // A half-revealed translation must never survive into another row.
+    [self ytmu_clearType];
 }
 
 - (void)ytmu_handleWordTap:(UITapGestureRecognizer *)gesture {
@@ -433,9 +567,66 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
     return size.width > size.height;
 }
 
+// Exactly ONE close affordance per configuration. The portrait sheet header
+// carries its own "X" (created only for the modal sheet) and the fullscreen
+// layout has landscapeExitButton; both were visible at the same time in
+// landscape, and the header's menu button also overlapped the exit button at
+// the top-right corner. The header close button is therefore found by tag
+// (LyricsShared.h owns the ivars and is not edited from here) and the header's
+// two buttons are hidden for the whole time the landscape branch runs -- never
+// destroyed, the portrait branch shows them again.
+static const NSInteger YTMUHeaderCloseTag = 8889;
+static UIButton *YTMUHeaderCloseButton(UIView *header) {
+    if (!header) return nil;
+    UIView *found = [header viewWithTag:YTMUHeaderCloseTag];
+    return [found isKindOfClass:[UIButton class]] ? (UIButton *)found : nil;
+}
+
+// The engagement panel's own chrome. YTEngagementPanelHeaderView (title + the
+// panel's dismiss control) is a SIBLING of the content container our view lives
+// in, so ytmu_assertOnTop -- which only walks our own superview -- never saw it
+// and its X stayed on screen next to ours. Hidden with our siblings while our
+// lyrics fill the panel, restored on the way out.
+static UIView *YTMUPanelHeaderSibling(UIView *container) {
+    UIView *parent = container.superview;
+    if (!parent) return nil;
+    for (UIView *sub in parent.subviews) {
+        if (sub == container) continue;
+        if ([NSStringFromClass([sub class]) isEqualToString:@"YTEngagementPanelHeaderView"]) return sub;
+    }
+    return nil;
+}
+
+// Fullscreen retranslate button. LyricsShared.h owns the ivars and must not
+// be edited from here, so the button is found through the toolbar by tag (the
+// same pattern the album-card shadow uses with 7104).
+static const NSInteger YTMURetranslateTag = 7105;
+static UIButton *YTMURetranslateButton(UIView *toolbar) {
+    return (UIButton *)[toolbar viewWithTag:YTMURetranslateTag];
+}
+// Latched while a retranslate is in flight, so the button cannot re-enter and
+// the finishing path runs exactly once (payload landed, failure, watchdog).
+static BOOL s_retranslateRunning = NO;
+
+// Per-instance state that LyricsShared.h has no property for. Associated
+// objects (not function statics: with a modal sheet AND the embedded panel
+// live at once a static is shared by both, which is how the blur style got
+// stuck on the first instance that ever resolved one).
+//   s_ytmuArtRequestKey  video id whose cover this instance already asked for
+//   s_ytmuBlurStyleKey   last blur style this instance applied
+//   s_ytmuBlurHaveKey    whether that last style is meaningful
+static char s_ytmuArtRequestKey;
+static char s_ytmuBlurStyleKey;
+static char s_ytmuBlurHaveKey;
+
 // Private selectors used across the controller
 @interface YTMULyricsViewController (LandscapePrivate)
 - (void)ytmu_assertOnTop;
+- (void)ytmu_collapseHostingPanel;
+- (void)ytmu_restoreHostingPanelChrome;
+- (void)ytmu_applyHeaderButtonsForLandscape:(BOOL)landscape;
+- (void)ytmu_requestArtworkOnce:(NSString *)videoID;
+- (NSString *)ytmu_artworkTargetVideoID;
 - (void)ytmu_refreshChromeInk;
 - (void)ytmu_resolveProviderIndexSaved:(NSString *)saved;
 - (void)ytmu_applyProviderAtIndex:(NSInteger)idx;
@@ -444,6 +635,9 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 - (UIMenu *)ytmu_providerMenu;
 - (void)ytmu_refreshProviderSwitcher;
 - (void)ytmu_setProbing:(BOOL)probing;
+- (void)ytmu_scrollToRow:(NSInteger)row instant:(BOOL)instant;
+- (void)ytmu_retranslateTapped:(UIButton *)sender;
+- (void)ytmu_endRetranslate:(BOOL)ok;
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
 - (void)ytmu_probeArtworkBrightness:(UIImage *)img;
 - (void)ytmu_applySongTint:(UIImage *)img;
@@ -539,7 +733,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // Dim the ambient blur for contrast; keyed on background brightness so
     // bright covers get the lighter wash and dark covers the heavier one.
     // Snapshot: refreshed with the bucket in ytmu_refreshBgDerivedInk.
-    self.darkOverlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:(YTMUBgIsLight(self.view) ? 0.30 : 0.48)];
+    self.darkOverlay.backgroundColor = YTMUBgOverlayColor(self.view);
     self.darkOverlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view insertSubview:self.darkOverlay aboveSubview:self.blurView];
 
@@ -594,6 +788,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     if (self.isModal || self.presentingViewController) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+        closeBtn.tag = YTMUHeaderCloseTag;
+        closeBtn.accessibilityLabel = @"Close lyrics";
         closeBtn.frame = CGRectMake(16, 10, 36, 36);
         [closeBtn setTitle:@"X" forState:UIControlStateNormal];
         [closeBtn setTitleColor:YTMULyricInk(1.0, 1.0, self.view) forState:UIControlStateNormal];
@@ -792,6 +988,29 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     [self.landscapeReloadButton addTarget:self action:@selector(ytmu_toolbarReload:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeToolbar addSubview:self.landscapeReloadButton];
 
+    // Retranslate the current song through the current provider: same force
+    // fetch the reload path uses, but it keeps the on-screen lyrics and the
+    // caches, so nothing flashes empty while the new translation streams in.
+    UIButton *retranslateBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    retranslateBtn.tag = YTMURetranslateTag;
+    retranslateBtn.tintColor = YTMULyricInk(0.9, 0.9, self.view);
+    if (@available(iOS 13.0, *)) {
+        // iOS 13 symbol only; a nil image falls through to the text title.
+        UIImage *tImg = [UIImage systemImageNamed:@"globe"];
+        if (tImg) {
+            [retranslateBtn setImage:tImg forState:UIControlStateNormal];
+            [retranslateBtn setTitle:@"" forState:UIControlStateNormal];
+        }
+    }
+    if (!retranslateBtn.imageView.image) {
+        [retranslateBtn setTitle:@"T" forState:UIControlStateNormal];
+        [retranslateBtn setTitleColor:YTMULyricInk(0.9, 0.9, self.view) forState:UIControlStateNormal];
+        retranslateBtn.titleLabel.font = [UIFont boldSystemFontOfSize:13];
+    }
+    retranslateBtn.accessibilityLabel = @"Retranslate lyrics";
+    [retranslateBtn addTarget:self action:@selector(ytmu_retranslateTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.landscapeToolbar addSubview:retranslateBtn];
+
     // Provider switcher (Image-1 style): [<] [list] [name i/n] [>] so the
     // source can be flipped anytime without re-probing. Stepper tags are
     // the signed step (-1/+1), handled by ytmu_stepProvider:.
@@ -834,6 +1053,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.providerCache = [NSMutableDictionary dictionary];
     self.providerCandidates = nil;
     self.providerIndex = -1;
+    // Typewriter reveal + streaming translation state (Source/LyricsStream.x).
+    self.typeState = [NSMutableDictionary dictionary];
+    self.typeRows = [NSMutableSet set];
+    self.typeLastWall = 0;
+    self.tstreamClient = nil;
+    self.tstreamVideoID = nil;
 
     self.fpsLabel = [[UILabel alloc] initWithFrame:CGRectMake(16, 64, 140, 24)];
     self.fpsLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
@@ -902,11 +1127,96 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         [self dismissViewControllerAnimated:YES completion:nil];
         return;
     }
-    // Embedded (engagement panel tag 9999): hide so landscape can re-present cleanly
+    // Embedded (engagement panel tag 9999): leaving means putting the panel
+    // back exactly as we found it. ytmu_assertOnTop hides our siblings (and the
+    // panel's own header, so only one close control is ever on screen) and
+    // nothing un-hid them before, which left a blank panel after leaving.
+    [self ytmu_restoreHostingPanelChrome];
     if (self.view.superview) {
         self.view.hidden = YES;
         sendDebugLog(@"[MUSIC] landscape exit: hid embedded lyrics view");
     }
+    // The panel itself has to go too, otherwise a landscape user who reached
+    // this state through the embedded panel is left looking at it. Safe by
+    // construction: if no collapse selector answers, the panel simply shows
+    // its own content again, with its own close control back in the header.
+    [self ytmu_collapseHostingPanel];
+}
+
+// Undo everything ytmu_assertOnTop hid while our lyrics were on top. The panel
+// header is a sibling of the content container, so it is restored separately.
+- (void)ytmu_restoreHostingPanelChrome {
+    UIView *container = self.view.superview;
+    if (!container) return;
+    for (UIView *sub in container.subviews) {
+        if (sub != self.view && sub.tag != 9999) sub.hidden = NO;
+    }
+    UIView *panelHeader = YTMUPanelHeaderSibling(container);
+    if (panelHeader) {
+        panelHeader.hidden = NO;
+        [container.superview bringSubviewToFront:panelHeader];
+    }
+    [container.superview bringSubviewToFront:container];
+}
+
+// Collapse/dismiss the panel our view is embedded in. Every hop is behind
+// respondsToSelector + @try, and the call is wrapped: an unknown YT selector
+// must never cost the user their way out of the panel.
+- (void)ytmu_collapseHostingPanel {
+    UIViewController *host = [self.view _viewControllerForAncestor];
+    if (!host) host = (UIViewController *)self.view.superview.superview.nextResponder;
+    if (![host isKindOfClass:[UIViewController class]] || host == (UIViewController *)self) {
+        sendDebugLog(@"[MUSIC] landscape exit: no host view controller, panel left as-is");
+        return;
+    }
+    NSMutableArray *targets = [NSMutableArray array];
+    if (host) [targets addObject:host];
+    id container = g_activeEngagementPanelContainer;
+    if (container && ![container isEqual:host]) [targets addObject:container];
+    SEL oneArgBool[] = {
+        @selector(dismissEngagementPanelAnimated:),
+        @selector(closeEngagementPanelAnimated:),
+        @selector(hideEngagementPanelAnimated:),
+    };
+    SEL noArg[] = {
+        @selector(collapseEngagementPanel),
+        @selector(dismissEngagementPanel),
+    };
+    for (id target in targets) {
+        for (NSUInteger i = 0; i < sizeof(oneArgBool) / sizeof(oneArgBool[0]); i++) {
+            if (![target respondsToSelector:oneArgBool[i]]) continue;
+            @try {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [target performSelector:oneArgBool[i] withObject:@YES];
+#pragma clang diagnostic pop
+                sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
+                              NSStringFromSelector(oneArgBool[i])]);
+                return;
+            } @catch (NSException *e) {
+                sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
+            }
+        }
+        for (NSUInteger i = 0; i < sizeof(noArg) / sizeof(noArg[0]); i++) {
+            if (![target respondsToSelector:noArg[i]]) continue;
+            @try {
+                YTMUInvokeNoArgs(target, noArg[i]);
+                sendDebugLog([NSString stringWithFormat:@"[MUSIC] landscape exit: collapsed panel via %@",
+                              NSStringFromSelector(noArg[i])]);
+                return;
+            } @catch (NSException *e) {
+                sendDebugLog(@"[WARN] landscape exit: panel collapse selector threw");
+            }
+        }
+    }
+    // Last resort: the panel VC is itself presented, so dismissing it is the
+    // one exit that always exists.
+    if (host.presentedViewController || host.presentingViewController) {
+        [host dismissViewControllerAnimated:YES completion:nil];
+        sendDebugLog(@"[MUSIC] landscape exit: dismissed hosting panel");
+        return;
+    }
+    sendDebugLog(@"[MUSIC] landscape exit: no collapse selector, native panel left visible");
 }
 
 // Video titles carry qualifiers the track name does not ("(Official Video)",
@@ -948,6 +1258,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_updateLandscapeMetadata {
+    // Safety net for the cover: every path that refreshes this header (the song
+    // change, the stream's meta event, a layout pass) also makes sure the new
+    // song's artwork is on its way, so the fullscreen card never waits for the
+    // lyrics. ytmu_requestArtworkOnce: makes it a no-op once asked for.
+    [self ytmu_requestArtworkOnce:[self ytmu_artworkTargetVideoID]];
     // Priority: server song info (the real track name/artist, the same
     // metadata the lyrics were fetched with) > player video details > the
     // visible now-playing labels. playerResponse is frequently nil and its
@@ -1242,13 +1557,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // Ambient blur follows the sampled artwork brightness (not the OS
     // theme). No-ops when the bucket is unchanged so every-layout calls
     // don't restart the 0.25s crossfade.
+    // The snapshot is per INSTANCE: it used to be a function static, so with a
+    // modal sheet and the embedded panel both live the second one never
+    // applied its own style (it matched the first instance's).
     if (!self.blurView) return;
     UIBlurEffectStyle style = YTMUBgBlurStyle(self.view);
-    static UIBlurEffectStyle s_lastStyle = UIBlurEffectStyleDark;
-    static BOOL s_haveStyle = NO;
-    if (s_haveStyle && style == s_lastStyle) return;
-    s_haveStyle = YES;
-    s_lastStyle = style;
+    NSNumber *lastStyle = objc_getAssociatedObject(self, &s_ytmuBlurStyleKey);
+    NSNumber *haveStyle = objc_getAssociatedObject(self, &s_ytmuBlurHaveKey);
+    if (haveStyle.boolValue && lastStyle.integerValue == (NSInteger)style) return;
+    objc_setAssociatedObject(self, &s_ytmuBlurStyleKey, @(style), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, &s_ytmuBlurHaveKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     UIBlurEffect *effect = [UIBlurEffect effectWithStyle:style];
     [UIView animateWithDuration:0.25 animations:^{
         self.blurView.effect = effect;
@@ -1380,6 +1698,77 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)ytmu_toolbarReload:(UIButton *)sender {
     [self forceReloadLyrics];
+}
+
+// Retranslate the CURRENT song through the CURRENT provider. Unlike the
+// reload button this keeps g_lyricsCache, self.lyrics and every provider
+// candidate: the old translation stays on screen while the forced fetch runs,
+// so nothing flashes empty and the switcher keeps its index. The button is
+// the action only -- the compact [<] [>] + name switcher next to it stays in
+// its normal collapsed form (refreshed here, never expanded).
+- (void)ytmu_retranslateTapped:(UIButton *)sender {
+    NSString *videoID = g_currentVideoID;
+    if (!videoID.length || s_retranslateRunning) return;
+    // The fetch only runs for the video the sheet is already on; a song that
+    // changed under us is handled by handleSongChange: instead.
+    if (self.loadingVideoID.length && ![self.loadingVideoID isEqualToString:videoID]) return;
+    UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+    if (self.isLoading) {
+        // A fetch is already running for this song; the 45s reclaim in
+        // fetchLyricsForVideo: covers a dead one.
+        if (statusLabel) statusLabel.text = @"Loading...";
+        return;
+    }
+    s_retranslateRunning = YES;
+    [self ytmu_refreshProviderSwitcher];
+    [self ytmu_setProbing:YES];
+    if (statusLabel) statusLabel.text = @"Retranslating...";
+    // Same slot bookkeeping forceReloadLyrics uses, so a re-entrant
+    // fetchLyricsForVideo: for this video waits instead of duplicating the
+    // request, and its 45s reclaim still applies.
+    self.isLoading = YES;
+    self.loadingSince = [NSDate date];
+    self.loadingVideoID = videoID;
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] retranslate requested for %@", videoID]);
+
+    __block BOOL jwtResolved = NO;
+    [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
+        if (jwtResolved) return;
+        jwtResolved = YES;
+        [self fetchFullLyricsForVideo:videoID jwt:jwt force:YES];
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (jwtResolved) return;
+        jwtResolved = YES;
+        sendDebugLog(@"[WARN] JWT timeout, retranslate without JWT");
+        [self fetchFullLyricsForVideo:videoID jwt:nil force:YES];
+    });
+    // Same 45s watchdog the fetch slots use: a stream or a full fetch that
+    // never reports back must not leave the toolbar dimmed forever.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!s_retranslateRunning) return;
+        sendDebugLog(@"[WARN] retranslate watchdog expired, restoring toolbar");
+        [self ytmu_endRetranslate:NO];
+    });
+}
+
+// Single exit for the retranslate: unlatch, restore the chrome and say what
+// happened. The payload itself is applied by the normal fetch path
+// (updateLyrics: + the YTMULyricsDidLoad notification), so a server answer
+// identical to what is on screen still ends cleanly.
+- (void)ytmu_endRetranslate:(BOOL)ok {
+    s_retranslateRunning = NO;
+    [self ytmu_setProbing:NO];
+    // The fetch paths release the slot themselves; this covers the ones that
+    // died without a terminal event (a stream that never sent `done`).
+    self.isLoading = NO;
+    self.loadingSince = nil;
+    UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
+    // Only own the status line while it still shows our marker: a long
+    // translation can outrun the 45s watchdog, and by then the fetch path has
+    // its own text there.
+    BOOL ours = [statusLabel.text isEqualToString:@"Retranslating..."];
+    if (statusLabel && (ok || ours)) statusLabel.text = ok ? @"" : @"[WARN] Retranslate failed";
 }
 
 - (void)ytmu_postJSON:(NSString *)path body:(NSDictionary *)body completion:(void (^)(NSDictionary *json, NSError *error))completion {
@@ -1818,6 +2207,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.landscapeReloadButton.alpha = a;
     self.providerPrevButton.enabled = !probing;
     self.providerNextButton.enabled = !probing;
+    UIButton *retranslate = YTMURetranslateButton(self.landscapeToolbar);
+    if (retranslate) {
+        retranslate.alpha = a;
+        retranslate.enabled = !probing;
+    }
     if (self.providerSwitcherLabel && probing) self.providerSwitcherLabel.text = @"…";
     if (!probing) [self ytmu_refreshProviderSwitcher];
 }
@@ -1871,7 +2265,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
                 g_lyricsCache[vid] = lyrics;
                 YTMULyricsCacheSave(vid, lyrics);
-                self.loadingVideoID = vid;
+                // Only adopt the id this select was issued for while it is still
+                // the song on screen: writing it back unconditionally rolled
+                // loadingVideoID back to the previous video after a song skip,
+                // which is what let the OLD song's artwork answer through the
+                // guard in ytmu_applyArtworkImage:forVideoID:.
+                NSString *curVideo = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+                if (!curVideo.length || [vid isEqualToString:curVideo]) {
+                    self.loadingVideoID = vid;
+                }
                 self.isLoading = NO;
                 self.lastProvider = provider;
                 id s = data[@"song"], a = data[@"artist"];
@@ -1902,6 +2304,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     CGFloat W = self.view.bounds.size.width;
     CGFloat H = self.view.bounds.size.height;
     BOOL landscape = (W > H);
+    // Gap between the album column and the lyrics table, mirrored on the
+    // right edge. Declared here because the toolbar's max width uses it too.
+    const CGFloat kLyricsGap = 24.0;
 
     if (landscape) {
         // --- Landscape, Image-2 style: fullscreen ambient blur, floating
@@ -1917,6 +2322,11 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeInfoPanel.hidden = NO;
         self.landscapeExitButton.hidden = NO;
         self.landscapeToolbar.hidden = NO;
+        // One close affordance per configuration: in landscape that is
+        // landscapeExitButton, so the portrait header's "X" and its menu button
+        // (which sat on top of the exit button) both step aside. They are
+        // hidden, not removed -- the portrait branch brings them back.
+        [self ytmu_applyHeaderButtonsForLandscape:YES];
 
         // Sync artwork image whenever it changes
         if (self.artworkImageView.image && self.landscapeArtImageView.image != self.artworkImageView.image) {
@@ -2011,27 +2421,39 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeExitButton.frame = CGRectMake(W - exitS - 12.0, exitTop, exitS, exitS);
         self.landscapeExitButton.layer.cornerRadius = exitS / 2.0;
 
-        // Bottom-right floating toolbar: provider switcher ([<][list][name i/n][>]) + reload.
-        CGFloat toolBtnS = 34, toolSmallS = 30, toolLabelW = 96, toolPad = 4, toolGap = 4;
-        CGFloat toolW = toolPad + 2 + toolSmallS + toolGap + toolBtnS + toolGap + toolSmallS + toolGap + toolLabelW + toolGap + toolBtnS + toolPad + 2;
+        // Bottom-right floating toolbar: provider switcher ([<][list][name
+        // i/n][>]) + reload + retranslate. Six controls on one pill, so the
+        // paddings are tight; the name label is what gives first when the
+        // screen is too narrow for the full pill (never a second row, never
+        // an unreachable control).
+        CGFloat toolBtnS = 32, toolSmallS = 28, toolLabelW = 84, toolPad = 3, toolGap = 3;
+        CGFloat toolFixed = toolPad * 2 + 2 + toolGap * 5 + toolBtnS * 3 + toolSmallS * 2;
+        CGFloat toolMax = MAX(160.0, W - (leftW + kLyricsGap) - 16.0);
+        if (toolLabelW > toolMax - toolFixed) toolLabelW = MAX(0.0, toolMax - toolFixed);
+        CGFloat toolW = toolFixed + toolLabelW;
         CGFloat toolH = toolBtnS + 6;
+        CGFloat yBig = floor((toolH - toolBtnS) / 2.0);
+        CGFloat ySmall = floor((toolH - toolSmallS) / 2.0);
         CGFloat toolY = H - safeBottom - toolH - 12.0;
         self.landscapeToolbar.frame = CGRectMake(W - toolW - 16.0, toolY, toolW, toolH);
         self.landscapeToolbar.layer.cornerRadius = toolH / 2.0;
         CGFloat tx = toolPad + 2;
-        self.providerPrevButton.frame = CGRectMake(tx, 5, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
-        self.landscapeProviderButton.frame = CGRectMake(tx, 3, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
-        self.providerNextButton.frame = CGRectMake(tx, 5, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
-        self.providerSwitcherLabel.frame = CGRectMake(tx, 3, toolLabelW, toolBtnS); tx += toolLabelW + toolGap;
-        self.landscapeReloadButton.frame = CGRectMake(tx, 3, toolBtnS, toolBtnS);
+        self.providerPrevButton.frame = CGRectMake(tx, ySmall, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
+        self.landscapeProviderButton.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
+        self.providerNextButton.frame = CGRectMake(tx, ySmall, toolSmallS, toolSmallS); tx += toolSmallS + toolGap;
+        self.providerSwitcherLabel.frame = CGRectMake(tx, yBig, toolLabelW, toolBtnS); tx += toolLabelW + toolGap;
+        self.landscapeReloadButton.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
+        UIButton *retranslate = YTMURetranslateButton(self.landscapeToolbar);
+        if (retranslate) retranslate.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS);
 
         // Keep title/artist fresh
         [self ytmu_updateLandscapeMetadata];
 
         // tableView floats on the ambient blur, right of the column, with a
-        // gutter so the lyrics never crowd the album card
-        CGFloat lyricsGap = 12.0;
-        self.tableView.frame = CGRectMake(leftW + lyricsGap, 0, MAX(80.0, rightW - lyricsGap), H);
+        // gutter on BOTH sides so the lyrics never crowd the album card or the
+        // screen edge (the cell adds its own gutter on top of this one).
+        CGFloat lyricsGap = kLyricsGap;
+        self.tableView.frame = CGRectMake(leftW + lyricsGap, 0, MAX(80.0, rightW - lyricsGap * 2.0), H);
         [self.view bringSubviewToFront:self.landscapeArtPanel];
         [self.view bringSubviewToFront:self.tableView];
         [self.view bringSubviewToFront:self.fpsLabel];
@@ -2040,6 +2462,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         [self.landscapeArtPanel bringSubviewToFront:self.landscapeInfoPanel];
         self.landscapeArtPanel.userInteractionEnabled = YES;
         self.landscapeInfoPanel.userInteractionEnabled = YES;
+        // YT re-shows the panel's own header whenever it lays the panel out, so
+        // the embedded case re-asserts on every pass (this is also the first
+        // pass after a rotation, before the first tick).
+        [self ytmu_assertOnTop];
 
         // Smaller bottom inset in landscape (less scroll space needed)
         CGFloat bottomPad = MAX(120.0, H * 0.30f);
@@ -2064,6 +2490,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         self.landscapeInfoPanel.hidden = YES;
         self.landscapeExitButton.hidden = YES;
         self.landscapeToolbar.hidden = YES;
+        // Back to the portrait sheet chrome: the header's own "X" and menu
+        // button are the single close affordance here.
+        [self ytmu_applyHeaderButtonsForLandscape:NO];
 
         // Restore tableView to full bounds
         self.tableView.frame = self.view.bounds;
@@ -2092,10 +2521,32 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     }
 }
 
+// The song whose cover this instance is showing or has claimed: the DISPLAY
+// intent first, then the loading slot, then the global. Deliberately not
+// loadingVideoID alone -- ytmu_selectProvider writes that one back from the id
+// it captured at tap time, so a provider tap plus a song skip pointed the art
+// path at the previous song.
+- (NSString *)ytmu_artworkTargetVideoID {
+    NSString *vid = self.artworkVideoID;
+    if (!vid.length) vid = self.loadingVideoID;
+    if (!vid.length) vid = g_currentVideoID;
+    return vid;
+}
+
+- (void)ytmu_applyHeaderButtonsForLandscape:(BOOL)landscape {
+    // The table header belongs to the portrait sheet. In landscape it is
+    // covered by the fullscreen chrome, and its two buttons are hidden so the
+    // only close control on screen is landscapeExitButton.
+    UIButton *headerClose = YTMUHeaderCloseButton(self.tableView.tableHeaderView);
+    if (headerClose) headerClose.hidden = landscape;
+    if (self.headerMenuButton) self.headerMenuButton.hidden = landscape;
+}
+
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.displayLink invalidate];
     [self.providerPollTimer invalidate];
+    [self ytmu_cancelTranslateStream];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -2120,6 +2571,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
             if (statusLabel) statusLabel.text = @"";
             [self updateLyrics:lyrics];
+            // A retranslate is over as soon as a payload lands (the watchdog
+            // covers the case where the server answered from cache and the
+            // notification never fires).
+            if (s_retranslateRunning) [self ytmu_endRetranslate:YES];
         });
     }
 }
@@ -2130,16 +2585,35 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self ytmu_stopProviderPoll];
             [self ytmu_setProbing:NO];
-            if (![self.loadingVideoID isEqualToString:videoID]) {
+            [self ytmu_cancelTranslateStream];
+            [self ytmu_typeResetAll];
+            // One gate for everything a new song must forget, keyed on the song
+            // that actually changed -- the DISPLAY ids, not loadingVideoID.
+            // That field is rewritten by other writers (ytmu_selectProvider
+            // writes back the id it captured at tap time), so a conditional
+            // built on it could be skipped and the previous song's cover,
+            // brightness bucket and ink tint all survived the change; the
+            // pointer compare in viewDidLayoutSubviews then made the stale art
+            // permanent.
+            BOOL songChanged = (![self.displayedVideoID isEqualToString:videoID] ||
+                                ![self.artworkVideoID isEqualToString:videoID]);
+            if (songChanged) {
                 self.currentIndex = -1;
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
                 statusLabel.text = @"";
                 self.lyrics = @[];
                 [self.tableView reloadData];
-                self.artworkVideoID = nil;
+                // Art + background state, unconditional inside the change: the
+                // new song claims the display intent first, then the old cover
+                // is dropped from both image views.
+                self.artworkVideoID = videoID;
                 self.artworkImageView.image = nil;
                 self.landscapeArtImageView.image = nil;
                 g_ytmu_bgLight = -1;
+                s_ytmuArtworkMean = nil;
+                // Back to unsampled ink until the new cover lands, instead of
+                // showing the previous song's tint on the chrome and lyrics.
+                [self ytmu_refreshBgDerivedInk];
                 // New song: drop stale per-song state so the retry chains
                 // refill it (stale title/artist otherwise stick forever,
                 // and the switcher would point at the old video's index).
@@ -2149,6 +2623,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.clockRawWall = 0;
                 self.activeIndexes = nil;
                 self.lastColorKey = nil;
+                YTMUResetScrollTracking();
                 self.cachedWordLayoutKey = nil;
                 self.cachedWordRects = nil;
                 self.isLoading = NO;
@@ -2163,6 +2638,14 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 self.providerIndex = -1;
                 [self ytmu_refreshProviderSwitcher];
             }
+            // Cover and header text first, in parallel with everything below --
+            // never after the lyrics response, the JWT or a server round trip.
+            // The URL is the same one the server hands out from
+            // GET /api/lyrics/image (i.ytimg.com/vi/<id>/maxresdefault.jpg with
+            // the hqdefault fallback), so this costs no extra request and does
+            // not need the stream's meta event to carry art.
+            [self ytmu_requestArtworkOnce:videoID];
+            [self ytmu_updateLandscapeMetadata];
             // Metadata + provider list come from the server for the new song:
             // two tiny reads, no provider traffic. They land whether the
             // lyrics come from the network, the server cache or the device
@@ -2171,7 +2654,6 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self ytmu_requestSongMetaForVideo:videoID];
             [self ytmu_loadProviderMetaForVideo:videoID];
             [self ytmu_loadProviderLyricsForVideo:videoID];
-            [self ytmu_updateLandscapeMetadata];
             [self fetchLyricsForVideo:videoID];
         });
     }
@@ -2207,10 +2689,16 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 - (void)ytmu_probeArtworkBrightness:(UIImage *)img {
     CGFloat lum = YTMUArtworkLuminance(img);
     if (lum < 0) return;
+    // The mean color is what tints the ink, so re-resolve whenever IT moves,
+    // not only when the bright/dark bucket flips: two songs in the same
+    // brightness band still have to swap the hue of their lyrics.
+    UIColor *mean = YTMUArtworkAverageColor(img);
+    BOOL meanMoved = (mean != s_ytmuArtworkMean) && ![mean isEqual:s_ytmuArtworkMean];
+    YTMUSetArtworkMeanColor(mean);
     int light = (lum > 0.55) ? 1 : 0;
-    if (light == g_ytmu_bgLight) return;
+    if (light == g_ytmu_bgLight && !meanMoved) return;
     g_ytmu_bgLight = light;
-    sendDebugLog([NSString stringWithFormat:@"[MUSIC] bg luminance %.2f -> %@ ink", lum, light ? @"black" : @"white"]);
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] bg luminance %.2f -> %@ ink (tint %@)", lum, light ? @"black" : @"white", mean ? @"artwork" : @"none"]);
     [self ytmu_refreshBgDerivedInk];
 }
 
@@ -2237,6 +2725,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     tintBtn(self.landscapePrevButton);
     tintBtn(self.landscapeNextButton);
     tintBtn(self.landscapeReloadButton);
+    tintBtn(YTMURetranslateButton(self.landscapeToolbar));
     tintBtn(self.landscapeProviderButton);
     tintBtn(self.providerPrevButton);
     tintBtn(self.providerNextButton);
@@ -2252,7 +2741,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
 - (void)ytmu_refreshBgDerivedInk {
     self.view.backgroundColor = YTMUBgBaseColor(self.view);
-    if (self.darkOverlay) self.darkOverlay.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:(YTMUBgIsLight(self.view) ? 0.30 : 0.48)];
+    if (self.darkOverlay) self.darkOverlay.backgroundColor = YTMUBgOverlayColor(self.view);
     [self ytmu_applyLandscapeTheme];
     if (self.landscapeTitleLabel) self.landscapeTitleLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
     if (self.landscapeArtistLabel) self.landscapeArtistLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
@@ -2264,15 +2753,49 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)ytmu_applyArtworkImage:(UIImage *)img forVideoID:(NSString *)videoID {
-    if (!img) return;
-    if (![self.loadingVideoID isEqualToString:videoID]) return;
+    if (!img || !videoID.length) return;
+    // Guarded on the DISPLAY INTENT (artworkVideoID, then the live player id),
+    // never on loadingVideoID: that one is written by the two cache branches,
+    // the network branch, forceReloadLyrics and ytmu_selectProvider -- which
+    // writes back the id it captured at tap time, so a provider tap followed by
+    // a song skip rolled it back to the previous video. A late response for the
+    // old song was therefore accepted, painted the OLD cover into both image
+    // views and stamped artworkVideoID, which made the pointer compare in
+    // viewDidLayoutSubviews a permanent no-op.
+    if (![videoID isEqualToString:self.artworkVideoID]) {
+        NSString *cur = YTMUResolveCurrentVideoID();
+        if (cur.length && [videoID isEqualToString:cur]) {
+            // The song on screen that this instance had not claimed yet (the
+            // view was built after the fetch started): adopt it, never drop a
+            // current song's cover.
+            self.artworkVideoID = videoID;
+        } else {
+            sendDebugLog([NSString stringWithFormat:@"[MUSIC] artwork dropped for %@ (display %@ / current %@)",
+                          videoID, self.artworkVideoID ?: @"(nil)", cur ?: @"(nil)"]);
+            return;
+        }
+    }
+    // The fullscreen card is written first and directly: it must not depend on
+    // artworkImageView (or on the layout pointer compare) to show the new
+    // song's cover.
+    self.landscapeArtImageView.image = img;
     [UIView transitionWithView:self.artworkImageView duration:0.4 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
         self.artworkImageView.image = img;
     } completion:nil];
-    self.landscapeArtImageView.image = img;
     self.artworkVideoID = videoID;
     [self ytmu_probeArtworkBrightness:img];
     [self ytmu_applySongTint:img];
+}
+
+// Ask for a song's cover at most once per instance, so the several paths that
+// want artwork (song change, the fetch branches, the updateLyrics: safety net)
+// cannot pile up duplicate image requests for the same song.
+- (void)ytmu_requestArtworkOnce:(NSString *)videoID {
+    if (!videoID.length) return;
+    NSString *asked = objc_getAssociatedObject(self, &s_ytmuArtRequestKey);
+    if (asked.length && [asked isEqualToString:videoID]) return;
+    objc_setAssociatedObject(self, &s_ytmuArtRequestKey, [videoID copy], OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [self loadArtworkForVideo:videoID];
 }
 
 - (void)ytmu_applySongTint:(UIImage *)img {
@@ -2280,7 +2803,13 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     // the whole lyrics UI (portrait + landscape share self.view) follows
     // the cover. Animated so song changes cross-fade instead of popping.
     if (!img || !self.view || !self.blurView) return;
-    UIColor *avg = YTMUArtworkAverageColor(img);
+    // Reuse the mean the brightness probe already sampled; only pay for a
+    // sample here when the tint runs without one (and keep it for the ink).
+    UIColor *avg = s_ytmuArtworkMean;
+    if (!avg) {
+        avg = YTMUArtworkAverageColor(img);
+        YTMUSetArtworkMeanColor(avg);
+    }
     if (!avg) return;
     if (!self.songTintView) {
         UIView *t = [[UIView alloc] initWithFrame:self.view.bounds];
@@ -2331,6 +2860,15 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         if ([g_globalLoadingVideoID isEqualToString:videoID]) {
             YTMUReleaseGlobalFetch();
         }
+        return;
+    }
+
+    // Streamed translation: the same server-side work, but the ranked lyrics
+    // land first and every translated line arrives as the model writes it (see
+    // Source/LyricsStream.x). Falls back to the blocking JSON fetch if the
+    // stream dies before delivering anything.
+    if (YTMULyricsStreamTranslateEnabled() && !self.tstreamFallbackUsed) {
+        [self ytmu_openTranslateStream:videoID jwt:jwt force:force];
         return;
     }
 
@@ -2438,6 +2976,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         g_lyricsCache = [[NSMutableDictionary alloc] init];
     }
 
+    // Display intent, claimed before any branch (including the two early
+    // "Waiting..." returns below): every art/metadata response is validated
+    // against this id, so a late answer for the previous song is dropped and
+    // the song on screen is never dropped.
+    self.artworkVideoID = videoID;
+
     // Metadata + provider list first, so the full screen header and the
     // switcher are right even when the lyrics turn out to be a cache hit.
     [self ytmu_requestSongMetaForVideo:videoID];
@@ -2449,7 +2993,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         statusLabel.text = @"";
         self.loadingVideoID = videoID;
         self.isLoading = NO;
-        [self loadArtworkForVideo:videoID];
+        [self ytmu_requestArtworkOnce:videoID];
         [self updateLyrics:g_lyricsCache[videoID]];
         [self ytmuCheckServerUpgradeForVideoID:videoID];
         return;
@@ -2463,7 +3007,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             statusLabel.text = @"";
             self.loadingVideoID = videoID;
             self.isLoading = NO;
-            [self loadArtworkForVideo:videoID];
+            [self ytmu_requestArtworkOnce:videoID];
             [self updateLyrics:fileCached];
             [self ytmuCheckServerUpgradeForVideoID:videoID];
             return;
@@ -2505,7 +3049,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.loadingVideoID = videoID;
     self.loadingSince = [NSDate date];
 
-    [self loadArtworkForVideo:videoID];
+    [self ytmu_requestArtworkOnce:videoID];
 
     NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
     [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
@@ -2590,6 +3134,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     for (UIView *sub in contentContainer.subviews) {
         if (sub != self.view && sub.tag != 9999 && !sub.hidden) sub.hidden = YES;
     }
+    // The panel's own header (with its dismiss control) lives one level up, so
+    // the loop above never reached it and its X stayed visible next to our
+    // fullscreen exit button -- the third close control. Hidden with the same
+    // rule, restored by ytmu_restoreHostingPanelChrome.
+    UIView *panelHeader = YTMUPanelHeaderSibling(contentContainer);
+    if (panelHeader && !panelHeader.hidden) panelHeader.hidden = YES;
 }
 
 - (BOOL)ytmu_lyricHasTiming:(NSDictionary *)lyric {
@@ -2667,6 +3217,29 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     return set;
 }
 
+// Single entry point for every programmatic lyric scroll (line advance,
+// tap-to-seek). `instant` forces the jump the far-jump rule asks for; on top
+// of that a target arriving while an animated scroll is still in flight also
+// jumps, which settles the running scroll instead of queueing a second one
+// behind it. Runs on the same clock as the activation pop (the UIKit scroll
+// settles in about one transition), so the line arrives and lights up as one
+// motion.
+- (void)ytmu_scrollToRow:(NSInteger)row instant:(BOOL)instant {
+    if (row < 0 || row >= (NSInteger)self.lyrics.count || !self.tableView) return;
+    NSTimeInterval now = CACurrentMediaTime();
+    BOOL settling = (s_scrollInFlightRow >= 0 && s_scrollInFlightRow != row &&
+                     (now - s_scrollStartedAt) < YTMUTransitionDuration);
+    BOOL animate = (!instant && !settling);
+    if (animate) {
+        s_scrollInFlightRow = row;
+        s_scrollStartedAt = now;
+    } else {
+        YTMUResetScrollTracking();
+    }
+    NSIndexPath *indexPath = [NSIndexPath indexPathForRow:row inSection:0];
+    [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:animate];
+}
+
 - (void)updatePlaybackTime {
     self.fpsTicks++;
     NSTimeInterval fpsNow = CACurrentMediaTime();
@@ -2699,7 +3272,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             [self ytmu_updateLandscapeMetadata];
         }
     }
-    if (!self.isSynced || self.lyrics.count == 0) return;
+    if (!self.isSynced || self.lyrics.count == 0) {
+        // Nothing to reveal without timing: drop any mask and state the tick
+        // would otherwise never get to clean up (it returns here too).
+        if (self.typeState.count) [self ytmu_typeResetAll];
+        return;
+    }
 
     double currentTime = 0;
     NSTimeInterval tickNow = CACurrentMediaTime();
@@ -2766,31 +3344,47 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             if (oldCell) {
                 [self configureCell:oldCell atIndex:(NSInteger)i isActive:NO currentTime:currentTime];
             }
+            // Leaving the active set finishes the reveal: a line must never be
+            // left half-typed behind the reader.
+            [self ytmu_typeRow:(NSInteger)i activate:NO];
         }
         for (NSUInteger i = [activated firstIndex]; i != NSNotFound; i = [activated indexGreaterThanIndex:i]) {
             YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (newCell) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:currentTime];
                 NSDictionary *nl = self.lyrics[i];
-                if (!([nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0)) {
-                    newCell.lyricLabel.alpha = 0.3;
+                BOOL wordSynced = [nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0;
+                if (wordSynced) {
+                    // The wipe owns a word-synced row: applyWordColorsToCell
+                    // paints the base label and the mask path every tick, so
+                    // only the reveal layer is animated here. Scaling the base
+                    // label would fight the per-word mask and stutter.
+                    newCell.wipeLabel.alpha = YTMUPopStartAlpha;
+                    [UIView animateWithDuration:YTMUTransitionDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+                        newCell.wipeLabel.alpha = 1.0;
+                    } completion:nil];
+                } else {
+                    newCell.lyricLabel.alpha = YTMUPopStartAlpha;
+                    newCell.lyricLabel.transform = CGAffineTransformMakeScale(YTMUPopScale, YTMUPopScale);
+                    [UIView animateWithDuration:YTMUTransitionDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+                        newCell.lyricLabel.alpha = 1.0;
+                        newCell.lyricLabel.transform = CGAffineTransformIdentity;
+                    } completion:nil];
                 }
-                newCell.lyricLabel.transform = CGAffineTransformMakeScale(1.04, 1.04);
-                [UIView animateWithDuration:0.5 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-                    newCell.lyricLabel.alpha = 1.0;
-                    newCell.lyricLabel.transform = CGAffineTransformIdentity;
-                } completion:nil];
             }
+            // Starts the letter-by-letter reveal of the translation under the
+            // new current line (no-op when the typewriter is off).
+            [self ytmu_typeRow:(NSInteger)i activate:YES];
         }
 
         if (newIndex >= 0 && newIndex < self.lyrics.count) {
             if (!self.tableView.isDragging && !self.tableView.isDecelerating && !self.tableView.isTracking) {
                 // Near: smooth-scroll with the song. Far (tap-jump / seek):
                 // jump instantly instead of stacking competing animated
-                // scrolls, which reads as jank on old phones.
+                // scrolls, which reads as jank on old phones. Same rule for
+                // the tap-to-seek path (ytmu_scrollToRow:instant: owns both).
                 BOOL far = (oldIndex >= 0 && labs(newIndex - oldIndex) > 3);
-                NSIndexPath *indexPath = [NSIndexPath indexPathForRow:newIndex inSection:0];
-                [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:!far];
+                [self ytmu_scrollToRow:newIndex instant:far];
             }
         }
     } else if (newActive.count > 0) {
@@ -2805,6 +3399,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
             }
         }
     }
+    // Typewriter: advances every row still revealing. Runs last so a line that
+    // became current in THIS tick starts moving in the same frame instead of
+    // sitting invisible for one (configureCell above dropped its mask).
+    [self ytmu_typeStep];
 }
 
 - (void)forceReloadLyrics {
@@ -2833,6 +3431,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.clockRawTime = 0;
     self.clockRawWall = 0;
     self.activeIndexes = nil;
+    YTMUResetScrollTracking();
 
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
     statusLabel.text = @"Force Reloading...";
@@ -2843,8 +3442,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.isLoading = YES;
     self.loadingVideoID = g_currentVideoID;
     self.loadingSince = [NSDate date];
-
-    [self loadArtworkForVideo:g_currentVideoID];
+    // The cover is re-asked for (the request guard keys on the song, and a
+    // force reload must not skip the re-sample that re-keys the ink), and the
+    // display intent follows the song being reloaded.
+    self.artworkVideoID = g_currentVideoID;
+    objc_setAssociatedObject(self, &s_ytmuArtRequestKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [self ytmu_requestArtworkOnce:g_currentVideoID];
 
     __block BOOL jwtResolved = NO;
     [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:^(NSString *jwt) {
@@ -2862,6 +3465,7 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 }
 
 - (void)updateLyrics:(NSArray *)newLyrics {
+    NSUInteger previousLineCount = self.lyrics.count;
     self.lyrics = newLyrics;
 
     // One type size per song from the longest line, so rows never resize
@@ -2899,11 +3503,17 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     self.cachedWordLayoutKey = nil;
     self.cachedWordRects = nil;
 
-    NSString *artVid = self.loadingVideoID;
-    if (!artVid) artVid = g_currentVideoID;
-    if (artVid && ![artVid isEqualToString:self.artworkVideoID]) {
-        if (!self.loadingVideoID) self.loadingVideoID = artVid;
-        [self loadArtworkForVideo:artVid];
+    // The cover belongs to the song the art path is aimed at (the display
+    // intent, not loadingVideoID -- see ytmu_artworkTargetVideoID). Keyed on the
+    // request guard as well, so a "Waiting..." fetch path (which returns before
+    // the load) still gets its cover from here exactly once.
+    NSString *artVid = [self ytmu_artworkTargetVideoID];
+    if (artVid.length) {
+        NSString *asked = objc_getAssociatedObject(self, &s_ytmuArtRequestKey);
+        if (!(asked.length && [asked isEqualToString:artVid])) {
+            if (!self.loadingVideoID) self.loadingVideoID = artVid;
+            [self ytmu_requestArtworkOnce:artVid];
+        }
     }
 
     // Song change (portrait sheet and landscape share this table): dissolve
@@ -2911,6 +3521,12 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     NSString *vid = self.loadingVideoID ?: g_currentVideoID;
     BOOL songChanged = vid.length && ![vid isEqualToString:self.displayedVideoID];
     self.displayedVideoID = [vid copy];
+    // Reveal bookkeeping is per row index, so it only survives a payload that
+    // keeps the same song AND the same line count -- a streamed `raw` payload
+    // followed by `final` must not restart lines that are already typing.
+    if (songChanged || newLyrics.count != previousLineCount) {
+        [self ytmu_typeResetAll];
+    }
     if (songChanged && newLyrics.count > 0) {
         [UIView transitionWithView:self.tableView duration:0.28
                            options:UIViewAnimationOptionTransitionCrossDissolve
@@ -3155,21 +3771,29 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
 
     NSDictionary *lyric = self.lyrics[index];
     if ([self ytmuIsInstrumentalLyric:lyric]) {
-        // Instrumental gap: music-note icon row (mirrors the braccato
-        // preview icon). No wipe mask, no word timing, no translation row.
-        // Font/alignment are reset explicitly in the text branch below
-        // because cells are reused.
+        // Instrumental gap: a music-note marker, shown ONLY while playback is
+        // inside this row's own window (the same isActive the lyric rows use),
+        // and aligned with the lyric gutter instead of floating centred. An
+        // untimed payload has no window at all, so the marker stays up for the
+        // whole song there -- it is the only content of its row.
+        // Font/alignment are reset explicitly in the text branch below because
+        // cells are reused.
+        // An inactive marker COLLAPSES to zero height (ytmu_setRowCollapsed:)
+        // so it cannot steal a line from the lyrics; it still counts for
+        // timing/active-set purposes and tapping it still seeks.
+        BOOL showNote = isActive || !self.isSynced;
+        if ([cell ytmu_setRowCollapsed:!showNote]) [self.tableView setNeedsLayout];
         cell.lyricLabel.attributedText = nil;
-        cell.lyricLabel.text = @"\u266A";
+        cell.lyricLabel.text = showNote ? @"\u266A" : @"";
         cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
-        cell.lyricLabel.textAlignment = NSTextAlignmentCenter;
+        cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
         cell.lyricLabel.alpha = 1.0;
         cell.lyricLabel.transform = CGAffineTransformIdentity;
-        cell.lyricLabel.textColor = YTMULyricInk(isActive ? 1.0 : 0.2, isActive ? 1.0 : 0.2, self.view);
+        cell.lyricLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
         cell.lyricLabel.layer.shadowColor = YTMULyricShadow(self.view).CGColor;
         cell.lyricLabel.layer.shadowOffset = CGSizeMake(0, 2);
         cell.lyricLabel.layer.shadowRadius = 4.0;
-        cell.lyricLabel.layer.shadowOpacity = isActive ? 0.75 : 0.32;
+        cell.lyricLabel.layer.shadowOpacity = showNote ? 0.75 : 0.32;
         cell.lyricLabel.layer.masksToBounds = NO;
         [cell clearWipe];
         cell.transLabel.text = @"";
@@ -3177,6 +3801,8 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
         return;
     }
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
+    // A normal line is never collapsed, whatever the cell held before it.
+    [cell ytmu_setRowCollapsed:NO];
     cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];
@@ -3185,6 +3811,9 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric ranges:NULL];
     cell.lyricLabel.alpha = 1.0;
     cell.lyricLabel.transform = CGAffineTransformIdentity;
+    // The activation pop animates this one on word-synced rows; a reconfigure
+    // is the only place a half-finished pop can be dropped.
+    cell.wipeLabel.alpha = 1.0;
 
     if (!self.isSynced) {
         cell.lyricLabel.attributedText = nil;
@@ -3319,6 +3948,10 @@ static void YTMUInvokeNoArgs(id obj, SEL sel) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:g_currentPlaybackTime];
             }
         }
+        // A tap is always a far jump: settle on the tapped line now, so the
+        // next tick does not animate a scroll from the pre-tap position and
+        // the pop and the scroll land together.
+        [self ytmu_scrollToRow:indexPath.row instant:YES];
     }
 }
 

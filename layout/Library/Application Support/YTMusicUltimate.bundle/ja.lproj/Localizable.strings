@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "6時間ごとにサーバーの翻訳を自動取得";
 "DOWNLOAD" = "ダウンロード";
 "UPDATE_WHATS_NEW" = "新機能：\n%@";
+
+"LYRICS_ENGINE" = "歌詞エンジン";
+"LYRICS_ENGINE_FOOTER" = "サーバーが歌詞を取得し、下で設定した言語に翻訳します。その言語の文字で書かきた行は表記の正規化だけが行われ、翻訳元に送信されることはありません。ストリーム翻訳はモデルが書き進める間に行ごとに表示し、タイプワイター表示はアクティブ行の下に翻訳を一文字ずつ入力します。";
+"STREAM_TRANSLATE" = "ストリーム翻訳";
+"STREAM_TRANSLATE_DESC" = "曲全体を待つのではなく、モデルが書き進める翻訳済みの行をその場で表示します";
+"TYPEWRITER" = "タイプワイター表示";
+"TYPEWRITER_DESC" = "アクティブ行の下に翻訳を一文字ずつ入力します（0 = オフ）";
+"DEBUG_SETTINGS" = "デバッグ";
+"DEBUG_STREAM" = "ストリーミング翻訳";
+"DEBUG_STATE" = "状態";
+"DEBUG_VIDEO" = "直前の動画";
+"DEBUG_PROGRESS" = "イベント / 行数";
+"DEBUG_LAST_LINE" = "最後にストリームした行";
+"DEBUG_REVEAL" = "タイプワイター速度";
+"DEBUG_UPLOAD" = "デバッグ送信";
+"DEBUG_LOG_LEVEL" = "ログレベル";
+"DEBUG_LOG_LEVEL_DESC" = "Off = 送信しない、Err = 失敗のみ、All = 情報 + 警告 + エラー";
+"DEBUG_SEND" = "デバッグをサーバーに送信";
+"DEBUG_SEND_DESC" = "デバッグイベントを歌詞サーバーに送信し、ダッショウドで確認できます";
+"DEBUG_SCREENSHOT" = "スクリーンショットのデバッグ情報を送信";
+"DEBUG_SCREENSHOT_DESC" = "スクリーンショットを揍った後にのみ UI 階層を送信します";
+"DEBUG_ACTIONS" = "アクション";
+"DEBUG_COPY" = "診断情報をコピー";
+"DEBUG_TEST_LOG" = "テストログを送信";
+"DEBUG_COPIED" = "診断情報をクリップボードにコピーしました";
+"DEBUG_IDLE" = "待機中";
+
+"DEBUG_ENDPOINT" = "エンドポイント";
+"DEBUG_NOW_PLAYING" = "再生中: %@";
+"DEBUG_LAST_EVENT" = "最終イベント %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- 現在ブロックされています: メインスイッチがオフ、またはログレベルが All ではありません";
+"DEBUG_UPLOAD_OFF" = "upload_logs = オフ";
+"DEBUG_TEST_SENT" = "情報ログとして送信しました。只今サーバーのダッシュボードに届きます。";
+"DEBUG_TEST_BLOCKED" = "送信しません。メインスイッチ、ログレベル、またはサーバーの upload_logs スイッチによって送信がブロックされています。";

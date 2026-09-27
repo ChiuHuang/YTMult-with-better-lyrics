@@ -455,6 +455,386 @@ def _cohere_translate_raw(texts, target_lang):
     return None
 
 
+# ------------------------------------------------------------
+# Streaming translate
+#
+# cohere_translate() above hands the whole numbered prompt to the model and
+# waits for the last token, so a 40-line song shows nothing for ~7s and then
+# pops every translation in at once. The functions below do the same job with
+# `stream: true`, yielding each numbered line as the model finishes writing it
+# (and, throttled, the line still being written) so a UI can paint the raw
+# line first and type the translation in.
+#
+# Same contract as the blocking path, deliberately: the same cache key, the
+# same "Han-script lines for a Chinese target never hit the API" bucketing,
+# the same echo-original retry, the same "never negative-cache a total
+# failure" rule. translate_stream() is a superset -- it falls back to the
+# blocking call whenever streaming cannot deliver, so callers can always use
+# it instead.
+# ------------------------------------------------------------
+
+_COHERE_CHAT_URL = 'https://api.cohere.com/v2/chat'
+_COHERE_TRANSLATE_MODEL = 'command-a-translate-08-2025'
+# Providers stream one token (or one character) at a time; pushing every
+# single delta down an SSE channel would be pure overhead, so in-progress
+# lines are reported at most this often. Completed lines always go through.
+_TSTREAM_MIN_PARTIAL = 0.045
+
+_LINE_NUM_RE = re.compile(r'^\s*\[(\d{1,4})\]\s?(.*)$', re.S)
+
+
+class _NumberedStreamParser:
+    """Incremental parser for the numbered translation format.
+
+    feed(chunk) returns a list of {'i': <1-based prompt line>, 'text': str,
+    'done': bool}. 'done' marks a line the model terminated with a newline;
+    a line still being written is reported (throttled) with 'done' False so a
+    UI can grow it character by character. Lines that don't parse as
+    '[n] ...' are dropped, exactly like _parse_numbered_lines does.
+    flush() returns the final line when the stream ended without a trailing
+    newline.
+    """
+
+    def __init__(self):
+        self._buf = ''
+        self._last_partial = 0.0
+
+    @staticmethod
+    def _parse(raw):
+        m = _LINE_NUM_RE.match(raw)
+        if not m:
+            return None
+        try:
+            return int(m.group(1)), m.group(2)
+        except Exception:
+            return None
+
+    def feed(self, chunk):
+        if not chunk:
+            return []
+        self._buf += chunk
+        out = []
+        while True:
+            nl = self._buf.find('\n')
+            if nl < 0:
+                break
+            line = self._buf[:nl]
+            self._buf = self._buf[nl + 1:]
+            parsed = self._parse(line.strip())
+            if parsed:
+                out.append({'i': parsed[0], 'text': parsed[1].strip(), 'done': True})
+        partial = self._parse(self._buf.strip())
+        if partial and partial[1].strip():
+            now = time_module.monotonic()
+            if (now - self._last_partial) >= _TSTREAM_MIN_PARTIAL:
+                self._last_partial = now
+                out.append({'i': partial[0], 'text': partial[1], 'done': False})
+        return out
+
+    def flush(self):
+        tail = self._buf.strip()
+        self._buf = ''
+        parsed = self._parse(tail) if tail else None
+        if not parsed or not parsed[1].strip():
+            return []
+        return [{'i': parsed[0], 'text': parsed[1].strip(), 'done': True}]
+
+
+def _iter_numbered_events(deltas):
+    """Turn a raw text-delta stream into numbered-line events."""
+    parser = _NumberedStreamParser()
+    for chunk in deltas:
+        for ev in parser.feed(chunk):
+            yield ev
+    for ev in parser.flush():
+        yield ev
+
+
+def _sse_data_lines(resp):
+    """Yield (event_name, data_string) for an SSE response, stopping at the
+    `[DONE]` sentinel both providers send.
+
+    Forces UTF-8 explicitly: Cohere and the OpenAI-compatible chat providers
+    answer with `text/event-stream` and NO charset, so requests falls back to
+    ISO-8859-1 and every CJK delta arrives as mojibake (the same trap
+    node.py hit). `resp.encoding` is what iter_lines decodes with, so setting
+    it here is the fix.
+    """
+    resp.encoding = 'utf-8'
+    event = ''
+    for raw in resp.iter_lines(decode_unicode=True):
+        if not raw:
+            event = ''
+            continue
+        if raw.startswith(':'):
+            continue  # comment / keepalive
+        if raw.startswith('event:'):
+            event = raw[6:].strip()
+        elif raw.startswith('data:'):
+            data = raw[5:].strip()
+            if data == '[DONE]':
+                return
+            yield event, data
+
+
+def _cohere_translate_stream(texts, target_lang):
+    """Stream the numbered translation out of Cohere, yielding raw text
+    deltas (str). Rotates keys on 429 like the batch path, records the failure
+    reason on translate_last_error(), and raises RuntimeError when every key
+    failed so the caller can fall back. The HTTP response is always closed,
+    including when the consumer abandons the generator (client disconnect)."""
+    _TLS.last_error = None
+    if not texts:
+        return
+    keys = cohere_key_list()
+    if not keys:
+        _TLS.last_error = 'error'
+        raise RuntimeError('no Cohere keys configured')
+    saw_429 = False
+    body = {
+        "model": _COHERE_TRANSLATE_MODEL,
+        "messages": [{"role": "user", "content": _translate_prompt(texts, target_lang)}],
+        "stream": True,
+    }
+    for attempt in range(len(keys)):
+        resp = None
+        try:
+            api_key = get_cohere_key()
+            if not api_key:
+                break
+            resp = requests.post(
+                _COHERE_CHAT_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                json=body,
+                stream=True,
+                timeout=(10, 60),
+            )
+            if resp.status_code == 429:
+                print(f"  [Cohere] Stream rate limited on key {attempt}, rotating...")
+                saw_429 = True
+                rotate_cohere_key()
+                continue
+            if resp.status_code != 200:
+                print(f"  [Cohere] Stream error {resp.status_code}")
+                rotate_cohere_key()
+                continue
+            for event, data in _sse_data_lines(resp):
+                if event and event != 'content-delta':
+                    continue
+                try:
+                    payload = json.loads(data)
+                except Exception:
+                    continue
+                content = ((payload.get('delta') or {}).get('message') or {}).get('content') or {}
+                text = content.get('text')
+                if text:
+                    yield text
+            _TLS.last_error = None
+            return
+        except Exception as e:
+            print(f"  [Cohere] Stream exception: {e}")
+            rotate_cohere_key()
+        finally:
+            if resp is not None:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
+    _TLS.last_error = 'rate_limited' if saw_429 else 'error'
+    raise RuntimeError('Cohere stream failed on every key')
+
+
+def _chat_stream_deltas(messages, max_tokens=4000):
+    """Stream text deltas from the first 'translate' chat provider
+    (OpenAI-compatible: `stream: true` -> choices[].delta.content).
+    Raises RuntimeError when the provider is missing or the call fails."""
+    p = _chat_provider('translate')
+    if not p:
+        raise RuntimeError('no chat provider configured')
+    key = (p.get('api_key') or '').strip()
+    base = (p.get('base_url') or '').strip().rstrip('/')
+    if not key or not base:
+        raise RuntimeError('chat provider missing key/base_url')
+    headers = {'Authorization': f'Bearer {key}',
+               'Content-Type': 'application/json',
+               'Accept': 'text/event-stream'}
+    for hk, hv in (p.get('headers') or {}).items():
+        if isinstance(hk, str) and isinstance(hv, str):
+            headers[hk] = hv
+    resp = None
+    try:
+        resp = requests.post(
+            base + '/chat/completions',
+            headers=headers,
+            json={'model': p.get('model') or 'orcarouter/free',
+                  'messages': messages, 'temperature': 0.2,
+                  'max_tokens': max_tokens, 'stream': True},
+            stream=True,
+            timeout=(10, 60),
+        )
+        if resp.status_code == 429:
+            _TLS.last_error = 'rate_limited'
+            raise RuntimeError('chat stream rate limited')
+        if resp.status_code != 200:
+            _TLS.last_error = 'error'
+            raise RuntimeError(f'chat stream HTTP {resp.status_code}')
+        for event, data in _sse_data_lines(resp):
+            try:
+                payload = json.loads(data)
+            except Exception:
+                continue
+            for choice in (payload.get('choices') or []):
+                content = (choice.get('delta') or {}).get('content')
+                if isinstance(content, list):
+                    content = ''.join(part.get('text') or ''
+                                       for part in content
+                                       if isinstance(part, dict))
+                if content:
+                    yield content
+        _TLS.last_error = None
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
+
+def translate_stream(texts, target_lang='zh-TW', song_lang=''):
+    """Streaming counterpart of cohere_translate.
+
+    Yields {'i': <0-based index into texts>, 'text': str, 'done': bool} as the
+    model writes. 'done' means that line is final; a partial event means the
+    line is still growing (clients should overwrite the same index, not
+    append). Always terminates with every line delivered: streaming failures
+    (no key, 429 on every key, a provider that ignores `stream`) fall back to
+    the blocking call, which is also how a total API failure ends up serving
+    the originals -- uncached, exactly like cohere_translate.
+    """
+    if not texts:
+        return
+    if not any(t.strip() for t in texts):
+        for i, t in enumerate(texts):
+            yield {'i': i, 'text': t, 'done': True}
+        return
+
+    cache_key = f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
+    cached = get_translate_cached(cache_key)
+    if cached is not None:
+        print(f"  [Cohere] Stream cache hit ({len(texts)} lines)")
+        for i, t in enumerate(texts):
+            yield {'i': i, 'text': cached[i] if i < len(cached) else t, 'done': True}
+        return
+
+    # Same zh bucketing as cohere_translate: lines already in Han script for a
+    # Chinese target need a script pass, never an API call -- so they are
+    # handed over immediately and for free.
+    chinese_target = _is_chinese_target(target_lang)
+    skip_han = chinese_target and song_lang in ('', 'zh', 'zh-TW', 'zh-CN', 'zh-HK')
+    results = list(texts)
+    if chinese_target and skip_han:
+        to_translate_idx = [i for i, t in enumerate(texts) if not _line_is_already_chinese(t)]
+    else:
+        to_translate_idx = list(range(len(texts)))
+
+    if chinese_target and to_translate_idx != list(range(len(texts))):
+        for i, t in enumerate(_apply_zh_script(results, target_lang)):
+            results[i] = t
+            yield {'i': i, 'text': t, 'done': True}
+
+    if to_translate_idx:
+        subset = [texts[i] for i in to_translate_idx]
+
+        # Fold the events into the final per-line text. Last event wins, so a
+        # line that streamed partials ends up with its completed text.
+        latest = {}
+
+        def _run(deltas):
+            """Feed a delta iterator through a fresh parser, yielding every
+            event it produces and recording the last one per line. Line numbers
+            outside the prompt's range are dropped: models occasionally append
+            a bonus line, and a bogus index must never reach a client.
+
+            The prompt numbers lines from 1 over `subset`, but the wire
+            contract is a 0-based index into `texts` (every other yield in
+            this function uses it, and callers paint by index). Those are only
+            the same when nothing was bucketed out, so re-map here: with the
+            Han-script bucket active `subset` is a strict subset and the
+            model's `[1]` is not lyric row 0."""
+            for ev in _iter_numbered_events(deltas):
+                prompt_i = ev['i']
+                if not (1 <= prompt_i <= len(subset)):
+                    continue
+                latest[prompt_i] = ev['text']
+                out = dict(ev)
+                out['i'] = to_translate_idx[prompt_i - 1]
+                yield out
+
+        engine = 'cohere'
+        try:
+            for ev in _run(_cohere_translate_stream(subset, target_lang)):
+                yield ev
+        except Exception as e:
+            print(f"  [Cohere] {e}; trying chat-provider stream fallback...")
+            latest.clear()
+            engine = 'chat'
+            try:
+                for ev in _run(_chat_stream_deltas(
+                        [{'role': 'user', 'content': _translate_prompt(subset, target_lang)}])):
+                    yield ev
+            except Exception as e2:
+                print(f"  [Chat] stream failed too: {e2}")
+        produced = bool(latest)
+
+        if not produced:
+            # Nothing came back at all: hand the job to the blocking path
+            # (it retries the keys, the chat provider, and keeps the
+            # originals uncached when the API is simply down).
+            print("  [Cohere] Stream produced nothing, falling back to blocking translate")
+            blocking = cohere_translate(texts, target_lang, song_lang=song_lang)
+            for i, t in enumerate(blocking):
+                results[i] = t
+                yield {'i': i, 'text': t, 'done': True}
+            return
+
+        for prompt_i, text in latest.items():
+            if 1 <= prompt_i <= len(to_translate_idx):
+                results[to_translate_idx[prompt_i - 1]] = text
+
+        # A translated line that still embeds its original (model echoed
+        # original + romanization + translation as one blob) gets one strict
+        # retry, same as the blocking path -- the client sees the corrected
+        # line land as a second `done` event.
+        bad = [k for k in range(len(subset))
+               if _echoes_original(subset[k], results[to_translate_idx[k]])]
+        if bad:
+            print(f"  [Cohere] {len(bad)} line(s) echo the original, retrying once...")
+            retry_fn = orca_chat_translate if engine == 'chat' else _cohere_translate_raw
+            retry = retry_fn([subset[k] for k in bad], target_lang)
+            if retry is not None:
+                for j, k in enumerate(bad):
+                    gi = to_translate_idx[k]
+                    results[gi] = retry[j]
+                    yield {'i': gi, 'text': retry[j], 'done': True}
+
+        if chinese_target:
+            converted = _apply_zh_script(results, target_lang)
+            for i, t in enumerate(converted):
+                if t != results[i]:
+                    results[i] = t
+                    yield {'i': i, 'text': t, 'done': True}
+
+        # Never cache a run that translated nothing: later lookups would serve
+        # the originals as if they were translations.
+        if any(results[i] and results[i] != texts[i]
+               for i in to_translate_idx):
+            set_translate_cached(cache_key, results)
+
+
 def apply_display_transforms(lyrics, target_lang='zh-TW', auto_zh=False):
     """Presentation-only, response-time post-processing (never applied to what
     gets persisted). Two rules:

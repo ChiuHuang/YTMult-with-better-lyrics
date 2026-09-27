@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "Động cơ lời bài hát";
+"LYRICS_ENGINE_FOOTER" = "Máy chủ lấy lời bài hát và dịch sang ngôn ngữ đặt bên dưới. Dòng đã viết bằng chữ Hán kia chỉ được chuẩn hóa chữ viết, không bao giờ gửi sang bộ dịch. Dịch theo luồng hiển thị từng dòng ngay khi mô hình đang viết, còn hiệu ứng máy đánh máy gõ từng chữ dưới dòng đang nổi bật.";
+"STREAM_TRANSLATE" = "Dịch theo luồng";
+"STREAM_TRANSLATE_DESC" = "Hiển thị từng dòng đã dịch ngay khi mô hình đang viết, thay vì chờ hết cả bài";
+"TYPEWRITER" = "Hiệu ứng máy đánh máy";
+"TYPEWRITER_DESC" = "Gõ từng chữ của bản dịch dưới dòng đang nổi bật (0 = tắt)";
+"DEBUG_SETTINGS" = "Gỡ lỗi";
+"DEBUG_STREAM" = "Dịch theo luồng";
+"DEBUG_STATE" = "Trạng thái";
+"DEBUG_VIDEO" = "Video gần nhất";
+"DEBUG_PROGRESS" = "Sự kiện / dòng";
+"DEBUG_LAST_LINE" = "Dòng phát gần nhất";
+"DEBUG_REVEAL" = "Tốc độ máy đánh máy";
+"DEBUG_UPLOAD" = "Dữ liệu gỡ lỗi tải lên";
+"DEBUG_LOG_LEVEL" = "Mức nhật ký";
+"DEBUG_LOG_LEVEL_DESC" = "Tắt = không tải lên, Err = chỉ lỗi, All = thông tin + cảnh báo + lỗi";
+"DEBUG_SEND" = "Gửi dữ liệu gỡ lỗi lên máy chủ";
+"DEBUG_SEND_DESC" = "Tải sự kiện gỡ lỗi lên máy chủ lời bài hát, xem được trong bảng điều khiển";
+"DEBUG_SCREENSHOT" = "Gửi dữ liệu gỡ lỗi ảnh chụp màn hình";
+"DEBUG_SCREENSHOT_DESC" = "Chỉ tải lên cấu trúc phân cấp UI sau khi bạn chụp màn hình";
+"DEBUG_ACTIONS" = "Tác vụ";
+"DEBUG_COPY" = "Sao chép chẩn đoán";
+"DEBUG_TEST_LOG" = "Gửi nhật ký kiểm thử";
+"DEBUG_COPIED" = "Đã sao chép chẩn đoán vào bảng nhớ tạm";
+"DEBUG_IDLE" = "nhàn rỗi";
+
+"DEBUG_ENDPOINT" = "Địa chệ máy chủ";
+"DEBUG_NOW_PLAYING" = "đang phát: %@";
+"DEBUG_LAST_EVENT" = "sự kiện cuối %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- hiện đang bị chặn: công tắc chính tắt, hoặc mức nhật ký không phải All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = tắt";
+"DEBUG_TEST_SENT" = "Đã gửi như một nhật ký thông tin. Nó đã tới bảng điều khiển máy chủ.";
+"DEBUG_TEST_BLOCKED" = "Chưa gửi. Việc tải lên bị chặn bởi công tắc chính, mức nhật ký, hoặc công tắc upload_logs của máy chủ.";

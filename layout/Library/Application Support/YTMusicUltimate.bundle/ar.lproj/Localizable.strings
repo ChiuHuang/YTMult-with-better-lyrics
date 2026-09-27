@@ -126,3 +126,37 @@
 "AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
+
+"LYRICS_ENGINE" = "محرك الكلمات";
+"LYRICS_ENGINE_FOOTER" = "يقوم الخادم بجلب الكلمات وترجمتها إلى اللغة المضبوطة أدناه. أما السطور المكتوبة أصلاً بذلك الخط الصيني فتُوحَّد كتابتها فقط ولا تُرسل أبداً إلى المترجم. أما الترجمة المتدفقة فتعرض كل سطر أثناء كتابته، وتأثير الآلة الكاتبة يكتب الترجمة حرفاً بحرف تحت السطر النشط.";
+"STREAM_TRANSLATE" = "ترجمة متدفقة";
+"STREAM_TRANSLATE_DESC" = "اعرض كل سطر مترجم أثناء كتابته بدل انتظار الأغنية كاملة";
+"TYPEWRITER" = "تأثير الآلة الكاتبة";
+"TYPEWRITER_DESC" = "اكتب الترجمة حرفاً بحرف تحت السطر النشط (0 = إيقاف)";
+"DEBUG_SETTINGS" = "التنقيح";
+"DEBUG_STREAM" = "الترجمة المتدفقة";
+"DEBUG_STATE" = "الحالة";
+"DEBUG_VIDEO" = "آخر فيديو";
+"DEBUG_PROGRESS" = "الأحداث / الأسطر";
+"DEBUG_LAST_LINE" = "آخر سطر تم بثه";
+"DEBUG_REVEAL" = "سرعة الآلة الكاتبة";
+"DEBUG_UPLOAD" = "رفع بيانات التنقيح";
+"DEBUG_LOG_LEVEL" = "مستوى السجل";
+"DEBUG_LOG_LEVEL_DESC" = "إيقاف = بدون رفع، Err = الأخطاء فقط، All = معلومات + تحذيرات + أخطاء";
+"DEBUG_SEND" = "إرسال بيانات التنقيح إلى الخادم";
+"DEBUG_SEND_DESC" = "ارفع أحداث التنقيح إلى خادم الكلمات لتظهر في لوحة المعلومات";
+"DEBUG_SCREENSHOT" = "إرسال بيانات تنقيح لقطة الشاشة";
+"DEBUG_SCREENSHOT_DESC" = "ارفع تسلسل واجهة المستخدم فقط بعد التقاط لقطة شاشة";
+"DEBUG_ACTIONS" = "الأفعال";
+"DEBUG_COPY" = "نسخ التشخيص";
+"DEBUG_TEST_LOG" = "إرسال سجل الاختبار";
+"DEBUG_COPIED" = "تم نسخ التشخيص إلى الحافظة";
+"DEBUG_IDLE" = "خامل";
+
+"DEBUG_ENDPOINT" = "نقطة الوصول";
+"DEBUG_NOW_PLAYING" = "قيد التشغيل الآن: %@";
+"DEBUG_LAST_EVENT" = "آخر حدث %@ ms";
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- محظور الآن: المفتاح الرئيسي معطّل، أو مستوى السجل ليس All";
+"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_TEST_SENT" = "أُرسل كسجل معلومات. يصل الآن إلى لوحة معلومات الخادم.";
+"DEBUG_TEST_BLOCKED" = "لم يُرسل. الرفع محظور بواسطة المفتاح الرئيسي أو مستوى السجل أو مفتاح upload_logs في الخادم.";

@@ -126,3 +126,67 @@
 "AUTO_SYNC_DESC" = "每 6 小時將伺服器翻譯靜默拉回本地快取";
 "DOWNLOAD" = "下載";
 "UPDATE_WHATS_NEW" = "更新內容：\n%@";
+
+"LYRICS_ENGINE" = "歌詞引擎";
+
+"LYRICS_ENGINE_FOOTER" = "伺服器負責抓取歌詞並翻譯成下方指定的語言。已經是該中文字體的歌詞只會做簡繁轉換，不會送去翻譯。串流翻譯會在模型輸出的當下逐行顯示，打字機效果則會在當前歌詞下方逐字顯示譯文。";
+
+"STREAM_TRANSLATE" = "串流翻譯";
+
+"STREAM_TRANSLATE_DESC" = "在模型輸出的當下逐行顯示譯文，不必等整首歌翻完";
+
+"TYPEWRITER" = "打字機效果";
+
+"TYPEWRITER_DESC" = "在當前歌詞下方逐字顯示譯文（0 = 關閉）";
+
+"DEBUG_SETTINGS" = "除錯";
+
+"DEBUG_STREAM" = "串流翻譯";
+
+"DEBUG_STATE" = "狀態";
+
+"DEBUG_VIDEO" = "上一段影片";
+
+"DEBUG_PROGRESS" = "事件 / 行數";
+
+"DEBUG_LAST_LINE" = "最後串流的行";
+
+"DEBUG_REVEAL" = "打字機速度";
+
+"DEBUG_UPLOAD" = "除錯資料上傳";
+
+"DEBUG_LOG_LEVEL" = "記錄等級";
+
+"DEBUG_LOG_LEVEL_DESC" = "關閉 = 不上傳，Err = 只傳失敗，All = 資訊 + 警告 + 錯誤";
+
+"DEBUG_SEND" = "將除錯資料傳送到伺服器";
+
+"DEBUG_SEND_DESC" = "將除錯事件上傳到歌詞伺服器，可於儀表板中查看";
+
+"DEBUG_SCREENSHOT" = "傳送截圖除錯資料";
+
+"DEBUG_SCREENSHOT_DESC" = "只有在你截圖時才上傳 UI 層級資料";
+
+"DEBUG_ACTIONS" = "操作";
+
+"DEBUG_COPY" = "複製診斷資訊";
+
+"DEBUG_TEST_LOG" = "傳送測試記錄";
+
+"DEBUG_COPIED" = "診斷資訊已複製到剪貼簿";
+
+"DEBUG_IDLE" = "閒置";
+
+"DEBUG_ENDPOINT" = "端點";
+
+"DEBUG_NOW_PLAYING" = "目前播放：%@";
+
+"DEBUG_LAST_EVENT" = "最後事件 %@ 毫秒";
+
+"DEBUG_UPLOAD_BLOCKED" = "%@ -- 目前被封鎖：總開關關閉，或記錄等級不是 All";
+
+"DEBUG_UPLOAD_OFF" = "upload_logs = 關閉";
+
+"DEBUG_TEST_SENT" = "已以 info 記錄傳送，現在就會出現在伺服器儀表板。";
+
+"DEBUG_TEST_BLOCKED" = "未傳送。上傳被總開關、記錄等級或伺服器的 upload_logs 開關封鎖。";
