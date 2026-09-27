@@ -9,9 +9,9 @@ import requests
 
 GH_REPO = os.environ.get('YTMU_GH_REPO', 'ChiuHuang/YTMult-with-better-lyrics')
 # Worker prefix: prepended to the release asset URL for regions where
-# github.com is slow. Trailing slash added automatically.
+# github.com is slow (Cloudflare CDN). Trailing slash added automatically.
 WORKER_PREFIX = os.environ.get(
-    'YTMU_WORKER_PREFIX', 'http://workersproxy.codefoxy.workers.dev/')
+    'YTMU_WORKER_PREFIX', 'https://proxy.chiuhuang.dev/')
 
 _CACHE = {'at': 0.0, 'release': None}
 _TTL = 600
