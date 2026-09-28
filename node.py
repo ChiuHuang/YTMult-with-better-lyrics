@@ -15,8 +15,9 @@ things:
      repeat work someone else's node (or the server itself) already did.
   2. Relays outbound lyric-provider HTTP requests through this machine's IP
      when asked, for IP diversity against provider rate limits.
-  3. Accepts lyric-cache sync pushes from the server ('sync' messages), so a
-     node's cache reflects what the main server already resolved.
+  3. Accepts the server's Cubey JWT pool ('jwt_sync' messages) and hands a
+     token back when asked ('jwt_get'), so the server can borrow one when
+     its own pool is empty.
   4. Self-updates: the server tells it the current node.template code_sha in
      the hello_ack and in periodic ping messages; when its own copy is stale
      it refetches the personalized script from the server and restarts.
@@ -52,6 +53,7 @@ NODE_KEY = "__NODE_KEY__"
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_cache", "lyrics")
 CACHE_TTL_SECONDS = 86400 * 3  # matches the main server's cache lifetime
+JWT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_cache", "jwt.json")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
@@ -95,6 +97,40 @@ def _save_local_cache(cache_key, data):
             json.dump({'data': data, 'ts': time.time()}, f, ensure_ascii=False)
     except Exception:
         pass
+
+
+def _save_synced_jwts(tokens):
+    """Replace this node's stored copy of the server's JWT pool wholesale, so a
+    token the server dropped (twice dead, or evicted past the pool cap) also
+    disappears here. Returns how many are held."""
+    clean = [t for t in (tokens or []) if isinstance(t, str) and len(t) >= 20]
+    if not clean:
+        return 0
+    try:
+        os.makedirs(os.path.dirname(JWT_FILE), exist_ok=True)
+        with open(JWT_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'tokens': clean, 'updated': time.time()}, f)
+    except Exception as e:
+        print(f"[node] jwt store failed: {e}")
+        return 0
+    return len(clean)
+
+
+def _pick_synced_jwt():
+    """The token to hand back on 'jwt_get': last one received, else whatever is
+    still on disk. Purely local, no network."""
+    tok = getattr(_pick_synced_jwt, '_last', None)
+    if tok:
+        return tok
+    try:
+        if not os.path.exists(JWT_FILE):
+            return None
+        with open(JWT_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        toks = [t for t in (data.get('tokens') or []) if isinstance(t, str) and len(t) >= 20]
+        return toks[-1] if toks else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -229,12 +265,19 @@ def on_message(ws, raw):
         _maybe_self_update(msg.get('code_sha'))
         return
 
-    if mtype == 'sync':
-        _save_local_cache(msg.get('cache_key', ''), msg.get('data'))
+    if mtype == 'jwt_sync':
+        n = _save_synced_jwts(msg.get('tokens'))
+        if n:
+            # Remember the freshest one in memory: 'jwt_get' can then answer
+            # even before the file write is visible, and the newest token is
+            # the one the server wants back.
+            _pick_synced_jwt._last = msg['tokens'][-1]
+        print(f"[node] jwt pool synced: {n} token(s) held")
         return
 
-    if mtype == 'sync_end':
-        print(f"[node] cache sync complete: {msg.get('count', 0)} entries")
+    if mtype == 'jwt_get':
+        token = _pick_synced_jwt()
+        ws.send(json.dumps({'type': 'jwt_data', 'request_id': request_id, 'token': token}))
         return
 
     if mtype == 'cache_check':

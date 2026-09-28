@@ -422,10 +422,40 @@ def check_all(evict=True):
     return {'ok': ok_n, 'dead': dead_n, 'unknown': unknown_n, 'total': len(_pool)}
 
 
+def live_jwt_tokens():
+    """Raw live tokens, best-first, for the node JWT sync. Same ordering as
+    pick_jwt so the token a node hands back is the one this server would have
+    served. Never logged, never persisted here -- it only travels over an
+    already-authenticated node WebSocket."""
+    with _lock:
+        live = [e for e in _pool.values() if e.get('token')]
+        live.sort(key=_pick_sort_key)
+        return [e['token'] for e in live]
+
+
+def _top_up_from_nodes():
+    """Called when the pool has no usable token: ask the connected nodes for
+    one they are holding (see nodes._jwt_sync_loop for the push side) and
+    contribute it so it persists and takes part in normal rotation. Background
+    only -- never called from a lyrics request."""
+    with _lock:
+        has_live = any(e.get('token') for e in _pool.values())
+    if has_live:
+        return False
+    from .nodes import ask_nodes_for_jwt
+    node_id, token = ask_nodes_for_jwt(timeout=2.0)
+    if not token:
+        return False
+    res = contribute_jwt(token, node_id=None)
+    print(f"  [JWT] topped up from node {node_id}: ok={res.get('ok')} pool={res.get('num_pool')}")
+    return bool(res.get('ok'))
+
+
 def _check_loop():
     while True:
         time_module.sleep(VERIFY_INTERVAL)
         try:
+            _top_up_from_nodes()
             check_all(evict=True)
         except Exception as e:
             print(f"  [JWT] check loop error: {e}")

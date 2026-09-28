@@ -250,6 +250,7 @@ def admin_nodes_list():
             'last_seen': rec.get('last_seen'),
             'ip': live_ips.get(node_id) or rec.get('last_ip', ''),
             'online': node_id in online_ids,
+            'jwt_sync': rec.get('jwt_sync', True) is not False,
         })
     items.sort(key=lambda x: x['created'], reverse=True)
     return jsonify({'nodes': items})
@@ -342,6 +343,31 @@ def admin_nodes_regenerate(node_id):
     resp = Response(script, mimetype='text/x-python')
     resp.headers['Content-Disposition'] = f'attachment; filename="node_{node_id}.py"'
     return resp
+
+
+@app.route('/api/admin/nodes/<node_id>/jwt_sync', methods=['POST'])
+@login_required
+def admin_nodes_jwt_sync(node_id):
+    """Per-node opt-out for the Cubey pool push. Turning it ON for a node that
+    is already connected pushes immediately instead of waiting for the next
+    60s tick; turning it OFF stops the next push but does NOT erase what the
+    node already stored (revoke the node if that matters)."""
+    body = request.get_json(silent=True) or {}
+    enable = bool(body.get('enabled', True))
+    nodes = _load_nodes()
+    if node_id not in nodes:
+        return jsonify({'error': 'not found'}), 404
+    nodes[node_id]['jwt_sync'] = enable
+    _save_nodes(nodes)
+    with _connected_nodes_lock:
+        entry = connected_nodes.get(node_id)
+        if entry is not None:
+            entry['jwt_sync'] = enable
+    if enable and entry is not None:
+        from .nodes import _live_jwt_tokens, _push_jwt_sync
+        threading.Thread(target=_push_jwt_sync,
+                         args=(node_id, _live_jwt_tokens()), daemon=True).start()
+    return jsonify({'ok': True, 'node_id': node_id, 'jwt_sync': enable})
 
 
 @app.route('/api/admin/nodes/<node_id>/revoke', methods=['POST'])

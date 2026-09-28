@@ -59,7 +59,20 @@
   (`_safe_cache_component`). Run: `python proxy_server.py` or
   `.venv\Scripts\python -c "from server import main; main()"`.
   DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
-  providers/translate/cache; routes->all, nothing imports routes.
+  providers/translate/cache; routes->all, nothing imports routes. Node mesh
+  (`nodes.py`) is PULL-ONLY for lyrics cache (`ask_nodes_for_cache` on a disk
+  miss: routes_lyrics 316/731, routes_stream 231, playlist 85) -- the server
+  does NOT push `cache/lyrics` down anymore, so a node only holds what it
+  fetched itself. The one push that remains is the Cubey JWT pool:
+  `_push_jwt_sync` (`jwt_sync` message) on connect + a 60s tick that re-pushes
+  only when the token-set signature changes, per-node opt-out via
+  `"jwt_sync": false` in `config/nodes.json` (shown as a clickable `jwt on/off`
+  pill in the dashboard node row, `POST /api/admin/nodes/<id>/jwt_sync`).
+  Node side stores it in `node_cache/jwt.json` and answers `jwt_get`;
+  `jwt_pool._top_up_from_nodes` pulls one in from `_check_loop` when the pool
+  has no live token, so a node holding a token can rescue an empty pool. A
+  node already saw raw tokens via `relay_http_request` (the Cubey probe posts
+  the token in the body), so this is the same exposure, not a new one.
   Streaming translation: `translate.translate_stream` is the generator,
   `routes_stream._stream_translate` runs it on a worker thread and drains it
   into SSE, and the device reads `GET /api/lyrics/tstream` (its full-fetch
@@ -127,6 +140,33 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **node cache push removed, JWT push added** (user: "stop syncing caches and
+  also sync jwt"). Gone: `_cache_entries_for_sync` / `_push_cache_sync` /
+  `_full_sync_for` / `_cache_sync_loop` and the `'sync'`/`'sync_end'` receivers
+  in `node.py`, plus the orphaned `_cache_key_from_filename` import. The
+  60s-tick, 300-entry-per-push, 120s-cutoff lyric push had almost no value
+  anyway -- it was already capped at ~300 songs and never backfilled, and the
+  nodes it fed are the ones being asked in `ask_nodes_for_cache`. The PULL
+  stays (that is the read path that actually saves work) but a node now only
+  has what it fetched itself, so expect `[Node cache] hit` to get much rarer.
+  New: the server pushes its live Cubey pool (`live_jwt_tokens`, best-first by
+  the same key as `pick_jwt`) to every node as one `jwt_sync` message, on
+  connect and on a 60s tick gated by a sha256 over the token set so a steady
+  pool costs one hash a minute. The node replaces its copy wholesale (so a
+  twice-dead token really disappears) and hands one back on `jwt_get`;
+  `jwt_pool._top_up_from_nodes()` runs at the top of `_check_loop` and, only
+  when `pick_jwt()` would be None, pulls one in from a node and contributes it
+  -- background only, never on a request path. Gate: `"jwt_sync": false` per
+  node in `config/nodes.json`, defaulted in at connect, toggled from the
+  dashboard node row. Accepted trade: a token pulled back from a node gets a
+  fresh `fails: 0` from `contribute_jwt` and is re-probed within 300s, so a
+  node holding a long-dead token can re-seed the pool once per cycle until the
+  probe kills it again (bounded, self-correcting). Nodes pick this up on their
+  own: the template sha moved, so the next 30s ping makes every node refetch
+  node.py. Verified: py_compile x4, `node --check`, dash.js syntax, and a
+  loopback test (fake ws -> real `node.py` handlers) covering push, store,
+  pull, top-up-into-an-emptied-pool, the opt-out refusing the push, no-nodes
+  being a silent False, and `cache_check` still working.
 - **precache actually works now** (it had never run): the only caller of
   `YTMULyricsPrecacheQueue` was a Logos hook on `YTMQueueConfigImpl
   -setQueueModel:`, a setter nothing calls - every other hook on that class in

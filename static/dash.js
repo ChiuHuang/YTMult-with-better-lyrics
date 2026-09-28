@@ -411,12 +411,23 @@
     list.innerHTML = '';
     if (!nodes.length) { list.appendChild(el('div', {class:'list-row'}, 'No nodes')); return; }
     nodes.forEach(n => {
+      const jwtPill = el('span', {class: n.jwt_sync ? 'pill pill-ok' : 'pill pill-mute',
+                                  style:'cursor:pointer; justify-self:end;'}, n.jwt_sync ? 'jwt on' : 'jwt off');
+      jwtPill.title = n.jwt_sync ? 'Cubey JWT pool is pushed to this node. Click to stop.' : 'This node gets no JWT pool. Click to allow it.';
+      jwtPill.addEventListener('click', async () => {
+        try {
+          await API(`/api/admin/nodes/${encodeURIComponent(n.node_id)}/jwt_sync`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({enabled: !n.jwt_sync})});
+          mdui.snackbar({message: `JWT sync ${!n.jwt_sync ? 'enabled' : 'disabled'} for ${n.label || n.node_id}`});
+          loadNodes();
+        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+      });
       const row = el('div', {class:'list-row node', style:'font-size:13.5px;'},
         el('span', {}, n.label || '(unnamed)'),
         el('span', {class:'mono truncate'}, n.node_id || ''),
         el('span', {}, n.last_seen ? ago(n.last_seen)+' ago' : ''),
         el('span', {}, el('span', {class: n.online ? 'pill pill-ok' : 'pill pill-mute'}, el('span', {class:'dot'}), n.online ? 'online' : 'offline')),
-        el('mdui-button-icon', {icon: 'delete', variant: 'text', style:'justify-self:end; color:rgb(var(--mdui-color-error));'})
+        jwtPill,
+        el('mdui-button-icon', {icon: 'delete', variant: 'text', style:'color:rgb(var(--mdui-color-error));'})
       );
       const revokeBtn = row.lastElementChild;
       revokeBtn.addEventListener('click', async () => {
