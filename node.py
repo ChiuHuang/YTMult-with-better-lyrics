@@ -375,6 +375,63 @@ _PING_TIMEOUT = 25
 # the ping numbers above only stop the client from hanging up first.
 _SERVER_PING_ANSWER_EVERY = 1   # answer every server ping (they are 30s apart)
 
+# Out-of-band self-update: how a node recovers from a bug that stops it
+# connecting at all.
+#
+# _maybe_self_update needs the server's code_sha, and that only ever arrives
+# inside hello_ack or a ping message -- both of which require a WORKING
+# socket. So a node whose run_forever() raises before the handshake (exactly
+# what an illegal ping_interval/ping_timeout pair did) can never learn it is
+# outdated, and every node stays broken until a human edits the file. The
+# self-update could not rescue the one class of bug it exists for.
+#
+# The generate endpoint is keyed by the node key, not by a session, so it
+# works with no socket at all: fetch the script over plain HTTP, and the
+# sha comparison is just "does the file I was handed differ from mine".
+# After this many consecutive failures with no authenticated session, do that
+# once per attempt -- it costs one request and only runs while we are already
+# broken.
+_HTTP_SELF_UPDATE_AFTER = 3
+
+
+def _http_self_update():
+    """Refetch our own script over HTTP, with no websocket involved. Returns
+    True only if it execv'd (never returns in that case), else False. Same
+    identity + size guards as _maybe_self_update."""
+    base = _http_base()
+    if not base:
+        return False
+    url = f"{base}/api/admin/nodes/generate/{quote(NODE_ID)}?key={quote(NODE_KEY)}"
+    try:
+        resp = requests.get(url, timeout=20)
+    except Exception as e:
+        print(f"[node] http self-update fetch failed: {e}")
+        return False
+    script = resp.text
+    if resp.status_code != 200 or len(script) < 500:
+        print(f"[node] http self-update: bad response status={resp.status_code}")
+        return False
+    if NODE_ID not in script or NODE_KEY not in script:
+        print("[node] http self-update: server returned a different identity, ignoring")
+        return False
+    # Compare the same way the server hashes: normalize the three identity
+    # lines away, or our own personalization would look like a difference.
+    norm = _NODE_VERSION_RE.sub(lambda m: m.group(1) + m.group(2) + '""', script)
+    local = _code_sha()
+    if not local or hashlib.sha256(norm.encode('utf-8')).hexdigest() == local:
+        print("[node] http self-update: already current, not restarting")
+        return False
+    print("[node] http self-update: script differs from ours, restarting")
+    try:
+        with open(os.path.abspath(__file__), 'w', encoding='utf-8', newline='\n') as f:
+            f.write(script.replace('\r\n', '\n'))
+    except Exception as e:
+        print(f"[node] http self-update: write failed: {e}")
+        return False
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+    return True
+
+
 # Written by on_message, cleared before every dial: the loop uses this to
 # tell "a working session ended" (reset the curve) from "the dial never got
 # anywhere" / "the server rejected us" (keep growing, so neither a revoked
@@ -390,6 +447,7 @@ def run_forever_with_backoff():
     backoff = _RECONNECT_MIN
     url = SERVER_WS_URL
     state = {'upgrade': False}
+    failed_dials = 0
     while True:
         _SESSION['authed_at'] = 0.0
 
@@ -414,11 +472,21 @@ def run_forever_with_backoff():
         authed_at = _SESSION['authed_at']
         if authed_at:
             held = time.time() - authed_at
+            failed_dials = 0
             if held >= _SESSION_RESET_MIN:
                 backoff = _RECONNECT_MIN
                 print(f"[node] session lasted {held:.0f}s")
             else:
                 print(f"[node] session lasted only {held:.0f}s, keeping backoff")
+        else:
+            # No authenticated session: the websocket self-update path is
+            # unreachable, because it needs hello_ack. If this has repeated,
+            # ask over HTTP whether our own file is out of date -- that is the
+            # only way a node recovers from a bug that blocks connecting.
+            failed_dials += 1
+            if failed_dials >= _HTTP_SELF_UPDATE_AFTER:
+                _http_self_update()   # execv's if the script differs
+                failed_dials = 0
         if state['upgrade']:
             url = _to_wss(url)
             state['upgrade'] = False
