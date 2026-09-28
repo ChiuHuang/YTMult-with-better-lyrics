@@ -83,6 +83,18 @@ python proxy_server.py        # listens on :20016
   real files.
 - Extra keys via env: `YTMU_COHERE_KEYS`, `ORCAROUTER_API_KEY`
   (`YTMU_ORCA_BASE`, `YTMU_ORCA_MODEL`).
+- **Nodes** — dashboard → Nodes → *Generate node*. Three ways to deploy the
+  generated `node.py`:
+  - `deploy.sh` one-liner (bash): installs deps, writes a systemd unit.
+  - **Download node.py** in the dialog: the script itself, for Windows or any
+    host with no shell — then `py -m pip install websocket-client requests`
+    and `py node.py`. It self-updates from then on.
+  - **Download + Windows run.cmd**: the script plus a `.cmd` that makes a
+    venv, installs the deps, and starts the node.
+  Both downloads are creation-time only: the server keeps a hash of each node
+  key, never the key, so it cannot re-render a script later. Keep the key from
+  the dialog, or use the keyed endpoint to refetch:
+  `curl -fsSL "<server>/api/admin/nodes/generate/<id>?key=<key>" -o node.py`.
 - Dashboard (password-gated): live logs, library manager (rebase, bulk
   refetch, retitle, translate queue), JWT pool, nodes, self-update, crash
   logs, and the **App** tab (tweak remote config served at
