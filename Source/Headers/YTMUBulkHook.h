@@ -52,7 +52,10 @@ static inline void YTMUBulkHook(NSArray<NSString *> *classNames, SEL sel, IMP re
         Method m = class_getInstanceMethod(cls, sel);
         if (!m) continue;
         NSMutableDictionary *perClass = [NSMutableDictionary dictionary];
-        perClass[selName] = [NSValue valueWithPointer:method_getImplementation(m)];
+        // The cast to `const void *` is REQUIRED, not cosmetic. These files
+        // are .xm, so they compile as Objective-C++ where an IMP (a function
+        // pointer) will not implicitly convert to `const void *`.
+        perClass[selName] = [NSValue valueWithPointer:(const void *)method_getImplementation(m)];
         origs[[NSValue valueWithPointer:(__bridge const void *)cls]] = perClass;
         method_setImplementation(m, replacement);
     }
