@@ -240,9 +240,13 @@ def _badge_text(btype):
 @app.route('/api/app/badge', methods=['GET'])
 def api_app_badge():
     """Server-rendered MD3 badge (same theme as assets/badges/), used in the
-    README. ?type=release|lyrics|devices|tracks|nodes. SVG, no-store.
+    README. ?type=release|lyrics|devices|tracks|nodes|now. SVG, no-store.
     Any failure degrades to an 'unknown' pill, never a broken image."""
     btype = (request.args.get('type') or 'release').strip()
+    if btype == 'now':
+        from .badge_nowplaying import now_playing_svg
+        return Response(now_playing_svg(), mimetype='image/svg+xml',
+                        headers={'Cache-Control': 'no-store'})
     try:
         text = _badge_text(btype)
     except Exception as e:
