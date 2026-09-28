@@ -140,6 +140,29 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **node self-update could not fix the one class of bug it exists for**
+  (user: "bruh why didnt node self update"). `_maybe_self_update` needs the
+  server's `code_sha`, and that only ever arrives inside `hello_ack` or a
+  `ping` message -- BOTH require a working socket. So a node whose
+  `run_forever()` raises before the handshake (exactly what the illegal
+  ping pair did) can never discover it is outdated: it retries forever,
+  hears nothing, and every node stays broken until a human edits the file.
+  The recovery mechanism was structurally blind to startup failures, and I
+  shipped that blind spot into the very commit that needed it. Fix:
+  `_http_self_update()` + `_HTTP_SELF_UPDATE_AFTER = 3`, called from
+  `run_forever_with_backoff`'s new `else:` branch (no authenticated
+  session) once three consecutive dials have failed. The `generate` endpoint
+  is keyed by node key, not a session, so it works with no socket at all --
+  that is the property the whole fix rests on. Guards carried over: identity
+  must be echoed back, 200 + >=500 bytes, and the sha comparison normalizes
+  the three identity lines exactly like the server does, otherwise a
+  personalized node always looks stale to itself. Throttled on purpose: only
+  while already broken, so a healthy node never pays for it, and a 403/500
+  can never turn into a restart loop. Verified end to end: a staged node
+  with `_PING_TIMEOUT = 120` and a live server repaired its own file to 25
+  and execv'd; the repaired copy kept its own identity and carried the pong
+  fix; a node with no local sha restarts zero times over 6 dials; the
+  threshold really is throttled (3 dials, 0 checks before the cut).
 - **the node disconnect bug was on the SERVER, and my first fix made it
   worse** (user reported `connection loop error: Ensure ping_interval >
   ping_timeout` in a loop, after "make backoff lower or dont make it
