@@ -140,36 +140,60 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
-- **node reconnect: fast floor, bounded ceiling, fewer drops** (user: "make
-  backoff lower or dont make it disconnect"). `node.py` was the only backoff
-  in the repo: 2s doubling to a 60s cap, and NOTHING ever reset it, so a
-  server restart or a wifi blip could leave a node dark for a minute and
-  one bad afternoon set the pace for the whole day. Now
-  `_RECONNECT_MIN 1.0` / `_RECONNECT_MAX 10.0` / `_RECONNECT_GROWTH 1.5`,
-  jitter +0-15% applied to the wait and then clamped so 1s and 10s stay exact
-  (jitter lengthens, never shortens -- the first cut did the opposite and
-  let the floor drift to 0.7s). The curve resets on a session that
-  AUTHENTICATED and lived >= `_SESSION_RESET_MIN` (15s), tracked by
-  `_SESSION['authed_at']` written from the `hello_ack ok` branch: resetting
-  on a bare socket open would let a revoked key spin at 1s forever, and
-  resetting on any open would let a proxy that kills every socket hammer at
-  1s, so the reset is gated twice. Liveness: `ping_timeout 10 -> 120`
-  (`_PING_INTERVAL` stays 30). That was the "disconnect" half and it is a
-  real bug, not a preference -- websocket-client records the pong on the
-  READER thread, which is the same thread `on_message` runs on, so one
-  relayed `http_fetch` (20s requests timeout, and they queue) blocked pong
-  processing and the client declared a healthy socket dead. Server side is
-  untouched on purpose: `ws.receive(timeout=90)` is what reaps a silently
-  dead node, and raising it would only make bad nodes look alive. The
-  template sha moved, so every node refetches node.py on its own within 30s
-  (verified: template sha == a node's own `_code_sha` after the
-  SERVER_WS_URL/NODE_ID/NODE_KEY normalization, so there is no refetch
-  loop). Verified with a stubbed-`websocket` harness over the real
-  `run_forever_with_backoff`: never-connects walks 1.1 -> 8.1 -> 10.0 and
-  stays at 10.0 (6 dials/min worst case), a long session drops the next
-  wait back to ~1.0, a rejected key and an immediately-dropped session both
-  still climb to the cap, and the run_forever kwargs are
-  `{ping_interval: 30, ping_timeout: 120}`.
+- **the node disconnect bug was on the SERVER, and my first fix made it
+  worse** (user reported `connection loop error: Ensure ping_interval >
+  ping_timeout` in a loop, after "make backoff lower or dont make it
+  disconnect"). Three things here, read in order:
+  1. `ping_timeout 10 -> 120` was WRONG and shipped broken.
+     websocket-client validates the pair in `run_forever` and raises
+     `Ensure ping_interval > ping_timeout` BEFORE opening a socket, so every
+     node crash-looped and never authenticated. And it could not self-update
+     out of it (self-update needs `hello_ack`). A node in that state needs a
+     MANUAL restart after the fix -- the template sha bump is not enough.
+     Now `_PING_INTERVAL 30` / `_PING_TIMEOUT 25`: still more headroom than
+     the old 10s (the reader thread that records the pong is the same one
+     `on_message` runs on, so a relayed `http_fetch` with its 20s timeout
+     blocks it), but legal. The two are coupled -- never tune one alone.
+  2. THE REAL DISCONNECT, pre-existing since the mesh landed: the server's
+     `ws.receive(timeout=90)` in `ws_node` is reset ONLY by an APPLICATION
+     message. `simple_websocket`'s `_handle_events` answers a protocol Ping
+     with a Pong internally and never touches `input_buffer` or the event,
+     so a protocol ping is invisible to `receive()`. The comment at
+     `server/nodes.py:397` ("the node's WebSocketApp pings every 30s") was
+     therefore wrong: a healthy, IDLE node was being reaped every 90s, and
+     `on_message` answered the server's own `ping` with silence. Fix: the
+     node now replies `{"type":"pong","ts":...}` to that 30s `ping`
+     (`node.py` `on_message`, cadence `_SERVER_PING_ANSWER_EVERY`, module
+     counter `_pong_count` -- it needs a `global`, so it lives next to its
+     policy constant, not as a local), and the server handles `pong` by
+     stamping `last_seen` (`server/nodes.py`). The 90s reaper is UNCHANGED
+     and still drops a truly dead node -- that detection is wanted.
+     Verified both directions on a real socket against a real
+     `werkzeug.serving` app: a node that answers survives 100s with 200
+     pings and keeps advancing `last_seen`; a node that ignores them is
+     dropped at 90s. Plus a wire-level proof against the installed ws.py
+     that a Ping is invisible to `receive()` while an app message is not
+     (drive wsproto directly -- a socketpair harness deadlocks in the
+     library's non-daemon reader thread, and a WSConnection that never
+     handshakes silently discards data frames, which makes the control case
+     lie).
+  3. `config/nodes.json` is now gitignored: it holds `key_hash` for every
+     node, which is credential material, and it was the one runtime config
+     file missing from `.gitignore`.
+  The reconnect pacing from the previous entry is unchanged and still
+  stands: `_RECONNECT_MIN 1.0` / `_RECONNECT_MAX 10.0` / `_RECONNECT_GROWTH
+  1.5`, jitter lengthened then clamped to keep 1s and 10s exact, reset only
+  on a session that authenticated and lived >= 15s (`_SESSION['authed_at']`).
+- **node reconnect: fast floor, bounded ceiling** (user: "make backoff lower
+  or dont make it disconnect"). `node.py` was the only backoff in the repo:
+  2s doubling to a 60s cap, and NOTHING ever reset it, so a server restart
+  or a wifi blip could leave a node dark for a minute and one bad afternoon
+  set the pace for the whole day. Verified with a stubbed-`websocket` harness
+  over the real `run_forever_with_backoff`: never-connects walks 1.1 -> 8.1
+  -> 10.0 and stays there (6 dials/min worst case), a long session drops the
+  next wait back to ~1.0, a rejected key and an immediately-dropped session
+  both still climb to the cap. (The liveness half of this entry was wrong and
+  is corrected above.)
 - **settings API documented** (`docs/settings-api.md`, linked from the
   README's public-endpoints list). Full reference: merge order (defaults
   overlaid by the file, a read never raises), the key regex and the
