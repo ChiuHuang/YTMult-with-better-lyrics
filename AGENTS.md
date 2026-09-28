@@ -140,6 +140,62 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **the translated-lyrics echo bug** (user: "allow to fix broken
+  translate(lyrics)", with a rendered row reading "Every single morning
+  ((Huh) （哈）每一個清晨"). NOT a display bug: the panel is two labels in one
+  cell and nothing joins them, so the STRING was wrong. The guard in
+  `server/translate.py` was `orig in trans` -- whole-line containment. It
+  caught the full echo, retried once, then took the retry ON FAITH with no
+  second check, so an echo survived into `cache/translate/` permanently; and
+  it MISSED the more common PARTIAL echo (clause kept, trailing vocal cue
+  dropped), which a whole-line test cannot see. Fixed at four points, each
+  because the other alone leaks: `_echoes_original` compares leading words
+  (`_leading_echo_fraction`, bar 0.75 so a kept proper noun like "BITE!" is
+  spared) with `_strip_echo_prefix` to salvage the tail; the retry is
+  re-checked in BOTH the blocking and stream paths; the stream path repairs
+  BEFORE yielding the delta (the client paints each delta as it arrives, so a
+  post-hoc fix is already on screen -- that is literally how the user watched
+  the original repeat); and the cache-read sanitiser now runs on the Cohere
+  AND Google paths with `apply_display_transforms` as the last-chance repair
+  (covers entries persisted before the fix). The blocking path also stopped
+  caching a run that translated nothing. Device: row gap 6 -> 10pt (at 0.68x
+  the two labels read as one string) and the auto font shrink now measures the
+  translation on the scale it is drawn at. TRAPS: `_WORD_SPLIT` must NOT
+  include the parens -- splitting them made "((Huh)" three empty fragments,
+  reached the cue-only branch never, and shifted every index; and a
+  cue-only original must keep containment while a ONE-WORD original must not,
+  which is the only thing separating a vocal cue from a kept proper noun.
+  Verified by driving the real `cohere_translate` / `translate_stream` with a
+  fake API: the echo survives end to end before the fix, never reaches the
+  wire after it. No romaji / orig+romaji+translate display feature exists on
+  the device -- if that is wanted it has to be built, and the parsers
+  currently DISCARD the `tlyric` / `<translation>` data that would feed it.
+- **settings: schema UI, a real off switch, full l10n** (user: "what eats
+  server settings now? make a ui for it not raw string and allow turning it
+  off dont impact users too much"). The App tab was a free-form key/value
+  bag, so the ~20 keys the device actually reads were undiscoverable: only
+  `upload_logs` had a server default and every `ui.*` switch existed solely in
+  the tweak. `server/app_settings.py` now owns `_SCHEMA` (key, type, default,
+  group, label, desc) and the dashboard renders typed switches from it, with
+  an override/default pill the flat map could never express; the raw form
+  survives under a collapsed Advanced heading. Remote control is bounded from
+  BOTH ends: server master `ui.remote_control`, and `allowServerFeatureControl`
+  as a LOCAL pref (a user who wants the server out of their UI must not need
+  the server's permission) shown as a row in the Liquid Glass settings page.
+  `YTMULGServerAllows` moved out of the header into `LyricsCore.x` because it
+  runs on every layout pass of ~40 hooked classes and was doing two
+  NSUserDefaults deserializations plus an allocation per call; it is now
+  memoized and invalidated on fetch / on the switch flipping. All four guards
+  fail open. Also: a non-string key was a 500 through the crash handler not a
+  400; schema keys are type-checked; bulk set is all-or-nothing; reset now
+  confirms; and `YTMULiquidGlassPreferences.h` redeclared
+  `YTMUAppSettingBool` with NO extern C guard while `LyricsShared.h` declares
+  it WITH one, and `LiquidGlass.xm` imports both -- a link break waiting to
+  happen. l10n: 185 strings were sitting in English inside the non-English
+  .strings files (ja 61, ar 22, ...) and the zip's 8 new rows were hardcoded
+  English literals; all 14 files are complete, with the remaining identical
+  values being words that are genuinely the same word there (SponsorBlock,
+  Audio, Player) and declared as such.
 - **node self-update could not fix the one class of bug it exists for**
   (user: "bruh why didnt node self update"). `_maybe_self_update` needs the
   server's `code_sha`, and that only ever arrives inside `hello_ack` or a
