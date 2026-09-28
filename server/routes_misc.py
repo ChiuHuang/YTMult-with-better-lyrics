@@ -60,9 +60,24 @@ def api_app_settings():
 @app.route('/api/app/stats', methods=['GET'])
 def api_app_stats():
     """Public usage counter: lyrics served, devices, last song + status.
-    Actions embeds it into release notes."""
+    Actions embeds it into release notes.
+
+    `served` is the PROCESS-lifetime counter (resets on redeploy, so it reads
+    low). `log_stats` is the durable one the badge shows: the byte offset and
+    per-file count reached in each log generation, so the numbers can be seen
+    without re-reading the log. See server/badge_stats.py.
+    """
     from .usage_stats import snapshot
-    return jsonify({'ok': True, **snapshot()})
+    from . import badge_stats
+    snap = snapshot()
+    try:
+        log_stats = badge_stats.stats()
+    except Exception as e:
+        print(f"[STATS] [WARN] badge_stats failed: {e}")
+        log_stats = {'served': None, 'source': 'error', 'error': str(e)}
+    snap['served_log'] = log_stats.get('served')
+    snap['log_stats'] = log_stats
+    return jsonify({'ok': True, **snap})
 
 
 # ------------------------------------------------------------
