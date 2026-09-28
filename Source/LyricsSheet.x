@@ -347,7 +347,12 @@ static CGFloat YTMULyricGutterTrailing(void) { return 40.0; }
 // constraints, so an "empty" row keeps a full lyric line's height unless the
 // padding itself is collapsed.
 static const CGFloat YTMURowPadTop = 14.0;
-static const CGFloat YTMURowPadGap = 6.0;
+// Gap between a lyric line and its translation. 6pt read as a single glued
+// string at 0.68x scale -- "Every single morning ((Huh)" followed by
+// "（哈）每一個清晨" looked like one mangled line rather than two. The
+// translation is already visually distinct (smaller, dimmer), it just needed
+// room to be read as its own line.
+static const CGFloat YTMURowPadGap = 10.0;
 static const CGFloat YTMURowPadBottom = 14.0;
 
 @interface YTMULyricsCell (SheetRows)
@@ -3875,6 +3880,15 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         if (![l isKindOfClass:[NSDictionary class]]) continue;
         NSString *t = [self normalizedLyricText:l[@"text"]];
         if (t.length > maxLen) maxLen = t.length;
+        // The translation wraps too, but at ~0.68x the size, so compare it on
+        // the scale it will actually be drawn at. Measuring the raw character
+        // count let a long translation overflow a full-width main line and
+        // wrap under an already-shrunken one.
+        NSString *tr = l[@"translated"];
+        if ([tr isKindOfClass:[NSString class]] && tr.length) {
+            NSUInteger effective = (NSUInteger)ceil((double)tr.length * YTMULyricTransFontSize() / 28.0);
+            if (effective > maxLen) maxLen = effective;
+        }
     }
     CGFloat size = 28.0;
     if (maxLen > 28) {
