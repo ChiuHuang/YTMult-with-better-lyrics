@@ -235,7 +235,7 @@ def _badge_text(btype):
         if served <= 0:                      # no log yet -> usage counter
             from .usage_stats import snapshot
             served = int(snapshot().get('served', 0))
-        return f'Lyrics {served:,}'
+        return f'Lyrics served {served:,}'
     if btype == 'devices':
         from .usage_stats import snapshot
         return f"Devices {int(snapshot().get('users', 0)):,}"
