@@ -91,7 +91,7 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.rq { grid-template-columns: 1fr 80px 80px 100px 70px; }
 .list-row.cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; }
 .list-row.file { grid-template-columns: 1fr 90px 160px 44px; }
-.list-row.node { grid-template-columns: 1fr 120px 120px 90px 36px; }
+.list-row.node { grid-template-columns: 1fr 120px 120px 90px 80px 36px; }
 .list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 100px 36px; }
 .list-head { font-size:11px; color: rgb(var(--mdui-color-on-surface-variant)); font-weight:500; padding:0 16px 6px; }
 .list-head.lh-rq { grid-template-columns: 1fr 80px 80px 100px 70px; display:grid; gap:10px; }

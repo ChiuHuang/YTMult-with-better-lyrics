@@ -21,17 +21,25 @@ import atexit
 import logging
 from flask import request
 from .app import sock
-from .cache import _cache_key_from_filename
 
 # ============================================================
 # Node mesh (WebSocket worker nodes)
 #
 # Lets you run node.py on other machines/IPs. They connect back here over a
-# persistent, authenticated WebSocket. Used for two things:
-#   1. Cache sharing: before doing a fresh fetch, every connected node gets
-#      asked "do you already have this cached?" so work already done
-#      elsewhere doesn't get redone.
-#   2. IP diversity: the Cubey/Musixmatch lookup (the one most exposed to
+# persistent, authenticated WebSocket. Used for three things:
+#   1. Cache sharing, PULL ONLY: before doing a fresh fetch, every connected
+#      node gets asked "do you already have this cached?" so work a node
+#      already did doesn't get redone. The server deliberately does NOT push
+#      its own cache/lyrics down to the nodes anymore -- a node only holds
+#      what it fetched itself (or got with a JWT-scoped relay), and the pull
+#      is a best-effort bonus on top of that, never a dependency.
+#   2. JWT sync (server -> node): the live Cubey token pool is pushed to
+#      nodes so one that is holding a token can hand it back when this
+#      server's pool is dry. A node already sees raw tokens today through
+#      relay_http_request (a probe posts the token in the body), so this is
+#      the same exposure, not a new one. Per-node opt-out: "jwt_sync": false
+#      in config/nodes.json.
+#   3. IP diversity: the Cubey/Musixmatch lookup (the one most exposed to
 #      per-IP rate limits) can be relayed through a connected node's
 #      outbound IP instead of always going out from this server.
 # Node availability is purely additive: with no nodes connected, or if a
@@ -180,7 +188,7 @@ def node_label(node_id):
 
 
 # ============================================================
-# Node script versioning + cache sync + pings
+# Node script versioning + JWT sync + pings
 # ============================================================
 _NODE_TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'node.py')
 # These three lines are personalized per node, so comparing raw hashes would
@@ -232,84 +240,98 @@ def _broadcast_pings():
                 pass
 
 
-def _cache_entries_for_sync(newer_than=None):
-    """Yield {cache_key, data, ts(epoch)} for cache/lyrics/*.json, newest first.
-    newer_than is an epoch cutoff: entries older than it are skipped (used for
-    incremental pushes right after a full sync)."""
-    lyrics_dir = 'cache/lyrics'
-    if not os.path.isdir(lyrics_dir):
-        return
-    try:
-        fnames = sorted(os.listdir(lyrics_dir),
-                        key=lambda f: os.path.getmtime(os.path.join(lyrics_dir, f)),
-                        reverse=True)
-    except Exception:
-        return
-    for fname in fnames:
-        cache_key = _cache_key_from_filename(fname)
-        if cache_key is None:
-            continue
-        fpath = os.path.join(lyrics_dir, fname)
-        try:
-            mt = os.path.getmtime(fpath)
-            if newer_than is not None and mt < newer_than:
-                break
-            with open(fpath, 'r', encoding='utf-8') as f:
-                entry = json.load(f)
-            data = entry.get('data')
-            if data is None:
-                continue
-            yield {'cache_key': cache_key, 'data': data, 'ts': mt}
-        except Exception:
-            continue
-
-
-def _push_cache_sync(node_id, newer_than=None, limit=300):
-    """Stream cache entries to one node as 'sync' control messages (each entry
-    is one message, so the node's existing receive loop just stores them), then
-    send a 'sync_end' terminator. Returns the number of entries pushed."""
-    entry_ws = None
+def _jwt_sync_allowed(node_id):
+    """Per-node opt-out for the JWT push: "jwt_sync": false in
+    config/nodes.json. Read from the live record cached at connect time, with
+    the on-disk record as the fallback for a node that predates that field."""
     with _connected_nodes_lock:
         entry = connected_nodes.get(node_id)
-        if entry:
-            entry_ws = entry['ws']
-    if entry_ws is None:
-        return 0
-    count = 0
+    if entry is not None and 'jwt_sync' in entry:
+        return bool(entry['jwt_sync'])
     try:
-        for info in _cache_entries_for_sync(newer_than=newer_than):
-            if count >= limit:
-                break
-            entry_ws.send(json.dumps({'type': 'sync', 'cache_key': info['cache_key'],
-                                      'data': info['data'], 'ts': info['ts']}))
-            count += 1
-            if count % 25 == 0:
-                time_module.sleep(0.05)  # don't flood the socket
-        entry_ws.send(json.dumps({'type': 'sync_end', 'count': count}))
+        rec = _load_nodes().get(node_id) or {}
+    except Exception:
+        return True
+    return rec.get('jwt_sync', True) is not False
+
+
+def _live_jwt_tokens():
+    """Raw live tokens from the server's Cubey pool, newest-use first. Imports
+    lazily: jwt_pool imports us at module level."""
+    try:
+        from .jwt_pool import live_jwt_tokens
+        return live_jwt_tokens()
     except Exception as e:
-        print(f"  [NODE] cache sync to {node_id} aborted: {e}")
-        return 0
-    return count
+        print(f"  [NODE] jwt pool read failed: {e}")
+        return []
 
 
-def _full_sync_for(node_id, newer_than=None):
-    n = _push_cache_sync(node_id, newer_than=newer_than)
-    print(f"  [NODE] cache sync to {node_id}: {n} entries")
+def _push_jwt_sync(node_id, tokens):
+    """Send the pool to one node as a single 'jwt_sync' message. The node
+    replaces its stored copy wholesale, so a token this server dropped (twice
+    dead, or past POOL_MAX) disappears from the node too. Returns True when the
+    push went out."""
+    if not tokens or not _jwt_sync_allowed(node_id):
+        return False
+    with _connected_nodes_lock:
+        entry = connected_nodes.get(node_id)
+        entry_ws = entry['ws'] if entry else None
+    if entry_ws is None:
+        return False
+    try:
+        entry_ws.send(json.dumps({'type': 'jwt_sync', 'tokens': tokens}))
+    except Exception as e:
+        print(f"  [NODE] jwt sync to {node_id} failed: {e}")
+        return False
+    print(f"  [NODE] jwt sync to {node_id}: {len(tokens)} token(s)")
+    return True
 
 
-def _cache_sync_loop():
-    """Re-push recent cache changes to every connected node periodically, so a
-    song cached after a node connected still reaches it within a minute."""
+def _jwt_sync_for(node_id):
+    """Connect-time push, so a node that just came online can answer 'jwt_get'
+    immediately instead of staying empty until the next tick."""
+    try:
+        _push_jwt_sync(node_id, _live_jwt_tokens())
+    except Exception as e:
+        print(f"  [NODE] jwt sync thread error: {e}")
+
+
+def ask_nodes_for_jwt(timeout=2.0):
+    """Ask each connected node for a Cubey token it is holding. Returns
+    (node_id, token) or (None, None). Callers treat a miss as 'pool is dry',
+    never as an error -- this is a background top-up, not a request path."""
+    with _connected_nodes_lock:
+        ids = list(connected_nodes.keys())
+    for node_id in ids:
+        reply = send_to_node(node_id, {
+            'type': 'jwt_get', 'request_id': _secrets.token_hex(8),
+        }, timeout=timeout)
+        if reply and reply.get('token'):
+            return node_id, reply['token']
+    return None, None
+
+
+def _jwt_sync_loop():
+    """Keep every node's copy of the pool current. Only re-pushes when the
+    token set actually changed (cheap signature over the ids), so a steady
+    pool costs one hash per minute."""
+    last_sig = None
     while True:
         time_module.sleep(60)
         try:
-            with _connected_nodes_lock:
-                ids = list(connected_nodes.keys())
-            cutoff = time_module.time() - 120
-            for nid in ids:
-                _push_cache_sync(nid, newer_than=cutoff, limit=300)
+            tokens = _live_jwt_tokens()
+            sig = hashlib.sha256('|'.join(tokens).encode('utf-8')).hexdigest()
+            # A node that connects while the pool is already this exact shape
+            # still gets its own push from _jwt_sync_for at connect time, so
+            # here a changed signature is the only thing worth re-sending.
+            if sig != last_sig:
+                with _connected_nodes_lock:
+                    ids = list(connected_nodes.keys())
+                for nid in ids:
+                    _push_jwt_sync(nid, tokens)
+                last_sig = sig
         except Exception as e:
-            print(f"  [NODE] cache sync loop error: {e}")
+            print(f"  [NODE] jwt sync loop error: {e}")
 
 
 _started_threads = False
@@ -323,7 +345,7 @@ def _ensure_node_workers():
             return
         _started_threads = True
     threading.Thread(target=_broadcast_pings, daemon=True).start()
-    threading.Thread(target=_cache_sync_loop, daemon=True).start()
+    threading.Thread(target=_jwt_sync_loop, daemon=True).start()
 
 
 @sock.route('/ws/node')
@@ -352,11 +374,14 @@ def ws_node(ws):
         record['last_seen'] = datetime.now().isoformat()
         if real_ip:
             record['last_ip'] = real_ip
+        # Default-on JWT push, per-node opt-out via "jwt_sync": false.
+        if 'jwt_sync' not in record:
+            record['jwt_sync'] = True
         nodes[node_id] = record
         _save_nodes(nodes)
 
         with _connected_nodes_lock:
-            connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id), 'ip': real_ip}
+            connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id), 'ip': real_ip, 'jwt_sync': bool(record.get('jwt_sync', True))}
         print(f"  [NODE] {node_id} ({record.get('label', '')}) connected")
         try:
             from .app import _sse_broadcast
@@ -366,7 +391,7 @@ def ws_node(ws):
         ws.send(json.dumps({'type': 'hello_ack', 'ok': True,
                             'code_sha': _node_template_sha(),
                             'server_sha': _current_server_sha()}))
-        threading.Thread(target=_full_sync_for, args=(node_id,), daemon=True).start()
+        threading.Thread(target=_jwt_sync_for, args=(node_id,), daemon=True).start()
 
         while True:
             raw = ws.receive(timeout=90)  # generous: the node's WebSocketApp pings every 30s
@@ -378,7 +403,7 @@ def ws_node(ws):
                 continue
             mtype = msg.get('type')
             request_id = msg.get('request_id')
-            if mtype in ('cache_check_result', 'cache_data', 'task_result') and request_id:
+            if mtype in ('cache_check_result', 'cache_data', 'task_result', 'jwt_data') and request_id:
                 with _pending_lock:
                     pending = _pending_node_requests.get(request_id)
                 if pending:
