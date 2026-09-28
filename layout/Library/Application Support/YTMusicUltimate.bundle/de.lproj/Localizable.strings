@@ -63,8 +63,8 @@
 
 "TABBAR_SETTINGS" = "Tab-Leisten-Optionen";
 "STARTUP_TAB" = "Start-Tab";
-"HOME" = "Home";
-"SAMPLES" = "Samples";
+"HOME" = "Startseite";
+"SAMPLES" = "Vorschau";
 "EXPLORE" = "Entdecken";
 "LIBRARY" = "Bibliothek";
 "DOWNLOADS" = "Downloads";
@@ -122,10 +122,10 @@
 "DELETE" = "Löschen";
 "RENAME" = "Umbenennen";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Automatisch im Hintergrund abgleichen";
+"AUTO_SYNC_DESC" = "Server-Uebersetzungen still in den lokalen Cache holen (alle 6 Stunden)";
+"DOWNLOAD" = "Herunterladen";
+"UPDATE_WHATS_NEW" = "Neuerungen:\n%@";
 
 "LYRICS_ENGINE" = "Liedtext-Engine";
 "LYRICS_ENGINE_FOOTER" = "Der Server lädt die Liedtexte und übersetzt sie in die unten eingestellte Sprache. Zeilen, die bereits in dieser chinesischen Schrift vorliegen, werden nur in die Schrift normalisiert und nie an den Übersetzer geschickt. Streaming-Übersetzung malt jede Zeile, während das Modell schreibt, und die Schreibmaschinen-Anzeige tippt die Übersetzung unter der aktiven Zeile aus.";
@@ -133,7 +133,7 @@
 "STREAM_TRANSLATE_DESC" = "Jede übersetzte Zeile malen, während das Modell schreibt, statt auf den ganzen Song zu warten";
 "TYPEWRITER" = "Schreibmaschinen-Anzeige";
 "TYPEWRITER_DESC" = "Die Übersetzung Buchstabe für Buchstabe unter der aktiven Zeile tippen (0 = aus)";
-"DEBUG_SETTINGS" = "Debug";
+"DEBUG_SETTINGS" = "Diagnose";
 "DEBUG_STREAM" = "Streaming-Übersetzung";
 "DEBUG_STATE" = "Status";
 "DEBUG_VIDEO" = "Letztes Video";
@@ -164,11 +164,11 @@
 "LYRICS_FULLSCREEN" = "Vollbild beim Drehen";
 "LYRICS_FULLSCREEN_DESC" = "Drehe das Gerät ins Querformat, dann öffnet sich der Liedtext automatisch im Vollbild";
 
-"LG_TITLE" = "Liquid Glass V2";
-"LG_SECTION_THEME" = "Theme";
+"LG_TITLE" = "Flüssigglas V2";
+"LG_SECTION_THEME" = "Design";
 "LG_SECTION_PLAYER" = "Player";
 "LG_SECTION_APP" = "App";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Flüssigglas";
 "LG_MASTER_DESC" = "Hauptschalter für das visuelle Material.";
 "LG_SONG_THEME_WHOLE" = "Song-Theme für die ganze App";
 "LG_SONG_THEME_WHOLE_DESC" = "Farbatmosphäre im Apple-Music-Stil in der ganzen App.";
@@ -182,10 +182,29 @@
 "LG_LYRICS_BUTTON_DESC" = "Behält einen sichtbaren Liedtext-Einstieg in V1 und V2.";
 "LG_QUEUE_V2" = "Warteschlange V2";
 "LG_QUEUE_V2_DESC" = "Glasliste Als Nächstes und Header der Warteschlange.";
-"LG_HOME_V2" = "Home V2";
+"LG_HOME_V2" = "Startseite V2";
 "LG_HOME_V2_DESC" = "Abgerundete Cover, transparente Reihen und Glaskacheln.";
 "LG_PIVOT_V2" = "Bottom-Navigation V2";
 "LG_PIVOT_V2_DESC" = "Schwebende Navigationsleiste aus Material.";
 "LG_SHEETS_V2" = "Sheets V2";
 "LG_SHEETS_V2_DESC" = "Abgerundete Glas-Aktions- und Bottom-Sheets.";
 "LG_ENTRY_BUTTON" = "Liquid-Glas-Einstellungen";
+"LG_SEARCH_V2" = "Suche V2";
+"LG_SEARCH_V2_DESC" = "Abgerundetes Suchfeld und transparente Trefferzeilen.";
+"LG_LIBRARY_V2" = "Bibliothek V2";
+"LG_LIBRARY_V2_DESC" = "Transparente Bibliotheksseiten mit abgerundeten Covern.";
+"LG_ENTITY_V2" = "Entitseiten V2";
+"LG_ENTITY_V2_DESC" = "Gemeinsame Glashuelle fuer Album, Kuenstler und Playlist.";
+"LG_DOWNLOADS_V2" = "Downloads V2";
+"LG_DOWNLOADS_V2_DESC" = "Abgerundete Offline- und Download-Flaechen.";
+"LG_STATUS_OVERLAYS_V2" = "Statusoverlays V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Glas-Toasts, Dialoge und Fortschrittsanzeigen.";
+"LG_GLOBAL_STATES_V2" = "Globale Zustaende V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Glas-Lade-, Leer-, Offline- und Fehlerzustaende.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Transparenter Video-Overlay ohne Stoerschatten.";
+"LG_LANDSCAPE_PLAYER_V2" = "Querformat-Player V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Panelbasiertes Querformat-Layout.";
+"LG_REMOTE_CONTROL" = "Fernsteuerung";
+"LG_REMOTE_CONTROL_DESC" = "Dem Server erlauben, Oberflaechen-Features auf diesem Geraet zu deaktivieren. Ausgeschaltet kann er hier nichts abschalten; deine Schalter bleiben deine.";
+"LG_SECTION_REMOTE" = "Remote";

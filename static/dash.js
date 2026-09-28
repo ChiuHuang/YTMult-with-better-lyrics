@@ -999,65 +999,175 @@
     });
   };
   /* ---- app settings (tweak remote config) ---- */
-  const renderApp = settings => {
+  /* ---- app settings ---- */
+  // The panel is schema-driven: the server owns the list, the labels and the
+  // descriptions (server/app_settings.py _SCHEMA), so a new remote key shows
+  // up here without touching the dashboard. The raw key/value form survives
+  // under "Advanced" for keys that are not in the schema.
+  const MASTER_KEY = 'ui.remote_control';
+  const appState = { schema: [], groups: [], extra: [], data: {} };
+
+  const appPost = async (values) => {
+    const r = await API('/api/admin/app/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({values})});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed');
+    return d;
+  };
+  const appDelete = async (key) => {
+    const r = await API('/api/admin/app/settings', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key})});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Failed');
+    return d;
+  };
+  const applyApp = (d) => { appState.schema = d.schema || []; appState.groups = d.groups || []; appState.extra = d.extra || []; renderApp(); };
+
+  // A row is: label + description on the left, a typed control and a state
+  // pill on the right. The pill says whether the value is the server default
+  // or an operator override -- the flat map could never show that, which is
+  // why "Reset" per row used to be invisible until you clicked it.
+  const appRow = (e) => {
+    const row = el('div', {class:'list-row app-row'});
+    const text = el('div', {class:'app-text'},
+      el('div', {class:'app-label'}, e.label || e.key),
+      el('div', {class:'app-desc', title:e.desc || ''}, e.desc || e.key));
+    row.appendChild(text);
+
+    const sw = el('mdui-switch', {'aria-label': e.label || e.key});
+    sw.checked = e.value !== false;
+    sw.dataset.key = e.key;
+    row.appendChild(sw);
+
+    const pill = el('span', {class: e.is_override ? 'pill pill-warn' : 'pill pill-mute'},
+      e.is_override ? 'override' : 'default');
+    row.appendChild(pill);
+    return {row, sw, pill, entry: e};
+  };
+
+  const renderAppGroups = (host) => {
+    host.innerHTML = '';
+    appState.groups.forEach(([gid, gname]) => {
+      const entries = appState.schema.filter(e => e.group === gid);
+      if (!entries.length) return;
+      const wrap = el('div', {class:'app-group'});
+      wrap.appendChild(el('div', {class:'app-group-title'}, gname));
+      const grid = el('div', {class:'list-grid'});
+      entries.forEach(e => {
+        if (e.key === MASTER_KEY) return;   // rendered as the master card
+        const {row, sw, pill} = appRow(e);
+        sw.addEventListener('change', async () => {
+          sw.disabled = true;
+          try {
+            const d = await appPost({[e.key]: sw.checked});
+            applyApp(d);
+            mdui.snackbar({message: `${e.label || e.key}: ${sw.checked ? 'on' : 'off'} on every device`});
+          } catch (err) {
+            sw.checked = !sw.checked;   // never leave a lying switch
+            mdui.snackbar({message: 'Failed: '+err.message});
+          } finally { sw.disabled = false; }
+        });
+        grid.appendChild(row);
+      });
+      if (grid.children.length) wrap.appendChild(grid);
+      if (wrap.children.length) host.appendChild(wrap);
+    });
+  };
+
+  const renderAppMaster = () => {
+    const sw = $('#app-master'); if (!sw) return;
+    const e = appState.schema.find(x => x.key === MASTER_KEY);
+    if (!e) return;
+    const lbl = $('#app-master-label'), desc = $('#app-master-desc');
+    if (lbl) lbl.textContent = e.label;
+    if (desc) desc.textContent = e.desc;
+    sw.checked = e.value !== false;
+    const card = sw.closest('.app-master');
+    if (card) card.dataset.off = sw.checked ? 'no' : 'yes';
+  };
+
+  const renderApp = () => {
+    const host = $('#app-groups');
+    renderAppMaster();
+    if (host) renderAppGroups(host);
+
+    // Advanced: unrecognised overrides, plus the raw form target.
     const list = $('#app-list');
     if (!list) return;
     list.innerHTML = '';
-    const keys = Object.keys(settings || {}).sort();
-    if (!keys.length) { list.appendChild(el('div', {class:'list-row'}, 'No settings')); return; }
-    keys.forEach(k => {
-      const v = settings[k];
-      const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
-        el('span', {class:'truncate mono'}, `${k} = ${JSON.stringify(v)}`));
-      const edit = el('mdui-button', {variant:'text', icon:'edit'});
-      edit.textContent = 'Edit';
-      edit.addEventListener('click', () => {
-        const cur = $('#app-key'); const cv = $('#app-value');
-        if (cur) cur.value = k;
-        if (cv) cv.value = (typeof v === 'string') ? v : JSON.stringify(v);
+    const extras = appState.extra || [];
+    if (!extras.length) {
+      list.appendChild(el('div', {class:'list-row'}, 'No keys outside the schema'));
+    } else {
+      extras.forEach(x => {
+        const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'},
+          el('span', {class:'truncate mono', title:x.key}, `${x.key} = ${JSON.stringify(x.value)}`));
+        const edit = el('mdui-button', {variant:'text', icon:'edit'});
+        edit.textContent = 'Edit';
+        edit.addEventListener('click', () => {
+          const cur = $('#app-key'); const cv = $('#app-value');
+          if (cur) cur.value = x.key;
+          if (cv) cv.value = (typeof x.value === 'string') ? x.value : JSON.stringify(x.value);
+        });
+        row.appendChild(edit);
+        const del = el('mdui-button', {variant:'text', icon:'delete'});
+        del.textContent = 'Delete';
+        del.addEventListener('click', async () => {
+          try { applyApp(await appDelete(x.key)); mdui.snackbar({message: 'Deleted'}); }
+          catch (err) { mdui.snackbar({message: 'Failed: '+err.message}); }
+        });
+        row.appendChild(del);
+        list.appendChild(row);
       });
-      row.appendChild(edit);
-      const del = el('mdui-button', {variant:'text', icon:'delete'});
-      del.textContent = 'Reset';
-      del.addEventListener('click', async () => {
-        try {
-          const r = await API('/api/admin/app/settings', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k})});
-          const d = await r.json();
-          if (d.ok) renderApp(d.settings);
-        } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
-      });
-      row.appendChild(del);
-      list.appendChild(row);
-    });
+    }
   };
+
   const loadApp = async () => {
-    try { renderApp((await json('/api/admin/app/settings')).settings || {}); }
-    catch (e) { const l = $('#app-list'); if (l) l.innerHTML = ''; }
+    try { applyApp(await json('/api/admin/app/settings')); }
+    catch (e) { const g = $('#app-groups'); if (g) g.innerHTML = ''; }
   };
+
   const appInit = () => {
+    const master = $('#app-master');
+    if (master) master.addEventListener('change', async () => {
+      master.disabled = true;
+      try {
+        applyApp(await appPost({[MASTER_KEY]: master.checked}));
+        mdui.snackbar({message: master.checked
+          ? 'Remote control ON: the server can disable features again'
+          : 'Remote control OFF: the server can no longer disable anything'});
+      } catch (e) {
+        master.checked = !master.checked;
+        mdui.snackbar({message: 'Failed: '+e.message});
+      } finally { master.disabled = false; }
+    });
     const set = $('#app-set');
     if (set) set.addEventListener('click', async () => {
       const k = ((($('#app-key') || {}).value) || '').trim();
       const raw = ((($('#app-value') || {}).value) || '').trim();
       if (!k) { mdui.snackbar({message:'Key required'}); return; }
       let v = raw;
-      if (raw === 'true') v = true;
-      else if (raw === 'false') v = false;
+      if (raw === 'true' || raw === 'True') v = true;
+      else if (raw === 'false' || raw === 'False') v = false;
       else if (raw !== '' && !isNaN(Number(raw))) v = Number(raw);
       try {
         const r = await API('/api/admin/app/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k, value: v})});
         const d = await r.json();
-        if (d.ok) { renderApp(d.settings); mdui.snackbar({message:'Saved'}); }
+        if (d.ok) { applyApp(d); mdui.snackbar({message:'Saved'}); }
         else mdui.snackbar({message: d.error || 'Failed'});
       } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
     });
     const rs = $('#app-reset');
+    // There is no undo server-side, and this used to be a single unconfirmed
+    // click that wiped every override.
     if (rs) rs.addEventListener('click', async () => {
-      try {
-        const r = await API('/api/admin/app/settings/reset', {method:'POST'});
-        const d = await r.json();
-        if (d.ok) { renderApp(d.settings); mdui.snackbar({message:'Defaults restored'}); }
-      } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+      await mdui.confirm({headline:'Reset all settings',
+        description:'Drops every override on every device. This cannot be undone.',
+        cancelText:'Cancel', confirmText:'Reset', onConfirm: async () => {
+          try {
+            const r = await API('/api/admin/app/settings/reset', {method:'POST'});
+            const d = await r.json();
+            if (d.ok) { applyApp(d); mdui.snackbar({message:'Defaults restored'}); }
+          } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        }});
     });
   };
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */

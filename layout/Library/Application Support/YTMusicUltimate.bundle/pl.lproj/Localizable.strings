@@ -103,9 +103,9 @@
 "DONT_RUSH_DESC" = "Wymagane odtworzenie piosenki, aby wyciągnąć link";
 "SELECT_ACTION" = "Wybierz akcję";
 "DOWNLOADING" = "Pobieranie";
-"DOWNLOAD_PREMIUM" = "Download (Premium required)";
+"DOWNLOAD_PREMIUM" = "Pobierz (wymaga Premium)";
 "OOPS" = "Uups\ncoś poszło nie tak";
-"LINK_NOT_FOUND" = "Link not found";
+"LINK_NOT_FOUND" = "Nie znaleziono linku";
 "SAVED_TO_PHOTOS" = "Zapisane do Zdjęć";
 "DONE" = "Gotowe";
 "FOUND_SEGMENT" = "Znaleziono niezwiązany segment";
@@ -122,10 +122,10 @@
 "DELETE" = "Usuń";
 "RENAME" = "Zmień nazwę";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Automatyczna synchronizacja w tle";
+"AUTO_SYNC_DESC" = "Cicho pobieraj tlumaczenia z serwera do lokalnej pamieci cache (co 6 godz.)";
+"DOWNLOAD" = "Pobierz";
+"UPDATE_WHATS_NEW" = "Co nowego:\n%@";
 
 "LYRICS_ENGINE" = "Silnik tekstów";
 "LYRICS_ENGINE_FOOTER" = "Serwer pobiera teksty i tłumaczy je na język ustawiony poniżej. Wersje już zapisane tym pismem chińskim są tylko normalizowane i nigdy nie trafiają do tłumacza. Strumieniowe tłumaczenie rysuje każdy wiersz w trakcie pisania modelu, a efekt maszyny do pisania wypisuje tłumaczenie pod aktywnym wierszem.";
@@ -157,18 +157,18 @@
 "DEBUG_NOW_PLAYING" = "teraz odtwarzane: %@";
 "DEBUG_LAST_EVENT" = "Ostatnie zdarzenie %@ ms";
 "DEBUG_UPLOAD_BLOCKED" = "%@ -- zablokowane teraz: główny przełącznik jest wyłączony albo poziom logowania to nie All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_UPLOAD_OFF" = "upload_logs = wyl.";
 "DEBUG_TEST_SENT" = "Wysłano jako wpis informacyjny. Trafia teraz do pulpitu serwera.";
 "DEBUG_TEST_BLOCKED" = "Nie wysłano. Wysyłanie blokuje główny przełącznik, poziom logowania albo przełącznik upload_logs serwera.";
 
 "LYRICS_FULLSCREEN" = "Pełny ekran po obrocie";
 "LYRICS_FULLSCREEN_DESC" = "Obróć telefon w poziom, a tekst piosenki otworzy się sam na pełnym ekranie";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Ciekłe szkło V2";
 "LG_SECTION_THEME" = "Motyw";
 "LG_SECTION_PLAYER" = "Odtwarzacz";
 "LG_SECTION_APP" = "Aplikacja";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Ciekłe szkło";
 "LG_MASTER_DESC" = "Główny przełącznik materiału wizualnego.";
 "LG_SONG_THEME_WHOLE" = "Motyw utworu w całej aplikacji";
 "LG_SONG_THEME_WHOLE_DESC" = "Klimat kolorów w stylu Apple Music w całej aplikacji.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "Arkusze V2";
 "LG_SHEETS_V2_DESC" = "Zaokrąglone szklane arkusze akcji i arkusze dolne.";
 "LG_ENTRY_BUTTON" = "Ustawienia Liquid Glass";
+"LG_SEARCH_V2" = "Wyszukiwanie V2";
+"LG_SEARCH_V2_DESC" = "Zaokraglone pole wyszukiwania i przezroczyste wiersze wynikow.";
+"LG_LIBRARY_V2" = "Biblioteka V2";
+"LG_LIBRARY_V2_DESC" = "Przezroczyste strony biblioteki z zaokraglonymi okladkami.";
+"LG_ENTITY_V2" = "Strony encji V2";
+"LG_ENTITY_V2_DESC" = "Wspólna szklana obudowa dla Albumu, Artysty i Playlisty.";
+"LG_DOWNLOADS_V2" = "Pobieranie V2";
+"LG_DOWNLOADS_V2_DESC" = "Zaokraglone powierzchnie offline i pobierania.";
+"LG_STATUS_OVERLAYS_V2" = "Nakladki stanu V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Szklane powiadomienia, alerty i postep.";
+"LG_GLOBAL_STATES_V2" = "Stany globalne V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Szklane stany ladowania, pustego, offline i bledu.";
+"LG_VIDEO_V2" = "Wideo V2";
+"LG_VIDEO_V2_DESC" = "Przezroczysta nakladka wideo bez cieni.";
+"LG_LANDSCAPE_PLAYER_V2" = "Odtwarzacz poziomy V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Poziomy uklad oparty na panelach.";
+"LG_REMOTE_CONTROL" = "Zdalne sterowanie";
+"LG_REMOTE_CONTROL_DESC" = "Pozwól serwerowi wyłączać funkcje interfejsu na tym urządzeniu. Wyłączony serwer nie może nic wyłączyć; twoje przełączniki zostają twoje.";
+"LG_SECTION_REMOTE" = "Zdalne";
