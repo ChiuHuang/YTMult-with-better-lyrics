@@ -15,6 +15,8 @@
 extern "C" {
 #endif
 
+// Declared flush (no leading whitespace) so the C-linkage guard and the
+// declaration can be read -- and grepped -- as one block.
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 BOOL YTMULGServerAllows(NSString *key);
 void YTMUAppSettingsInvalidateCache(void);

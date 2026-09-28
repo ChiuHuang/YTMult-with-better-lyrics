@@ -317,6 +317,18 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
     cache_key = f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
     cached = get_translate_cached(cache_key)
     if cached is not None:
+        # Sanitise on the way out. Entries poisoned before the echo guard was
+        # fixed are still on disk, and a cached echo short-circuits everything
+        # above -- so without this one bad write is served forever.
+        dirty = [i for i in range(len(texts))
+                 if i < len(cached) and _echoes_original(texts[i], cached[i])]
+        if dirty:
+            print(f"  [Cohere] dropping {len(dirty)} echoed line(s) from the cache")
+            for i in dirty:
+                trimmed = _strip_echo_prefix(texts[i], cached[i])
+                cached[i] = trimmed if trimmed and not _echoes_original(
+                    texts[i], trimmed) else texts[i]
+            set_translate_cached(cache_key, cached)
         return cached
 
     # Chinese target: lines that are already Chinese script skip Cohere
@@ -356,7 +368,23 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
             retry = fn([subset[i] for i in bad], target_lang)
             if retry is not None:
                 for k, i in enumerate(bad):
-                    translated_subset[i] = retry[k]
+                    # Re-check the retry. The old code took it on faith, so a
+                    # retry that echoed again was cached forever and re-served
+                    # on every later lookup -- which is why this bug outlived
+                    # the guard that was supposed to stop it.
+                    cand = retry[k]
+                    if _echoes_original(subset[i], cand):
+                        trimmed = _strip_echo_prefix(subset[i], cand)
+                        if trimmed and not _echoes_original(subset[i], trimmed):
+                            print(f"  [Cohere] retry still echoed; kept the translation tail")
+                            cand = trimmed
+                        else:
+                            # Still an echo and nothing salvageable: serve the
+                            # original for this line. A duplicated lyric row is
+                            # worse than an untranslated one.
+                            print(f"  [Cohere] retry still echoed; serving the original")
+                            cand = subset[i]
+                    translated_subset[i] = cand
         for local_i, global_i in enumerate(to_translate_idx):
             results[global_i] = translated_subset[local_i]
     else:
@@ -365,20 +393,126 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
     if chinese_target:
         results = _apply_zh_script(results, target_lang)
 
-    set_translate_cached(cache_key, results)
+    # Never cache a run that translated nothing: later lookups would serve the
+    # originals as if they were translations.
+    if any(results[i] and results[i] != texts[i] for i in to_translate_idx):
+        set_translate_cached(cache_key, results)
     return results
 
 
+# Word separator for the echo test. NOTE: do NOT put the parens in this class.
+# Karaoke vocal cues are part of the token -- "((Huh)" must stay one word -- so
+# that an echoed cue and the cue in the original compare equal. Splitting on
+# them turns "((Huh)" into three empty-fragment words, which made the
+# cue-only containment branch unreachable and shifted every index.
+_WORD_SPLIT = re.compile(r'[\s,.;:!?、，。．！？\[\]"]+')
+
+
+def _leading_echo_fraction(orig, trans):
+    """How much of the original survives at the START of the translation.
+
+    The old guard was `orig in trans`, a whole-line containment test. That
+    only catches the model keeping the original byte-for-byte; the far more
+    common failure is a PARTIAL echo, where it keeps the first words and
+    drops a trailing vocal cue. Real example, reported by the user:
+        orig  "Every single morning ((Huh)"
+        trans "（哈）每一個清晨"            <- clean, fine
+        trans "Every single morning 每一個清晨"  <- partial echo, was missed
+    Returns a 0.0..1.0 fraction of leading original words re-emitted, so the
+    caller can threshold it instead of guessing per language."""
+    o_words = [w for w in _WORD_SPLIT.split(orig.strip()) if w]
+    if not o_words:
+        return 0.0
+    t_words = [w for w in _WORD_SPLIT.split(trans.strip()) if w]
+    if not t_words:
+        return 0.0
+    n = 0
+    for ow, tw in zip(o_words, t_words):
+        if ow.casefold() != tw.casefold():
+            break
+        n += 1
+    return n / len(o_words)
+
+
+# A translation is an echo when it re-emits this much of the original's
+# leading words. 1.0 is the old whole-line containment test. The bar is high
+# on purpose: a translation legitimately keeps proper nouns and short
+# interjections ("BITE!" -> "BITE！", "Yeah" -> "Yeah！"), and flagging those
+# would make the repair path delete real translations. The failure we are
+# catching re-emits a whole clause, so 0.75 still separates them.
+_ECHO_PREFIX_FRACTION = 0.75
+
+# Below this many original words a prefix match is not evidence of an echo:
+# "BITE" is one word, and a one-word original that came back unchanged is a
+# kept proper noun, not a dupe. Two words is where a clause starts.
+_ECHO_MIN_ORIGINAL_WORDS = 2
+
+
 def _echoes_original(orig, trans):
-    """True when a translation embeds its whole original line (model echoed
-    original + romanization + translation as one blob). Short originals
-    (interjections, proper nouns kept as-is) don't count."""
-    if not orig or not trans or trans == orig:
+    """True when a translation re-emits the original instead of replacing it
+    (whole-line, or a leading prefix of it). Short originals and ones that are
+    a single word are left alone."""
+    if not orig or not trans:
         return False
     o = orig.strip()
+    t = trans.strip()
+    if not o or not t or t == o:
+        return False
+    o_words = [w for w in _WORD_SPLIT.split(o) if w]
     if len(o) < 4:
         return False
-    return o in trans
+    # A cue-only original ("((Huh)", "Oh") is ONE word: there is no clause to
+    # compare, so plain containment is the only meaningful test. This is
+    # separate from the _ECHO_MIN_ORIGINAL_WORDS floor below, which exists to
+    # spare a one-word PROPER NOUN ("BITE!") -- a cue is parenthesised or
+    # interjectional, which is what tells the two apart.
+    if len(o_words) < _ECHO_MIN_ORIGINAL_WORDS:
+        return bool(_looks_like_cue(o)) and o in t
+    return _leading_echo_fraction(o, t) >= _ECHO_PREFIX_FRACTION
+
+
+_CUE_RE = re.compile(r'^[\s(\[{<【（\-*~♪♫]*$')
+
+
+def _looks_like_cue(s):
+    """A short vocal/interjection line: bare, or wrapped in brackets/ellipsis
+    the way karaoke cues are ("((Huh)", "(x2)", "Oh...", "---")."""
+    s = s.strip()
+    if not s:
+        return False
+    if s[0] in '([{（【<~*♪♫':
+        return True
+    return bool(_CUE_RE.match(s)) or s.endswith('...') or s.endswith('…')
+
+
+def _strip_echo_prefix(orig, trans):
+    """Best-effort repair of a partial echo: drop the re-emitted leading
+    original words and keep whatever the model added after them. Returns
+    trans unchanged when nothing recognizable is left, so the caller's
+    fallback (serve the original) still applies.
+
+    Matching is word-by-word from the start. The reported case
+    ("Every single morning ((Huh)" + "（哈）每一個清晨") is NOT an echo and must
+    pass through untouched, which is why a translation whose FIRST word does
+    not match the original's first word is returned as-is rather than being
+    split on whitespace.
+    """
+    o_words = [w for w in _WORD_SPLIT.split(orig.strip()) if w]
+    t_words = [w for w in _WORD_SPLIT.split(trans.strip()) if w]
+    if not o_words or not t_words:
+        return trans
+    if o_words[0].casefold() != t_words[0].casefold():
+        # Different opening word: this is a real translation that happens to
+        # quote the original, not an echo. Do not touch it.
+        return trans
+    n = 0
+    for ow, tw in zip(o_words, t_words):
+        if ow.casefold() != tw.casefold():
+            break
+        n += 1
+    if n == 0 or n >= len(t_words):
+        return trans
+    return ' '.join(t_words[n:]).strip()
 
 
 def _cohere_translate_raw(texts, target_lang):
@@ -769,8 +903,20 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
                 prompt_i = ev['i']
                 if not (1 <= prompt_i <= len(subset)):
                     continue
-                latest[prompt_i] = ev['text']
+                text = ev['text']
+                # Repair BEFORE the event is yielded. The client paints each
+                # delta as it arrives, so an echo emitted here is already on
+                # screen by the time any post-hoc check could run -- which is
+                # precisely how the user watched the original being repeated
+                # and then translated. Correcting here means the first (and
+                # only) paint is already right.
+                if _echoes_original(subset[prompt_i - 1], text):
+                    trimmed = _strip_echo_prefix(subset[prompt_i - 1], text)
+                    text = trimmed if trimmed and not _echoes_original(
+                        subset[prompt_i - 1], trimmed) else subset[prompt_i - 1]
+                latest[prompt_i] = text
                 out = dict(ev)
+                out['text'] = text
                 out['i'] = to_translate_idx[prompt_i - 1]
                 yield out
 
@@ -805,10 +951,10 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
             if 1 <= prompt_i <= len(to_translate_idx):
                 results[to_translate_idx[prompt_i - 1]] = text
 
-        # A translated line that still embeds its original (model echoed
-        # original + romanization + translation as one blob) gets one strict
-        # retry, same as the blocking path -- the client sees the corrected
-        # line land as a second `done` event.
+        # Belt-and-braces: the delta loop above already repairs echoes before
+        # painting, so an echo reaching here means something slipped past it
+        # (a re-bucketed line, a display transform). Retry it and correct the
+        # final text; the correction lands as a second `done` event.
         bad = [k for k in range(len(subset))
                if _echoes_original(subset[k], results[to_translate_idx[k]])]
         if bad:
@@ -818,8 +964,21 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
             if retry is not None:
                 for j, k in enumerate(bad):
                     gi = to_translate_idx[k]
-                    results[gi] = retry[j]
-                    yield {'i': gi, 'text': retry[j], 'done': True}
+                    # Same re-check as the blocking path: an echo from the retry
+                    # was previously accepted and cached. The correction lands
+                    # as a second `done` event, which is how the client replaces
+                    # the already-painted line.
+                    cand = retry[j]
+                    if _echoes_original(subset[k], cand):
+                        trimmed = _strip_echo_prefix(subset[k], cand)
+                        if trimmed and not _echoes_original(subset[k], trimmed):
+                            print(f"  [Cohere] retry still echoed; kept the translation tail")
+                            cand = trimmed
+                        else:
+                            print(f"  [Cohere] retry still echoed; serving the original")
+                            cand = subset[k]
+                    results[gi] = cand
+                    yield {'i': gi, 'text': cand, 'done': True}
 
         if chinese_target:
             converted = _apply_zh_script(results, target_lang)
@@ -872,6 +1031,18 @@ def apply_display_transforms(lyrics, target_lang='zh-TW', auto_zh=False):
         if translated == text:
             line.pop('translated', None)
             continue
+        # A translation that re-emits the original renders as one glued row on
+        # the device ("Every single morning ((Huh) （哈）每一個清晨"). Repair it
+        # here, at the last point before the payload leaves, so it also covers
+        # entries that were persisted before the echo guard was tightened.
+        if _echoes_original(text, translated):
+            trimmed = _strip_echo_prefix(text, translated)
+            if trimmed and not _echoes_original(text, trimmed):
+                line['translated'] = trimmed
+            else:
+                # Nothing salvageable: drop the row rather than show a dupe.
+                line.pop('translated', None)
+            continue
         if (auto_zh and chinese_target and converter
                 and text.strip() and _line_is_already_chinese(text)):
             line['text'] = translated
@@ -889,6 +1060,18 @@ def google_translate_fast(texts, target_lang='zh-TW'):
     cache_key = f"gtx:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
     cached = get_translate_cached(cache_key)
     if cached is not None:
+        # Same sanitiser as the Cohere path: this is the interim translator for
+        # the fast fetch and the tstream=0 stream, so an echo here is exactly
+        # the "repeat the original and then translate" the user reported.
+        dirty = [i for i in range(len(texts))
+                 if i < len(cached) and _echoes_original(texts[i], cached[i])]
+        if dirty:
+            print(f"  [Google] dropping {len(dirty)} echoed line(s) from the cache")
+            for i in dirty:
+                trimmed = _strip_echo_prefix(texts[i], cached[i])
+                cached[i] = trimmed if trimmed and not _echoes_original(
+                    texts[i], trimmed) else texts[i]
+            set_translate_cached(cache_key, cached)
         return cached
 
     delimiter = '\n\n;\n\n'
