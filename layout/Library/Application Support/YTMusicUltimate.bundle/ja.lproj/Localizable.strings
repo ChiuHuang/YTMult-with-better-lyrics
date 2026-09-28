@@ -8,14 +8,14 @@
 "NO_ADS_DESC" = "アプリ内広告を削除";
 "BACKGROUND_PLAYBACK" = "バックグラウンド再生";
 "BACKGROUND_PLAYBACK_DESC" = "バックグラウンド再生を有効化";
-"FORCE_PREMIUM" = "Force enable premium";
-"FORCE_PREMIUM_DESC" = "Forcibly enables premium features.\nThis option also disables Samples tab";
+"FORCE_PREMIUM" = "プレミアムを強制的に有効にする";
+"FORCE_PREMIUM_DESC" = "プレミアム機能を強制的に有効にします。\nこのオプションはサンプルタブも無効にします";
 
 "PLAYER_SETTINGS" = "プレーヤーオプション";
-"DOWNLOAD_AUDIO" = "Download audio";
-"DOWNLOAD_AUDIO_DESC" = "Adds the option to download audio by pressing the YTMUltimate button in the player";
-"DOWNLOAD_COVER" = "Download cover image";
-"DOWNLOAD_COVER_DESC" = "Adds the option to download cover image by pressing the YTMUltimate button in the player";
+"DOWNLOAD_AUDIO" = "音声をダウンロード";
+"DOWNLOAD_AUDIO_DESC" = "プレーヤーの YTMUltimate ボタンから音声をダウンロードできるようにします";
+"DOWNLOAD_COVER" = "カバー画像をダウンロード";
+"DOWNLOAD_COVER_DESC" = "プレーヤーの YTMUltimate ボタンからカバー画像をダウンロードできるようにします";
 "PLAYBACK_RATE_BUTTON" = "再生速度ボタンを表示";
 "PLAYBACK_RATE_BUTTON_DESC" = "再生速度を変更できます";
 "SELECTABLE_LYRICS" = "歌詞のテキスト選択";
@@ -24,24 +24,24 @@
 "VOLBAR_DESC" = "プレーヤーにボリュームバーを追加する";
 "NO_AUTORADIO" = "ラジオを無効化する";
 "NO_AUTORADIO_DESC" = "エンドレスミュージック機能を無効化";
-"SKIP_CONTENT_WARNING" = "Skip content warning";
-"SKIP_CONTENT_WARNING_DESC" = "Skips warnings about potentially harmful content";
+"SKIP_CONTENT_WARNING" = "コンテンツ警告をスキップ";
+"SKIP_CONTENT_WARNING_DESC" = "有害なコンテンツの警告をスキップします";
 "AV_DEFAULT_MODE" = "デフォルトの再生モード";
 "AUDIO" = "音楽";
 "VIDEO" = "映像";
 
 "SKIP_NONMUSIC_PARTS" = "SponsorBlock";
 "SKIP_NONMUSIC_PARTS_DESC" = "ミュージックビデオでの音楽以外のセクションをスキップします";
-"SB_BEHAVIOR" = "Behavior";
-"SB_SKIP" = "Skip";
-"SB_ASK" = "Ask";
-"SB_NOTIF_DURATION" = "Notification duration (sec)";
-"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
-"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
+"SB_BEHAVIOR" = "動作";
+"SB_SKIP" = "スキップ";
+"SB_ASK" = "確認する";
+"SB_NOTIF_DURATION" = "通知の表示時間（秒）";
+"SB_LYRICS_OFFSET" = "スキップしたイントロに合わせて歌詞をずらす";
+"SB_LYRICS_OFFSET_DESC" = "音楽ではないイントロをスキップすると、歌詞を曲頭に合わせてずらします";
 
-"SEEK_BUTTONS" = "Replace next/previous with forward and backward buttons";
+"SEEK_BUTTONS" = "次へ／前へを早送り・巻き戻しボタンに置き換える";
 "SEEK_TIME_FOOTER" = "Select a seek time in seconds\n\nDefaults:\nSeek backward = 10 sec.\nSeek forward = 30 sec.";
-"DEFAULT" = "Default";
+"DEFAULT" = "デフォルト";
 
 "THEME_SETTINGS" = "テーマオプション";
 "OLED_DARK_THEME" = "有機ELダークテーマ";
@@ -52,32 +52,32 @@
 "LOW_CONTRAST_DESC" = "文字とボタンのコントラストを下げます";
 
 "NAVBAR_SETTINGS" = "ナビゲーションバーオプション";
-"DONT_STICK_HEADERS" = "Dont stick headers";
-"DONT_STICK_HEADERS_DESC" = "Unsticks pinned at the top of the screen panels";
+"DONT_STICK_HEADERS" = "ヘッダーを固定しない";
+"DONT_STICK_HEADERS_DESC" = "画面上部に固定されたパネルを解除します";
 "HIDE_HISTORY_BUTTON" = "履歴ボタンを非表示";
 "HIDE_HISTORY_BUTTON_DESC" = "ナビゲーションバーの履歴ボタンを非表示にします";
 "HIDE_CAST_BUTTON" = "キャストボタンを非表示";
 "HIDE_CAST_BUTTON_DESC" = "ナビゲーションバーのキャストボタンを非表示にします";
-"HIDE_FILTER_BUTTON" = "Remove sort filter button";
-"HIDE_FILTER_BUTTON_DESC" = "Removes Library/Downloads filter button from the navigation bar";
+"HIDE_FILTER_BUTTON" = "並び替え・絞り込みボタンを削除";
+"HIDE_FILTER_BUTTON_DESC" = "ナビゲーションバーからライブラリ／ダウンロードの絞り込みボタンを削除します";
 
-"TABBAR_SETTINGS" = "Tab bar options";
-"STARTUP_TAB" = "Startup tab";
-"SAMPLES" = "Samples";
-"HOME" = "Home";
-"EXPLORE" = "Explore";
-"LIBRARY" = "Library";
-"DOWNLOADS" = "Downloads";
+"TABBAR_SETTINGS" = "タブバーの設定";
+"STARTUP_TAB" = "起動時のタブ";
+"SAMPLES" = "サンプル";
+"HOME" = "ホーム";
+"EXPLORE" = "探索";
+"LIBRARY" = "ライブラリ";
+"DOWNLOADS" = "ダウンロード";
 
-"TAB_SETTINGS" = "Tab settings";
+"TAB_SETTINGS" = "タブの設定";
 "REMOVE_TABBAR_LABELS" = "No tab bar labels";
-"HIDE_HOME" = "Hide Home tab";
-"HIDE_SAMPLES" = "Hide Samples tab";
-"HIDE_EXPLORE" = "Hide Explore tab";
-"HIDE_LIBRARY" = "Hide Library tab";
-"HIDE_DOWNLOADS" = "Hide Downloads tab";
+"HIDE_HOME" = "ホームタブを隠す";
+"HIDE_SAMPLES" = "サンプルタブを隠す";
+"HIDE_EXPLORE" = "探索タブを隠す";
+"HIDE_LIBRARY" = "ライブラリタブを隠す";
+"HIDE_DOWNLOADS" = "ダウンロードタブを隠す";
 
-"CLEAR_CACHE" = "Clear cache";
+"CLEAR_CACHE" = "キャッシュを消去";
 
 "APPLY" = "適用";
 "APPLY_DESC" = "アプリを終了して変更を適用します";
@@ -92,35 +92,35 @@
 
 "CLOSE" = "閉じる";
 "WARNING" = "警告";
-"LOGIN_INFO" = "App restart required after successful signing into Google account";
-"RETRY_LOGIN" = "Workaround activated.\n\nPlease try again.";
+"LOGIN_INFO" = "Google アカウントへのサインイン後にアプリの再起動が必要です";
+"RETRY_LOGIN" = "回避策を有効にしました。\n\nもう一度お試しください。";
 "APPLY_MESSAGE" = "この操作でYouTube Musicを終了し、変更を適用します。本当にいいですか？";
 "CANCEL" = "キャンセル";
 "YES" = "はい";
-"REGIONAL_RESTRICTION" = "Looks like YouTube Music restricted in your country.\n\n Please use VPN to get access to YouTube Music.";
+"REGIONAL_RESTRICTION" = "お住まいの国では YouTube Music が制限されているようです。\n\nYouTube Music を利用するには VPN をお使いください。";
 
-"DONT_RUSH" = "Don't rush brilliance";
-"DONT_RUSH_DESC" = "Required to play the song to extract the link";
-"SELECT_ACTION" = "Select Action";
-"DOWNLOADING" = "Downloading";
-"DOWNLOAD_PREMIUM" = "Download (Premium required)";
-"OOPS" = "Oops\nsomething went wrong";
-"LINK_NOT_FOUND" = "Link not found";
-"SAVED_TO_PHOTOS" = "Saved to Photos";
-"DONE" = "Done";
-"FOUND_SEGMENT" = "Found offtopic segment";
-"SEGMENT_SKIPPED" = "Offtopic has been skipped";
-"SKIP" = "Skip";
-"UNSKIP" = "Unskip";
+"DONT_RUSH" = "才行を急がせない";
+"DONT_RUSH_DESC" = "リンクを抽出するには再生が必要です";
+"SELECT_ACTION" = "アクションを選択";
+"DOWNLOADING" = "ダウンロード中";
+"DOWNLOAD_PREMIUM" = "ダウンロード（プレミアムが必要です）";
+"OOPS" = "問題が発生しました";
+"LINK_NOT_FOUND" = "リンクが見つかりません";
+"SAVED_TO_PHOTOS" = "写真に保存しました";
+"DONE" = "完了";
+"FOUND_SEGMENT" = "関係のないセグメントを検出しました";
+"SEGMENT_SKIPPED" = "関係のないセグメントをスキップしました";
+"SKIP" = "スキップ";
+"UNSKIP" = "スキップしない";
 
-"EMPTY" = "Content you download will show here";
-"REMOVE_ALL" = "Remove all audios";
-"SHARE_ALL" = "Share all audios";
-"PREPARING" = "Preparing...";
-"DELETE_MESSAGE" = "Are you sure you want to delete %@?";
-"ALL_DOWNLOADS" = "all download audios"; //keep it lowercase
-"DELETE" = "Delete";
-"RENAME" = "Rename";
+"EMPTY" = "ダウンロードしたコンテンツがここに表示されます";
+"REMOVE_ALL" = "すべての音声を削除";
+"SHARE_ALL" = "すべての音声を共有";
+"PREPARING" = "準備中…";
+"DELETE_MESSAGE" = "%@ を削除してもよろしいですか？";
+"ALL_DOWNLOADS" = "ダウンロードしたすべての音声"; //keep it lowercase
+"DELETE" = "削除";
+"RENAME" = "名前を変更";
 
 "AUTO_SYNC_TITLE" = "バックグラウンド自動同期";
 "AUTO_SYNC_DESC" = "6時間ごとにサーバーの翻訳を自動取得";
@@ -164,11 +164,11 @@
 "LYRICS_FULLSCREEN" = "横向きで全画面表示";
 "LYRICS_FULLSCREEN_DESC" = "端末を横向きにすると、歌詞が自動で全画面表示に開きます";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "リキッドグラス V2";
 "LG_SECTION_THEME" = "テーマ";
 "LG_SECTION_PLAYER" = "プレーヤー";
 "LG_SECTION_APP" = "アプリ";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "リキッドグラス";
 "LG_MASTER_DESC" = "ビジュアルマテリアルのマスタースイッチです";
 "LG_SONG_THEME_WHOLE" = "アプリ全体の曲テーマ";
 "LG_SONG_THEME_WHOLE_DESC" = "アプリ全体に Apple Music 風の配色を適用します";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "シート V2";
 "LG_SHEETS_V2_DESC" = "角丸のガラスアクションシートとボトムシート";
 "LG_ENTRY_BUTTON" = "Liquid Glass の設定";
+"LG_SEARCH_V2" = "検索 V2";
+"LG_SEARCH_V2_DESC" = "角丸の検索欄と透明な結果行。";
+"LG_LIBRARY_V2" = "ライブラリ V2";
+"LG_LIBRARY_V2_DESC" = "角丸ジャケットの透明なライブラリ画面。";
+"LG_ENTITY_V2" = "エンティティページ V2";
+"LG_ENTITY_V2_DESC" = "アルバム・アーティスト・プレイリストの共通ガラス枠。";
+"LG_DOWNLOADS_V2" = "ダウンロード V2";
+"LG_DOWNLOADS_V2_DESC" = "角丸のオフラインとダウンロード画面。";
+"LG_STATUS_OVERLAYS_V2" = "ステータス表示 V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "ガラスのトースト、警告、進捗表示。";
+"LG_GLOBAL_STATES_V2" = "グローバル状態 V2";
+"LG_GLOBAL_STATES_V2_DESC" = "ガラスの読み込み・空・オフライン・エラー表示。";
+"LG_VIDEO_V2" = "動画 V2";
+"LG_VIDEO_V2_DESC" = "影のない透明な動画オーバーレイ。";
+"LG_LANDSCAPE_PLAYER_V2" = "横向きプレーヤー V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "パネルベースの横向きレイアウト。";
+"LG_REMOTE_CONTROL" = "リモート制御";
+"LG_REMOTE_CONTROL_DESC" = "サーバーがこの端末のインターフェース機能を無効にできるようにします。オフにするとサーバーは何も無効にできません。自分のスイッチは自分のままです。";
+"LG_SECTION_REMOTE" = "リモート";

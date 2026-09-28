@@ -111,6 +111,16 @@ def admin_logs_clear():
 @app.route('/api/admin/app/settings', methods=['GET'])
 @login_required
 def admin_app_settings():
+    """The typed view: schema + effective value + override flags. One payload
+    so the dashboard never has to reconcile two responses."""
+    from .app_settings import describe
+    return jsonify({'ok': True, **describe()})
+
+
+@app.route('/api/admin/app/settings/raw', methods=['GET'])
+@login_required
+def admin_app_settings_raw():
+    """The flat merged map, for scripts. No schema, no override flags."""
     from .app_settings import get_all
     return jsonify({'ok': True, 'settings': get_all()})
 
@@ -118,22 +128,30 @@ def admin_app_settings():
 @app.route('/api/admin/app/settings', methods=['POST'])
 @login_required
 def admin_app_settings_set():
-    """Set one key. Body: {key, value: string|number|boolean}."""
-    from .app_settings import set_one
+    """Set one key. Body: {key, value: string|number|boolean}.
+
+    Accepts either a single {key, value} or a bulk {values: {key: value, ...}}
+    so the dashboard can save a whole group in one request. Every response
+    returns the same describe() payload the GET does, so the UI re-renders
+    from one round trip."""
+    from .app_settings import set_one, set_many, describe
     body = request.get_json(silent=True) or {}
+    bulk = body.get('values')
     try:
-        set_one(body.get('key'), body.get('value'))
+        if isinstance(bulk, dict):
+            set_many(bulk)
+        else:
+            set_one(body.get('key'), body.get('value'))
     except (ValueError, TypeError) as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
-    from .app_settings import get_all
-    return jsonify({'ok': True, 'settings': get_all()})
+    return jsonify({'ok': True, **describe()})
 
 
 @app.route('/api/admin/app/settings', methods=['DELETE'])
 @login_required
 def admin_app_settings_del():
     """Delete one override key (defaults still apply). Body: {key}."""
-    from .app_settings import delete_one
+    from .app_settings import delete_one, describe
     body = request.get_json(silent=True) or {}
     try:
         removed = delete_one(body.get('key') or '')
@@ -141,15 +159,16 @@ def admin_app_settings_del():
         # Same 400 as POST: a malformed key is a client error, and the 500
         # handler would report it as a crash.
         return jsonify({'ok': False, 'error': str(e)}), 400
-    from .app_settings import get_all
-    return jsonify({'ok': True, 'removed': removed, 'settings': get_all()})
+    return jsonify({'ok': True, 'removed': removed, **describe()})
 
 
 @app.route('/api/admin/app/settings/reset', methods=['POST'])
 @login_required
 def admin_app_settings_reset():
-    from .app_settings import reset_defaults
-    return jsonify({'ok': True, 'settings': reset_defaults()})
+    """Drop every override. There is no undo, so the dashboard confirms first."""
+    from .app_settings import reset_defaults, describe
+    reset_defaults()
+    return jsonify({'ok': True, **describe()})
 
 
 @app.route('/api/admin/caches', methods=['GET'])

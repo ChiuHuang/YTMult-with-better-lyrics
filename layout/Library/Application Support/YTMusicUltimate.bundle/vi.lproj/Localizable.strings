@@ -122,10 +122,10 @@
 "DELETE" = "Xóa";
 "RENAME" = "Đặt tên";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Tự đồng bộ ở nền";
+"AUTO_SYNC_DESC" = "Lặng lẽ tải bản dịch từ máy chủ vào bộ nhớ đệm cục bộ (mỗi 6 giờ)";
+"DOWNLOAD" = "Tải về";
+"UPDATE_WHATS_NEW" = "Có gì mới:\n%@";
 
 "LYRICS_ENGINE" = "Động cơ lời bài hát";
 "LYRICS_ENGINE_FOOTER" = "Máy chủ lấy lời bài hát và dịch sang ngôn ngữ đặt bên dưới. Dòng đã viết bằng chữ Hán kia chỉ được chuẩn hóa chữ viết, không bao giờ gửi sang bộ dịch. Dịch theo luồng hiển thị từng dòng ngay khi mô hình đang viết, còn hiệu ứng máy đánh máy gõ từng chữ dưới dòng đang nổi bật.";
@@ -164,11 +164,11 @@
 "LYRICS_FULLSCREEN" = "Toàn màn hình khi xoay";
 "LYRICS_FULLSCREEN_DESC" = "Xoay máy sang ngang, lờ i bài hát sằ tự mḟ mở trong chế độ sể toàn màn hình";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Kính Lỏng V2";
 "LG_SECTION_THEME" = "Giao diện";
 "LG_SECTION_PLAYER" = "Trình phát";
 "LG_SECTION_APP" = "Ứng dụng";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Kính Lỏng";
 "LG_MASTER_DESC" = "Công tắc chính cho vật liệu giao diện.";
 "LG_SONG_THEME_WHOLE" = "Chủ đề bài hát toàn ứng dụng";
 "LG_SONG_THEME_WHOLE_DESC" = "Không khí màu kiểu Apple Music trên toàn ứng dụng.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "Trang V2";
 "LG_SHEETS_V2_DESC" = "Trang hành động và trang dưới bằng kính bo tròn.";
 "LG_ENTRY_BUTTON" = "Cài đặt Liquid Glass";
+"LG_SEARCH_V2" = "Tìm kiếm V2";
+"LG_SEARCH_V2_DESC" = "Ô tìm kiếm bo tròn và hàng kết quả trong suốt.";
+"LG_LIBRARY_V2" = "Thư viện V2";
+"LG_LIBRARY_V2_DESC" = "Trang thư viện trong suốt với ảnh bìa bo tròn.";
+"LG_ENTITY_V2" = "Trang thực thể V2";
+"LG_ENTITY_V2_DESC" = "Lớp vỏ chung cho Album, Nghệ sĩ và Danh sách phát.";
+"LG_DOWNLOADS_V2" = "Tải về V2";
+"LG_DOWNLOADS_V2_DESC" = "Bề mặt ngoại tuyến và tải về bo tròn.";
+"LG_STATUS_OVERLAYS_V2" = "Lớp trạng thái V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Thông báo, cảnh báo và tiến trình dạng kính.";
+"LG_GLOBAL_STATES_V2" = "Trạng thái chung V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Trạng thái đang tải, trống, ngoại tuyến và lỗi dạng kính.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Lớp video trong suốt, không bóng đổ.";
+"LG_LANDSCAPE_PLAYER_V2" = "Trình phát ngang V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Bố cục ngang dựa trên bảng.";
+"LG_REMOTE_CONTROL" = "Điều khiển từ xa";
+"LG_REMOTE_CONTROL_DESC" = "Cho phép máy chủ tắt các tính năng giao diện trên thiết bị này. Khi tắt, máy chủ không thể tắt gì; công tắc của bạn vẫn là của bạn.";
+"LG_SECTION_REMOTE" = "Từ xa";

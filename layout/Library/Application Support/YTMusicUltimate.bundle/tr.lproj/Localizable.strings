@@ -122,10 +122,10 @@
 "DELETE" = "Sil";
 "RENAME" = "Kaydet";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Arka planda otomatik eşitleme";
+"AUTO_SYNC_DESC" = "Sunucu çevirilerini sessizce yerel önbelleğe al (6 saatte bir)";
+"DOWNLOAD" = "İndir";
+"UPDATE_WHATS_NEW" = "Yenilikler:\n%@";
 
 "LYRICS_ENGINE" = "Şarkı sözleri motoru";
 "LYRICS_ENGINE_FOOTER" = "Sunucu şarkı sözlerini alır ve aşağıda ayarlanan dile çevirir. Zaten bu Çince yazıyla yazılmış satırlar yalnızca yazı biçimi bakımından normalleştirilir, çevirmeye hiç gönderilmez. Akışlı çeviri model yazarken her satırı boyar, dakika yazımı ise çeviriyi etkin satırın altına harf harf yazar.";
@@ -164,11 +164,11 @@
 "LYRICS_FULLSCREEN" = "Döndürünce tam ekran";
 "LYRICS_FULLSCREEN_DESC" = "Cihazı yatay çevir, şarkı sözleri otomatik olarak tam ekranda açılır";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Sıvı Cam V2";
 "LG_SECTION_THEME" = "Tema";
 "LG_SECTION_PLAYER" = "Oynatıcı";
 "LG_SECTION_APP" = "Uygulama";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Sıvı Cam";
 "LG_MASTER_DESC" = "Görsel materyal için ana anahtar.";
 "LG_SONG_THEME_WHOLE" = "Uygulama geneli şarkı teması";
 "LG_SONG_THEME_WHOLE_DESC" = "Uygulama genelinde Apple Music tarzı renk atmosferi.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "Sayfalar V2";
 "LG_SHEETS_V2_DESC" = "Yuvarlatılmış cam eylem ve alt sayfalar.";
 "LG_ENTRY_BUTTON" = "Liquid Glass ayarları";
+"LG_SEARCH_V2" = "Arama V2";
+"LG_SEARCH_V2_DESC" = "Yuvarlak arama alanı ve saydam sonuç satırları.";
+"LG_LIBRARY_V2" = "Kitaplık V2";
+"LG_LIBRARY_V2_DESC" = "Yuvarlak kapaklı saydam kitaplık sayfaları.";
+"LG_ENTITY_V2" = "Varlık sayfaları V2";
+"LG_ENTITY_V2_DESC" = "Albüm, Sanatçı ve Oynatma Listesi için ortak cam kabuk.";
+"LG_DOWNLOADS_V2" = "İndirilenler V2";
+"LG_DOWNLOADS_V2_DESC" = "Yuvarlak çevrimdışı ve indirme yüzeyleri.";
+"LG_STATUS_OVERLAYS_V2" = "Durum katmanları V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Cam bildirimler, uyarılar ve ilerleme göstergeleri.";
+"LG_GLOBAL_STATES_V2" = "Genel durumlar V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Cam yükleme, boş, çevrimdışı ve hata durumları.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Şeffaf video katmanı, gölgesiz.";
+"LG_LANDSCAPE_PLAYER_V2" = "Yatay oynatıcı V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Panel tabanlı yatay düzen.";
+"LG_REMOTE_CONTROL" = "Uzaktan kontrol";
+"LG_REMOTE_CONTROL_DESC" = "Sunucunun bu cihazda arayuz ozelliklerini kapatmasina izin ver. Kapaliyken hicbir seyi kapatamaz; anahtarlarin sende kalir.";
+"LG_SECTION_REMOTE" = "Uzaktan";

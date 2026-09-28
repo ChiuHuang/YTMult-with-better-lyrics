@@ -36,8 +36,8 @@
 "SB_SKIP" = "ข้าม";
 "SB_ASK" = "ถามก่อน";
 "SB_NOTIF_DURATION" = "ระยะเวลาแจ้งเตือน (วินาที)";
-"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
-"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
+"SB_LYRICS_OFFSET" = "เลื่อนคำบทเมื่อข้ามเพลงนำ";
+"SB_LYRICS_OFFSET_DESC" = "เลื่อนคำบทไปที่จุดเริ่มเพลงเมื่อข้ามส่วนที่ไม่ใช่ดนตรี";
 
 "SEEK_BUTTONS" = "แทนที่ปุ่มถัดไป/ก่อนหน้า ด้วยปุ่มกรอไปข้างหน้าและย้อนกลับ";
 "SEEK_TIME_FOOTER" = "เลือกเวลาการกรอเป็นวินาที\n\nค่าเริ่มต้น:\nย้อนกลับ = 10 วินาที\nกรอไปข้างหน้า = 30 วินาที\n\nสามารถข้ามไปเพลงถัดไปหรือก่อนหน้าได้โดยกดค้างที่ปุ่ม";
@@ -122,10 +122,10 @@
 "DELETE" = "ลบ";
 "RENAME" = "เปลี่ยนชื่อ";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "ซิงค์อัตโนมัติในพื้นหลัง";
+"AUTO_SYNC_DESC" = "ดึงคำแปลจากเซิร์ฟเวอร์เข้าแคชในเครื่องอย่างเงียบ ๆ (ทุก 6 ชม.)";
+"DOWNLOAD" = "ดาวน์โหลด";
+"UPDATE_WHATS_NEW" = "มีอะไรใหม่:\n%@";
 
 "LYRICS_ENGINE" = "ระบบเนื้อเพลง";
 "LYRICS_ENGINE_FOOTER" = "เซิร์ฟเวอร์ดึงเนื้อเพลงและแปลเป็นภาษาที่ตั้งไว้ด้านล่าง บรรทัดที่เขียนด้วยตัวอักษรจีนอยู่แล้วจะถูกปรับรูปแบบตัวอักษรเท่านั้น ไม่ถูกส่งไปให้ผู้แปล ส่วนคำแปลแบบสตรีมจะแสดงทีละบรรทัดขณะที่โมเดลกำลังเขียน และเอฟเฟกต์เครื่องพิมพ์ดีดจะพิมพ์คำแปลทีละตัวอักษรใต้บรรทัดปัจจุบัน";
@@ -157,18 +157,18 @@
 "DEBUG_NOW_PLAYING" = "กำลังเล่น: %@";
 "DEBUG_LAST_EVENT" = "เหตุการณ์ล่าสุด %@ ms";
 "DEBUG_UPLOAD_BLOCKED" = "%@ -- ถูกบล็อกอยู่ตอนนี้: สวิตช์หลักปิดอยู่ หรือระดับบันทึกไม่ใช่ All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_UPLOAD_OFF" = "upload_logs = ปิด";
 "DEBUG_TEST_SENT" = "ส่งเป็นบันทึกข้อมูลแล้ว ขณะนี้ไปถึงแดชบอร์ดของเซิร์ฟเวอร์แล้ว";
 "DEBUG_TEST_BLOCKED" = "ไม่ได้ส่ง การอัปโหลดถูกบล็อกโดยสวิตช์หลัก ระดับบันทึก หรือสวิตช์ upload_logs ของเซิร์ฟเวอร์";
 
 "LYRICS_FULLSCREEN" = "เต็มจอเมื่อหมุนเครื่อง";
 "LYRICS_FULLSCREEN_DESC" = "หมุนเครื่องเป็นแนวนอน เนื้อเพลจะเปิดเต็มจออัตโนมัติ";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "กระจกเหลว V2";
 "LG_SECTION_THEME" = "ธีม";
 "LG_SECTION_PLAYER" = "เครื่องเล่น";
 "LG_SECTION_APP" = "แอป";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "กระจกเหลว";
 "LG_MASTER_DESC" = "สวิตช์หลักของวัสดุภาพ";
 "LG_SONG_THEME_WHOLE" = "ธีมเพลงทั้งแอป";
 "LG_SONG_THEME_WHOLE_DESC" = "บรรยากาศสีแบบ Apple Music ทั่วทั้งแอป";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "ชีต V2";
 "LG_SHEETS_V2_DESC" = "ชีตคำสั่งและชีตด้านล่างแบบกระจกปลายมน";
 "LG_ENTRY_BUTTON" = "การตั้งค่า Liquid Glass";
+"LG_SEARCH_V2" = "ค้นหา V2";
+"LG_SEARCH_V2_DESC" = "ช่องค้นหามนและแถวผลลัพธ์โปร่งใส";
+"LG_LIBRARY_V2" = "ห้องสมุด V2";
+"LG_LIBRARY_V2_DESC" = "หน้าห้องสมุดโปร่งใสพร้อมภาพปกมน";
+"LG_ENTITY_V2" = "หน้าอัลบั้ม V2";
+"LG_ENTITY_V2_DESC" = "โครงกระจกร่วมสำหรับอัลบั้ม ศิลปิน และเพลย์ลิสต์";
+"LG_DOWNLOADS_V2" = "ดาวน์โหลด V2";
+"LG_DOWNLOADS_V2_DESC" = "พื้นผิวออฟไลน์และดาวน์โหลดแบบมน";
+"LG_STATUS_OVERLAYS_V2" = "สถานะทับหน้า V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "การแจ้งเตือน กล่องแจ้งเตือน และแถบความคืบหน้าแบบกระจก";
+"LG_GLOBAL_STATES_V2" = "สถานะทั่วไป V2";
+"LG_GLOBAL_STATES_V2_DESC" = "สถานะกำลังโหลด ว่าง ออฟไลน์ และข้อผิดพลาดแบบกระจก";
+"LG_VIDEO_V2" = "วิดีโอ V2";
+"LG_VIDEO_V2_DESC" = "ทับวิดีโอโปร่งใส ไม่มีเงา";
+"LG_LANDSCAPE_PLAYER_V2" = "เครื่องเล่นแนวนอน V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "เลย์เอาตแนวนอนแบบใช้แผง";
+"LG_REMOTE_CONTROL" = "ควบคุมจากระยะไกล";
+"LG_REMOTE_CONTROL_DESC" = "อนุญาตให้เซิร์ฟเวอร์ปิดฟีเจอร์อินเทอร์เฟซบนอุปกรณ์นี้ เมื่อปิด เซิร์ฟเวอร์จะปิดอะไรไม่ได้ สวิตช์ของคุณยังเป็นของคุณ";
+"LG_SECTION_REMOTE" = "ระยะไกล";

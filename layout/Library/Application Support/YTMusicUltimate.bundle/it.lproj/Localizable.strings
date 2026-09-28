@@ -41,7 +41,7 @@
 
 "SEEK_BUTTONS" = "Cambia bottoni successivo/precedente con forward/backward"; 
 "SEEK_TIME_FOOTER" = "Seleziona un tempo in secondi\n\nDefault:\nIndietro = 10 sec.\nAvanti = 30 sec.\n\nPassa alla canzone successiva o precedente tenendo premuto i bottoni.";
-"DEFAULT" = "Default";
+"DEFAULT" = "Predefinito";
 
 "THEME_SETTINGS" = "Opzioni tema";
 "OLED_DARK_THEME" = "Tema scuro OLED";
@@ -64,7 +64,7 @@
 "TABBAR_SETTINGS" = "Opzioni barra Tab";
 "STARTUP_TAB" = "Tab di avvio";
 "HOME" = "Home";
-"SAMPLES" = "Samples";
+"SAMPLES" = "Anteprime";
 "EXPLORE" = "Esplora";
 "LIBRARY" = "Libreria";
 "DOWNLOADS" = "Download";
@@ -110,8 +110,8 @@
 "DONE" = "Fatto";
 "FOUND_SEGMENT" = "Trovato segmento offtopic";
 "SEGMENT_SKIPPED" = "Offtopic skippato";
-"SKIP" = "Skip";
-"UNSKIP" = "Unskip";
+"SKIP" = "Salta";
+"UNSKIP" = "Non saltare";
 
 "EMPTY" = "I contenuti che scaricherai verranno mostrati qui";
 "REMOVE_ALL" = "Rimuovi tutti gli audio";
@@ -121,10 +121,10 @@
 "DELETE" = "Cancella";
 "RENAME" = "Rinomina";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Sincronizza automaticamente in background";
+"AUTO_SYNC_DESC" = "Porta silenziosamente le traduzioni del server nella cache locale (ogni 6 ore)";
+"DOWNLOAD" = "Scarica";
+"UPDATE_WHATS_NEW" = "Novita:\n%@";
 
 "LYRICS_ENGINE" = "Motore dei testi";
 "LYRICS_ENGINE_FOOTER" = "Il server recupera i testi e li traduce nella lingua impostata qui sotto. Le righe già in quello script cinese vengono solo normalizzate, non vengono mai inviate al traduttore. La traduzione in streaming dipinge ogni riga mentre il modello la scrive, e il effetto macchina da scrivere compone la traduzione sotto la riga attiva.";
@@ -132,7 +132,7 @@
 "STREAM_TRANSLATE_DESC" = "Dipinge ogni riga tradotta mentre il modello la scrive, invece di attendere il brano intero";
 "TYPEWRITER" = "Effetto macchina da scrivere";
 "TYPEWRITER_DESC" = "Componi la traduzione sotto la riga attiva, lettera per lettera (0 = disattivato)";
-"DEBUG_SETTINGS" = "Debug";
+"DEBUG_SETTINGS" = "Diagnostica";
 "DEBUG_STREAM" = "Traduzione in streaming";
 "DEBUG_STATE" = "Stato";
 "DEBUG_VIDEO" = "Ultimo video";
@@ -163,11 +163,11 @@
 "LYRICS_FULLSCREEN" = "Schermo intero alla rotazione";
 "LYRICS_FULLSCREEN_DESC" = "Ruotando in orizzontale, i testi si aprono da soli a schermo intero";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Vetro liquido V2";
 "LG_SECTION_THEME" = "Tema";
-"LG_SECTION_PLAYER" = "Player";
+"LG_SECTION_PLAYER" = "Lettore";
 "LG_SECTION_APP" = "App";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Vetro liquido";
 "LG_MASTER_DESC" = "Interruttore principale del materiale visivo.";
 "LG_SONG_THEME_WHOLE" = "Tema del brano in tutta l'app";
 "LG_SONG_THEME_WHOLE_DESC" = "Atmosfera di colori in stile Apple Music in tutta l'app.";
@@ -188,3 +188,23 @@
 "LG_SHEETS_V2" = "Sheet V2";
 "LG_SHEETS_V2_DESC" = "Sheet azione e sheet inferiori in vetro arrotondato.";
 "LG_ENTRY_BUTTON" = "Impostazioni Liquid Glass";
+"LG_SEARCH_V2" = "Ricerca V2";
+"LG_SEARCH_V2_DESC" = "Campo di ricerca arrotondato e risultati trasparenti.";
+"LG_LIBRARY_V2" = "Libreria V2";
+"LG_LIBRARY_V2_DESC" = "Pagine trasparenti con copertine arrotondate.";
+"LG_ENTITY_V2" = "Pagine entita V2";
+"LG_ENTITY_V2_DESC" = "Guscio di vetro comune per Album, Artista e Playlist.";
+"LG_DOWNLOADS_V2" = "Download V2";
+"LG_DOWNLOADS_V2_DESC" = "Superfici offline e di download arrotondate.";
+"LG_STATUS_OVERLAYS_V2" = "Overlay di stato V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Toast, avvisi e indicatori in vetro.";
+"LG_GLOBAL_STATES_V2" = "Stati globali V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Stati di caricamento, vuoto, offline ed errore in vetro.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Overlay video trasparente, senza ombre.";
+"LG_LANDSCAPE_PLAYER_V2" = "Lettore orizzontale V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Layout orizzontale a pannelli.";
+"LG_REMOTE_CONTROL" = "Controllo remoto";
+"LG_REMOTE_CONTROL_DESC" = "Consenti al server di disattivare le funzioni dell'interfaccia su questo dispositivo. Spento non puo piu disattivare nulla; i tuoi interruttori restano tuoi.";
+"LG_SECTION_REMOTE" = "Remoto";
+"SHARE_ALL" = "Condividi tutti gli audio";

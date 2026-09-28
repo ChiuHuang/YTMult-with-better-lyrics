@@ -4,6 +4,9 @@
 BOOL _safe_cache_component(NSString *s);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 void YTMUAutoSyncIfDue(void);
+// Forward decl for the remote gate; declared for the .xm files in
+// YTMULiquidGlassPreferences.h, and defined below.
+BOOL YTMULGServerAllows(NSString *key);
 
 // Every accessor the queue walk below probes. They are declared, not
 // implemented: the category exists so the direct calls compile, and each one is
@@ -238,10 +241,36 @@ BOOL YTMULyricsStreamTranslateEnabled(void) {
     return YTMULyricsPreference(@"lyricsStreamTranslate", YES);
 }
 
-NSDictionary *YTMUAppSettings(void) {
-    NSDictionary *cached = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUAppSettings"];
-    return [cached isKindOfClass:[NSDictionary class]] ? cached : @{};
+// ---------------------------------------------------------------------------
+// Server remote config (GET /api/app/settings)
+// ---------------------------------------------------------------------------
+// The map is read on a HOT path: YTMULGServerAllows runs on every layout pass
+// of ~40 hooked classes (per chip while Home scrolls, per pivot-bar item), and
+// both NSUserDefaults lookups deserialize a plist-backed dictionary each time.
+// So both are cached behind one pointer-free memo, invalidated explicitly when
+// a fetch lands or the user flips the opt-out. Same pattern as
+// YTMUTypewriterCPS, which is the existing precedent.
+static NSDictionary *g_appSettingsCache = nil;
+
+// The opt-out is a LOCAL pref on purpose: the user is the one who gets to
+// decide the server cannot change their UI. Reading it from remote config
+// would mean turning it off could only ever be done remotely, i.e. never by
+// the person who wants it.
+static BOOL YTMURemoteControlAllowed(void) {
+    return YTMULyricsPreference(@"allowServerFeatureControl", YES);
 }
+
+NSDictionary *YTMUAppSettings(void) {
+    if (g_appSettingsCache) return g_appSettingsCache;
+    NSDictionary *cached = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUAppSettings"];
+    g_appSettingsCache = [cached isKindOfClass:[NSDictionary class]] ? cached : @{};
+    return g_appSettingsCache;
+}
+
+void YTMUAppSettingsInvalidateCache(void) {
+    g_appSettingsCache = nil;
+}
+
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt) {
     id v = YTMUAppSettings()[key];
     if ([v isKindOfClass:[NSNumber class]]) return [v boolValue];
@@ -251,10 +280,30 @@ BOOL YTMUAppSettingBool(NSString *key, BOOL dflt) {
     }
     return dflt;
 }
+
+// Remote gate for every Liquid Glass feature, and the ONLY remote read that
+// can turn a user-visible feature off. Four guards, in order:
+//   1. allowServerFeatureControl -- the user's own local opt-out, a hard
+//      ceiling on remote power. Local on purpose: a user who wants the server
+//      out of their UI must not need the server's permission.
+//   2. ui.remote_control          -- the server's own master switch. Off means
+//      "I am not using remote control", so every kill switch below goes inert.
+//   3. ui.liquid_glass            -- kill every surface at once.
+//   4. ui.<key>                   -- one surface.
+// Every step fails OPEN (default YES), so an unreachable, empty or partially
+// written server leaves the tweak behaving exactly as if this code were gone.
+BOOL YTMULGServerAllows(NSString *key) {
+    if (!YTMURemoteControlAllowed()) return YES;
+    if (!YTMUAppSettingBool(@"ui.remote_control", YES)) return YES;
+    if (!YTMUAppSettingBool(@"ui.liquid_glass", YES)) return NO;
+    if (!key.length) return YES;
+    return YTMUAppSettingBool([@"ui." stringByAppendingString:key], YES);
+}
+
 void YTMUFetchAppSettings(void) {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     NSTimeInterval last = [ud doubleForKey:@"YTMUAppSettingsFetchedAt"];
-    if (last > 0 && [[NSDate date] timeIntervalSince1970] - last < 3600) return;
+    if (last > 0 && [[NSDate date] timeIntervalSince1970] - last < 24.0 * 60.0 * 60.0) return;
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/app/settings", YTMUApiBase()]];
     if (!url) return;
     [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
@@ -265,6 +314,10 @@ void YTMUFetchAppSettings(void) {
         NSUserDefaults *ud2 = [NSUserDefaults standardUserDefaults];
         [ud2 setObject:s forKey:@"YTMUAppSettings"];
         [ud2 setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"YTMUAppSettingsFetchedAt"];
+        // A remote flip (a kill switch) has to take effect now, not at the next
+        // launch: nothing else re-reads the map, and the layout gates are the
+        // only consumers.
+        YTMUAppSettingsInvalidateCache();
     }] resume];
 }
 
@@ -1126,7 +1179,6 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     BOOL result = %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
-        YTMUFetchAppSettings();
         YTMUAutoSyncIfDue();
     });
     return result;

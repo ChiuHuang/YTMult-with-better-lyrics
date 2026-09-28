@@ -99,13 +99,13 @@
 "YES" = "Taip";
 "REGIONAL_RESTRICTION" = "Panašu, kad Youtube Music naudojimas jūsų šalyje yra apribotas.\n\n Prieigai prie YouTube Music naudokite VPN.";
 
-"DONT_RUSH" = "Don't rush brilliance";
-"DONT_RUSH_DESC" = "Required to play the song to extract the link";
+"DONT_RUSH" = "Neskubėkite talento";
+"DONT_RUSH_DESC" = "Reikia paleisti dainą, kad būtų gauta nuoroda";
 "SELECT_ACTION" = "Pasirinkite veiksmą";
 "DOWNLOADING" = "Atsisiunčiama";
-"DOWNLOAD_PREMIUM" = "Download (Premium required)";
+"DOWNLOAD_PREMIUM" = "Atsisiųsti (reikia Premium)";
 "OOPS" = "Oi!\nkažkas atsitiko";
-"LINK_NOT_FOUND" = "Link not found";
+"LINK_NOT_FOUND" = "Nuoroda nerasta";
 "SAVED_TO_PHOTOS" = "Išsaugota Nuotraukose";
 "DONE" = "Atlikta";
 "FOUND_SEGMENT" = "Rastas segmentas nepriklausantis temai";
@@ -122,10 +122,10 @@
 "DELETE" = "Panaikinti";
 "RENAME" = "Pervardyti";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "Automatiškai sinchronizuoti fone";
+"AUTO_SYNC_DESC" = "Tyliai įtraukti serverio vertimus į vietinę talpyklą (kas 6 val.)";
+"DOWNLOAD" = "Atsisiųsti";
+"UPDATE_WHATS_NEW" = "Kas naujo:\n%@";
 
 "LYRICS_ENGINE" = "Dainos žodžių variklis";
 "LYRICS_ENGINE_FOOTER" = "Serveris gauna dainos žodžius ir verčia juos į žemiau nustatytą kalbą. Eilutės, jau parašytos tuo kinų rašmenų sistemos šriftu, tik suvienodinamos pagal rašmenų sistemą ir niekada neperduodamos vertėjui. Srautinis vertimas piešia kiekvieną eilutę ties modeliui rašant, o rašomosios mašinos efektas rašo vertimą po aktyvia eilute.";
@@ -157,18 +157,18 @@
 "DEBUG_NOW_PLAYING" = "dabar groja: %@";
 "DEBUG_LAST_EVENT" = "Paskutinis įvykis %@ ms";
 "DEBUG_UPLOAD_BLOCKED" = "%@ -- užblokuotas dabar: pagrindinis jungiklis išjungtas arba žurnalo lygis nėra All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_UPLOAD_OFF" = "upload_logs = išjungta";
 "DEBUG_TEST_SENT" = "Išsiųstas kaip informacinis žurnalo įrašas. Dabar jis pasiekė serverio skydelį.";
 "DEBUG_TEST_BLOCKED" = "Nesiųsta. Siuntimą blokuoja pagrindinis jungiklis, žurnalo lygis arba serverio upload_logs jungiklis.";
 
 "LYRICS_FULLSCREEN" = "Pilnas ekranas sukant";
 "LYRICS_FULLSCREEN_DESC" = "Sukant į gulsčią padėtį, dainos žodžiai atsiveria visame ekrane";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Skystas stiklas V2";
 "LG_SECTION_THEME" = "Tema";
 "LG_SECTION_PLAYER" = "Grotuvas";
 "LG_SECTION_APP" = "Programa";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Skystas stiklas";
 "LG_MASTER_DESC" = "Pagrindinis vaizdinės medžiagos jungiklis.";
 "LG_SONG_THEME_WHOLE" = "Visos programos dainos tema";
 "LG_SONG_THEME_WHOLE_DESC" = "Apple Music stiliaus spalvų atmosfera visoje programoje.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "Lapai V2";
 "LG_SHEETS_V2_DESC" = "Suapvalinti stikliniai veiksmų ir apatiniai lapai.";
 "LG_ENTRY_BUTTON" = "Liquid Glass nustatymai";
+"LG_SEARCH_V2" = "Paieška V2";
+"LG_SEARCH_V2_DESC" = "Suapvalė paieškos laukas ir skaidrios rezultatų eilutės.";
+"LG_LIBRARY_V2" = "Biblioteka V2";
+"LG_LIBRARY_V2_DESC" = "Skaidrios bibliotekos puslapiai su suapvalėtais viršeliais.";
+"LG_ENTITY_V2" = "Objektų puslapiai V2";
+"LG_ENTITY_V2_DESC" = "Bendra stiklo išklada albumui, atlikėjui ir grojaraščiui.";
+"LG_DOWNLOADS_V2" = "Atsisiuntimai V2";
+"LG_DOWNLOADS_V2_DESC" = "Suapvalėti neprisijungimo ir atsisiuntimų paviršiai.";
+"LG_STATUS_OVERLAYS_V2" = "Būsenos sluoksniai V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Stikliniai pranešimai, įspėjimai ir eiga.";
+"LG_GLOBAL_STATES_V2" = "Bendrieji įvykiai V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Stikliniai įkėlimo, tuščio, neprisijungimo ir klaidos įvykiai.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Skaidrus video sluoksnis be nereikalingų šešėlių.";
+"LG_LANDSCAPE_PLAYER_V2" = "Gulduoamas leistuvas V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Gulduojamas išdėstymas pagal plokštes.";
+"LG_REMOTE_CONTROL" = "Nuotolinis valdymas";
+"LG_REMOTE_CONTROL_DESC" = "Leisti serveriui išjungti sajos funkcijas. Ijungus serveris negales nieko išjungti; jūsų perjungiklie lieka jūsų.";
+"LG_SECTION_REMOTE" = "Nuotoline";

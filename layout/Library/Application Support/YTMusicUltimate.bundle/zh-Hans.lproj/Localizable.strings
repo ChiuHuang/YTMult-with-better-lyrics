@@ -194,11 +194,11 @@
 "LYRICS_FULLSCREEN" = "旋转时全屏";
 "LYRICS_FULLSCREEN_DESC" = "转到横屏时自动全屏显示歌词";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "液态玻璃 V2";
 "LG_SECTION_THEME" = "主题";
 "LG_SECTION_PLAYER" = "播放器";
 "LG_SECTION_APP" = "应用";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "液态玻璃";
 "LG_MASTER_DESC" = "可视材质的总开关。";
 "LG_SONG_THEME_WHOLE" = "全局歌曲主题";
 "LG_SONG_THEME_WHOLE_DESC" = "整个应用采用 Apple Music 风格的配色氛围。";
@@ -219,3 +219,22 @@
 "LG_SHEETS_V2" = "面板 V2";
 "LG_SHEETS_V2_DESC" = "圆角玻璃操作面板和底部面板。";
 "LG_ENTRY_BUTTON" = "Liquid Glass 设置";
+"LG_SEARCH_V2" = "搜索 V2";
+"LG_SEARCH_V2_DESC" = "圆角搜索框与透明结果行。";
+"LG_LIBRARY_V2" = "媒体库 V2";
+"LG_LIBRARY_V2_DESC" = "圆角封面的透明媒体库页面。";
+"LG_ENTITY_V2" = "实体页 V2";
+"LG_ENTITY_V2_DESC" = "专辑、艺人与播放列表共用的玻璃外壳。";
+"LG_DOWNLOADS_V2" = "下载 V2";
+"LG_DOWNLOADS_V2_DESC" = "圆角的离线与下载界面。";
+"LG_STATUS_OVERLAYS_V2" = "状态浮层 V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "玻璃提示、警告与进度指示。";
+"LG_GLOBAL_STATES_V2" = "全局状态 V2";
+"LG_GLOBAL_STATES_V2_DESC" = "玻璃质感的加载、空、离线与错误状态。";
+"LG_VIDEO_V2" = "视频 V2";
+"LG_VIDEO_V2_DESC" = "透明视频浮层，无多余阴影。";
+"LG_LANDSCAPE_PLAYER_V2" = "横屏播放器 V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "基于面板的横屏布局。";
+"LG_REMOTE_CONTROL" = "远程控制";
+"LG_REMOTE_CONTROL_DESC" = "允许服务器关闭本机的界面功能。关闭后服务器将无法再关闭任何功能，你的开关始终归你。";
+"LG_SECTION_REMOTE" = "远程";

@@ -32,12 +32,12 @@
 
 "SKIP_NONMUSIC_PARTS" = "SponsorBlock";
 "SKIP_NONMUSIC_PARTS_DESC" = "تخطي قسم الاعلانات في موسيقي الفيديو";
-"SB_BEHAVIOR" = "Behavior";
-"SB_SKIP" = "Skip";
-"SB_ASK" = "Ask";
-"SB_NOTIF_DURATION" = "Notification duration (sec)";
-"SB_LYRICS_OFFSET" = "Shift lyrics for skipped intro";
-"SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
+"SB_BEHAVIOR" = "السلوك";
+"SB_SKIP" = "تخطي";
+"SB_ASK" = "اسأل";
+"SB_NOTIF_DURATION" = "مدة الإشعار (بالثواني)";
+"SB_LYRICS_OFFSET" = "إزاحة الكلمات عند تخطي المقدمة";
+"SB_LYRICS_OFFSET_DESC" = "ينقل الكلمات إلى بداية الأغنية عند تخطي مقدمة غير موسيقية";
 
 "SEEK_BUTTONS" = "استبدال الإعجاب/عدم الإعجاب بأزرار أمامية وخلفية";
 "SEEK_TIME_FOOTER" = "حدد وقت التقدم بالثواني\n\nالافتراضي:\nالتقدم للخلف = 10 ثوانٍ\nالتقدم للأمام = 30 ثانية\n\nالانتقال إلى الموسيقي التالية والسابقة عن طريق الضغط لفترة طويلة على الأزرار.";
@@ -93,7 +93,7 @@
 "CLOSE" = "يغلق";
 "WARNING" = "تحذير";
 "LOGIN_INFO" = "تم تسجيل الدخول بنجاح سيتم إعادة تشغيل البرنامج";
-"RETRY_LOGIN" = "Workaround activated.\n\nPlease try again.";
+"RETRY_LOGIN" = "تم تفعيل حل بديل.\n\nيرجى المحاولة مرة أخرى.";
 "APPLY_MESSAGE" = "سيتم غلق البرنامج لتطبيق الاعدادات هل انت متأكد؟";
 "CANCEL" = "إلغاء";
 "YES" = "نعم, موافق";
@@ -103,15 +103,15 @@
 "DONT_RUSH_DESC" = "لا تستعجل قم بتشغيل الموسيقي اولاً ";
 "SELECT_ACTION" = "اختر الفعل";
 "DOWNLOADING" = "يتم التحميل";
-"DOWNLOAD_PREMIUM" = "Download (Premium required)";
+"DOWNLOAD_PREMIUM" = "تنزيل (يتطلب اشتراكًا مميزًا)";
 "OOPS" = "هناك شئ خطأ";
-"LINK_NOT_FOUND" = "Link not found";
+"LINK_NOT_FOUND" = "لم يتم العثور على الرابط";
 "SAVED_TO_PHOTOS" = "تم الحفظ في البوم الصور";
 "DONE" = "تم الانتهاء بنجاح";
-"FOUND_SEGMENT" = "Found offtopic segment";
-"SEGMENT_SKIPPED" = "Offtopic has been skipped";
-"SKIP" = "Skip";
-"UNSKIP" = "Unskip";
+"FOUND_SEGMENT" = "تم العثور على مقطع خارج الموضوع";
+"SEGMENT_SKIPPED" = "تم تخطي المقطع خارج الموضوع";
+"SKIP" = "تخطي";
+"UNSKIP" = "عدم التخطي";
 
 "EMPTY" = "المحتوي الذي تم تحميله سيظهر هنا";
 "REMOVE_ALL" = "مسح كل التحميلات";
@@ -120,12 +120,12 @@
 "DELETE_MESSAGE" = "هل انت متأكد انك تريد الحذف ؟";
 "ALL_DOWNLOADS" = "كل التحميلات";  //keep it lowercase
 "DELETE" = "حذف";
-"RENAME" = "Rename";
+"RENAME" = "إعادة تسمية";
 
-"AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
-"DOWNLOAD" = "Download";
-"UPDATE_WHATS_NEW" = "What's new:\n%@";
+"AUTO_SYNC_TITLE" = "مزامنة تلقائية في الخلفية";
+"AUTO_SYNC_DESC" = "سحب الترجمات من الخادم إلى ذاكرة التخزين المؤقتة بصمت (كل 6 ساعات)";
+"DOWNLOAD" = "تنزيل";
+"UPDATE_WHATS_NEW" = "ما الجديد:\n%@";
 
 "LYRICS_ENGINE" = "محرك الكلمات";
 "LYRICS_ENGINE_FOOTER" = "يقوم الخادم بجلب الكلمات وترجمتها إلى اللغة المضبوطة أدناه. أما السطور المكتوبة أصلاً بذلك الخط الصيني فتُوحَّد كتابتها فقط ولا تُرسل أبداً إلى المترجم. أما الترجمة المتدفقة فتعرض كل سطر أثناء كتابته، وتأثير الآلة الكاتبة يكتب الترجمة حرفاً بحرف تحت السطر النشط.";
@@ -157,18 +157,18 @@
 "DEBUG_NOW_PLAYING" = "قيد التشغيل الآن: %@";
 "DEBUG_LAST_EVENT" = "آخر حدث %@ ms";
 "DEBUG_UPLOAD_BLOCKED" = "%@ -- محظور الآن: المفتاح الرئيسي معطّل، أو مستوى السجل ليس All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_UPLOAD_OFF" = "upload_logs = معطّل";
 "DEBUG_TEST_SENT" = "أُرسل كسجل معلومات. يصل الآن إلى لوحة معلومات الخادم.";
 "DEBUG_TEST_BLOCKED" = "لم يُرسل. الرفع محظور بواسطة المفتاح الرئيسي أو مستوى السجل أو مفتاح upload_logs في الخادم.";
 
 "LYRICS_FULLSCREEN" = "ملء الشاشة عند التدوير";
 "LYRICS_FULLSCREEN_DESC" = "أدر الجهاز أفقياً وستفتح الكلمات بملء الشاشة تقائياً";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "زجاج سائل V2";
 "LG_SECTION_THEME" = "المظهر";
 "LG_SECTION_PLAYER" = "المشغل";
 "LG_SECTION_APP" = "التطبيق";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "زجاج سائل";
 "LG_MASTER_DESC" = "مفتاح المواد المرئية الرئيسي.";
 "LG_SONG_THEME_WHOLE" = "موضوع الأغنية في التطبيق كله";
 "LG_SONG_THEME_WHOLE_DESC" = "أجواء لونية بأسلوب Apple Music في التطبيق كله.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "الألواح V2";
 "LG_SHEETS_V2_DESC" = "ألواح إجراءات زجاجية بزوايا دائرية وألواح سفلية.";
 "LG_ENTRY_BUTTON" = "إعدادات Liquid Glass";
+"LG_SEARCH_V2" = "البحث V2";
+"LG_SEARCH_V2_DESC" = "حقل بحث دائري وصفوف نتائج شفافة.";
+"LG_LIBRARY_V2" = "المكتبة V2";
+"LG_LIBRARY_V2_DESC" = "صفحات مكتبة شفافة بأغلفة دائرية.";
+"LG_ENTITY_V2" = "صفحات الكيانات V2";
+"LG_ENTITY_V2_DESC" = "غلاف زجاجي مشترك للألبوم والفنان وقائمة التشغيل.";
+"LG_DOWNLOADS_V2" = "التنزيلات V2";
+"LG_DOWNLOADS_V2_DESC" = "أسطح التنزيل والتشغيل دون اتصال بصيغة دائرية.";
+"LG_STATUS_OVERLAYS_V2" = "طبقات الحالة V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "إشعارات وتنبيهات ومؤشرات تقدم زجاجية.";
+"LG_GLOBAL_STATES_V2" = "الحالات العامة V2";
+"LG_GLOBAL_STATES_V2_DESC" = "حالات التحميل والفارغ ودون اتصال والخطأ زجاجية.";
+"LG_VIDEO_V2" = "الفيديو V2";
+"LG_VIDEO_V2_DESC" = "طبقة فيديو شفافة بلا ظلال.";
+"LG_LANDSCAPE_PLAYER_V2" = "المشغل الأفقي V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "تخطيط أفقي قائم على اللوحات.";
+"LG_REMOTE_CONTROL" = "التحكم عن بُعد";
+"LG_REMOTE_CONTROL_DESC" = "السماح للخادم بتعطيل ميزات الواجهة على هذا الجهاز. عند الإيقاف لا يستطيع الخادم إيقاف أي شيء، ومفاتيحك تبقى لك.";
+"LG_SECTION_REMOTE" = "عن بُعد";

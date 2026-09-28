@@ -3,6 +3,26 @@
 
 #import <Foundation/Foundation.h>
 
+// YTMUAppSettingBool is DEFINED in LyricsCore.x, which Theos compiles as
+// Objective-C (C linkage). Every Liquid Glass .xm is Objective-C++ and pulls
+// this header in, so the declaration has to carry C linkage explicitly or
+// the call mangles to _Z18YTMUAppSettingBoolP10NSString8ObjCBool and the V2
+// stack fails to link. LiquidGlass.xm imports BOTH this header and
+// LyricsShared.h (where the same function is declared inside its own
+// extern "C" block) -- two declarations of one name with different language
+// linkage in a single scope is ill-formed, so both must agree.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
+BOOL YTMULGServerAllows(NSString *key);
+void YTMUAppSettingsInvalidateCache(void);
+
+#ifdef __cplusplus
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // V1 / V2 coexistence policy. This block is the whole contract; everything
 // else in the Liquid Glass V2 stack only reads keys through the helpers here.
@@ -70,8 +90,18 @@ static inline BOOL YTMULGAvailable(void) {
 }
 
 // One V2 feature switch (used by every V2 file) + the tweak master.
+//
+// The remote gate LIVES in LyricsCore.x, not here, for two reasons:
+//   - it is called on every layout pass of ~40 hooked classes, so the map has
+//     to be read through a cache; a static inline in this header would give
+//     each of the 15 .xm files its own uncached copy;
+//   - the user's local opt-out and the fail-open defaults are policy that must
+//     be stated once.
+// See YTMULGServerAllows() in Source/LyricsCore.x.
+BOOL YTMULGServerAllows(NSString *key);
+
 static inline BOOL YTMULGFeatureEnabled(NSString *v2Key) {
-    return YTMULGTweakEnabled() && YTMULGAvailable() && YTMULGPreference(v2Key, YES);
+    return YTMULGTweakEnabled() && YTMULGAvailable() && YTMULGPreference(v2Key, YES) && YTMULGServerAllows(v2Key);
 }
 
 // The V1 counterpart of a V2 key: V1 only runs when its V2 replacement is off.
@@ -95,7 +125,23 @@ static inline NSDictionary<NSString *, NSNumber *> *YTMULGDefaultPreferences(voi
         @"pivotBarV2Enabled": @YES,
         @"lyricsEntryButtonEnabled": @YES,
         @"playerSongThemeEnabled": @YES,
-        @"wholeAppSongThemeEnabled": @YES
+        @"wholeAppSongThemeEnabled": @YES,
+        @"searchV2Enabled": @YES,
+        @"libraryV2Enabled": @YES,
+        @"entityPagesV2Enabled": @YES,
+        @"albumV2Enabled": @YES,
+        @"artistV2Enabled": @YES,
+        @"playlistV2Enabled": @YES,
+        @"downloadsV2Enabled": @YES,
+        @"statusOverlaysV2Enabled": @YES,
+        @"globalStatesV2Enabled": @YES,
+        @"videoV2Enabled": @YES,
+        @"landscapePlayerV2Enabled": @YES,
+        @"lyricsProviderAllFetchEnabled": @YES,
+        @"materialIntensity": @0.72,
+        @"backgroundImageStrength": @0.48,
+        @"reduceTransparencyFallbackEnabled": @YES,
+        @"reduceGlassMotionEnabled": @YES
     };
 }
 

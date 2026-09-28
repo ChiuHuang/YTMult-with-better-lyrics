@@ -441,14 +441,30 @@
           </div>
           <div class="panel-body">
             <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
-              Remote config for the tweak, served publicly at <span class="mono">GET /api/app/settings</span> (non-secret values only). Devices fetch on launch.
+              Remote config for the tweak, served publicly at <span class="mono">GET /api/app/settings</span> (non-secret values only).
+              Devices re-check on foreground, at most once every 24&nbsp;h.
             </div>
-            <div id="app-list" class="list-grid" style="margin-bottom:12px;"></div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
-              <mdui-text-field id="app-key" label="Key" style="width:180px;"></mdui-text-field>
-              <mdui-text-field id="app-value" label="Value (true/false/number/text)" style="flex:1; min-width:200px;"></mdui-text-field>
-              <mdui-button id="app-set" variant="tonal" icon="save">Save</mdui-button>
+            <div class="app-master">
+              <div>
+                <div class="app-master-label" id="app-master-label">Remote control</div>
+                <div class="app-desc" id="app-master-desc"></div>
+              </div>
+              <mdui-switch id="app-master" aria-label="Remote control"></mdui-switch>
             </div>
+            <div id="app-groups"></div>
+            <details id="app-advanced">
+              <summary>Advanced: raw key/value</summary>
+              <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin:6px 0 10px;">
+                Escape hatch for keys that are not in the schema. Stored verbatim;
+                a typo here is accepted and silently ignored by the device.
+              </div>
+              <div id="app-list" class="list-grid" style="margin-bottom:12px;"></div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+                <mdui-text-field id="app-key" label="Key" style="width:180px;"></mdui-text-field>
+                <mdui-text-field id="app-value" label="Value (true/false/number/text)" style="flex:1; min-width:200px;"></mdui-text-field>
+                <mdui-button id="app-set" variant="tonal" icon="save">Save</mdui-button>
+              </div>
+            </details>
           </div>
         </mdui-card>
       </section>

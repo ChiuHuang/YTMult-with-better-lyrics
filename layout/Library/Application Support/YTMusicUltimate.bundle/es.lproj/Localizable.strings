@@ -164,11 +164,11 @@
 "LYRICS_FULLSCREEN" = "Pantalla completa al girar";
 "LYRICS_FULLSCREEN_DESC" = "Gira el móvil en horizontal y las letras se abren solas en pantalla completa";
 
-"LG_TITLE" = "Liquid Glass V2";
+"LG_TITLE" = "Cristal liquido V2";
 "LG_SECTION_THEME" = "Tema";
 "LG_SECTION_PLAYER" = "Reproductor";
 "LG_SECTION_APP" = "Aplicación";
-"LG_MASTER" = "Liquid Glass";
+"LG_MASTER" = "Cristal liquido";
 "LG_MASTER_DESC" = "Interruptor maestro del material visual.";
 "LG_SONG_THEME_WHOLE" = "Tema de canción en toda la app";
 "LG_SONG_THEME_WHOLE_DESC" = "Atmósfera de color al estilo de Apple Music en toda la app.";
@@ -189,3 +189,22 @@
 "LG_SHEETS_V2" = "Hojas V2";
 "LG_SHEETS_V2_DESC" = "Hojas de acción y hojas inferiores de cristal redondeadas.";
 "LG_ENTRY_BUTTON" = "Ajustes de Liquid Glass";
+"LG_SEARCH_V2" = "Busqueda V2";
+"LG_SEARCH_V2_DESC" = "Campo de busqueda redondeado y filas de resultados transparentes.";
+"LG_LIBRARY_V2" = "Biblioteca V2";
+"LG_LIBRARY_V2_DESC" = "Paginas transparentes con caratulas redondeadas.";
+"LG_ENTITY_V2" = "Paginas de entidad V2";
+"LG_ENTITY_V2_DESC" = "Cascaron de cristal comun para Album, Artista y Lista.";
+"LG_DOWNLOADS_V2" = "Descargas V2";
+"LG_DOWNLOADS_V2_DESC" = "Superficies de descarga y sin conexion redondeadas.";
+"LG_STATUS_OVERLAYS_V2" = "Superposiciones de estado V2";
+"LG_STATUS_OVERLAYS_V2_DESC" = "Avisos, alertas y progreso de cristal.";
+"LG_GLOBAL_STATES_V2" = "Estados globales V2";
+"LG_GLOBAL_STATES_V2_DESC" = "Estados de carga, vacio, sin conexion y error de cristal.";
+"LG_VIDEO_V2" = "Video V2";
+"LG_VIDEO_V2_DESC" = "Superposicion de video transparente, sin sombras.";
+"LG_LANDSCAPE_PLAYER_V2" = "Reproductor horizontal V2";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "Diseno horizontal basado en paneles.";
+"LG_REMOTE_CONTROL" = "Control remoto";
+"LG_REMOTE_CONTROL_DESC" = "Permitir que el servidor desactive funciones de la interfaz en este dispositivo. Apagado, no puede desactivar nada; tus interruptores siguen siendo tuyos.";
+"LG_SECTION_REMOTE" = "Remoto";
