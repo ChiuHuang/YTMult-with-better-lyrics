@@ -7,7 +7,6 @@ import re
 import sys
 import requests
 import hashlib
-import time as time_module
 import subprocess
 import threading
 import concurrent.futures
@@ -184,35 +183,12 @@ def _badge_tracks_cached():
 # Serving counters live in cache/usage_stats.json, which only counts what this
 # process instance served since it started -- it reads low after a restart or
 # a redeploy. The log file has every serve the box ever did (plus one rotated
-# generation), so estimate from that instead. Scanned at most every 30s.
-_LOG_SCAN = {'at': 0.0, 'served': 0}
-_LOG_SCAN_TTL = 30.0
-
-
+# generation), so count from that instead. badge_stats owns the counting: it
+# reads the log ONCE, remembers the byte offset, and afterwards reads only
+# what was appended. This used to re-read the whole ~6MB log every 30s.
 def _served_from_logs():
-    """Estimate serves: one 'Returning' line per /api/lyrics response plus one
-    'push FINAL' per completed stream. Counts lines, not distinct req_ids --
-    req_id is only 3 bytes of hex, so ids repeat and would undercount."""
-    now = time_module.time()
-    if now - _LOG_SCAN['at'] < _LOG_SCAN_TTL:
-        return _LOG_SCAN['served']
-    from .app import SERVER_LOG_FILE
-    served = 0
-    for path in (SERVER_LOG_FILE, SERVER_LOG_FILE + '.1'):
-        try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as f:
-                for line in f:
-                    if '[SEND] [REQ ' not in line:
-                        continue
-                    # one per lyrics response; stream requests log 3 pushes
-                    # (RAW/MACHINE/FINAL) and only the FINAL one is a serve
-                    if ' Returning ' in line or '[Stream] push FINAL' in line:
-                        served += 1
-        except OSError:
-            continue
-    _LOG_SCAN['at'] = now
-    _LOG_SCAN['served'] = served
-    return served
+    from .badge_stats import served_count
+    return served_count()
 
 
 def _badge_nodes_online():
