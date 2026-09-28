@@ -394,7 +394,12 @@ def ws_node(ws):
         threading.Thread(target=_jwt_sync_for, args=(node_id,), daemon=True).start()
 
         while True:
-            raw = ws.receive(timeout=90)  # generous: the node's WebSocketApp pings every 30s
+            # 90s of no APPLICATION message ends the session. The node answers
+            # our 30s 'ping' with {'type':'pong'}, so a live node refreshes this
+            # every 30s and only a genuinely dead one is dropped here. (The
+            # node's protocol-level pings do NOT reach receive(); see the
+            # 'pong' branch above.)
+            raw = ws.receive(timeout=90)
             if raw is None:
                 break
             try:
@@ -409,6 +414,15 @@ def ws_node(ws):
                 if pending:
                     pending['result'] = msg
                     pending['event'].set()
+            elif mtype == 'pong':
+                # Keepalive answer, and the only thing that keeps this loop
+                # alive on an idle node (receive() surfaces application
+                # messages only, not protocol Pongs). It costs a 30s dict
+                # write; a missed one is not fatal, since last_seen is also
+                # stamped at connect and the dashboard tolerates staleness.
+                record['last_seen'] = datetime.now().isoformat()
+                nodes[node_id] = record
+                _save_nodes(nodes)
             elif mtype == 'jwt_contribute':
                 # A node boots with a Cubey JWT available (env YTMU_JWT) and
                 # hands it over here so the server can fall back to it when a

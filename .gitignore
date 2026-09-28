@@ -2,6 +2,8 @@
 config/ai_providers.json
 config/app_settings.json
 config/admin_config.json
+# Node registry: holds the key_hash of every node, so it is a secret.
+config/nodes.json
 cache/
 logs/
 tmp/

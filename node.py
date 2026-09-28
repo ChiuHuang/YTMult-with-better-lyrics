@@ -243,7 +243,14 @@ def on_open(ws):
     ws.send(json.dumps({'type': 'hello', 'node_id': NODE_ID, 'key': NODE_KEY, 'code_sha': _code_sha()}))
 
 
+# Counts the server's pings so the reply cadence is a module-level counter
+# (a bare `global` inside on_message would need a global statement there,
+# which reads worse than owning the count next to its policy constant).
+_pong_count = 0
+
+
 def on_message(ws, raw):
+    global _pong_count
     try:
         msg = json.loads(raw)
     except Exception:
@@ -268,6 +275,16 @@ def on_message(ws, raw):
     if mtype == 'ping':
         # server broadcast -- self-update when the template sha moved on
         _maybe_self_update(msg.get('code_sha'))
+        # Answer, or the server reaps us: its receive() timeout is reset only
+        # by an application message (a protocol Pong does not reach it), so a
+        # node that only listens is dropped every 90s regardless of health.
+        # Tiny payload, once per 30s.
+        if _pong_count % _SERVER_PING_ANSWER_EVERY == 0:
+            try:
+                ws.send(json.dumps({'type': 'pong', 'ts': time.time()}))
+            except Exception:
+                pass
+        _pong_count += 1
         return
 
     if mtype == 'jwt_sync':
@@ -334,13 +351,29 @@ _RECONNECT_GROWTH = 1.5
 # and the result is clamped back to _RECONNECT_MAX, so both ends of the
 # band stay exactly 1s and 10s.
 _RECONNECT_JITTER = 0.15
-# Liveness: ping every 30s, but wait 120s for the pong. The pong is
-# recorded by the READER thread, which is the same thread on_message runs
-# on, so a relayed http task (20s timeout, and they can queue) blocks it.
-# With ping_timeout=10 a single slow fetch was enough for the client to
-# call a healthy socket dead and tear it down.
+# Liveness. websocket-client REQUIRES ping_timeout < ping_interval and
+# raises "Ensure ping_interval > ping_timeout" from run_forever otherwise --
+# a hard failure before the socket even opens, so this pair must not be
+# tuned independently.
+#
+# Why ping_timeout is 25 and not 10: the pong is recorded on the READER
+# thread, which is the same thread on_message runs on, so a relayed
+# http_fetch (20s timeout, and they can queue) blocks pong processing and
+# the client would tear down a healthy socket. 25s tolerates one slow task.
+# The server independently reaps a truly dead node (ws.receive(timeout=90)),
+# so a generous client-side timeout is not a leak risk.
 _PING_INTERVAL = 30
-_PING_TIMEOUT = 120
+_PING_TIMEOUT = 25
+
+# The server's ws.receive(timeout=90) is reset ONLY by an application
+# message from the node -- simple_websocket answers a protocol Ping with a
+# Pong internally and never surfaces it (verified against the installed
+# ws.py). The node's pings therefore do nothing for the server, and a node
+# that is merely idle gets reaped every 90s. The server's own `ping` message
+# (every 30s, nodes.py:_broadcast_pings) is the only thing that can keep
+# the loop alive, so answer it. This is the actual "don't disconnect" fix;
+# the ping numbers above only stop the client from hanging up first.
+_SERVER_PING_ANSWER_EVERY = 1   # answer every server ping (they are 30s apart)
 
 # Written by on_message, cleared before every dial: the loop uses this to
 # tell "a working session ended" (reset the curve) from "the dial never got
