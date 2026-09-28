@@ -38,6 +38,37 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
 
         root = ET.fromstring(ttml_text)
 
+        # ---------------------------------------------------------------
+        # Authoritative line text, when the file provides it.
+        #
+        # Some TTML (lrc.red / BiniLyrics) keeps the real line text in a
+        # <translation><text for="L3">Here's a ticket</text></translation>
+        # block, keyed to each <p> by an lrc:key attribute, and puts only
+        # timed <span>s in the line itself. Those spans are the romanised
+        # source and are split FINER than words, so joining them mangles the
+        # text ("Here's a" + "tic" + "ket" -> "Here's a tic ket"), and for a
+        # Korean track the spans are the Korean original while the <text>
+        # block is the English line. Rebuilding `text` from spans therefore
+        # produced a wrong line on 24 of 53 lines in the file that prompted
+        # this. Prefer the declared text; fall back to the span join.
+        # ---------------------------------------------------------------
+        line_texts = {}
+        for t in root.iter('text'):
+            ref = t.get('for')
+            if not ref:
+                continue
+            val = ''.join(t.itertext()).strip() if list(t) else (t.text or '').strip()
+            if val:
+                # First writer wins: a later <translation> block must not
+                # clobber the first one that actually had text.
+                line_texts.setdefault(ref, val)
+
+        def _line_key(node):
+            for k, v in node.attrib.items():
+                if k == 'key' or k.endswith('}key'):
+                    return v
+            return None
+
         results = []
 
         # Find all <p> elements (lines)
@@ -95,6 +126,11 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                     text_parts = [p_text]
 
             full_text = re.sub(r' +', ' ', ''.join(text_parts)).strip()
+            # The declared line text wins over the span join. Keep the join
+            # only as the fallback for files with no <text for> block.
+            declared = line_texts.get(_line_key(p))
+            if declared:
+                full_text = declared
             if not full_text:
                 continue
 
