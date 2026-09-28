@@ -442,6 +442,51 @@
       list.appendChild(row);
     });
   };
+  // The generate response is the ONLY moment the raw key and the rendered
+  // script exist in the browser together -- the server keeps only key_hash, so
+  // it can never hand this out again for an existing node. Stash the payload
+  // for the download buttons instead of decoding it twice.
+  let lastGenerated = null;
+  const saveBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const decodeScript = (g) => {
+    const bin = atob(g.script_b64 || '');
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  };
+  // UTF-8 BOM: without it a Windows host that opens the file in Notepad, or
+  // runs it from a cp1252 console, can mangle the non-ASCII lines.
+  const asFile = (text) => new Blob(['\uFEFF' + text], {type: 'text/x-python;charset=utf-8'});
+  const downloadNodePy = (withRunner) => {
+    const g = lastGenerated;
+    if (!g?.script_b64) { mdui.snackbar({message: 'Generate a node first'}); return; }
+    saveBlob(asFile(decodeScript(g)), g.filename || 'node.py');
+    if (!withRunner) return;
+    // A .cmd wrapper so a Windows host needs no shell knowledge: it makes a
+    // venv, installs the two deps, and starts the node.
+    const runner = [
+      '@echo off',
+      'REM YTMusicUltimate lyrics node -- Windows runner.',
+      'REM Created by the server dashboard; safe to edit or delete.',
+      'setlocal',
+      'cd /d "%~dp0"',
+      'where py >nul 2>&1 || (echo py launcher not found: install Python 3 from python.org & exit /b 1)',
+      'if not exist ".venv\\Scripts\\python.exe" py -m venv .venv',
+      '".venv\\Scripts\\python.exe" -m pip install -q --upgrade pip',
+      '".venv\\Scripts\\python.exe" -m pip install -q websocket-client requests',
+      'echo Starting node. Press Ctrl+C to stop.',
+      '".venv\\Scripts\\python.exe" node.py',
+      'pause',
+      '',
+    ].join('\r\n');
+    saveBlob(new Blob([runner], {type: 'application/octet-stream'}), 'run.cmd');
+    mdui.snackbar({message: 'node.py + run.cmd downloaded'});
+  };
   const generateNode = async () => {
     await mdui.prompt({
       headline: 'Generate node',
@@ -452,6 +497,7 @@
         const r = await API('/api/admin/nodes/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({label: label.trim()}) });
         const data = await r.json();
         const d = $('#gen-dialog'); if (!d) return;
+        lastGenerated = data;
         $('#gen-node-id').textContent = data.node_id || '';
         $('#gen-node-key').textContent = data.node_key || '';
         const code = $('#gen-code-block'); if (code) code.querySelector('pre').textContent = data.deploy_one_liner || '';
@@ -1794,6 +1840,10 @@
     if (nodeGenBtn) nodeGenBtn.addEventListener('click', generateNode);
     const genCopyBtn = $('#gen-copy-btn');
     if (genCopyBtn) genCopyBtn.addEventListener('click', copyGenCode);
+    const genDlBtn = $('#gen-dl-btn');
+    if (genDlBtn) genDlBtn.addEventListener('click', () => downloadNodePy(false));
+    const genDlWinBtn = $('#gen-dl-win-btn');
+    if (genDlWinBtn) genDlWinBtn.addEventListener('click', () => downloadNodePy(true));
     const genCloseBtn = $('#gen-close');
     if (genCloseBtn) genCloseBtn.addEventListener('click', () => { try{$('#gen-dialog').open=false;}catch{} });
 

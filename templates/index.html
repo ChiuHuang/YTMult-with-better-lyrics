@@ -470,6 +470,11 @@
         <pre>loading...</pre>
         <mdui-button-icon id="gen-copy-btn" variant="tonal" icon="content_copy" class="copy-btn"></mdui-button-icon>
       </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <mdui-button id="gen-dl-btn" variant="tonal" icon="download">Download node.py</mdui-button>
+        <mdui-button id="gen-dl-win-btn" variant="text" icon="download">Download + Windows run.cmd</mdui-button>
+      </div>
+      <span class="pill pill-mute" style="align-self:flex-start;">No shell / Windows? Download node.py, then: <span class="mono">py -m pip install websocket-client requests</span> and <span class="mono">py node.py</span>. It self-updates from then on.</span>
     </div>
     <mdui-button id="gen-close" slot="action">Done</mdui-button>
   </mdui-dialog>
