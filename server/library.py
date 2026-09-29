@@ -580,13 +580,22 @@ _FEAT_TITLE_RE = re.compile(
 
 def retitle_song(song, artist):
     """Clean a song title + artist using Cohere LLM. Returns {title, artist}.
-    On any failure, falls back to regex-based cleaning. Never raises."""
-    cache_key = f"{(song or '').lower()}|{(artist or '').lower()}".strip('|')
+    On any failure, falls back to regex-based cleaning. Never raises.
+
+    Check retitle_batch() first if you have many pairs: it fills the same
+    cache, so every call here becomes a dict hit."""
+    cache_key = cache_key_for(song, artist)
     with _retitled_cache_lock:
         if cache_key in _retitled_cache:
             return _retitled_cache[cache_key]
 
     result = _retitle_via_llm(song, artist)
+    if result is not None:
+        reason = retitle_reject_reason(song, artist,
+                                       result.get('title'), result.get('artist'))
+        if reason:
+            print(f"[RETITLE] [WARN] rejected LLM answer for {song!r}: {reason}")
+            result = None
     if result is None:
         result = _retitle_via_regex(song, artist)
 
@@ -676,23 +685,23 @@ def _retitle_via_regex(song, artist):
     t = song or ''
     a = artist or ''
 
-    # strip official/cover/yt noise
-    t = _OFFICIAL_NOISE_RE.sub('', t)
-    t = _COVER_NOISE_RE.sub('', t)
-    t = _YT_NOISE_RE.sub('', t)
-    t = _FEAT_TITLE_RE.sub('', t)
+    # Strip official/cover/yt noise. Substitute a SPACE, never '': the closing
+    # bracket is part of the match, so "TIME(Cover)Kobo" collapsed into
+    # "TIMEKobo" and the mashed string was cached as the song title.
+    t = _OFFICIAL_NOISE_RE.sub(' ', t)
+    t = _COVER_NOISE_RE.sub(' ', t)
+    t = _YT_NOISE_RE.sub(' ', t)
+    t = _FEAT_TITLE_RE.sub(' ', t)
 
-    # "Song - Artist" split
+    # "Song - Artist" split. Only when the tail is actually adopted -- the
+    # old code always took parts[0] and silently dropped "/ subtitle" (and
+    # "/ feat. X") whenever an artist was already present.
     parts = re.split(r'\s*[-–—/]\s*', t, maxsplit=1)
-    if len(parts) == 2 and parts[1].strip():
-        cand_artist = parts[1].strip()
-        # only adopt if it looks like a name (not noise)
-        if len(cand_artist) < 80:
-            t = parts[0].strip()
-            if not a:
-                a = cand_artist
+    if len(parts) == 2 and parts[1].strip() and not a and len(parts[1].strip()) < 80:
+        t = parts[0].strip()
+        a = parts[1].strip()
 
-    t = re.sub(r'\s+', ' ', t).strip(' -_./')
+    t = _clean_title_text(t)
     a = re.sub(r'\s+', ' ', a).strip(' -_./')
 
     if not t:
@@ -701,3 +710,249 @@ def _retitle_via_regex(song, artist):
         a = artist or ''
 
     return {'title': t, 'artist': a}
+
+
+# Empty bracket pairs left behind by the noise patterns above: "ものふぉびあ
+# (Official MV) [Ghost Marija...]" -> "ものふぉびあ () [Ghost Marija...]".
+_EMPTY_BRACKET_RE = re.compile(r'(?:\(\s*\)|\[\s*\]|\{\s*\}|（\s*）|【\s*】)')
+
+
+def _clean_title_text(t):
+    """Collapse whitespace and drop empty bracket pairs. Never raises."""
+    prev = None
+    while prev != t:
+        prev = t
+        t = _EMPTY_BRACKET_RE.sub(' ', t)
+    return re.sub(r'\s+', ' ', t).strip(' -_./')
+
+
+def norm_title(s):
+    """Loose compare key: case, whitespace and separator insensitive."""
+    return re.sub(r'[\s\-–—_/｜|·、,，]+', '', (s or '')).lower()
+
+
+def retitle_reject_reason(orig_song, orig_artist, new_title, new_artist):
+    """Return why an LLM retitle answer is unusable, or None if it is fine.
+
+    Every branch is a real answer the retitle job cached before this check
+    existed: the model read a channel handle as the song title and the real
+    artist as the channel ("EmoCosine - EmoCosine", "Chenomio - Chenomio"),
+    or it swapped the two fields, or it padded a title with words that were
+    never in the input. Rejecting falls back to the regex, never to the LLM.
+    """
+    t = (new_title or '').strip()
+    a = (new_artist or '').strip()
+    if not t:
+        return 'empty title'
+    if a and norm_title(t) == norm_title(a):
+        return 'title equals artist'
+    if orig_artist and norm_title(t) == norm_title(orig_artist) and norm_title(t) != norm_title(orig_song or ''):
+        return 'title is the old artist'
+    if orig_song and norm_title(a) == norm_title(orig_song) and norm_title(a) != norm_title(orig_artist or ''):
+        return 'artist is the old title'
+    if norm_title(t) != norm_title(orig_song) and len(t) > len(orig_song or '') * 1.6 + 16:
+        return 'title grew implausibly'
+    if norm_title(a) != norm_title(orig_artist) and len(a) > len(orig_artist or '') * 2.0 + 16:
+        return 'artist grew implausibly'
+    return None
+
+
+# ------------------------------------------------------------
+# Batched retitling: one LLM call per chunk, not per song
+# ------------------------------------------------------------
+_RETITLE_BATCH_MAX = int(os.environ.get('YTMU_RETITLE_BATCH', '20') or 20)
+_RETITLE_BATCH_CONCURRENCY = 2
+
+_BATCH_PROMPT_HEADER = (
+    "You are a song metadata cleaner. You get a numbered list of YouTube "
+    "videos. Return a JSON array with one object per input, in the same "
+    "order, each with keys title and artist.\n"
+    "Remove: official video, official audio, official lyric video, official "
+    "mv, lyrics, mv, (cover ...), 歌ってみた, self cover tags, and YouTube "
+    "noise.\n"
+    "The artist field is often the uploader's channel handle while the real "
+    "artist sits inside the title. Move the real artist out of the title "
+    "into the artist field, but never use a channel handle as the song "
+    "title. The song title and the artist must never be the same string.\n"
+    "If a title uses Title - Artist format, split them properly.\n"
+    "Keep (feat. ...) in the artist field only.\n"
+    "If a title is already clean, return it unchanged. Never invent words "
+    "that are not in the input.\n"
+    "Return ONLY the JSON array.\n\n"
+)
+
+
+def retitle_batch(pairs, chunk_size=None, on_chunk=None):
+    """Clean many (song, artist) pairs with one LLM call per chunk.
+
+    Results land in the same in-memory cache retitle_song() reads, so every
+    later retitle_song() for these pairs is a dict hit. Pairs already cached
+    are skipped, duplicates inside one call are collapsed. A chunk whose
+    reply is unusable falls back to the per-song path, so a bad batch loses
+    only its own chunk. Never raises.
+    """
+    pairs = [(s or '', a or '') for s, a in pairs]
+
+    todo, seen = [], set()
+    for s, a in pairs:
+        k = cache_key_for(s, a)
+        if not s and not a:
+            continue
+        if k in seen:
+            continue
+        seen.add(k)
+        with _retitled_cache_lock:
+            if k in _retitled_cache:
+                continue
+        todo.append((k, s, a))
+    if not todo:
+        return 0
+
+    size = max(2, min(40, int(chunk_size or _RETITLE_BATCH_MAX)))
+    chunks = [todo[i:i + size] for i in range(0, len(todo), size)]
+    calls = [0]
+
+    def _run_chunk(chunk):
+        answers = _retitle_chunk_via_llm(chunk)
+        if answers is not None:
+            with _retitled_cache_lock:
+                calls[0] += 1
+            if on_chunk:
+                try:
+                    on_chunk(len(chunk), len(chunk), 'batch')
+                except Exception:
+                    pass
+            return
+        # Whole chunk unusable -> regex only, NOT retitle_song(). The batch
+        # already spent the LLM budget on this chunk; if the API is down for
+        # the whole job, retrying 20 single calls per chunk turned one outage
+        # into 205 more failing calls and a wall of log lines.
+        for _k, s, a in chunk:
+            with _retitled_cache_lock:
+                _retitled_cache[cache_key_for(s, a)] = _retitle_via_regex(s, a)
+        print(f"[RETITLE] [WARN] chunk of {len(chunk)} unusable, regex fallback")
+        if on_chunk:
+            try:
+                on_chunk(len(chunk), len(chunk), 'regex')
+            except Exception:
+                pass
+
+    workers = max(1, min(4, _RETITLE_BATCH_CONCURRENCY, len(chunks)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(_run_chunk, chunks))
+
+    print(f"[RETITLE] batch: {len(todo)} pair(s) in {len(chunks)} call(s), "
+          f"{calls[0]} ok")
+    return len(todo)
+
+
+def _retitle_chunk_via_llm(chunk):
+    """One LLM call for a chunk of (key, song, artist). Returns {i: {t,a}} or None."""
+    lines = []
+    for i, (_k, s, a) in enumerate(chunk):
+        lines.append(f"{i}. Title: {s}\n   Artist: {a}")
+    prompt = _BATCH_PROMPT_HEADER + "\n".join(lines)
+
+    for attempt in range(max(1, len(cohere_key_list()))):
+        try:
+            import requests as _requests
+            api_key = get_cohere_key()
+            if not api_key:
+                break
+            resp = _requests.post(
+                "https://api.cohere.com/v2/chat",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _RETITLE_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=120,
+            )
+            if resp.status_code == 429:
+                print(f"[RETITLE] [WARN] batch rate limited (key {attempt}), rotating")
+                rotate_cohere_key()
+                continue
+            if resp.status_code != 200:
+                print(f"[RETITLE] [WARN] batch HTTP {resp.status_code}")
+                rotate_cohere_key()
+                continue
+            body = resp.json()
+            text = body['message']['content'][0]['text']
+            return _parse_batch_from_text(text, chunk)
+        except Exception as e:
+            print(f"[RETITLE] [WARN] batch error: {e}")
+            rotate_cohere_key()
+    return None
+
+
+def _parse_batch_from_text(text, chunk):
+    """Parse the chunk reply into {index: {title, artist}} with validation.
+    Returns None when the array is missing/unusable (caller falls back)."""
+    arr = None
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, list):
+            arr = obj
+        elif isinstance(obj, dict) and isinstance(obj.get('results'), list):
+            arr = obj['results']
+    except Exception:
+        arr = None
+    if arr is None:
+        m = re.search(r'\[.*\]', text or '', re.S)
+        if m:
+            try:
+                arr = json.loads(m.group(0))
+            except Exception:
+                arr = None
+    if not isinstance(arr, list) or not arr:
+        print("  [RETITLE] [WARN] batch reply had no JSON array")
+        return None
+
+    out, rejected = {}, 0
+    for i, item in enumerate(arr[:len(chunk)]):
+        if not isinstance(item, dict):
+            continue
+        idx = item.get('i')
+        if not isinstance(idx, int):
+            idx = i
+        if idx < 0 or idx >= len(chunk):
+            continue
+        _k, s, a = chunk[idx]
+        t = (item.get('title') or '').strip()
+        na = (item.get('artist') or '').strip() or a
+        reason = retitle_reject_reason(s, a, t, na)
+        if reason:
+            rejected += 1
+            fb = _retitle_via_regex(s, a)
+            t, na = fb['title'], fb['artist']
+        out[idx] = {'title': t, 'artist': na}
+    if rejected:
+        print(f"[RETITLE] [WARN] batch: {rejected} answer(s) rejected, used regex")
+    for i in range(len(chunk)):
+        out.setdefault(i, _retitle_via_regex(chunk[i][1], chunk[i][2]))
+    for i, val in out.items():
+        _k, s, a = chunk[i]
+        with _retitled_cache_lock:
+            _retitled_cache[cache_key_for(s, a)] = val
+    return out
+
+
+def cache_key_for(song, artist):
+    """The retitle cache key for a pair (same format as retitle_song)."""
+    return f"{(song or '').lower()}|{(artist or '').lower()}".strip('|')
+
+
+def retitle_cache_clear():
+    """Drop every memoized retitle answer.
+
+    A retitle job clears this so a re-run after a prompt change actually
+    re-asks the model; the in-RAM cache is otherwise process-lifetime, so a
+    job run tomorrow would replay today's wording."""
+    with _retitled_cache_lock:
+        n = len(_retitled_cache)
+        _retitled_cache.clear()
+    return n
+
