@@ -195,15 +195,32 @@
   preflight this server never answers. Trust level equals a node key's (a node
   already contributes tokens over the websocket), and the key is deliberately
   NOT in `app_settings.json`, whose read endpoint is public.
-  NOT VERIFIED: the session that wrote all of this had no shell and no
-  connected browser, so nothing was executed -- no `py_compile`, no
-  `node --check`, no loaded extension, no Flask test client. Check, in order:
-  `py_compile server/jwt_push.py server/routes_admin.py`; then
-  `curl -X POST <server>/api/jwt/push -H 'X-YTMU-Key: <key>' -d '{"token":"x"}'`
-  (401 with no key, 400 with a junk token, 200 with a real one) and look for
-  `[PUSH] accepted <id> source=userscript pool=<n>` in `logs/server.log`; then
-  install the userscript, open the challenge page, and set `DEBUG = true` in it
-  if you want the console trace.
+  Verified, and the checks are worth copying: `compileall` over `server/`,
+  `node --check` on all four JS files, and 24 Flask-test-client checks on
+  `/api/jwt/push` (401 for no/wrong/empty/non-ASCII key, 302 to /login on
+  `/api/admin/jwt/push_key` with no session, 400 under 20 chars, 200 at exactly
+  20, `Cache-Control: no-store`, no `Access-Control-Allow-Origin`, key also
+  accepted in the body, `node_id` = the source sent, a repeat returning the same
+  id without growing the pool) with every entry it created removed again, so
+  the pool ended byte-identical. The test lives at `tmp/test_jwt_push.py`
+  (gitignored, self-cleaning, unique token per run) and it CAUGHT two bugs in
+  itself before it caught anything real: a 21-char "short" token that the
+  `< 20` rule correctly accepted, and an entry that leaked into the pool. The
+  one real bug it could not have found was in the userscript, and `node --check`
+  found it immediately: the setup prose was a `/* ... */` block that CONTAINED
+  the string `@match *://*/*`, so the `*/` in that glob terminated the comment
+  early and the rest of the prose was parsed as JavaScript. The userscript would
+  not have run at all. Watch for a glob inside a block comment in any script
+  with a metadata block. Also worth knowing: the `shell` tool is NOT listed in
+  the agent's tool inventory but exists and works -- `search()` inside
+  `execute` cannot see it, and the Code Mode runtime is not Node (`process`,
+  `require`, `globalThis` and `import()` are all absent), so "I have no shell"
+  is a wrong conclusion twice over.
+  Still unverified: nothing has run in a real browser. The Turnstile half (both
+  token paths, and whether Cloudflare solves the widget in the `CONFIG.auto`
+  2x2px frame) needs the userscript installed and
+  `https://lyrics.api.dacubeking.com/challenge` opened once, with `DEBUG` on
+  for the console trace.
 - **the node deletes itself** (user pasted 20+ `[NODE] rejected connection for
   node_id=... (bad key)` lines and asked "why node delete itself?"). Nothing
   deletes a node: the server has no record for that `node_id`, because every
