@@ -4,6 +4,27 @@
 > like how we talk or utf8 encoding error what we've do including this line"
 > — user request that created this file. New session: read this first.
 
+## LIVE MISSION (every agent keeps this current — this is live state, not history)
+- First action of a session, before any other work: write your own `[ACTIVE]`
+  line below. A session that leaves this stale is worse than one that never
+  wrote it.
+- Update the line the moment the mission changes, not at the end.
+- On finishing: flip to `[DONE]` + one outcome line, then move the detail into
+  `Done recently`.
+- Uncommitted work in the tree means the previous mission was cut off. Treat
+  the diff as the mission, re-verify it, and write that down.
+- Sanity check before trusting a line: the named files must still carry the
+  change (`git diff`, or the symbol must exist). If not, the mission is dead —
+  clear it instead of building on it.
+- No `[ACTIVE]` mission of your own and nothing in the tree? Ask. Do not
+  invent one.
+- Format: `[ACTIVE] <session-id> | <one-line mission> | files: <paths> | next: <single action>`
+  Keep the whole block under 5 lines. Detail belongs in the sections below.
+
+Current:
+- `[ACTIVE] ses_f129b9195ffeZzqDUEC4w8qrMM | add the live mission marker to AGENTS.md | files: AGENTS.md | next: commit + push`
+- `[ACTIVE] (uncommitted, previous session, id unknown) | full player glass redesign + lyric wipe feather highlight, neither built or device-checked | files: Source/FullPlayerLiquidGlassV2.xm, Source/LyricsSheet.x | next: rebuild, look on device, then commit`
+
 ## How we talk (user expectations — keep these)
 - Short, concise, facts-first. No superlatives, no praise, no emotional validation.
 - No emojis anywhere: not in code, logs, UI strings, or filenames. Plain tags instead
