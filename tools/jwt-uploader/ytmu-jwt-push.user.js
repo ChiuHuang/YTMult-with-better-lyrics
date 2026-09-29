@@ -24,12 +24,12 @@
  * this file:
  *   GM_setValue('cfg', {server:'http://192.168.1.5:20016', key:'<push key>'})
  *
- * Fully automatic (no tab at all): uncomment the `@match *://*/*` line in the
- * metadata block above, set CONFIG.auto = true, and the script drops a 2x2px
- * iframe of the challenge page into any page you visit, at most once every
- * CONFIG.autoEveryMin minutes. Caveat: Cloudflare's widget may refuse to solve
- * in a frame that is effectively invisible -- the manual page above always
- * works.
+ * Fully automatic (no tab at all): uncomment the extra @match line (the one
+ * covering every site) in the metadata block above, set CONFIG.auto = true,
+ * and the script drops a 2x2px iframe of the challenge page into any page you
+ * visit, at most once every CONFIG.autoEveryMin minutes. Caveat: Cloudflare's
+ * widget may refuse to solve in a frame that is effectively invisible -- the
+ * manual page above always works.
  */
 
 (function () {
