@@ -124,6 +124,8 @@ python proxy_server.py        # listens on :20016
 - `Source/` — the tweak (Theos/Logos)
 - `server/` — lyrics server (`proxy_server.py` is a thin shim)
 - `static/dash.js`, `templates/index.html` — admin dashboard
+- `tools/jwt-uploader/` — Chrome extension (load unpacked) that pushes a Cubey
+  JWT into the server pool from the browser, on demand or on a timer
 - `.github/workflows/main.yml` — build + release + mirror
 
 Fork of [YTMusicUltimate](https://github.com/ginsudev/YTMusicUltimate)

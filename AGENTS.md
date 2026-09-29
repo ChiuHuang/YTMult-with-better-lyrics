@@ -56,7 +56,8 @@
   `race` (parallel race + SSE helpers), `playlist` (sync job via
   `routes_library` too), `routes_lyrics`,
   `routes_stream`, `routes_admin`, `routes_misc`, `utils`
-  (`_safe_cache_component`). Run: `python proxy_server.py` or
+  (`_safe_cache_component`), `jwt_push` (key-authed `POST /api/jwt/push` for
+  the browser userscript). Run: `python proxy_server.py` or
   `.venv\Scripts\python -c "from server import main; main()"`.
   DAG: `app`<-everything; providers->parsers/nodes; pipeline/race->
   providers/translate/cache; routes->all, nothing imports routes. Node mesh
@@ -140,6 +141,69 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **a browser JWT uploader, because "get a JWT into the pool" was a dashboard
+  prompt and a device-only flow** (user: "write me a chrome extention or user
+  script to upload jwt anytime", then "can you just inject in site? or
+  userscript? dont make it user noticeable"). `tools/jwt-uploader/`, TWO
+  front ends and ONE new server route. The extension drives the endpoint that
+  already existed (`routes_admin.py:420`, `node_id: chrome-ext` so the
+  dashboard shows where a token came from); the userscript cannot, see below.
+  Extension flow: a background tab on
+  `lyrics.api.dacubeking.com/challenge` -> `challenge.js` catches the
+  Turnstile response TWO ways (the page's own
+  `postMessage({type:'turnstile-token'})`, which works at top level because
+  `window.parent === window`, and a poll of the hidden
+  `input[name=cf-turnstile-response]`, which covers a message that fires before
+  the content script is injected) -> the worker POSTs `/verify-turnstile`, takes
+  `jwt` or `jwtToken` -> `POST /api/admin/jwt/contribute`. Triggers: the popup
+  button, `alt+shift+j` from any page, an optional `chrome.alarms` timer (off by
+  default), and the "anytime" one -- a challenge the user solved in their OWN
+  tab uploads with no click at all (`onTurnstileToken` starts a run when no job
+  is pending). Two structural traps: run state lives in
+  `chrome.storage.local` and not in a promise, because an MV3 worker is killed
+  while a challenge sits open and the token message can arrive long after the
+  popup closed; and the timeout is an alarm that re-arms for the remainder,
+  because Chrome may fire an alarm earlier than asked. The auth trap is the
+  reason there are two request paths at all: the admin endpoints need a Flask
+  session cookie, that cookie is written with no `SameSite` so browsers treat
+  it as `Lax`, and a cross-site POST from the extension arrives WITHOUT it.
+  So every call goes out from the worker first (host_permissions bypass CORS)
+  and, if the answer is the login page, is re-run by
+  `chrome.scripting.executeScript` inside a tab already on the server origin --
+  an ordinary same-origin request, cookie included. That tab path is why one
+  manual dashboard login is the entire setup, and `via extension` / `via tab` in
+  the log says which one ran. An injected `func` is serialized into the page,
+  so `inPageCall` MUST be self-contained: it began by calling this file's
+  `pathOf`/`isHtml` and would have died on a ReferenceError, caught by its own
+  try/catch and reported as "could not run the request in tab N". The JWT is
+  never written to storage (only `len`, the first 8 chars and `exp`).
+  The SILENT half is `ytmu-jwt-push.user.js` in the same folder, which is what
+  the user actually asked for: no popup, no badge, no notification, no DOM
+  change, no console output (one `console.warn`, ever, and only on a real
+  failure). Same two token paths, but there the hidden-input poll is the
+  load-bearing one, because a FRAMED challenge page posts to its PARENT and
+  the message never arrives inside the frame -- which is also what lets
+  `CONFIG.auto`'s hidden 2x2px iframe work with no visible tab at all
+  (best effort: Cloudflare may refuse a frame that is effectively invisible).
+  A userscript cannot use the admin endpoint at all, so `server/jwt_push.py`
+  adds `POST /api/jwt/push`: 32 bytes of hex in `config/admin_config.json`
+  (`jwt_push_key`, created on the first `GET /api/admin/jwt/push_key`, which is
+  what the dashboard's new "Copy push key" button calls), compared with
+  `hmac.compare_digest`, and deliberately NO CORS headers and no preflight
+  answer -- requiring the `X-YTMU-Key` header is precisely what stops a random
+  web page from making a browser send it, because such a request needs a
+  preflight this server never answers. Trust level equals a node key's (a node
+  already contributes tokens over the websocket), and the key is deliberately
+  NOT in `app_settings.json`, whose read endpoint is public.
+  NOT VERIFIED: the session that wrote all of this had no shell and no
+  connected browser, so nothing was executed -- no `py_compile`, no
+  `node --check`, no loaded extension, no Flask test client. Check, in order:
+  `py_compile server/jwt_push.py server/routes_admin.py`; then
+  `curl -X POST <server>/api/jwt/push -H 'X-YTMU-Key: <key>' -d '{"token":"x"}'`
+  (401 with no key, 400 with a junk token, 200 with a real one) and look for
+  `[PUSH] accepted <id> source=userscript pool=<n>` in `logs/server.log`; then
+  install the userscript, open the challenge page, and set `DEBUG = true` in it
+  if you want the console trace.
 - **the node deletes itself** (user pasted 20+ `[NODE] rejected connection for
   node_id=... (bad key)` lines and asked "why node delete itself?"). Nothing
   deletes a node: the server has no record for that `node_id`, because every

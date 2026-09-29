@@ -29,6 +29,7 @@ from .app import (app, login_required, _admin_cfg, _save_admin_config,
 from .nodes import (_load_nodes, _mutate_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
 from .jwt_pool import contribute_jwt, list_jwt, remove_jwt, check_all as jwt_check_all
+from .jwt_push import push as _jwt_push, ensure_key as _jwt_push_key
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .cache import _cache_key_from_filename
@@ -429,6 +430,33 @@ def admin_jwt_contribute():
     node_id = (body.get('node_id') or '').strip() or None
     res = contribute_jwt(token, node_id=node_id)
     return jsonify(res)
+
+
+@app.route('/api/jwt/push', methods=['POST'])
+def api_jwt_push():
+    """Key-authenticated pool contribution for browser clients (the userscript in
+    tools/jwt-uploader). No session: the caller presents the push key, so this
+    route sends no CORS headers and answers no preflight -- a random web page
+    cannot make a browser send the key, only a userscript manager can."""
+    body = request.get_json(silent=True) or request.form.to_dict() or {}
+    key = request.headers.get('X-YTMU-Key') or body.get('key') or ''
+    token = body.get('token') or ''
+    source = body.get('source') or body.get('node_id') or 'push'
+    res = _jwt_push(key, token, source)
+    resp = jsonify(res)
+    resp.headers['Cache-Control'] = 'no-store'
+    if res.get('auth') is False:
+        return resp, 401
+    if not res.get('ok'):
+        return resp, 400
+    return resp
+
+
+@app.route('/api/admin/jwt/push_key', methods=['GET'])
+@login_required
+def admin_jwt_push_key():
+    """Reveal (creating on first call) the key the browser userscript uses."""
+    return jsonify({'key': _jwt_push_key()})
 
 
 @app.route('/api/admin/jwt/list', methods=['GET'])
