@@ -26,7 +26,7 @@ from .app import (app, login_required, _admin_cfg, _save_admin_config,
     SERVER_START_TIME, SERVER_START_TS, LOG_DIR, CRASH_LOG_FILE,
     _recent_logs, _structured_logs, _recent_requests, _crash_logs,
     _sse_subscribers, _sse_subscribers_lock)
-from .nodes import (_load_nodes, _save_nodes, _hash_node_key,
+from .nodes import (_load_nodes, _mutate_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
 from .jwt_pool import contribute_jwt, list_jwt, remove_jwt, check_all as jwt_check_all
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
@@ -308,14 +308,20 @@ def admin_nodes_generate():
 
     node_id = _secrets.token_hex(8)
     node_key = _secrets.token_hex(32)
-    nodes = _load_nodes()
-    nodes[node_id] = {
-        'key_hash': _hash_node_key(node_key),
-        'label': label,
-        'created': datetime.now().isoformat(),
-        'last_seen': None,
-    }
-    _save_nodes(nodes)
+
+    def _add(nd):
+        nd[node_id] = {
+            'key_hash': _hash_node_key(node_key),
+            'label': label,
+            'created': datetime.now().isoformat(),
+            'last_seen': None,
+        }
+        return True
+
+    # One lock + fresh read: a concurrent pong / generate used to save its own
+    # stale copy of the registry and erase this record, so the node.py we are
+    # about to hand out was rejected with "(bad key)" forever.
+    _mutate_nodes(_add)
 
     script = _render_node_script(node_id, node_key)
 
@@ -356,13 +362,11 @@ def admin_nodes_generate():
 @app.route('/ws/node/api/admin/nodes/generate/<node_id>', methods=['GET'])
 def admin_nodes_regenerate(node_id):
     key = request.args.get('key', '')
-    nodes = _load_nodes()
-    record = nodes.get(node_id)
+    record = _load_nodes().get(node_id)
     if not record or not key or record.get('key_hash') != _hash_node_key(key):
         return jsonify({'error': 'invalid node_id or key'}), 403
-    record['last_seen'] = datetime.now().isoformat()
-    nodes[node_id] = record
-    _save_nodes(nodes)
+    _mutate_nodes(lambda nd: nd[node_id].__setitem__(
+        'last_seen', datetime.now().isoformat()) if node_id in nd else False)
     script = _render_node_script(node_id, key)
     resp = Response(script, mimetype='text/x-python')
     resp.headers['Content-Disposition'] = f'attachment; filename="node_{node_id}.py"'
@@ -378,11 +382,15 @@ def admin_nodes_jwt_sync(node_id):
     node already stored (revoke the node if that matters)."""
     body = request.get_json(silent=True) or {}
     enable = bool(body.get('enabled', True))
-    nodes = _load_nodes()
-    if node_id not in nodes:
+
+    def _set(nd):
+        if node_id not in nd:
+            return False
+        nd[node_id]['jwt_sync'] = enable
+        return True
+
+    if _mutate_nodes(_set) is None:
         return jsonify({'error': 'not found'}), 404
-    nodes[node_id]['jwt_sync'] = enable
-    _save_nodes(nodes)
     with _connected_nodes_lock:
         entry = connected_nodes.get(node_id)
         if entry is not None:
@@ -397,11 +405,8 @@ def admin_nodes_jwt_sync(node_id):
 @app.route('/api/admin/nodes/<node_id>/revoke', methods=['POST'])
 @login_required
 def admin_nodes_revoke(node_id):
-    nodes = _load_nodes()
-    if node_id not in nodes:
+    if _mutate_nodes(lambda nd: nd.pop(node_id, None) is not None) is None:
         return jsonify({'error': 'not found'}), 404
-    del nodes[node_id]
-    _save_nodes(nodes)
     with _connected_nodes_lock:
         entry = connected_nodes.pop(node_id, None)
     if entry:

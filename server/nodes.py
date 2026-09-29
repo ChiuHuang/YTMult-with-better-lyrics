@@ -53,6 +53,13 @@ from .app import sock
 NODES_FILE = os.path.join('config', 'nodes.json')
 
 
+# config/nodes.json is a shared read-modify-write file with many concurrent
+# writers (every node connect, every 30s pong, every self-update fetch, plus
+# the dashboard's generate/revoke/jwt_sync buttons), so both halves of the
+# dance are guarded: one lock, and an atomic write. See _mutate_nodes.
+_nodes_file_lock = threading.Lock()
+
+
 def _load_nodes():
     if os.path.exists(NODES_FILE):
         try:
@@ -64,9 +71,44 @@ def _load_nodes():
 
 
 def _save_nodes(nodes):
-    os.makedirs('config', exist_ok=True)
-    with open(NODES_FILE, 'w', encoding='utf-8') as f:
-        json.dump(nodes, f, indent=2)
+    """Write the registry atomically. A plain open('w') truncates first, so a
+    concurrent reader could parse a half-written file, get {} from _load_nodes,
+    and then persist that empty registry -- every node record gone at once."""
+    os.makedirs(os.path.dirname(NODES_FILE) or '.', exist_ok=True)
+    tmp = f'{NODES_FILE}.{os.getpid()}.{threading.get_ident()}.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(nodes, f, indent=2)
+        os.replace(tmp, NODES_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _mutate_nodes(mutator):
+    """The ONLY safe way to change the registry: one lock around the whole
+    read-modify-write, always re-reading from disk first.
+
+    Every writer used to load once, hold that dict, and save it back later --
+    most of all ws_node's pong branch, which rewrote the WHOLE file every 30s
+    from the snapshot it took at connect time. A node generated in the
+    dashboard therefore vanished from disk within 30s (and stayed gone: the
+    stale snapshot kept being rewritten), and its node.py was rejected with
+    "(bad key)" forever. The mirror image was equally broken: revoke deleted a
+    record only for the next pong to write it back.
+
+    mutator(dict) mutates the freshly-read dict in place. Return False to abort
+    without writing (e.g. the node_id is gone). Returns the saved dict, or None.
+    Callers must never cache the returned dict and save it again later."""
+    with _nodes_file_lock:
+        nodes = _load_nodes()
+        if mutator(nodes) is False:
+            return None
+        _save_nodes(nodes)
+        return nodes
 
 
 def _hash_node_key(key):
@@ -362,8 +404,7 @@ def ws_node(ws):
 
         candidate_id = hello.get('node_id')
         key = hello.get('key')
-        nodes = _load_nodes()
-        record = nodes.get(candidate_id)
+        record = _load_nodes().get(candidate_id)
         if not record or not key or record.get('key_hash') != _hash_node_key(key):
             ws.send(json.dumps({'type': 'hello_ack', 'ok': False, 'error': 'invalid node_id or key'}))
             print(f"  [NODE] rejected connection for node_id={candidate_id} (bad key)")
@@ -371,14 +412,27 @@ def ws_node(ws):
 
         node_id = candidate_id
         real_ip = client_real_ip()
-        record['last_seen'] = datetime.now().isoformat()
-        if real_ip:
-            record['last_ip'] = real_ip
-        # Default-on JWT push, per-node opt-out via "jwt_sync": false.
-        if 'jwt_sync' not in record:
-            record['jwt_sync'] = True
-        nodes[node_id] = record
-        _save_nodes(nodes)
+
+        def _touch(nd):
+            rec = nd.get(node_id)
+            if not rec:
+                return False    # revoked while we were handshaking
+            rec['last_seen'] = datetime.now().isoformat()
+            if real_ip:
+                rec['last_ip'] = real_ip
+            # Default-on JWT push, per-node opt-out via "jwt_sync": false.
+            if 'jwt_sync' not in rec:
+                rec['jwt_sync'] = True
+            return True
+
+        # Re-read under the lock instead of writing back the dict loaded above:
+        # another writer may have changed the registry in between, and saving
+        # that stale copy would silently drop whatever they added.
+        saved = _mutate_nodes(_touch)
+        if saved is None:
+            ws.send(json.dumps({'type': 'hello_ack', 'ok': False, 'error': 'node revoked'}))
+            return
+        record = saved.get(node_id) or {}
 
         with _connected_nodes_lock:
             connected_nodes[node_id] = {'ws': ws, 'connected_ts': time_module.time(), 'label': record.get('label', node_id), 'ip': real_ip, 'jwt_sync': bool(record.get('jwt_sync', True))}
@@ -420,9 +474,14 @@ def ws_node(ws):
                 # messages only, not protocol Pongs). It costs a 30s dict
                 # write; a missed one is not fatal, since last_seen is also
                 # stamped at connect and the dashboard tolerates staleness.
-                record['last_seen'] = datetime.now().isoformat()
-                nodes[node_id] = record
-                _save_nodes(nodes)
+                #
+                # This used to write back the whole `nodes` dict captured at
+                # connect time, every 30s, forever -- which is what deleted
+                # freshly generated node records (and resurrected revoked
+                # ones). Stamp only our own field, re-read under the lock.
+                _mutate_nodes(lambda nd: nd[node_id].__setitem__(
+                    'last_seen', datetime.now().isoformat())
+                    if node_id in nd else False)
             elif mtype == 'jwt_contribute':
                 # A node boots with a Cubey JWT available (env YTMU_JWT) and
                 # hands it over here so the server can fall back to it when a
