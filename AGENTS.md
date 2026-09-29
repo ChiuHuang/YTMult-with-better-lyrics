@@ -141,6 +141,52 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **the retitle job: one LLM call per SONG, and a provider race even when
+  the retitle changed nothing** (user pasted 101/205 rows of the Retitling
+  dialog and asked "is this retitle ragebait? and we can put many songs in
+  one call not one song one call". It was). Read the log, it is a page of
+  `old == new` + red `retitled_no_lyrics`: `routes_library._run_retitle`
+  had no no-op guard, so a clean title still cost a Cohere call AND a full
+  8-provider race, then reported the miss as "retitled" -- while
+  `library._try_llm_retitle_fetch` 200 lines away HAS the guard
+  (`if new_song == song and new_artist == artist: return None`). dash.js
+  paints `retitled_no_lyrics` red (`rb-failed`), so ~95 unavoidable
+  misses read as ~95 failures. Batching: `library.retitle_batch(pairs)`
+  sends 20 pairs per call (`YTMU_RETITLE_BATCH`, 2 chunks in flight) and
+  writes into the same `_retitled_cache` that `retitle_song` reads, so the
+  worker pool's per-row call becomes a dict hit -- 205 songs, 11 calls.
+  A job clears that cache first (`retitle_cache_clear`) or a re-run after a
+  prompt change replays process-lifetime wording. An unusable chunk falls
+  back to REGEX ONLY: the per-song retry turned one API outage into 205
+  more failing calls and a wall of log lines. Also in the job: a no-op
+  returns `retitled_noop` without touching the pipeline; an existing cache
+  entry is only overwritten when `_tier(result) > _tier(old)` (the rebase
+  rule -- `fetch_all_lyrics` stamps the retitled pair onto the result at
+  `pipeline.py:411`, so the old code both renamed AND downgraded); and
+  `get_rename`/`save_rename` are honored, so a manual rename wins and the
+  LLM's answer is what later reads see. `retitle_reject_reason()` rejects
+  what actually reached the cache -- channel handle as the title with the
+  real artist as the handle (`EmoCosine - EmoCosine`, `Chenomio -
+  Chenomio`, `Camellia - Camellia`), swapped fields, implausible growth. It
+  deliberately does NOT reject a short title: `喵~ - Sān-Z & HOYO-MiX` ->
+  `喵~` is CORRECT, so a length heuristic there loses more than it saves
+  (I wrote one, it rejected the fake test data, I deleted it -- `照` from
+  `《絕區零》照EP｜Tiny Giant` stays unfixed and is 1 row in 101). Two
+  regex bugs the log exposed: the noise patterns substituted `''` while
+  consuming the closing bracket, so `TIME(Cover)Kobo` -> `TIMEKobo`; and
+  the `-`/`/` split took `parts[0]` unconditionally, deleting the subtitle
+  whenever an artist was already present (`PHD / 重音テトSV` -> `PHD`).
+  Now a space is substituted, empty bracket pairs are dropped, and the
+  tail is only taken when the artist is actually adopted. Verified with
+  `tmp/test_retitle_batch.py` (42) + `tmp/test_retitle_job.py` (17), both
+  driving the real functions against a fake Cohere/pipeline. TRAP worth
+  keeping: `_run_retitle` does `from .cache import set_cached` INSIDE the
+  function, so patching `routes_library.set_cached` is not enough -- the
+  test writes to `cache/lyrics` until you patch `server.cache` too. Both
+  tests also had wrong EXPECTATIONS before they had bugs: two of the log's
+  "garbage" rows (`OMG (Bossa Remix) - NewJeans`, `Starlight - Zenless
+  Zone Zero`) are the correct answer, and a manual rename that differs
+  from the stored title is a real retitle, not a no-op.
 - **a browser JWT uploader, because "get a JWT into the pool" was a dashboard
   prompt and a device-only flow** (user: "write me a chrome extention or user
   script to upload jwt anytime", then "can you just inject in site? or
