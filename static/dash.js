@@ -1961,6 +1961,26 @@
     if (jwtCheckBtn) jwtCheckBtn.addEventListener('click', () => checkJwt(jwtCheckBtn));
     const jwtContribBtn = $('#jwt-contribute');
     if (jwtContribBtn) jwtContribBtn.addEventListener('click', contributeJwt);
+    const jwtPushKeyBtn = $('#jwt-pushkey');
+    if (jwtPushKeyBtn) jwtPushKeyBtn.addEventListener('click', async () => {
+      if (jwtPushKeyBtn.loading) return;
+      jwtPushKeyBtn.loading = true;
+      try {
+        const d = await json('/api/admin/jwt/push_key');
+        const key = (d && d.key) || '';
+        if (!key) { mdui.snackbar({message: 'No push key returned'}); return; }
+        try {
+          await navigator.clipboard.writeText(key);
+          mdui.snackbar({message: 'Push key copied - paste it into the userscript CONFIG.key'});
+        } catch {
+          window.prompt('Push key (select and copy):', key);
+        }
+      } catch (e) {
+        mdui.snackbar({message: 'Could not read the push key: ' + e.message});
+      } finally {
+        jwtPushKeyBtn.loading = false;
+      }
+    });
 
     const updateCheckBtn = $('#update-check');
     if (updateCheckBtn) updateCheckBtn.addEventListener('click', async ()=>{ updateCheckBtn.loading=true; try{await loadUpdate(); mdui.snackbar({message:'Update state refreshed'});}catch{} updateCheckBtn.loading=false; });

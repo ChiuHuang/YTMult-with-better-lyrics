@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "YTMU JWT Uploader",
+  "version": "1.0.0",
+  "description": "Fetch a Cubey JWT in the background and push it into the YTMusicUltimate server JWT pool, on demand or on a timer.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "scripting",
+    "tabs",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "YTMU JWT Uploader"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://lyrics.api.dacubeking.com/challenge*"
+      ],
+      "js": [
+        "challenge.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "commands": {
+    "upload-now": {
+      "suggested_key": {
+        "default": "Alt+Shift+J",
+        "mac": "Alt+Shift+J"
+      },
+      "description": "Fetch a JWT and upload it to the pool"
+    }
+  }
+}

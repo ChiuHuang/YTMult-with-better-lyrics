@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>YTMU JWT</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>YTMU JWT</h1>
+    <span id="chip" class="chip" title="tokens in the server pool">pool -</span>
+  </header>
+
+  <div class="row">
+    <input id="server" type="text" spellcheck="false" autocomplete="off" placeholder="http://host:20016">
+    <button id="save" class="ghost" title="Save the server url">save</button>
+  </div>
+
+  <div class="row">
+    <label for="auto" class="lbl">auto</label>
+    <select id="auto">
+      <option value="0">off</option>
+      <option value="15">every 15 min</option>
+      <option value="30">every 30 min</option>
+      <option value="60">every hour</option>
+      <option value="180">every 3 h</option>
+    </select>
+    <button id="dash" class="ghost" title="Open the dashboard">dashboard</button>
+  </div>
+
+  <div class="row main">
+    <button id="upload" class="primary">Get JWT + upload</button>
+    <button id="probe" class="ghost" title="Re-probe every pooled token, evicting the dead ones">probe</button>
+  </div>
+
+  <div class="row">
+    <textarea id="token" rows="2" spellcheck="false" placeholder="or paste a JWT here"></textarea>
+    <button id="send" class="ghost">send</button>
+  </div>
+
+  <div id="status" class="status">idle</div>
+  <pre id="log" class="log"></pre>
+  <footer>alt+shift+j uploads from any page</footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -368,11 +368,12 @@
             <span class="section-title">Token pool</span>
             <span class="spacer"></span>
             <mdui-button id="jwt-contribute" variant="tonal" icon="add">Contribute</mdui-button>
+            <mdui-button id="jwt-pushkey" variant="text" icon="vpn_key">Copy push key</mdui-button>
             <mdui-button id="jwt-check" variant="text" icon="health_and_safety">Check dead tokens</mdui-button>
           </div>
           <div class="panel-body">
             <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
-              Tokens are shared with the Cubey provider and persist across restarts/updates. Raw tokens are never exposed here -- only hashes. A token is evicted only after two consecutive dead probes.
+              Tokens are shared with the Cubey provider and persist across restarts/updates. Raw tokens are never exposed here -- only hashes. A token is evicted only after two consecutive dead probes. "Copy push key" is the credential the browser userscript (tools/jwt-uploader) uses to POST /api/jwt/push without a dashboard session; it is created on first click and stored in config/admin_config.json.
             </div>
             <div class="list-head lh-jwt">
               <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>OK/Fail</span><span>Verdict</span><span>Status</span><span></span>
