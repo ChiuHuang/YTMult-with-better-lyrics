@@ -89,20 +89,38 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
             # Check for spans (word-level sync)
             spans = list(p.iter('span'))
             if spans:
+                # Spacing belongs to the source, not to us. Apple splits a held
+                # word down the middle ("foll" + "ow" for "follow") and writes NO
+                # whitespace between the two spans, while a real word gap always
+                # carries one. Inventing a space at every join turned those into
+                # "foll ow" -- 6 lines of Die With A Smile -- and the device
+                # rebuilds the display text from parts, so it showed the mangled
+                # line even when the server text was already right. A line whose
+                # spans carry no inter-span whitespace at all keeps the old
+                # space-after-each-word join: there a missing tail tells us
+                # nothing, and the file may simply be one that never uses them.
+                tails = [(span.tail or '') for span in spans]
+                has_gap = any(ch.isspace() for tail in tails for ch in tail)
+                glued = False
                 for idx, span in enumerate(spans):
                     span_begin = span.get('begin', '')
                     span_end = span.get('end', '')
                     span_text = (span.text or '')
-                    tail_text = (span.tail or '')
 
                     # Preserving spacing between words
                     clean_word = span_text
-                    if tail_text and ' ' in tail_text:
+                    this_glued = glued
+                    glued = False
+                    if any(ch.isspace() for ch in tails[idx]):
                         if not clean_word.endswith(' '):
                             clean_word += ' '
-                    elif not is_cjk(clean_word) and idx < len(spans) - 1:
-                        if not clean_word.endswith(' '):
-                            clean_word += ' '
+                    elif idx < len(spans) - 1:
+                        if has_gap:
+                            # Mid-word split: the source glued these two spans.
+                            glued = True
+                        elif not is_cjk(span_text):
+                            if not clean_word.endswith(' '):
+                                clean_word += ' '
 
                     if clean_word.strip():
                         text_parts.append(clean_word)
@@ -115,11 +133,16 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
                             if s_end_ms > 0 and s_end_ms < start_ms:
                                 s_end_ms = start_ms + s_end_ms
                             dur_ms = s_end_ms - s_begin_ms if s_end_ms > s_begin_ms else 0
-                            parts.append({
+                            part = {
                                 'startTimeMs': s_begin_ms,
                                 'words': clean_word,
                                 'durationMs': dur_ms
-                            })
+                            }
+                            # The device joins parts with a space unless a part
+                            # says otherwise, so a mid-word split has to say so.
+                            if this_glued:
+                                part['space'] = False
+                            parts.append(part)
             else:
                 p_text = (p.text or '').strip()
                 if p_text:
