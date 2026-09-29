@@ -409,6 +409,20 @@ static const CGFloat YTMURowPadBottom = 14.0;
         // keep it static white (no OS-theme dependency).
         self.wipeMask.fillColor = [UIColor whiteColor].CGColor;
         self.wipeMask.frame = CGRectZero;
+        // The highlight is not binary. Completed glyphs are fully opaque and
+        // the currently sung edge uses a moving alpha feather.
+        CAGradientLayer *wipeFeather = [CAGradientLayer layer];
+        wipeFeather.name = @"YTMULyricsWipeFeather";
+        wipeFeather.colors = @[(id)[UIColor whiteColor].CGColor,
+                               (id)[UIColor colorWithWhite:1 alpha:0.86].CGColor,
+                               (id)[UIColor colorWithWhite:1 alpha:0.52].CGColor,
+                               (id)[UIColor colorWithWhite:1 alpha:0.18].CGColor,
+                               (id)[UIColor clearColor].CGColor];
+        wipeFeather.locations = @[@0.0, @0.25, @0.55, @0.82, @1.0];
+        wipeFeather.startPoint = CGPointMake(0.0, 0.5);
+        wipeFeather.endPoint = CGPointMake(1.0, 0.5);
+        wipeFeather.actions = @{@"position":[NSNull null], @"bounds":[NSNull null], @"frame":[NSNull null], @"hidden":[NSNull null]};
+        [self.wipeMask addSublayer:wipeFeather];
         self.wipeLabel.layer.mask = self.wipeMask;
         _wipeProgress = 0.0;
 
@@ -4081,14 +4095,17 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     if (![layoutKey isEqualToString:cell.cachedWordLayoutKey]) {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = display;
-        cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
+        cell.lyricLabel.textColor = YTMULyricInk(0.40, 0.48, self.view);
 
         NSShadow *sh = [[NSShadow alloc] init];
         sh.shadowColor = YTMULyricShadow(self.view);
         sh.shadowOffset = CGSizeMake(0, 2);
         sh.shadowBlurRadius = 4;
         cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
-            attributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: YTMULyricInk(1.0, 1.0, self.view), NSShadowAttributeName: sh}];
+            attributes:@{NSFontAttributeName: font,
+                         NSForegroundColorAttributeName: YTMULyricInk(1.0, 1.0, self.view),
+                         NSShadowAttributeName: sh,
+                         NSKernAttributeName: @0.08}];
 
         NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
         NSLayoutManager *lm = [[NSLayoutManager alloc] init];
@@ -4123,17 +4140,57 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         if (CGRectIsNull(b)) continue;
         [path appendPath:[UIBezierPath bezierPathWithRect:b]];
     }
+
+    CAGradientLayer *wipeFeather = nil;
+    for (CALayer *layer in cell.wipeMask.sublayers) {
+        if ([layer.name isEqualToString:@"YTMULyricsWipeFeather"] &&
+            [layer isKindOfClass:CAGradientLayer.class]) {
+            wipeFeather = (CAGradientLayer *)layer;
+            break;
+        }
+    }
+    wipeFeather.hidden = YES;
+
     if (curWord >= 0 && curWord < rcount) {
-        CGRect b = [cell.cachedWordRects[curWord] CGRectValue];
-        if (!CGRectIsNull(b)) {
-            b.size.width *= MAX(curFrac, 0.0);
-            [path appendPath:[UIBezierPath bezierPathWithRect:b]];
+        CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
+        if (!CGRectIsNull(wordRect)) {
+            CGFloat fraction = MIN(1.0, MAX(0.0, curFrac));
+            BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+            CGFloat revealedWidth = wordRect.size.width * fraction;
+            CGFloat featherWidth = MIN(22.0, MAX(8.0, wordRect.size.width * 0.38));
+            CGFloat solidWidth = MAX(0.0, revealedWidth - featherWidth);
+
+            if (solidWidth > 0.0) {
+                CGRect solid = wordRect;
+                solid.size.width = solidWidth;
+                if (rtl) solid.origin.x = CGRectGetMaxX(wordRect) - solidWidth;
+                [path appendPath:[UIBezierPath bezierPathWithRect:solid]];
+            }
+            if (revealedWidth > 0.0 && wipeFeather) {
+                CGFloat visibleFeather = MIN(featherWidth, revealedWidth);
+                CGRect feather = wordRect;
+                feather.size.width = visibleFeather;
+                if (rtl) {
+                    feather.origin.x = CGRectGetMaxX(wordRect) - revealedWidth;
+                    wipeFeather.startPoint = CGPointMake(1.0, 0.5);
+                    wipeFeather.endPoint = CGPointMake(0.0, 0.5);
+                } else {
+                    feather.origin.x += revealedWidth - visibleFeather;
+                    wipeFeather.startPoint = CGPointMake(0.0, 0.5);
+                    wipeFeather.endPoint = CGPointMake(1.0, 0.5);
+                }
+                wipeFeather.frame = CGRectIntegral(feather);
+                wipeFeather.hidden = NO;
+            }
         }
     } else if (curWord >= rcount && display.length > 0) {
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
     }
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     cell.wipeMask.frame = cell.wipeLabel.bounds;
     cell.wipeMask.path = path.CGPath;
+    [CATransaction commit];
 }
 
 - (CGFloat)wipeProgressForLyricAtIndex:(NSInteger)index currentTime:(double)currentTime {
