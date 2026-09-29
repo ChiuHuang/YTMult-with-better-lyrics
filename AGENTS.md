@@ -140,6 +140,40 @@
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **the node deletes itself** (user pasted 20+ `[NODE] rejected connection for
+  node_id=... (bad key)` lines and asked "why node delete itself?"). Nothing
+  deletes a node: the server has no record for that `node_id`, because every
+  writer of `config/nodes.json` did load -> edit -> save with NO lock and NO
+  re-read, so the last writer won on stale data. The offender that made it
+  permanent is the `pong` branch of `ws_node` (`server/nodes.py`): it kept the
+  dict it loaded once at connect time and rewrote the WHOLE file from it every
+  30s, forever. Consequences, both reproduced: a node generated in the
+  dashboard was erased from disk within 30s and stayed erased (so the node.py
+  just handed out got `(bad key)` on every reconnect -- exactly the pasted
+  log, and the "it deleted itself" feeling, since the row vanishes from the
+  Nodes page a minute after generating it), and `revoke` deleted a record only
+  for the next pong to write it back. Compounding it, `_save_nodes` truncated
+  before writing, so a reader could parse a half-written file, get `{}` from
+  `_load_nodes`, and persist an empty registry. Fix: one `_nodes_file_lock`
+  around the whole read-modify-write plus a fresh read on every write
+  (`_mutate_nodes(mutator)`, mutator returns False to abort without writing),
+  an atomic `tmp` + `os.replace` save, and the pong now stamps only its own
+  record instead of the connect-time snapshot. Every call site converted
+  (`ws_node` connect + pong, `admin_nodes_generate`, `admin_nodes_regenerate`,
+  `admin_nodes_jwt_sync`, `admin_nodes_revoke`). Note the two halves are both
+  needed: the lock alone still lets a stale in-hand dict clobber the file, and
+  atomicity alone still loses the update. Recovery is NOT possible server-side
+  -- only a `key_hash` is stored, never the key -- so any node.py that is
+  already being rejected has to be re-generated and re-deployed. Verified: a
+  repro of the old behaviour, then 7 checks against the fix (5 threads
+  hammering the registry, revoke surviving 50 pongs, jwt_sync toggle
+  surviving, abort-on-False writing nothing, an unknown id never being
+  resurrected, 600 interleaved reads with zero truncated parses and no stray
+  `.tmp`, a fresh node's key still validating after 60 pongs) and the Flask
+  test client end to end (3 generates with 20 pongs between each: all three
+  records present with a matching hash, and the keyed self-update fetch
+  returning 200).
+
 - **the translated-lyrics echo bug** (user: "allow to fix broken
   translate(lyrics)", with a rendered row reading "Every single morning
   ((Huh) （哈）每一個清晨"). NOT a display bug: the panel is two labels in one
