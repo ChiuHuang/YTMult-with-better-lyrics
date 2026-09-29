@@ -12,8 +12,10 @@ from flask import request, jsonify
 from .app import app, login_required, _sse_broadcast
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, rebase_cached,
-    retitle_song, get_rename, save_rename,
+    retitle_song, retitle_batch, retitle_cache_clear,
+    get_rename, save_rename, norm_title,
 )
+from .rerace import _tier
 from .cache import get_cached, set_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
 from .utils import _safe_cache_component
 from .pipeline import probe_providers
@@ -464,6 +466,19 @@ def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers
 
     workers = max(1, min(16, int(workers or 8)))
 
+    # One batched LLM pass for the whole job, so the retitle_song() calls
+    # below are cache reads. 205 unlyriced tracks used to be 205 separate
+    # Cohere calls, one per row, at the worker's concurrency.
+    try:
+        retitle_cache_clear()
+        _sse_broadcast('retitle_phase', {
+            'message': f'retitling {len(items)} title(s) in batches...',
+            'done': 0, 'total': total,
+        })
+        retitle_batch([(i.get('song', ''), i.get('artist', '')) for i in items])
+    except Exception as e:
+        print(f"[LIBRARY] [FAIL] retitle batch pass: {e}")
+
     def _one(item):
         if _retitle_cancel.is_set():
             return None
@@ -481,9 +496,18 @@ def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers
             'done': done, 'total': total,
         })
 
-        cleaned = retitle_song(orig_song, orig_artist)
-        new_title = cleaned.get('title', orig_song)
-        new_artist = cleaned.get('artist', orig_artist)
+        # A manual rename wins over the LLM and skips the call entirely --
+        # same rule the rebase path uses (_try_llm_retitle_fetch).
+        saved = get_rename(vid) or {}
+        saved_t = (saved.get('title') or '').strip()
+        saved_a = (saved.get('artist') or '').strip()
+        if saved_t or saved_a:
+            new_title = saved_t or orig_song
+            new_artist = saved_a or orig_artist
+        else:
+            cleaned = retitle_song(orig_song, orig_artist)
+            new_title = cleaned.get('title', orig_song)
+            new_artist = cleaned.get('artist', orig_artist)
 
         entry = {
             'video_id': vid,
@@ -491,6 +515,25 @@ def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers
             'new': {'title': new_title, 'artist': new_artist},
             'status': 'retitle_only',
         }
+
+        # Nothing to clean. The old code ran the whole provider race anyway
+        # and then logged the miss as "retitled_no_lyrics", so a job over
+        # already-clean titles was ~100 wasted races painted as failures.
+        if (norm_title(new_title) == norm_title(orig_song)
+                and norm_title(new_artist) == norm_title(orig_artist)):
+            entry['status'] = 'retitled_noop'
+            with _retitle_lock:
+                _retitle_job['done'] = _retitle_job.get('done', 0) + 1
+                _retitle_job['results'].append(entry)
+                done = _retitle_job.get('done', 0)
+            _sse_broadcast('retitle_progress', {
+                'video_id': vid, 'song': orig_song, 'artist': orig_artist,
+                'new_title': new_title, 'new_artist': new_artist,
+                'status': 'retitled_noop', 'source': '',
+                'message': 'title already clean',
+                'done': done, 'total': total,
+            })
+            return entry
 
         with _retitle_lock:
             done = _retitle_job.get('done', 0)
@@ -511,12 +554,22 @@ def _run_retitle(video_id, song, artist, video_ids=None, req_items=None, workers
                 'ja_artist': '',
             }
             result = fetch_all_lyrics(vid, fake_info, lang)
+            full_key = f"{vid}:{lang}"
+            old = get_cached(full_key)
             if result and not is_not_found_result(result):
-                full_key = f"{vid}:{lang}"
-                set_cached(full_key, result)
-                remove_unlyriced(vid)
-                entry['status'] = 'retitled_and_cached'
-                entry['source'] = result.get('source', '')
+                # fetch_all_lyrics stamps the retitled pair onto the result
+                # (pipeline.py), so this write also renames the track. Never
+                # let it overwrite a better cached tier -- the rebase path
+                # has always required an upgrade.
+                if old is not None and _tier(result) <= _tier(old):
+                    entry['status'] = 'retitled_not_better'
+                    entry['source'] = result.get('source', '')
+                else:
+                    set_cached(full_key, result)
+                    remove_unlyriced(vid)
+                    save_rename(vid, new_title, new_artist)
+                    entry['status'] = 'retitled_and_cached'
+                    entry['source'] = result.get('source', '')
             else:
                 entry['status'] = 'retitled_no_lyrics'
         except Exception as e:

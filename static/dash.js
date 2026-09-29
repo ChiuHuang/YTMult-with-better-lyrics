@@ -248,6 +248,15 @@
         probeLiveLine(d.provider || '?', d.status || '', d.detail || '');
       } catch {}
     });
+    eventSource.addEventListener('retitle_phase', e => {
+      try {
+        const d = JSON.parse(e.data);
+        const box = $('#retitle-results');
+        if (!box) return;
+        box.appendChild(el('div', {style:'font-size:11px; opacity:.5; padding:2px 0;'}, d.message || ''));
+        box.scrollTop = box.scrollHeight;
+      } catch {}
+    });
     eventSource.addEventListener('retitle_progress', e => {      try {
         const d = JSON.parse(e.data);
         const results = $('#retitle-results');
