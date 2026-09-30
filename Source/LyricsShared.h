@@ -57,11 +57,47 @@
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, copy) NSString *lastColorKey;
+// How bright this row is by its distance from the sung line. 1 for the sung
+// line itself, 0.0 five lines out. A multiplier on top of the inactive ink, so
+// the existing colour maths is untouched.
+@property (nonatomic, assign) CGFloat distanceAlpha;
+// Horizontal alignment for this row, decided by the per-line voice: the lead
+// stays natural, a second singer goes right, a group sits centred.
+@property (nonatomic, assign) NSTextAlignment ytmu_textAlign;
+// The other duet display mode (pref `lyricsDuetDisplay`): a small caps marker
+// printed ABOVE the lyric line and only where the singer changes, instead of
+// moving the line. Same per-line `singer` / `duet` keys, so the two modes never
+// both draw. Nil text means no marker, and the label's height constraint goes to
+// zero with it, so a solo track lays out exactly as it did before duet support.
+@property (nonatomic, strong) UILabel *singerLabel;
+
+// The instrumental-gap ribbon (braccato's instrumental-wave style). A bezier
+// wave that oscillates between two shapes and flattens across the gap, built
+// in -layoutSubviews because the width is not known until then.
+@property (nonatomic, strong) CAShapeLayer *waveLayer;
+@property (nonatomic, assign) BOOL waveActive;
+// 0 at the start of the gap, 1 at its end; drives the flatten.
+@property (nonatomic, assign) CGFloat waveProgress;
+@property (nonatomic, assign) CGFloat waveWidth;
 // Typewriter reveal mask (Source/LyricsStream.x drives it). The label keeps
 // its FULL text the whole time, so the row height never changes mid-reveal.
 @property (nonatomic, strong) CAGradientLayer *typeMask;
 - (void)setWipeProgress:(CGFloat)progress;
 - (void)clearWipe;
+// Cross-fade the revealed layer to `alpha` over `duration`. Replaces both
+// halves of the arrival/departure fade so a reconfigure or a recycle can drop a
+// half-finished one through -clearWipe.
+- (void)ytmu_fadeHighlightTo:(CGFloat)alpha duration:(NSTimeInterval)duration;
+// Mask that reveals the WHOLE label, used by a line-synced row whose active
+// colour now lives on the reveal layer instead of the base one.
+- (void)ytmu_showFullWipe;
+// The arrival: primes the reveal layer to nothing and fades it up, unless a
+// fade is already in flight (then it retargets from what is on screen).
+- (void)ytmu_beginHighlightArrivalWithDuration:(NSTimeInterval)duration;
+- (void)ytmu_setDistanceAlpha:(CGFloat)alpha;
+// Show or clear this row's voice marker; nil is the normal case and is safe to
+// call on every configure, including on a recycled cell.
+- (void)ytmu_setSingerMarker:(NSString *)text;
 @end
 
 // (Typewriter) category for the cell -- see the note on the view controller's

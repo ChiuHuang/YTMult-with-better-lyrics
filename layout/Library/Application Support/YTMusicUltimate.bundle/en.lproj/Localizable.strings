@@ -238,3 +238,15 @@
 "LG_REMOTE_CONTROL" = "Remote control";
 "LG_REMOTE_CONTROL_DESC" = "Allow the server to switch off interface features on this device.";
 "LG_SECTION_REMOTE" = "Remote";
+"LYRICS_SINGER_BOTH" = "Both";
+"LYRICS_SINGER_N" = "Singer %ld";
+
+"LYRICS_DUET" = "Duet lines";
+
+"LYRICS_DUET_DESC" = "How a duet marks who sings each line.";
+
+"LYRICS_DUET_OFF" = "Off";
+
+"LYRICS_DUET_ALIGN" = "Align";
+
+"LYRICS_DUET_LABEL" = "Label";

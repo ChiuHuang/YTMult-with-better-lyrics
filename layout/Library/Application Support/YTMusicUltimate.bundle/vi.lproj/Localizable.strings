@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Điều khiển từ xa";
 "LG_REMOTE_CONTROL_DESC" = "Cho phép máy chủ tắt các tính năng giao diện trên thiết bị này. Khi tắt, máy chủ không thể tắt gì; công tắc của bạn vẫn là của bạn.";
 "LG_SECTION_REMOTE" = "Từ xa";
+"LYRICS_SINGER_BOTH" = "Công tấy";
+"LYRICS_SINGER_N" = "Ca sá %ld";
+
+"LYRICS_DUET" = "Bái hót ca";
+
+"LYRICS_DUET_DESC" = "Cách hiển thị hiện của bài.";
+
+"LYRICS_DUET_OFF" = "Tắt";
+
+"LYRICS_DUET_ALIGN" = "Cán";
+
+"LYRICS_DUET_LABEL" = "Nhãn";

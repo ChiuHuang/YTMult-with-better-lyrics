@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "リモート制御";
 "LG_REMOTE_CONTROL_DESC" = "サーバーがこの端末のインターフェース機能を無効にできるようにします。オフにするとサーバーは何も無効にできません。自分のスイッチは自分のままです。";
 "LG_SECTION_REMOTE" = "リモート";
+"LYRICS_SINGER_BOTH" = "ドュエット";
+"LYRICS_SINGER_N" = "ボーカー %ld";
+
+"LYRICS_DUET" = "ダウェット曲";
+
+"LYRICS_DUET_DESC" = "ダウエットで、各行の歌う人を表し方法。";
+
+"LYRICS_DUET_OFF" = "オフ";
+
+"LYRICS_DUET_ALIGN" = "中央組み";
+
+"LYRICS_DUET_LABEL" = "ラベル";

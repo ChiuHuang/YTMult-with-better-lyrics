@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Zdalne sterowanie";
 "LG_REMOTE_CONTROL_DESC" = "Pozwól serwerowi wyłączać funkcje interfejsu na tym urządzeniu. Wyłączony serwer nie może nic wyłączyć; twoje przełączniki zostają twoje.";
 "LG_SECTION_REMOTE" = "Zdalne";
+"LYRICS_SINGER_BOTH" = "Obaj";
+"LYRICS_SINGER_N" = "Wokalista %ld";
+
+"LYRICS_DUET" = "Linie duetu";
+
+"LYRICS_DUET_DESC" = "Jak duet pokazuje, kto śpiega kolejny wers.";
+
+"LYRICS_DUET_OFF" = "Wyłączone";
+
+"LYRICS_DUET_ALIGN" = "Wyrównaj";
+
+"LYRICS_DUET_LABEL" = "Etykieta";

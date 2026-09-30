@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "التحكم عن بُعد";
 "LG_REMOTE_CONTROL_DESC" = "السماح للخادم بتعطيل ميزات الواجهة على هذا الجهاز. عند الإيقاف لا يستطيع الخادم إيقاف أي شيء، ومفاتيحك تبقى لك.";
 "LG_SECTION_REMOTE" = "عن بُعد";
+"LYRICS_SINGER_BOTH" = "الجميعان";
+"LYRICS_SINGER_N" = "المغري %ld";
+
+"LYRICS_DUET" = "أشغان الديو";
+
+"LYRICS_DUET_DESC" = "كيف يدلّى الأناد على المشاركة في كل سطر.";
+
+"LYRICS_DUET_OFF" = "إيقاف";
+
+"LYRICS_DUET_ALIGN" = "محاذاة";
+
+"LYRICS_DUET_LABEL" = "محطباة";

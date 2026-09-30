@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Удалённое управление";
 "LG_REMOTE_CONTROL_DESC" = "Разрешить серверу отключать функции интерфейса на этом устройстве. Если выключено, сервер ничего не отключит; ваши переключатели остаются вашими.";
 "LG_SECTION_REMOTE" = "Удалённо";
+"LYRICS_SINGER_BOTH" = "Вдуетм";
+"LYRICS_SINGER_N" = "Исполнитель %ld";
+
+"LYRICS_DUET" = "Куплета дуэта";
+
+"LYRICS_DUET_DESC" = "Как дуэт показывает, кто поёт.";
+
+"LYRICS_DUET_OFF" = "Выкл";
+
+"LYRICS_DUET_ALIGN" = "Выравнивать";
+
+"LYRICS_DUET_LABEL" = "Метка";

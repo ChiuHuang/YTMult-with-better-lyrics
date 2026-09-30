@@ -238,3 +238,15 @@
 "LG_REMOTE_CONTROL" = "远程控制";
 "LG_REMOTE_CONTROL_DESC" = "允许服务器关闭本机的界面功能。关闭后服务器将无法再关闭任何功能，你的开关始终归你。";
 "LG_SECTION_REMOTE" = "远程";
+"LYRICS_SINGER_BOTH" = "合唱";
+"LYRICS_SINGER_N" = "演唱者 %ld";
+
+"LYRICS_DUET" = "合唱歌曲";
+
+"LYRICS_DUET_DESC" = "合唱时如何显示每行是谁在唱.";
+
+"LYRICS_DUET_OFF" = "关闭";
+
+"LYRICS_DUET_ALIGN" = "对齐";
+
+"LYRICS_DUET_LABEL" = "标签";
