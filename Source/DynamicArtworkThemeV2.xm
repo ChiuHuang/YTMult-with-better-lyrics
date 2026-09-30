@@ -79,7 +79,13 @@ static void YTMUApplyTheme(UIView *host, BOOL wholeApp) {
     CAGradientLayer *gradient = objc_getAssociatedObject(host,kThemeGradient);
     if (!gradient) { gradient=[CAGradientLayer layer]; [host.layer insertSublayer:gradient atIndex:0];
         objc_setAssociatedObject(host,kThemeGradient,gradient,OBJC_ASSOCIATION_RETAIN_NONATOMIC); }
-    UIColor *p=YTMUPrimaryColor?:[UIColor colorWithRed:.16 green:.12 blue:.22 alpha:1];
+    // Neutral dark when no artwork has been sampled yet. This used to be
+    // (.16,.12,.22) -- a violet -- the one thing on this surface that can be
+    // wrong for EVERY cover at once: it is what shows on the player between the
+    // player opening and the thumbnail landing, so the whole screen washes
+    // purple before it has any colour to match. Neutral reads as "no colour
+    // yet" and is replaced a frame later by the real one.
+    UIColor *p=YTMUPrimaryColor?:[UIColor colorWithWhite:.11 alpha:1];
     UIColor *s=YTMUSecondaryColor?:[UIColor colorWithWhite:.02 alpha:1];
     gradient.frame=host.bounds; gradient.startPoint=CGPointMake(.15,0); gradient.endPoint=CGPointMake(.85,1);
     gradient.colors=@[(id)[p colorWithAlphaComponent:(wholeApp?.52:.82)].CGColor,(id)[s colorWithAlphaComponent:.96].CGColor,(id)UIColor.blackColor.CGColor];
