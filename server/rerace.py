@@ -25,6 +25,7 @@ from .race import _lyrics_score, _wbw_line_count, _race_cubey
 from .providers_braccato import fetch_direct_best
 from .translate import google_translate_fast
 from .nodes import pick_node
+from .paths import LYRICS_DIR
 
 _RERACE_INTERVAL = int(os.environ.get('YTMU_RERACE_INTERVAL', '300'))
 _RERACE_BATCH = int(os.environ.get('YTMU_RERACE_BATCH', '15'))
@@ -52,7 +53,7 @@ def _cache_candidates(limit, cooldown):
     'fast' entry is fine when there's no full key for it)."""
     now = time_module.time()
     by_vid = {}
-    lyrics_dir = 'cache/lyrics'
+    lyrics_dir = LYRICS_DIR
     if not os.path.isdir(lyrics_dir):
         return []
     for fname in os.listdir(lyrics_dir):

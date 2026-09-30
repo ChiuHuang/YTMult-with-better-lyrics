@@ -19,8 +19,11 @@ from .race import _wbw_line_count
 from .translate import (
     cohere_key_list, get_cohere_key, rotate_cohere_key,
 )
+from .paths import (
+    LYRICS_DIR, PROVIDER_FILE, RENAME_FILE, UNLYRICED_FILE,
+)
 
-_UNLYRICED_PATH = 'cache/library_unlyriced.jsonl'
+_UNLYRICED_PATH = UNLYRICED_FILE
 _UNLYRICED_SEEN = set()
 _UNLYRICED_SEEN_LOCK = threading.Lock()
 _UNLYRICED_DEDUP_WINDOW = 500
@@ -35,7 +38,7 @@ _retitled_cache_lock = threading.Lock()
 # same flow so a saved override is reused until it is explicitly replaced.
 # The device provider menu (and dashboard) share this file for the saved
 # lyric provider choice: video_id -> {provider, lang, ts}.
-_PROVIDER_PATH = 'cache/provider.json'
+_PROVIDER_PATH = PROVIDER_FILE
 _PROVIDER_CACHE = None
 _PROVIDER_LOCK = threading.Lock()
 
@@ -97,7 +100,7 @@ def clear_provider(video_id):
             _save_provider_file()
 
 
-_RENAME_PATH = 'cache/rename.json'
+_RENAME_PATH = RENAME_FILE
 _RENAME_CACHE = None
 _RENAME_LOCK = threading.Lock()
 
@@ -180,9 +183,10 @@ def apply_saved_rename(video_id, info):
 # Cache scan
 # ------------------------------------------------------------
 def scan_cache():
-    """Scan cache/lyrics, dedupe per video (prefer full key over :fast), and
-    return a summary dict with per-tier bucket counts and a songs list."""
-    lyrics_dir = 'cache/lyrics'
+    """Scan the lyrics directory, dedupe per video (prefer full key over
+    :fast), and return a summary dict with per-tier bucket counts and a
+    songs list."""
+    lyrics_dir = LYRICS_DIR
     buckets = {'wbw': 0, 'line': 0, 'plain': 0, 'none': 0, 'error': 0}
     by_vid = {}
 

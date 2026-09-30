@@ -177,9 +177,10 @@ def _badge_tracks_cached():
     """Distinct cached (video_id, lang) pairs. Filenames only -- scan_cache()
     would open every JSON file, far too slow for a badge."""
     from .app import _ROOT
+    from .paths import LYRICS_DIR
     from .cache import _cache_key_from_filename
     try:
-        names = os.listdir(os.path.join(_ROOT, 'cache', 'lyrics'))
+        names = os.listdir(LYRICS_DIR)
     except OSError:
         return 0
     keys = set()

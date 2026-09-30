@@ -23,6 +23,7 @@ from flask import Flask, request, jsonify, render_template, session, redirect, u
 from .app import app, SERVER_INSTANCE_ID, _recent_requests, _sse_broadcast
 from .utils import _safe_cache_component, lyrics_content_hash
 from .cache import get_cached, set_cached, is_not_found_result, _cache_key_from_filename, _CACHE_FORMAT_VERSION, sanitize_lyrics_parts
+from .paths import LYRICS_DIR
 from .nodes import ask_nodes_for_cache
 from .jwt_pool import contribute_jwt as _pool_contribute
 from .providers_yt import get_song_info
@@ -287,7 +288,9 @@ def api_lyrics():
         if cached:
             age_info = ''
             try:
-                path = f"cache/lyrics/{(fast_cache_key if cache_source=='mode-specific' else full_cache_key)}.json"
+                path = os.path.join(
+                    LYRICS_DIR,
+                    _cache_filename(fast_cache_key if cache_source == 'mode-specific' else full_cache_key) + '.json')
                 import os as _os
                 if _os.path.exists(path):
                     with open(path,'r',encoding='utf-8') as f:
@@ -422,18 +425,24 @@ def api_lyrics():
 
 @app.route('/api/cache/list', methods=['GET'])
 def api_cache_list():
-    """Public, lightweight listing of what this server already has cached, so
-    a client can bulk-sync its local on-device cache without re-running the
+    """Public, lightweight listing of what this server already holds, so a
+    client can bulk-sync its local on-device cache without re-running the
     full fetch+translate pipeline per song. Pair this with GET /api/lyrics
     (force=0) for each returned video_id: that already serves straight from
-    this same cache almost instantly, so no new fetch endpoint is needed."""
+    this same store almost instantly, so no new fetch endpoint is needed.
+
+    This is the server->device direction, and it is the one the device's
+    /api/lyrics/sync call does NOT cover: that endpoint only reconciles
+    entries the device already holds (it posts their hashes), so it can never
+    hand the device a song it has never seen. This list can.
+    """
     lang_filter = (request.args.get('lang') or '').strip()
     try:
         limit = min(max(int(request.args.get('limit', 500)), 1), 2000)
     except (TypeError, ValueError):
         limit = 500
 
-    lyrics_dir = 'cache/lyrics'
+    lyrics_dir = LYRICS_DIR
     items = []
     if os.path.exists(lyrics_dir):
         fnames = sorted(
@@ -825,6 +834,10 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     # Instant path: a full probe already saved every provider for this video.
     # Serve the saved one directly (translate into the requested lang) so the
     # switcher flips providers with no re-probe and no popup.
+    #
+    # load_snapshot() drops any snapshot whose _SNAPSHOT_VERSION is not
+    # current, which is what keeps this from writing pre-fix text back into
+    # the main cache via set_cached() below.
     try:
         from .candidates import load_candidates
         _saved = load_candidates(video_id)

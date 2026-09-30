@@ -20,7 +20,16 @@ import os
 import time as time_module
 from datetime import datetime
 
-_CAND_DIR = 'cache/candidates'
+from .paths import CANDIDATES_DIR
+
+_CAND_DIR = CANDIDATES_DIR
+# Bump when the shape of a stored candidate changes, for the same reason
+# _CACHE_FORMAT_VERSION exists in cache.py: a parser fix does not invalidate
+# snapshots on its own. These hold PRE-TRANSLATION raw lyrics, so they carry
+# exactly the text the parser produces, and /providers/select writes what it
+# reads here straight back into the main lyrics cache -- an ungated stale
+# snapshot therefore resurrects a fixed parser's output on one UI tap.
+_SNAPSHOT_VERSION = 2
 # Snapshots older than this are ignored (probes overwrite on every full run
 # anyway, so this only guards videos probed once long ago).
 _CAND_MAX_AGE_S = 7 * 86400
@@ -87,7 +96,7 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
             return False
         os.makedirs(_CAND_DIR, exist_ok=True)
         payload = {
-            'v': 1,
+            'v': _SNAPSHOT_VERSION,
             'video_id': video_id,
             'song': (song_info or {}).get('title', ''),
             'artist': (song_info or {}).get('artist', ''),
@@ -125,6 +134,12 @@ def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
             return None
         with open(path, 'r', encoding='utf-8') as f:
             payload = json.load(f)
+        # Unversioned payload (written before _SNAPSHOT_VERSION existed) or an
+        # older one is not readable as current: its `text` came from a parser
+        # we have since fixed. Dropping it here is what makes the version bump
+        # in cache.py actually reach /providers/select and /providers/data.
+        if payload.get('v') != _SNAPSHOT_VERSION:
+            return None
         cands = payload.get('candidates')
         if not cands and not payload.get('outcomes'):
             return None

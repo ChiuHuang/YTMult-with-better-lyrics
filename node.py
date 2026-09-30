@@ -56,6 +56,14 @@ CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_cache
 CACHE_TTL_SECONDS = 86400 * 3  # matches the main server's cache lifetime
 JWT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_cache", "jwt.json")
 
+# Must equal server/cache.py _CACHE_FORMAT_VERSION. A node answers `cache_check`
+# from whatever is on its disk, and the server writes whatever it gets back
+# straight into its own lyrics cache -- so an entry cached before a parser fix
+# would be served to a device long after the fix, from a store that had no
+# version check at all. Entries written before this constant existed have no
+# 'v' key and are therefore rejected too, which is the point.
+CACHE_FORMAT_VERSION = 4
+
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 _SAFE_COMPONENT_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
@@ -82,6 +90,8 @@ def _load_local_cache(cache_key):
     try:
         with open(path, 'r', encoding='utf-8') as f:
             entry = json.load(f)
+        if entry.get('v') != CACHE_FORMAT_VERSION:
+            return None
         if time.time() - entry.get('ts', 0) > CACHE_TTL_SECONDS:
             return None
         return entry.get('data')
@@ -95,7 +105,7 @@ def _save_local_cache(cache_key, data):
         return
     try:
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'data': data, 'ts': time.time()}, f, ensure_ascii=False)
+            json.dump({'v': CACHE_FORMAT_VERSION, 'data': data, 'ts': time.time()}, f, ensure_ascii=False)
     except Exception:
         pass
 
@@ -304,12 +314,22 @@ def on_message(ws, raw):
 
     if mtype == 'cache_check':
         found = _load_local_cache(msg.get('cache_key', '')) is not None
-        ws.send(json.dumps({'type': 'cache_check_result', 'request_id': request_id, 'found': found}))
+        # cv rides along with both cache replies. _load_local_cache already
+        # refuses this node's own pre-fix files, so a matching cv means the
+        # lyrics were parsed by the same parser the server runs. It has to be
+        # sent explicitly because the reply carries entry['data'], not the
+        # entry, so the version is otherwise stripped on the way out -- and the
+        # server re-stamps whatever it pulls with its OWN current version, which
+        # would silently promote pre-fix text to "current" and make it
+        # un-retirable by any future version bump.
+        ws.send(json.dumps({'type': 'cache_check_result', 'request_id': request_id,
+                            'found': found, 'cv': CACHE_FORMAT_VERSION}))
         return
 
     if mtype == 'cache_fetch':
         data = _load_local_cache(msg.get('cache_key', ''))
-        ws.send(json.dumps({'type': 'cache_data', 'request_id': request_id, 'data': data}))
+        ws.send(json.dumps({'type': 'cache_data', 'request_id': request_id, 'data': data,
+                            'cv': CACHE_FORMAT_VERSION}))
         return
 
     if mtype == 'task':

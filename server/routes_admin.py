@@ -33,6 +33,7 @@ from .jwt_push import push as _jwt_push, ensure_key as _jwt_push_key
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .cache import _cache_key_from_filename
+from .paths import LYRICS_DIR, TRANSLATE_DIR
 from .library import get_rename
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
@@ -175,7 +176,7 @@ def admin_app_settings_reset():
 @app.route('/api/admin/caches', methods=['GET'])
 @login_required
 def admin_caches():
-    lyrics_dir = 'cache/lyrics'
+    lyrics_dir = LYRICS_DIR
     items = []
     if os.path.exists(lyrics_dir):
         for fname in sorted(os.listdir(lyrics_dir),
@@ -241,7 +242,7 @@ def admin_caches():
 @app.route('/api/admin/caches/clear_empty', methods=['POST'])
 @login_required
 def admin_clear_empty_caches():
-    lyrics_dir = 'cache/lyrics'
+    lyrics_dir = LYRICS_DIR
     removed = 0
     if os.path.exists(lyrics_dir):
         for fname in os.listdir(lyrics_dir):
@@ -505,10 +506,10 @@ def admin_server_info():
     lyrics_count = 0
     translate_count = 0
     try:
-        if os.path.exists('cache/lyrics'):
-            lyrics_count = len([f for f in os.listdir('cache/lyrics') if f.endswith('.json')])
-        if os.path.exists('cache/translate'):
-            translate_count = len([f for f in os.listdir('cache/translate') if f.endswith('.json')])
+        if os.path.exists(LYRICS_DIR):
+            lyrics_count = len([f for f in os.listdir(LYRICS_DIR) if f.endswith('.json')])
+        if os.path.exists(TRANSLATE_DIR):
+            translate_count = len([f for f in os.listdir(TRANSLATE_DIR) if f.endswith('.json')])
     except: pass
     return jsonify({
         'instance_id': SERVER_INSTANCE_ID,
@@ -584,10 +585,10 @@ def admin_files():
     # also include cache dir stats
     cache_info = {}
     try:
-        if os.path.exists('cache/lyrics'):
-            cache_info['lyrics_count'] = len([f for f in os.listdir('cache/lyrics') if f.endswith('.json')])
-        if os.path.exists('cache/translate'):
-            cache_info['translate_count'] = len([f for f in os.listdir('cache/translate') if f.endswith('.json')])
+        if os.path.exists(LYRICS_DIR):
+            cache_info['lyrics_count'] = len([f for f in os.listdir(LYRICS_DIR) if f.endswith('.json')])
+        if os.path.exists(TRANSLATE_DIR):
+            cache_info['translate_count'] = len([f for f in os.listdir(TRANSLATE_DIR) if f.endswith('.json')])
     except: pass
     return jsonify({'files': result, 'cache': cache_info})
 

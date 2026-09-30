@@ -392,7 +392,15 @@ NSInteger YTMULyricsCacheFormatVersion(void) {
     // data invalid (real per-word durations / last-word timing). Sent to the
     // server as `cv` on /api/lyrics/check; older values make the server answer
     // upgrade=1 so the client refetches and self-heals.
-    return 2;
+    //
+    // THIS MUST EQUAL server/cache.py _CACHE_FORMAT_VERSION. It sat at 2 while
+    // the server was on 3, which made /api/lyrics/check permanently report
+    // format_stale for every song (routes_lyrics.py: `client_ver <
+    // _CACHE_FORMAT_VERSION`), so the device refetched lyrics it already had,
+    // once per song, forever. The server stamps `cv` into every payload it
+    // sends (routes_lyrics `_prepare_entry_for_download`); the client ignored
+    // that and stamped this constant instead, so it could never converge.
+    return 4;
 }
 NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID) {
     if (!videoID.length) return 0;
@@ -421,6 +429,14 @@ void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics) {
     if (!YTMULyricsCacheEnabled() || !videoID.length) return;
     NSString *path = YTMULyricsCachePathForVideoID(videoID);
     if (!path) return;
+    // An entry written by an older format is worse than no entry: get_cached
+    // on the server and YTMULyricsCacheLoad here both happily read a file
+    // whose shape no longer matches what the renderer expects. Drop it on save
+    // so the next fetch refills it.
+    NSInteger existingCV = YTMULyricsCacheVersionForVideoID(videoID);
+    if (existingCV > 0 && existingCV != YTMULyricsCacheFormatVersion()) {
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    }
     // Never persist not-found/empty results: drop any stale file instead so
     // a later fetch retries instead of serving a cached miss forever.
     if (![lyrics isKindOfClass:[NSArray class]] || lyrics.count == 0) {
@@ -483,6 +499,15 @@ NSArray *YTMULyricsCacheLoad(NSString *videoID) {
     NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     NSArray *lyrics = dict[@"lyrics"];
     if ([lyrics isKindOfClass:[NSArray class]] && lyrics.count) {
+        // A stale format version is dropped here, exactly like an expired TTL:
+        // the file is unreadable as current, so serving it would show whatever
+        // the old shape rendered. This is the device half of the server's
+        // `_CACHE_FORMAT_VERSION` gate.
+        NSInteger cv = [dict[@"cv"] integerValue];
+        if (cv > 0 && cv != YTMULyricsCacheFormatVersion()) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            return nil;
+        }
         NSTimeInterval ts = [dict[@"ts"] doubleValue];
         if (ts > 0 && [[NSDate date] timeIntervalSince1970] - ts > 7*24*3600) {
             [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
@@ -712,16 +737,79 @@ BOOL _safe_cache_component(NSString *s) {
     return [s rangeOfCharacterFromSet:invalid].location == NSNotFound;
 }
 
+// Silent background batch sync, in two halves.
+//
+// 1. Hash reconcile: POST /api/lyrics/sync with the hashes of what we already
+//    hold, save back the `need` entries. This is the direction that keeps
+//    cached songs FRESH.
+// 2. Server -> device pull: GET /api/cache/list, then GET /api/lyrics
+//    (force=0) for songs we do NOT have. Half 1 can never do this, because it
+//    only ever answers about entries the request listed -- a song the device
+//    has never seen is not in the request, so the server never offers it.
+//    This is what actually grows the on-device library.
+//
+// Both are throttled together (6h) and gated on `lyricsAutoSync`.
+static void YTMUAutoSyncPullIfDue(NSString *lang, BOOL autoZh, NSInteger budget);
+
 void YTMUAutoSyncIfDue(void) {
-    // Silent background batch sync: hash local cache -> POST /api/lyrics/sync
-    // -> save need[] entries. No UI, no regen job, 6h throttle, on by default.
     if (!YTMULyricsPreference(@"lyricsAutoSync", YES)) return;
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - [ud doubleForKey:@"YTMUAutoSyncAt"] < 6 * 3600) return;
-    NSArray *cacheEntries = YTMULyricsCacheEntries();
-    if (!cacheEntries.count) return;
     [ud setDouble:now forKey:@"YTMUAutoSyncAt"];
+    NSString *lang = YTMUTargetLang();
+    BOOL autoZh = [YTMULyricsPreference(@"lyricsAutoZhConvert", YES) boolValue];
+
+    NSArray *cacheEntries = YTMULyricsCacheEntries();
+    if (cacheEntries.count) {
+        NSMutableArray *entries = [NSMutableArray array];
+        for (NSDictionary *e in cacheEntries) {
+            NSString *vid = e[@"video_id"];
+            NSString *hash = e[@"hash"];
+            if (!vid.length || !hash.length) continue;
+            [entries addObject:@{@"video_id": vid, @"hash": hash,
+                                 @"cv": e[@"cv"] ?: @(YTMULyricsCacheFormatVersion()),
+                                 @"tier": e[@"tier"] ?: @""}];
+            if (entries.count >= 500) break;
+        }
+        if (entries.count) {
+            NSDictionary *body = @{@"lang": lang,
+                                   @"auto_zh": @(autoZh),
+                                   @"entries": entries,
+                                   @"regenerate": @NO,
+                                   @"max_items": @500};
+            NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+            if (bodyData) {
+                NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/lyrics/sync", YTMUApiBase()]];
+                if (url) {
+                    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+                    req.HTTPMethod = @"POST";
+                    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+                    req.HTTPBody = bodyData;
+                    req.timeoutInterval = 30.0;
+                    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+                        if (err || !data) return;
+                        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                        if (![root isKindOfClass:[NSDictionary class]]) return;
+                        NSInteger saved = 0;
+                        for (NSDictionary *entry in root[@"need"]) {
+                            if (![entry isKindOfClass:[NSDictionary class]]) continue;
+                            NSString *vid = entry[@"videoID"];
+                            NSArray *lyrics = entry[@"lyrics"];
+                            if (!vid.length || !YTMULyricsIsUsable(lyrics, entry)) continue;
+                            YTMULyricsCacheSave(vid, lyrics);
+                            if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+                            g_lyricsCache[vid] = lyrics;
+                            saved++;
+                        }
+                        sendDebugLog([NSString stringWithFormat:@"[SYNC] background auto-sync saved %ld", (long)saved]);
+                    }] resume];
+                }
+            }
+        }
+    }
+    YTMUAutoSyncPullIfDue(lang, autoZh, YTMUAutoSyncPullMax());
+}
     NSMutableArray *entries = [NSMutableArray array];
     for (NSDictionary *e in cacheEntries) {
         NSString *vid = e[@"video_id"];

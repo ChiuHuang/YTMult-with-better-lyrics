@@ -33,13 +33,16 @@ from . import routes_ai  # noqa: F401
 def main():
     from .app import SERVER_INSTANCE_ID, SERVER_START_TS, SERVER_LOG_FILE, CRASH_LOG_FILE
     from .cache import clear_not_found_caches
+    from .paths import ensure_data_dir, migrate_legacy_cache_dir, DATA_DIR
     from .logging_util import _log_crash
     print('=' * 60)
     print('[MUSIC] YTMusic Ultimate - Lyrics API Server')
     print(f'Instance: {SERVER_INSTANCE_ID} started {SERVER_START_TS}')
     print('Server: http://0.0.0.0:20016')
-    print(f'Logs: {SERVER_LOG_FILE} | Crash: {CRASH_LOG_FILE}')
+    print(f'Data: {DATA_DIR}/ | Logs: {SERVER_LOG_FILE} | Crash: {CRASH_LOG_FILE}')
     print('=' * 60)
+    ensure_data_dir()
+    migrate_legacy_cache_dir()
     clear_not_found_caches()
     try:
         app.run(host='0.0.0.0', port=20016, debug=False, use_reloader=False, threaded=True)

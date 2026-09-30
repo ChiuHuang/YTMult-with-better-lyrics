@@ -134,7 +134,8 @@ def _finish_video(job, opts, vid, lang, old_tier, song, artist, result,
         # Keep a stale :fast sibling from shadowing this upgrade in scans:
         # mirror the upgraded payload so both keys agree on tier.
         try:
-            if os.path.exists(os.path.join('cache', 'lyrics', _cache_filename(key + ':fast') + '.json')):
+            from .paths import LYRICS_DIR
+            if os.path.exists(os.path.join(LYRICS_DIR, _cache_filename(key + ':fast') + '.json')):
                 set_cached(key + ':fast', result)
         except Exception:
             pass

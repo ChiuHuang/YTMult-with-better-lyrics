@@ -1,13 +1,15 @@
 # Usage counter: lyrics served, distinct devices, last song + status.
 # Recorded on every successful /api/lyrics serve, persisted to
-# cache/usage_stats.json (throttled flush), read by GET /api/app/stats and
+# database/usage_stats.json (throttled flush), read by GET /api/app/stats and
 # embedded into release notes by Actions. Never raises.
 import json
 import os
 import threading
 import time as time_module
 
-_PATH = 'cache/usage_stats.json'
+from .paths import USAGE_STATS_FILE
+
+_PATH = USAGE_STATS_FILE
 _LOCK = threading.Lock()
 _S = None
 _DIRTY = 0
