@@ -22,9 +22,7 @@
   Keep the whole block under 5 lines. Detail belongs in the sections below.
 
 Current:
-- `[DONE] ses_f0be4a8e1ffeCAOI4oIOftOkZ7 | non-wbw songs now take a second, rotated, delayed Cubey pass on all three callers (full fetch, SSE race, re-race loop), capped at two per query | outcome: 30/30 checks, detail in Done recently`
-- `[ACTIVE] ses_f0decf33effd0CRfe5izTGum1T | REBUILD (standing blocker, still open): nothing on this branch has ever been compiled | files: (build only, no Source edits until it builds) | next: get theos building in WSL Ubuntu -- ~/theos exists but sdks/ and toolchains/ are EMPTY, so fetch SDK + darwin toolchain, then \`make\` and read the real errors. NO toolchain on Windows (no clang/make/ldid); WSL2 Ubuntu has /usr/bin/clang 21.1.8 + make and a theos checkout with no SDK and no toolchains/ dir at all. I cannot install to the device -- the user must do that. Verified on 11bb42e: pack guard \`!= 5\` at LyricsSheet.x:720 MATCHES the 5-element array at :705 (the instrumental-collapse trap is closed); LOC() import at :5 and LYRICS_SINGER_BOTH/N + LYRICS_DUET_* exist in en.strings (no key-name leak); the duet segmented control at LyricsSettingsController.m:283-298 writes the same lyricsDuetDisplay key YTMUDuetDisplayMode reads at :446`
-- cleared: `ses_f129b9195ffeZzqDUEC4w8qrMM` (the marker it added is in this file, mission done) and the `Source/FullPlayerLiquidGlassV2.xm` + `Source/LyricsSheet.x` glass/wipe mission, which named a diff that is NOT in the tree (`git status` clean for Source) -- dead, do not rebuild it from this note
+(nothing live — add a line here before starting)
 
 ## How we talk (user expectations — keep these)
 - Reply in Traditional Chinese, Taiwan usage (繁體中文／台灣用語). The user reads
