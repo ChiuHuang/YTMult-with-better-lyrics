@@ -188,6 +188,47 @@ def set_translate_cached(cache_key, data):
     except:
         pass
 
+
+def translate_cache_key(texts, target_lang):
+    """The one definition of a translate-cache key.
+
+    Shared with the retranslate job (retranslate.py), which has to delete the
+    entry it is about to regenerate. Two copies of this string would drift and
+    the job would delete nothing while reporting every song as fixed, so it is
+    defined once and both callers build it here.
+    """
+    return f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
+
+
+def translate_cache_path(cache_key):
+    """On-disk path for one translate-cache entry. Exposed so the retranslate
+    job can delete exactly the entry it is about to regenerate instead of
+    clearing the whole directory."""
+    return os.path.join(TRANSLATE_DIR, hashlib.md5(cache_key.encode()).hexdigest() + '.json')
+
+
+def delete_translate_cached(cache_key):
+    """Drop one poisoned translate-cache entry. Returns True when a file was
+    actually removed.
+
+    Necessary because the key is `cohere:<lang>:md5(joined source texts)`, so
+    a retranslate of an UNCHANGED song hashes to the same key and returns the
+    same bad row: the job would report "fixed" while writing the identical
+    garbage. It also covers the read-side echo sanitiser having replaced the
+    cached echo with the original text (cohere_translate's cache-hit path), so
+    the entry left on disk is not even an echo any more -- it is a duplicate of
+    the lyric, which the display pass then drops and the user sees as an
+    untranslated row forever.
+    """
+    try:
+        path = translate_cache_path(cache_key)
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except Exception:
+        pass
+    return False
+
 def get_cohere_key():
     global _cohere_key_idx
     keys = _refresh_cohere_keys()
@@ -315,7 +356,7 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
     if not non_empty:
         return texts
 
-    cache_key = f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
+    cache_key = translate_cache_key(texts, target_lang)
     cached = get_translate_cached(cache_key)
     if cached is not None:
         # Sanitise on the way out. Entries poisoned before the echo guard was
@@ -857,7 +898,7 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
             yield {'i': i, 'text': t, 'done': True}
         return
 
-    cache_key = f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
+    cache_key = translate_cache_key(texts, target_lang)
     cached = get_translate_cached(cache_key)
     if cached is not None:
         print(f"  [Cohere] Stream cache hit ({len(texts)} lines)")

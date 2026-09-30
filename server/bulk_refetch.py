@@ -9,7 +9,8 @@ import threading
 import time as time_module
 import concurrent.futures
 
-from .cache import get_cached, set_cached, is_not_found_result, _cache_filename
+from .cache import (get_cached, set_cached, is_not_found_result,
+                    _cache_filename, read_entry)
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, apply_saved_rename,
     _try_llm_retitle_fetch,
@@ -70,6 +71,15 @@ def _norm_tier(result):
     if lyrics:
         return 'plain'
     return 'none'
+
+
+def _tier_of(data):
+    """Tier name of a payload, for a target's old_tier where the cached value
+    is read outside _finish_video (the `stale` scope). Same shape as
+    scan_cache's tier so the dashboard's from->to reads consistently."""
+    if not data or is_not_found_result(data):
+        return 'none'
+    return _norm_tier(data)
 
 
 def _push_result(job, row):
@@ -314,12 +324,18 @@ def start(opts):
     global _JOB, _CANCEL
     scope = (opts.get('scope') or 'non-wbw').strip()
     mode = (opts.get('mode') or 'fresh').strip()
+    if scope == 'stale' and mode != 'fresh':
+        # Forcing it here rather than trusting the caller: rerace reads the
+        # old payload through get_cached, which returns None for exactly the
+        # entries this scope selects, so every row would fail with
+        # "old cache miss" and the job would report errors instead of work.
+        mode = 'fresh'
     lang = (opts.get('lang') or 'zh-TW').strip()
     workers = max(1, min(int(opts.get('workers') or 8), 32))
     cpu_workers = max(1, min(int(opts.get('cpu_workers') or 2), cpu_count()))
     translate = bool(opts.get('translate', True))
-    if scope not in ('all', 'non-wbw', 'unlyriced', 'plain'):
-        raise ValueError('scope must be all|non-wbw|unlyriced|plain')
+    if scope not in ('all', 'non-wbw', 'unlyriced', 'plain', 'stale'):
+        raise ValueError('scope must be all|non-wbw|unlyriced|plain|stale')
     if mode not in ('fresh', 'rerace'):
         raise ValueError('mode must be fresh|rerace')
 
@@ -344,6 +360,34 @@ def start(opts):
                 targets.append({'video_id': it['video_id'],
                                 'lang': it.get('lang') or lang,
                                 'old_tier': 'none',
+                                'song': it.get('song', ''),
+                                'artist': it.get('artist', '')})
+        elif scope == 'stale':
+            # Exactly the songs the offline sweep could not fix: their text
+            # was parsed by an older parsers_*.py, so only a refetch can
+            # re-derive it. The list comes from db_migrate rather than a
+            # second copy of the epoch rule here, so the two halves of the
+            # version-bump feature cannot disagree about what "stale" means.
+            from .db_migrate import needs_refetch_keys
+            seen = set()
+            for it in needs_refetch_keys():
+                # needs_refetch_keys walks FILES, so a video with both a full
+                # key and a :fast sibling appears twice. One refetch fixes
+                # both (_finish_video mirrors onto the sibling), so fetching
+                # it twice is pure duplicate API spend.
+                sig = (it['video_id'], it['key'].rsplit(':', 1)[-1])
+                if sig in seen or sig[1] == 'fast':
+                    continue
+                seen.add(sig)
+                targets.append({'video_id': it['video_id'],
+                                'lang': it['key'].rsplit(':', 1)[-1] or lang,
+                                # read_entry, NOT get_cached: a stale entry is
+                                # exactly the case where get_cached returns
+                                # None, and reporting its tier as 'none' would
+                                # disable the never-downgrade guard on the one
+                                # scope that is replacing wbw entries.
+                                'old_tier': _tier_of(
+                                    (read_entry(it['key']) or {}).get('data')),
                                 'song': it.get('song', ''),
                                 'artist': it.get('artist', '')})
         else:

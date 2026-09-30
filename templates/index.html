@@ -244,6 +244,43 @@
 
         <mdui-card variant="elevated" class="panel">
           <div class="panel-head">
+            <span class="section-title">Database version</span>
+            <span class="pill pill-mute" id="dbver-status">idle</span>
+            <span class="spacer"></span>
+            <mdui-button id="dbver-refresh" variant="text" icon="refresh">Rescan</mdui-button>
+            <mdui-button id="dbver-dry" variant="tonal" icon="preview">Dry run</mdui-button>
+            <mdui-button id="dbver-sweep" variant="filled" icon="cached">Sweep</mdui-button>
+            <mdui-button id="dbver-refetch" variant="tonal" icon="upgrade">Refetch stale</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="dbver-line" style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); min-height:18px; margin-bottom:6px;"></div>
+            <div id="dbver-results" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Retranslate broken</span>
+            <span class="pill pill-mute" id="rtrans-status">idle</span>
+            <span class="spacer"></span>
+            <mdui-button id="rtrans-scan" variant="text" icon="search">Scan</mdui-button>
+            <mdui-button id="rtrans-start" variant="filled" icon="translate">Start</mdui-button>
+            <mdui-button id="rtrans-stop" variant="tonal" icon="stop" style="display:none;">Stop</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="bulk-opts">
+              <div class="bulk-opt">
+                <div class="bulk-label">Lang</div>
+                <mdui-text-field id="rtrans-lang" variant="outlined" value="zh-TW"></mdui-text-field>
+              </div>
+            </div>
+            <div id="rtrans-line" style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); min-height:18px; margin-bottom:6px;"></div>
+            <div id="rtrans-results" class="rebase-list"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
             <span class="section-title">Refetch all (bulk)</span>
             <span class="pill pill-mute" id="bulk-status">idle</span>
             <span class="spacer"></span>
@@ -260,6 +297,7 @@
                   <mdui-segmented-button-item value="plain">Plain only</mdui-segmented-button-item>
                   <mdui-segmented-button-item value="all">All cached</mdui-segmented-button-item>
                   <mdui-segmented-button-item value="unlyriced">Unlyriced</mdui-segmented-button-item>
+                  <mdui-segmented-button-item value="stale">Stale (needs refetch)</mdui-segmented-button-item>
                 </mdui-segmented-button>
               </div>
               <div class="bulk-opt">

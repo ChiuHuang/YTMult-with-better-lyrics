@@ -30,9 +30,27 @@ _CAND_DIR = CANDIDATES_DIR
 # reads here straight back into the main lyrics cache -- an ungated stale
 # snapshot therefore resurrects a fixed parser's output on one UI tap.
 _SNAPSHOT_VERSION = 2
+# Second gate, same reason as cache.py's _PARSER_EPOCH and for the same
+# reason it is separate: a snapshot stores the parser's OUTPUT, so it can be
+# re-postprocessed offline but its text can never be re-derived offline.
+# Unreadable-until-refetched is the safe direction (no stale text reaches
+# /providers/select); the sweep below re-stamps only what it really fixed.
+from .cache import _PARSER_EPOCH  # noqa: E402
 # Snapshots older than this are ignored (probes overwrite on every full run
 # anyway, so this only guards videos probed once long ago).
 _CAND_MAX_AGE_S = 7 * 86400
+
+
+def _keep_all_providers():
+    """Server switch: keep every provider's lyrics in the snapshot instead of
+    dropping the plain ones (candidates.py used to prune them whenever a
+    line-or-better entry existed). The switcher menu can then offer a plain
+    provider as the last fallback instead of the list silently shrinking."""
+    try:
+        from .app_settings import get_all
+        return bool(get_all().get('db.keep_all_providers', True))
+    except Exception:
+        return True
 
 
 def _cand_path(video_id):
@@ -85,9 +103,12 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
         if not slim:
             return False
         # Prune: plain entries go when a line-or-better entry exists; line
-        # entries always stay (wbw never deletes its fallback).
+        # entries always stay (wbw never deletes its fallback). Skipped
+        # entirely under db.keep_all_providers -- "put all providers in the
+        # DB" means the switcher can still fall back to a plain provider.
+        keep_all = _keep_all_providers()
         tiers = {c.get('tier') for c in slim}
-        if tiers & {'line', 'wbw'}:
+        if tiers & {'line', 'wbw'} and not keep_all:
             dropped = [c.get('provider') for c in slim if c.get('tier') == 'plain']
             slim = [c for c in slim if c.get('tier') != 'plain']
             if dropped:
@@ -97,6 +118,7 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
         os.makedirs(_CAND_DIR, exist_ok=True)
         payload = {
             'v': _SNAPSHOT_VERSION,
+            'pv': _PARSER_EPOCH,
             'video_id': video_id,
             'song': (song_info or {}).get('title', ''),
             'artist': (song_info or {}).get('artist', ''),
@@ -140,6 +162,13 @@ def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
         # in cache.py actually reach /providers/select and /providers/data.
         if payload.get('v') != _SNAPSHOT_VERSION:
             return None
+        # A parser epoch bump invalidates the TEXT the same way it invalidates
+        # the main cache: this file holds parsed lyrics, not source lyrics, so
+        # it can only be re-derived by refetching. Readable-until-refetched is
+        # the safe direction -- the alternative is /providers/select writing a
+        # fixed parser's old output back into the cache on one UI tap.
+        if payload.get('pv') != _PARSER_EPOCH:
+            return None
         cands = payload.get('candidates')
         if not cands and not payload.get('outcomes'):
             return None
@@ -153,6 +182,53 @@ def load_snapshot(video_id, max_age_s=_CAND_MAX_AGE_S):
         return payload
     except Exception:
         return None
+
+
+def read_snapshot_raw(video_id):
+    """The snapshot payload WITHOUT either gate. Same reason as
+    cache.read_entry: the sweep has to see the files load_snapshot refuses,
+    because a refused snapshot and a missing one are indistinguishable
+    through the gated reader. None when absent/unreadable."""
+    if not video_id:
+        return None
+    try:
+        path = _cand_path(video_id)
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def rewrite_snapshot(video_id, mutate, parser_epoch=None):
+    """Apply `mutate(payload)` to a raw snapshot and write it back atomically.
+    `parser_epoch=None` keeps whatever the file already claimed, which is what
+    the sweep wants for a parser-stale snapshot: the postprocess fixes are real,
+    so the file should be upgraded, but the TEXT was not re-derived, so it must
+    not start claiming the current parser epoch (that would make
+    load_snapshot serve pre-fix text again, which is the trap this gate
+    exists to prevent).
+    Returns True when written."""
+    payload = read_snapshot_raw(video_id)
+    if payload is None:
+        return False
+    try:
+        if mutate(payload) is False:
+            return False
+        payload['v'] = _SNAPSHOT_VERSION
+        if parser_epoch is not None:
+            payload['pv'] = parser_epoch
+        os.makedirs(_CAND_DIR, exist_ok=True)
+        tmp = _cand_path(video_id) + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, _cand_path(video_id))
+        return True
+    except Exception as e:
+        print(f"  [CAND] [FAIL] rewrite {video_id}: {e}")
+        return False
 
 
 def _norm_text(t):

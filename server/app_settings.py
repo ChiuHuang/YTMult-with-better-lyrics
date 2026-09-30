@@ -63,6 +63,46 @@ _SCHEMA = [
                  'once. Individual switches below are finer grained.'),
     },
     # ---- group: diagnostics ----
+    # ---- group: database ----
+    # Server-only keys: no device_key, so they are absent from the device's
+    # YTMUAppSettingBool lookup entirely. Read by db_migrate.py and
+    # pipeline._wbw_retry_cubey on the server.
+    {
+        'key': 'db.auto_sweep',
+        'type': 'bool',
+        'default': True,
+        'group': 'database',
+        'scope': 'server',
+        'label': 'Sweep the database on startup',
+        'desc': ('When the server starts and finds entries written by an older '
+                 'parser or an older record format, replay the offline fixes '
+                 'over them and re-stamp. No network. Songs whose text needs a '
+                 'real refetch are counted and left for the dashboard.'),
+    },
+    {
+        'key': 'db.keep_all_providers',
+        'type': 'bool',
+        'default': True,
+        'group': 'database',
+        'scope': 'server',
+        'label': 'Keep every provider in the snapshots',
+        'desc': ('Store each provider\'s lyrics for a song, not just the ones '
+                 'that beat the current tier, so the device provider switcher '
+                 'can offer a plain provider as a last fallback. Off prunes '
+                 'plain entries whenever a line-or-better one exists.'),
+    },
+    {
+        'key': 'fetch.wbw_retry_cubey',
+        'type': 'bool',
+        'default': True,
+        'group': 'database',
+        'scope': 'server',
+        'label': 'Second Cubey pass when not word-by-word',
+        'desc': ('If a fetch ends without word-level timing, ask Cubey once '
+                 'more for its inner providers separately. The first pass takes '
+                 'one merged answer and can hide a word-timed source that lost '
+                 'the merge. Costs one extra request per non-word-by-word song.'),
+    },
     {
         'key': 'upload_logs',
         'type': 'bool',
@@ -222,6 +262,7 @@ def reset_defaults():
 GROUPS = [
     ('server', 'Server'),
     ('ui', 'Liquid Glass surfaces'),
+    ('database', 'Database'),
     ('diagnostics', 'Diagnostics'),
 ]
 

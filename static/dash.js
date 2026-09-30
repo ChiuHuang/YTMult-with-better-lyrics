@@ -285,6 +285,11 @@
       } catch {}
     });
     eventSource.addEventListener('rebase', e => { if (activePage === 'library') loadLibrary(); });
+    // The sweep and the retranslate job both broadcast exactly one terminal
+    // event, so the panel refreshes itself without polling. loadLibrary()
+    // would re-run three more scans for this; only the two panels change.
+    eventSource.addEventListener('migrate', () => { if (activePage === 'library') loadDbVer(); });
+    eventSource.addEventListener('retranslate', () => { if (activePage === 'library') scanRTrans(); });
     eventSource.addEventListener('retitle', e => { if (activePage === 'library') loadLibrary(); });
     eventSource.addEventListener('jwt', () => { if (activePage === 'jwt') loadJwt(); });
     eventSource.addEventListener('ping', () => {
@@ -767,6 +772,12 @@
       setVal('#stat-none', fmt(scan.buckets?.none) + (scan.unlyriced ? ` (+${fmt(scan.unlyriced)} unlyriced)` : ''));
       renderRebaseStatus(status);
       renderRetitleStatus(retitleStatus);
+      // The version/retranslate panels fetch their own (much bigger) scans, and
+      // neither is needed to draw the library stats, so they are not in the
+      // Promise.all above: a slow full-directory walk would otherwise hold up
+      // the page every time it is opened.
+      loadDbVer().catch(() => {});
+      scanRTrans().catch(() => {});
       loadAI();
       try {
         const unlyriced = await json('/api/admin/library/unlyriced');
@@ -1860,6 +1871,168 @@
     if (startBtn) startBtn.loading = false;
   };
 
+  /* ---- Database version sweep (server/db_migrate.py) ---- */
+  // No polling: the sweep is seconds of local file IO, so the button's
+  // response already carries the finished job. `needs_refetch` is rendered
+  // separately from the fix counts because it is the number that decides
+  // whether the Refetch stale button has anything to do.
+  const renderDbVer = (d) => {
+    const pill = $('#dbver-status');
+    const line = $('#dbver-line');
+    const list = $('#dbver-results');
+    const s = d.scan || {};
+    const j = d.job;
+    if (pill) {
+      pill.textContent = j && j.state === 'running' ? 'running'
+        : s.stale_entries ? `${s.stale_songs} stale` : 'current';
+    }
+    if (line) {
+      const bits = [`format v${d.format_version} / parser epoch ${d.parser_epoch}`];
+      if (s.entries != null) bits.push(`${s.songs} song(s), ${s.entries} file(s)`);
+      if (s.stale_entries) {
+        bits.push(`${s.stale_entries} stale`);
+        bits.push(`${s.needs_refetch} need a real refetch`);
+      } else {
+        bits.push('all current');
+      }
+      if (j && j.state === 'done') {
+        bits.push(`sweep: ${j.fixed} fixed, ${j.demoted} demoted, ${j.restamped} re-stamped, ${j.skipped} skipped`);
+        if (j.translations_repaired) bits.push(`${j.translations_repaired} translation(s) repaired`);
+        if (j.candidates_written) bits.push(`${j.candidates_written}/${j.candidates} snapshot(s)`);
+        if (j.errors) bits.push(`${j.errors} error(s)`);
+      }
+      line.textContent = bits.join(' | ');
+    }
+    const refetchBtn = $('#dbver-refetch');
+    if (refetchBtn) refetchBtn.disabled = !(s.needs_refetch > 0);
+    if (list) {
+      const rows = (j && j.results) || [];
+      list.innerHTML = '';
+      if (!rows.length) return;
+      rows.slice(-60).reverse().forEach(r => {
+        const cls = r.status === 'needs_refetch' ? 'rb-failed'
+          : r.status === 'demoted' ? 'rb-same'
+          : (r.status === 'error') ? 'rb-failed' : 'rb-upgraded';
+        const el2 = el('div', {class:`rebase-row ${cls}`});
+        el2.appendChild(document.createTextNode(
+          `${r.song || r.key} - ${r.artist || ''} | ${r.status}${r.message ? ' | ' + r.message : ''}`));
+        list.appendChild(el2);
+      });
+    }
+  };
+  const loadDbVer = async () => {
+    try {
+      const r = await API('/api/admin/library/dbversion');
+      renderDbVer(await r.json());
+    } catch {}
+  };
+  const runDbSweep = async (dryRun) => {
+    const btn = dryRun ? $('#dbver-dry') : $('#dbver-sweep');
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/dbsweep/start', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({dry_run: !!dryRun})});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'sweep failed');
+      renderDbVer(d);
+      mdui.snackbar({message: d.job.dry_run ? 'Dry run finished' : `Sweep: ${d.job.fixed} fixed, ${d.job.demoted} demoted, ${d.job.needs_refetch} still need a refetch`});
+      loadLibrary();
+    } catch (e) { mdui.snackbar({message:'Sweep failed: '+e.message}); }
+    if (btn) btn.loading = false;
+  };
+  const refetchStale = async () => {
+    const btn = $('#dbver-refetch');
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/dbversion/refetch', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({workers: 4})});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'refetch failed');
+      mdui.snackbar({message:`Refetching ${d.total} stale song(s) -- watch the bulk panel`});
+      // Hand the work to the bulk panel rather than starting a second,
+      // invisible job: bulk_progress is the only stream it renders.
+      bulkJobId = d.job_id;
+      bulkState = {state:'running', total: d.total || 0, done: 0, upgraded: 0, kept: 0,
+                   failed: 0, errors: 0, tq_done: 0, tq_queued: 0, current: null, stage: '', results: []};
+      try { sessionStorage.setItem('ymtu-bulk-job', d.job_id); } catch {}
+      renderBulk(bulkState);
+      const stop = $('#bulk-stop');
+      if (stop) stop.style.display = '';
+    } catch (e) { mdui.snackbar({message:'Refetch stale failed: '+e.message}); }
+    if (btn) btn.loading = false;
+  };
+
+  /* ---- Retranslate broken (server/retranslate.py) ---- */
+  const renderRTrans = (d) => {
+    const pill = $('#rtrans-status');
+    const line = $('#rtrans-line');
+    const list = $('#rtrans-results');
+    const s = d.scan || {};
+    const j = d.job;
+    if (pill) pill.textContent = j && j.state === 'running' ? 'running'
+      : s.songs_broken ? `${s.songs_broken} song(s) broken` : 'clean';
+    if (line) {
+      const bits = [];
+      if (s.songs != null) bits.push(`${s.songs} song(s) checked`);
+      if (s.rows_broken) {
+        bits.push(`${s.rows_broken} broken row(s)`);
+        const det = Object.entries(s.defects || {}).map(([k, v]) => `${k} x${v}`).join(', ');
+        if (det) bits.push(det);
+      } else {
+        bits.push('no broken translations');
+      }
+      if (j && j.state !== 'running' && j.done) {
+        bits.push(`${j.done}/${j.total}: ${j.fixed} song(s) retranslated, ${j.rows_fixed} row(s) fixed, ${j.rows_remaining} still broken`);
+        if (j.errors) bits.push(`${j.errors} error(s)`);
+      }
+      line.textContent = bits.join(' | ');
+    }
+    if (list) {
+      const rows = (j && j.results) || [];
+      list.innerHTML = '';
+      rows.slice(-60).reverse().forEach(r => {
+        const cls = (r.status === 'error' || r.status === 'rate_limited') ? 'rb-failed'
+          : r.status === 'partial' ? 'rb-same' : 'rb-upgraded';
+        const el2 = el('div', {class:`rebase-row ${cls}`});
+        el2.appendChild(document.createTextNode(
+          `${r.song || r.key} - ${r.artist || ''} | ${r.status} | ${r.defects} broken (${r.detail || 'none'})${r.fixed ? ' | fixed ' + r.fixed : ''}`));
+        list.appendChild(el2);
+      });
+    }
+  };
+  const scanRTrans = async () => {
+    const btn = $('#rtrans-scan');
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/retranslate?lang=' +
+        encodeURIComponent((($('#rtrans-lang') || {}).value || '').trim()));
+      renderRTrans(await r.json());
+    } catch (e) { mdui.snackbar({message:'Scan failed: '+e.message}); }
+    if (btn) btn.loading = false;
+  };
+  const startRTrans = async () => {
+    const btn = $('#rtrans-start');
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/retranslate/start', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({lang: (($('#rtrans-lang') || {}).value || '').trim()})});
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'start failed');
+      mdui.snackbar({message:'Retranslate started'});
+      await scanRTrans();
+      const stop = $('#rtrans-stop');
+      if (stop) stop.style.display = '';
+    } catch (e) { mdui.snackbar({message:'Retranslate failed: '+e.message}); }
+    if (btn) btn.loading = false;
+  };
+  const stopRTrans = async () => {
+    try { await API('/api/admin/library/retranslate/stop', {method:'POST'}); } catch {}
+    const stop = $('#rtrans-stop');
+    if (stop) stop.style.display = 'none';
+    await scanRTrans();
+  };
+
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
   const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
@@ -2044,6 +2217,20 @@
     if (bulkStopBtn) bulkStopBtn.addEventListener('click', stopBulk);
     const bulkTransBtn = $('#bulk-translate-missing');
     if (bulkTransBtn) bulkTransBtn.addEventListener('click', translateMissing);
+    const dbvRefresh = $('#dbver-refresh');
+    if (dbvRefresh) dbvRefresh.addEventListener('click', loadDbVer);
+    const dbvDry = $('#dbver-dry');
+    if (dbvDry) dbvDry.addEventListener('click', () => runDbSweep(true));
+    const dbvSweep = $('#dbver-sweep');
+    if (dbvSweep) dbvSweep.addEventListener('click', () => runDbSweep(false));
+    const dbvRefetch = $('#dbver-refetch');
+    if (dbvRefetch) dbvRefetch.addEventListener('click', refetchStale);
+    const rtScan = $('#rtrans-scan');
+    if (rtScan) rtScan.addEventListener('click', scanRTrans);
+    const rtStart = $('#rtrans-start');
+    if (rtStart) rtStart.addEventListener('click', startRTrans);
+    const rtStop = $('#rtrans-stop');
+    if (rtStop) rtStop.addEventListener('click', stopRTrans);
     aiInit();
     appInit();
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
