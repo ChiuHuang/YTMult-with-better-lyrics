@@ -4,7 +4,16 @@
 #import "YTMULiquidGlassPreferences.h"
 
 static BOOL PlayerV2(void){return YTMULGFeatureEnabled(@"fullPlayerV2Enabled");}
-static const void*kGlass=&kGlass,&kAnimated=&kAnimated;
+// The associated-object keys. They must be the ADDRESS of something with static
+// storage duration, and each key must be a DISTINCT address -- two variables
+// initialized from their own names would be two addresses holding the same
+// value, which is not what a unique key is. A `static const void *kGlass =
+// &kGlass;` cannot even compile: forming `void **` out of a `const void *` is
+// an error, and the whole file died at :7 before a single hook was installed.
+static char kGlassKey;
+static char kAnimatedKey;
+static const void *kGlass = &kGlassKey;
+static const void *kAnimated = &kAnimatedKey;
 
 // NEUTRAL GLASS. This file used to hardcode a magenta border (1,.62,.94) and a
 // violet shadow (.54,.20,.78 / .72,.28,1) on the artwork card, every header
@@ -54,7 +63,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 @interface YTMNowPlayingViewController:UIViewController@end
 %hook YTMNowPlayingViewController
 - (void)viewDidAppear:(BOOL)a{%orig;if(PlayerV2())Enter(self.view);}
-- (void)viewDidLayoutSubviews{%orig;if(!PlayerV2()||CGRectGetWidth(self.view.bounds)<300)return;self.view.backgroundColor=UIColor.clearColor;self.opaque=NO;ClearRoot(self.view,0);}
+- (void)viewDidLayoutSubviews{%orig;if(!PlayerV2()||CGRectGetWidth(self.view.bounds)<300)return;self.view.backgroundColor=UIColor.clearColor;[self.view setOpaque:NO];ClearRoot(self.view,0);}
 %end
 
 @interface YTMPlayerHeaderView:UIView@end
