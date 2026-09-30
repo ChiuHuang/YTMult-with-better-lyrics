@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Nuotolinis valdymas";
 "LG_REMOTE_CONTROL_DESC" = "Leisti serveriui išjungti sajos funkcijas. Ijungus serveris negales nieko išjungti; jūsų perjungiklie lieka jūsų.";
 "LG_SECTION_REMOTE" = "Nuotoline";
+"LYRICS_SINGER_BOTH" = "Abu";
+"LYRICS_SINGER_N" = "Dainininkas %ld";
+
+"LYRICS_DUET" = "Dainininko eilutės";
+
+"LYRICS_DUET_DESC" = "Kaip duetai rodo, kas dainuoja kiekvieną eilutė.";
+
+"LYRICS_DUET_OFF" = "Išjungta";
+
+"LYRICS_DUET_ALIGN" = "Lygiuoti";
+
+"LYRICS_DUET_LABEL" = "Etiketė";

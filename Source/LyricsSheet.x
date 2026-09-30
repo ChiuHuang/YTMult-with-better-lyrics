@@ -1,4 +1,8 @@
 #import "LyricsShared.h"
+// LOC() for the duet marker strings. It resolves against the tweak's own bundle
+// (Source/Utils/NSBundle+YTMU.m), NOT the main bundle -- plain NSLocalizedString
+// would miss every key here and return the key name itself.
+#import "Localization.h"
 
 static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     return ((c >= 0x3040 && c <= 0x309F) ||
@@ -196,8 +200,48 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 // as in flight (see ytmu_scrollToRow:instant:).
 static const NSTimeInterval YTMUTransitionDuration = 0.28;
 // Restrained activation pop: the old 1.04 / alpha 0.3 / 0.5s read as a jump.
+// Applied to a LINE-SYNCED row only; a word-synced row's arrival motion is the
+// per-word sway below, which is what braccato's own themes do (its karaoke
+// preset sets line-scale off and leaves the wobble on).
 static const CGFloat YTMUPopScale = 1.018;
 static const CGFloat YTMUPopStartAlpha = 0.6;
+
+// The rest of this block is braccato parity (better-lyrics/braccato, cloned to
+// the temp dir for reference). Its numbers are in packages/core/src/styles/
+// variables.css and its timings in engine.ts; nothing is vendored.
+static const NSTimeInterval YTMUHighlightFadeInDuration = 0.33;   // variables.css:90
+static const NSTimeInterval YTMUHighlightFadeOutDuration = 0.50;  // variables.css:94
+// braccato rests the sung line at 37% of the viewport, not the middle, so the
+// lines still to come have somewhere to go. engine.ts:125.
+static const CGFloat YTMUScrollTargetRatio = 0.37;
+// Highlight glow: a drop-shadow that starts fat around the word being sung and
+// shrinks away over 1.2x that word's own time, never under 1.2s.
+// variables.css:105-108.
+static const CGFloat YTMUHighlightGlowRadius = 12.8;
+static const CGFloat YTMUHighlightGlowRatio = 1.2;
+static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
+// Word wobble, applied per WORD as a whole-line sway. braccato's own keyframes
+// are translateX(0.05em) + scaleX(1.025) at 12.5%, settling at 75%, over 1s
+// (variables.css:111-120). Only the translate half survives here: our lyric
+// labels are full-width with Natural alignment, so a scaleX about the label
+// centre would drag the glyphs toward the middle instead of squashing the word
+// -- that needs one layer per word, which is not built.
+static const NSTimeInterval YTMUWobbleDuration = 1.0;
+static const CGFloat YTMUWobblePeakOffset = 0.125;
+static const CGFloat YTMUWobbleSettleOffset = 0.75;
+static const CGFloat YTMUWobblePeakEm = 0.05;
+// Karaoke swipe overshoot: the leading edge runs past the word and is pulled
+// back over the last fifth of it, so the highlight visibly catches up.
+// variables.css:101-104 does the same thing with animated gradient stops
+// (-0.2/-0.1 -> 1.4/1.5).
+static const CGFloat YTMUSwipeOvershoot = 0.28;
+static const CGFloat YTMUSwipeOvershootTail = 0.22;
+static const NSTimeInterval YTMUWaveOscillationDuration = 1.25;  // variables.css:139
+// Distance ladder: opacity by how far a row sits from the sung line. braccato's
+// Sustain theme pairs each step with a blur; the blur needs an effect view per
+// row and reads as a notification card, so only the opacity moves.
+static const CGFloat YTMUDistanceLadder[6] = { 1.0, 0.88, 0.72, 0.52, 0.28, 0.0 };
+static const NSInteger YTMUDistanceLadderSteps = 5;
 // Row of the animated scroll currently in flight, -1 when the table is at
 // rest. A second target arriving inside the transition would queue behind the
 // first and the two fight, so the caller jumps instead (see the method below).
@@ -354,11 +398,138 @@ static const CGFloat YTMURowPadTop = 14.0;
 // room to be read as its own line.
 static const CGFloat YTMURowPadGap = 10.0;
 static const CGFloat YTMURowPadBottom = 14.0;
+// Gap above a duet voice marker. Smaller than YTMURowPadTop on purpose: the
+// marker belongs to the row it introduces, so it sits closer to the content
+// edge and the lyric line below it keeps the same rhythm as every other line.
+static const CGFloat YTMUSingerPadTop = 8.0;
+
+// ---------------------------------------------------------------------------
+// Duet display mode. Two answers to the same question, both asked for, so both
+// ship and the user picks one in Lyrics settings:
+//
+//   kYTMUDuetOff      nothing
+//   kYTMUDuetAlign    the second voice goes right-aligned, a shared line sits
+//                     centred (drives lyricLabel.textAlignment, via
+//                     YTMUVoiceAlignment below)
+//   kYTMUDuetLabel    a small caps marker above the line, printed only where the
+//                     singer changes (drives singerLabel)
+//
+// Default is ALIGN: the user picked it over the label on sight, then asked for
+// the label back as a setting. The two are mutually exclusive at the single
+// decision point -- YTMUVoiceAlignment returns Natural outside align mode -- so
+// a row is never both right-aligned and carrying a marker.
+// ---------------------------------------------------------------------------
+typedef NS_ENUM(NSInteger, YTMUDuetDisplay) {
+    kYTMUDuetOff = 0,
+    kYTMUDuetAlign = 1,
+    kYTMUDuetLabel = 2,
+};
+
+// Read from the local YTMUltimate pref dictionary, NOT the server app-settings
+// table -- it is a per-device display choice like lyricsFullscreenAutoOpen, and
+// there is no YTMUAppSettingInt to call (that was invented and does not exist).
+// Cached behind NSUserDefaultsDidChangeNotification because -configureCell asks
+// on every row on every activation change, and dictionaryForKey: is a
+// deserialisation each time.
+static YTMUDuetDisplay YTMUDuetDisplayMode(void) {
+    static dispatch_once_t once;
+    static BOOL dirty = YES;
+    static YTMUDuetDisplay cached = kYTMUDuetAlign;
+    dispatch_once(&once, ^{
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSUserDefaultsDidChangeNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) { dirty = YES; }];
+    });
+    if (dirty) {
+        id v = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"][@"lyricsDuetDisplay"];
+        NSInteger n = [v respondsToSelector:@selector(integerValue)] ? [v integerValue] : kYTMUDuetAlign;
+        if (n < kYTMUDuetOff || n > kYTMUDuetLabel) n = kYTMUDuetAlign;
+        cached = (YTMUDuetDisplay)n;
+        dirty = NO;
+    }
+    return cached;
+}
+
+// The voice a line is sung by, as a comparable key, or nil when the file said
+// nothing about it. `duet` is its own key rather than "singer 1 as well": both
+// voices on one line is a different fact from either of them singing it.
+//
+// The server fills these in from the TTML's ttm:agent (server/parsers_ttml.py),
+// nearest-wins over <p> -> <div> -> <body>. `singer` is an INDEX into the person
+// agents declared in <head>, and the file gives no names -- the agents are empty
+// elements -- so this never invents one.
+static NSString *YTMUSingerVoiceKey(NSDictionary *lyric) {
+    if (![lyric isKindOfClass:[NSDictionary class]]) return nil;
+    if ([lyric[@"duet"] boolValue]) return @"both";
+    id s = lyric[@"singer"];
+    if (![s isKindOfClass:[NSNumber class]]) return nil;
+    return [NSString stringWithFormat:@"p%ld", (long)[s integerValue]];
+}
+
+// Marker text for one row. The NUMBER is all the file gives us.
+static NSString *YTMUSingerMarkerText(NSDictionary *lyric) {
+    if ([lyric[@"duet"] boolValue]) return LOC(@"LYRICS_SINGER_BOTH");
+    id s = lyric[@"singer"];
+    if (![s isKindOfClass:[NSNumber class]]) return nil;
+    NSInteger idx = [s integerValue];
+    if (idx < 0 || idx > 15) return nil;
+    return [NSString stringWithFormat:LOC(@"LYRICS_SINGER_N"), (long)(idx + 1)];
+}
+
+// ---------------------------------------------------------------------------
+// Duet display is ALIGNMENT and nothing else: the second voice's lines go
+// right-aligned and a shared line sits centred. See YTMUVoiceAlignment below,
+// which -configureCell: applies to all three labels plus the instrumental
+// ribbon.
+//
+// The alternative was a small caps "Singer 2" marker above the line, printed
+// only where the singer changes. Its scaffolding was built and then removed: the
+// user picked alignment on sight, and keeping the label meant a fourth vertical
+// padding constraint on every row, a marker that had to be collapsed to zero
+// height to stay out of a solo track's layout, and two localized strings, all
+// for nothing. Do not re-add it without asking.
+//
+// The data is on the wire either way: server/parsers_ttml.py fills `singer` and
+// `duet` in from the TTML's ttm:agent (commit 72225e9), so nothing server-side
+// needs revisiting.
+
+// The instrumental ribbon, as a pair of shapes. BOTH must have identical command
+// structure -- same move, same four quads, same two lines, same close -- because
+// CoreAnimation only interpolates between two CGPaths whose command sequences
+// match. A mismatched pair snaps at the halfway point instead of flowing
+// (braccato says the same of its own path() pair).
+//
+// Proportions are braccato's `M -4 3 Q 1 2 5 3 Q 10 4 14 3 Q 18 2 22 3 Q 26 4
+// 30 3 L 30 4 L -4 4 Z`, mapped onto x in [0, width] and y in [0, amp] with y
+// growing downward so y = amp is the baseline the wave flattens onto.
+static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
+    UIBezierPath *p = [UIBezierPath bezierPath];
+    CGFloat w = MAX(width, 2.0);
+    CGFloat a = MAX(amp, 2.0);
+    CGFloat mid = a * 0.5;
+    CGFloat crestY = high ? 0.0 : a;
+    CGFloat troughY = high ? a : 0.0;
+    [p moveToPoint:CGPointMake(0.0, mid)];
+    [p addQuadCurveToPoint:CGPointMake(w * 0.2647, mid) controlPoint:CGPointMake(w * 0.1470, crestY)];
+    [p addQuadCurveToPoint:CGPointMake(w * 0.5290, mid) controlPoint:CGPointMake(w * 0.4118, troughY)];
+    [p addQuadCurveToPoint:CGPointMake(w * 0.7647, mid) controlPoint:CGPointMake(w * 0.6470, crestY)];
+    [p addQuadCurveToPoint:CGPointMake(w * 1.0000, mid) controlPoint:CGPointMake(w * 0.8820, troughY)];
+    [p addLineToPoint:CGPointMake(w, a)];
+    [p addLineToPoint:CGPointMake(0.0, a)];
+    [p closePath];
+    return p;
+}
 
 @interface YTMULyricsCell (SheetRows)
 // Returns YES when the row's height state actually changed, so the caller can
 // ask the table to re-measure the self-sizing row.
 - (BOOL)ytmu_setRowCollapsed:(BOOL)collapsed;
+// (Re)arms the wave's repeating path animation. Defined below -layoutSubviews,
+// which calls it, and declared here so that call is not an implicit method
+// lookup.
+- (void)ytmu_armWaveOscillation;
 @end
 
 @implementation YTMULyricsCell
@@ -390,9 +561,14 @@ static const CGFloat YTMURowPadBottom = 14.0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
         self.wipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
-        self.wipeLabel.layer.shadowOffset = CGSizeMake(0, 2);
-        self.wipeLabel.layer.shadowRadius = 4.0;
-        self.wipeLabel.layer.shadowOpacity = 0.75;
+        // Centred, because this shadow is now the animated highlight glow rather
+        // than a drop: the constant downward drop that keeps the bright text
+        // readable over artwork lives in the attributed string's NSShadow, so
+        // this one is free to swell around the word being sung. See
+        // -applyWordColorsToCell:...force:.
+        self.wipeLabel.layer.shadowOffset = CGSizeZero;
+        self.wipeLabel.layer.shadowRadius = 0.0;
+        self.wipeLabel.layer.shadowOpacity = 0.0;
         self.wipeLabel.layer.masksToBounds = NO;
         self.wipeLabel.layer.shouldRasterize = YES;
         self.wipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
@@ -440,6 +616,43 @@ static const CGFloat YTMURowPadBottom = 14.0;
         self.transLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.transLabel];
 
+        // Instrumental-gap ribbon. A bare shape layer on the content view: it is
+        // the only lyric decoration that draws its own geometry, and it is
+        // present on at most one row at a time.
+        self.waveLayer = [CAShapeLayer layer];
+        self.waveLayer.fillColor = [UIColor clearColor].CGColor;
+        self.waveLayer.strokeColor = nil;
+        // Baseline-anchored so the flatten in -layoutSubviews collapses the wave
+        // downward onto y = amp instead of shrinking it about its middle.
+        self.waveLayer.anchorPoint = CGPointMake(0.0, 1.0);
+        self.waveLayer.hidden = YES;
+        _waveWidth = 0.0;
+        _waveProgress = 0.0;
+        // Must start at 1.0, not the CGFloat zero value: -ytmu_setDistanceAlpha:
+        // early-outs when the requested value already matches, so a zero here
+        // would make the FIRST ladder pass on a fresh cell a no-op for a row
+        // that should be at 0.0 -- and it would stay fully bright, five lines
+        // from the sung one, until something else touched it.
+        _distanceAlpha = 1.0;
+        [self.contentView.layer addSublayer:self.waveLayer];
+
+        // Voice marker for the kYTMUDuetLabel mode. Pinned to zero height unless
+        // a duet actually changes singer on this row, so a solo track -- or a
+        // song shown in align mode -- takes no extra vertical space at all.
+        self.singerLabel = [[UILabel alloc] init];
+        self.singerLabel.numberOfLines = 1;
+        self.singerLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold];
+        self.singerLabel.textColor = YTMULyricInk(0.55, 0.6, self.contentView);
+        self.singerLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
+        self.singerLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        self.singerLabel.layer.shadowRadius = 2.0;
+        self.singerLabel.layer.shadowOpacity = 0.4;
+        self.singerLabel.layer.masksToBounds = NO;
+        self.singerLabel.layer.shouldRasterize = YES;
+        self.singerLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        self.singerLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.singerLabel];
+
         // Content sits well in from both edges; see YTMULyricGutter* above.
         CGFloat gutterLead = YTMULyricGutterLeading();
         CGFloat gutterTrail = YTMULyricGutterTrailing();
@@ -453,25 +666,43 @@ static const CGFloat YTMURowPadBottom = 14.0;
             [self.wipeLabel.bottomAnchor constraintEqualToAnchor:self.lyricLabel.bottomAnchor],
 
             [self.transLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
-            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
+            [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
+
+            [self.singerLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
+            [self.singerLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
         ]];
         // The three vertical padding constraints are kept (not inline) because
         // -ytmu_setRowCollapsed: rewrites their constants: an instrumental
         // marker that is not its turn must take no vertical space. The fourth
         // one pins the translation label to zero for the same reason -- the
-        // ONLY height constraint on that anchor, so nothing can conflict with
-        // it and normal rows keep sizing themselves.
+        // ONLY height constraint on that anchor, so nothing can conflict with it
+        // and normal rows keep sizing themselves.
+        NSLayoutConstraint *singerPadTop = [self.singerLabel.topAnchor
+            constraintEqualToAnchor:self.contentView.topAnchor constant:YTMUSingerPadTop];
         NSLayoutConstraint *padTop = [self.lyricLabel.topAnchor
-            constraintEqualToAnchor:self.contentView.topAnchor constant:YTMURowPadTop];
+            constraintEqualToAnchor:self.singerLabel.bottomAnchor constant:YTMURowPadTop];
         NSLayoutConstraint *padGap = [self.transLabel.topAnchor
             constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:YTMURowPadGap];
         NSLayoutConstraint *padBottom = [self.transLabel.bottomAnchor
             constraintEqualToAnchor:self.contentView.bottomAnchor constant:-YTMURowPadBottom];
-        [NSLayoutConstraint activateConstraints:@[padTop, padGap, padBottom]];
+        [NSLayoutConstraint activateConstraints:@[singerPadTop, padTop, padGap, padBottom]];
         NSLayoutConstraint *flat = [self.transLabel.heightAnchor constraintEqualToConstant:0.0];
         flat.active = NO;
+        // singerFlat does for the voice marker what `flat` does for the
+        // translation label: pins it to zero height, so it starts ACTIVE and a
+        // solo track costs nothing. padTop now hangs off singerLabel.bottom
+        // instead of contentView.top, which is what lets a marker become its own
+        // line above the lyric; its constant keeps the same meaning, so the
+        // `changed` test in -ytmu_setRowCollapsed: is untouched.
+        NSLayoutConstraint *singerFlat = [self.singerLabel.heightAnchor constraintEqualToConstant:0.0];
+        singerFlat.active = YES;
+        // FIVE entries now, and the guard in -ytmu_setRowCollapsed: checks the
+        // count. Growing this array without growing that guard is the silent way
+        // to turn row collapsing off for every row in the sheet: it returns NO,
+        // no constraint breaks, and the only symptom is that a collapsed
+        // instrumental row keeps a full line of height.
         objc_setAssociatedObject(self, @selector(ytmu_setRowCollapsed:),
-                                 @[padTop, padGap, padBottom, flat],
+                                 @[padTop, padGap, padBottom, flat, singerFlat],
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return self;
@@ -482,29 +713,192 @@ static const CGFloat YTMURowPadBottom = 14.0;
 // gutters and the automatic row height of a normal line are untouched.
 - (BOOL)ytmu_setRowCollapsed:(BOOL)collapsed {
     NSArray *pack = objc_getAssociatedObject(self, @selector(ytmu_setRowCollapsed:));
-    if (pack.count != 4) return NO;
+    // A count mismatch here returns NO, i.e. the row silently stops collapsing
+    // -- no constraint breaks and nothing is logged -- so this number has to
+    // match the array in -init exactly. It was 4 until the duet voice marker
+    // added singerFlat.
+    if (pack.count != 5) return NO;
     NSLayoutConstraint *padTop = pack[0];
     NSLayoutConstraint *padGap = pack[1];
     NSLayoutConstraint *padBottom = pack[2];
     NSLayoutConstraint *flat = pack[3];
+    NSLayoutConstraint *singerFlat = pack[4];
     BOOL changed = (padTop.constant != (collapsed ? 0.0 : YTMURowPadTop)) || (flat.active != collapsed);
     padTop.constant = collapsed ? 0.0 : YTMURowPadTop;
     padGap.constant = collapsed ? 0.0 : YTMURowPadGap;
     padBottom.constant = collapsed ? 0.0 : -YTMURowPadBottom;
     if (flat.active != collapsed) flat.active = collapsed;
+    // A collapsed row is an instrumental marker, which nobody sings, so the
+    // voice marker goes flat with it. On expand it is left alone: -configureCell
+    // sets the real marker (or nil) immediately afterwards.
+    if (collapsed && (singerFlat.active == NO || self.singerLabel.text.length)) {
+        self.singerLabel.text = @"";
+        singerFlat.active = YES;
+        changed = YES;
+    }
     [self setNeedsUpdateConstraints];
     [self setNeedsLayout];
     return changed;
 }
+
+// Show or clear this row's voice marker. Passing nil is the normal case and
+// must be safe to call on every configure, including on a recycled cell that
+// still holds the previous song's marker.
+- (void)ytmu_setSingerMarker:(NSString *)text {
+    BOOL show = text.length > 0;
+    self.singerLabel.text = show ? text : @"";
+    NSArray *pack = objc_getAssociatedObject(self, @selector(ytmu_setRowCollapsed:));
+    if (pack.count != 5) return;
+    NSLayoutConstraint *singerFlat = pack[4];
+    // singerFlat ACTIVE == pinned to zero height, so it is active when hidden.
+    if (singerFlat.active == !show) return;
+    singerFlat.active = !show;
+    [self setNeedsUpdateConstraints];
+    [self setNeedsLayout];
+}
+
+
 
 - (void)setWipeProgress:(CGFloat)progress {
     _wipeProgress = MIN(MAX(progress, 0.0), 1.0);
     [self setNeedsLayout];
 }
 
+// --- braccato parity: the arrival/departure cross-fade -------------------------
+//
+// The revealed layer (wipeLabel) and the resting layer (lyricLabel) are both
+// full copies of the line, so a highlight fade is just a fade between them: the
+// active colour lives on the reveal layer on BOTH kinds of row now, which is
+// what a line-synced row never had before (it swapped textColor, so it SNAPPED).
+//
+// Explicit CAAnimation rather than a UIView block, so the caller's value is the
+// model value and a re-fade mid-flight retargets from what is on screen instead
+// of jumping back to 0 or 1.
+- (void)ytmu_fadeHighlightTo:(CGFloat)alpha duration:(NSTimeInterval)duration {
+    CALayer *layer = self.wipeLabel.layer;
+    CALayer *presented = (CALayer *)layer.presentationLayer;
+    CGFloat from = presented ? (CGFloat)presented.opacity : (CGFloat)layer.opacity;
+    [layer removeAnimationForKey:@"ytmuHighlightFade"];
+    alpha = MIN(MAX(alpha, 0.0), 1.0);
+    if (fabs(from - alpha) < 0.001) {
+        layer.opacity = (float)alpha;
+        return;
+    }
+    CABasicAnimation *anim = [CABasicAnimation animationWithKeyPath:@"opacity"];
+    anim.fromValue = @(from);
+    anim.toValue = @(alpha);
+    anim.duration = MAX(duration, 0.0);
+    anim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    anim.fillMode = kCAFillModeForwards;
+    anim.removedOnCompletion = NO;
+    layer.opacity = (float)alpha;
+    [layer addAnimation:anim forKey:@"ytmuHighlightFade"];
+}
+
+// The mask that reveals everything, for a row whose highlight is not word-timed.
+// Written explicitly rather than left nil: a CAShapeLayer with a nil path is not
+// a documented "show all" and has behaved differently across iOS versions.
+- (void)ytmu_showFullWipe {
+    CALayer *feather = nil;
+    for (CALayer *sub in self.wipeMask.sublayers) {
+        if ([sub.name isEqualToString:@"YTMULyricsWipeFeather"]) { feather = sub; break; }
+    }
+    feather.hidden = YES;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.wipeMask.frame = self.wipeLabel.bounds;
+    self.wipeMask.path = [UIBezierPath bezierPathWithRect:self.wipeLabel.bounds].CGPath;
+    [CATransaction commit];
+}
+
+// The arrival. Starts the reveal layer at nothing unless a fade is already in
+// flight, so a line cannot simply appear at full brightness. A row whose
+// fade-OUT is still running -- a fast line, or a tap-seek straight back -- is
+// retargeted from whatever is actually on screen instead, which is what stops a
+// visible dip on the way in.
+- (void)ytmu_beginHighlightArrivalWithDuration:(NSTimeInterval)duration {
+    CALayer *layer = self.wipeLabel.layer;
+    if (![layer animationForKey:@"ytmuHighlightFade"]) {
+        layer.opacity = 0.0;
+    }
+    [self ytmu_fadeHighlightTo:1.0 duration:duration];
+}
+
+- (void)ytmu_setDistanceAlpha:(CGFloat)alpha {
+    alpha = MIN(MAX(alpha, 0.0), 1.0);
+    if (fabs(alpha - self.distanceAlpha) < 0.005) return;
+    _distanceAlpha = alpha;
+    // contentView, not the cell: the cell's own alpha would fight
+    // UITableView's selection/highlight plumbing and the row separators.
+    self.contentView.alpha = alpha;
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.wipeMask.frame = self.wipeLabel.bounds;
+    if (!self.waveActive) {
+        if (!self.waveLayer.hidden) self.waveLayer.hidden = YES;
+        return;
+    }
+    CGRect lb = self.lyricLabel.bounds;
+    CGFloat width = CGRectGetWidth(lb);
+    CGFloat amp = (self.lyricLabel.font ? self.lyricLabel.font.pointSize : 22.0) * 0.30;
+    if (width <= 2.0 || amp <= 2.0) {
+        if (!self.waveLayer.hidden) self.waveLayer.hidden = YES;
+        return;
+    }
+    self.waveLayer.hidden = NO;
+
+    // Laid out from the label's CENTRE, never its frame: the arrival pop and the
+    // word wobble both put a transform on this label, and a transformed view's
+    // frame is undefined.
+    CGPoint lc = self.lyricLabel.center;
+    CGFloat x = lc.x - width * 0.5;
+    if (self.ytmu_textAlign == NSTextAlignmentRight) x = lc.x + width * 0.5 - width;
+    else if (self.ytmu_textAlign == NSTextAlignmentCenter) x = lc.x - width * 0.5;
+
+    // Geometry is rebuilt only when the width really moved: a running `path`
+    // animation would otherwise keep drawing the shape it captured, and
+    // rebuilding it every layout pass would restart the oscillation 60 times a
+    // second.
+    if (fabs(width - self.waveWidth) > 0.5) {
+        self.waveWidth = width;
+        [self.waveLayer removeAnimationForKey:@"ytmuWaveOscillation"];
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        self.waveLayer.bounds = CGRectMake(0.0, 0.0, width, amp);
+        self.waveLayer.path = YTMUWavePath(width, amp, YES).CGPath;
+        [CATransaction commit];
+        [self ytmu_armWaveOscillation];
+    }
+    // braccato flattens the wave across the gap's own length, ease-in, from a
+    // 1.2x overshoot at the start down to flat.
+    CGFloat t = MIN(MAX(self.waveProgress, 0.0), 1.0);
+    CGFloat scaleY = 1.2 * (1.0 - t * t);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    self.wipeMask.frame = self.wipeLabel.bounds;
+    self.waveLayer.position = CGPointMake(x, lc.y);
+    self.waveLayer.transform = CATransform3DMakeScale(1.0, MAX(scaleY, 0.0001), 1.0);
+    [CATransaction commit];
+}
+
+// The wave breathes whether or not the audio is playing (it is a repeating
+// WAAPI animation there too), so it needs no clock of ours -- which also means
+// it freezes by itself when playback pauses, since the render tree stops.
+- (void)ytmu_armWaveOscillation {
+    if (UIAccessibilityIsReduceMotionEnabled()) return;
+    CGFloat width = self.waveLayer.bounds.size.width;
+    CGFloat amp = self.waveLayer.bounds.size.height;
+    if (width <= 2.0 || amp <= 2.0) return;
+    CABasicAnimation *osc = [CABasicAnimation animationWithKeyPath:@"path"];
+    osc.fromValue = (__bridge id)YTMUWavePath(width, amp, YES).CGPath;
+    osc.toValue = (__bridge id)YTMUWavePath(width, amp, NO).CGPath;
+    osc.duration = YTMUWaveOscillationDuration;
+    osc.autoreverses = YES;
+    osc.repeatCount = HUGE_VALF;
+    osc.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [self.waveLayer addAnimation:osc forKey:@"ytmuWaveOscillation"];
 }
 
 - (void)clearWipe {
@@ -517,6 +911,21 @@ static const CGFloat YTMURowPadBottom = 14.0;
     // on reloadData, so the typewriter mask has to be dropped here too --
     // otherwise a half-revealed row survives a reconfigure of the same cell.
     [self ytmu_clearType];
+    // Likewise a half-finished cross-fade: the reveal layer has to go back to
+    // fully opaque, or the next row to use it inherits the previous line's fade
+    // and appears dim for no reason.
+    [self.wipeLabel.layer removeAnimationForKey:@"ytmuHighlightFade"];
+    self.wipeLabel.layer.opacity = 1.0;
+    self.wipeLabel.alpha = 1.0;
+    self.wipeLabel.transform = CGAffineTransformIdentity;
+    self.lyricLabel.transform = CGAffineTransformIdentity;
+    self.lyricLabel.alpha = 1.0;
+    // The glow is per-word state too: leaving it on a blanked row would light a
+    // halo around nothing.
+    self.wipeLabel.layer.shadowRadius = 0.0;
+    self.wipeLabel.layer.shadowOpacity = 0.0;
+    self.waveActive = NO;
+    self.waveLayer.hidden = YES;
 }
 
 - (void)prepareForReuse {
@@ -531,8 +940,23 @@ static const CGFloat YTMURowPadBottom = 14.0;
     self.lastColorKey = nil;
     // A collapsed (zero-height) row must never be recycled as a normal line.
     [self ytmu_setRowCollapsed:NO];
+    // ...and a duet voice marker must never survive into another row, let alone
+    // another song. -configureCell sets the real one on the way out.
+    [self ytmu_setSingerMarker:nil];
     // A half-revealed translation must never survive into another row.
     [self ytmu_clearType];
+    // Same for the highlight cross-fade, the distance ladder and the ribbon:
+    // all three are per-row state a recycled cell would otherwise carry.
+    [self.wipeLabel.layer removeAnimationForKey:@"ytmuHighlightFade"];
+    self.wipeLabel.layer.opacity = 1.0;
+    self.wipeLabel.alpha = 1.0;
+    self.wipeLabel.transform = CGAffineTransformIdentity;
+    _distanceAlpha = 1.0;
+    self.contentView.alpha = 1.0;
+    self.waveActive = NO;
+    self.waveWidth = 0.0;
+    [self.waveLayer removeAnimationForKey:@"ytmuWaveOscillation"];
+    self.waveLayer.hidden = YES;
 }
 
 - (void)ytmu_handleWordTap:(UITapGestureRecognizer *)gesture {
@@ -3641,6 +4065,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 // behind it. Runs on the same clock as the activation pop (the UIKit scroll
 // settles in about one transition), so the line arrives and lights up as one
 // motion.
+//
+// The resting position is braccato's: the sung line sits at 37% of the VISIBLE
+// height rather than dead centre, which leaves the lines still to come room
+// below it. That needs a computed offset, not -scrollToRowAtIndexPath:, because
+// the table has a header and the table's own `Middle` ignores it.
 - (void)ytmu_scrollToRow:(NSInteger)row instant:(BOOL)instant {
     if (row < 0 || row >= (NSInteger)self.lyrics.count || !self.tableView) return;
     NSTimeInterval now = CACurrentMediaTime();
@@ -3653,8 +4082,31 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     } else {
         YTMUResetScrollTracking();
     }
+    UITableView *tv = self.tableView;
     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:row inSection:0];
-    [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:animate];
+    CGRect target = [tv rectForRowAtIndexPath:indexPath];
+    CGFloat visible = CGRectGetHeight(tv.bounds);
+    if (CGRectIsNull(target) || visible <= 1.0) {
+        // Not laid out yet (or no rows): the old call is the safe fallback, it
+        // asks the table to resolve the geometry itself.
+        [tv scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionMiddle animated:animate];
+        return;
+    }
+    UIEdgeInsets insets = tv.adjustedContentInset;
+    CGFloat desired = CGRectGetMinY(target) + insets.top - visible * YTMUScrollTargetRatio;
+    CGFloat lo = -insets.top;
+    CGFloat hi = MAX(lo, tv.contentSize.height + insets.bottom - visible);
+    desired = MIN(MAX(desired, lo), hi);
+    CGPoint offset = CGPointMake(tv.contentOffset.x, desired);
+    if (!animate) {
+        [tv setContentOffset:offset animated:NO];
+        return;
+    }
+    [UIView animateWithDuration:YTMUTransitionDuration
+                          delay:0.0
+                        options:UIViewAnimationOptionCurveEaseOut
+                     animations:^{ [tv setContentOffset:offset animated:NO]; }
+                     completion:nil];
 }
 
 - (void)updatePlaybackTime {
@@ -3777,22 +4229,31 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:currentTime];
                 NSDictionary *nl = self.lyrics[i];
                 BOOL wordSynced = [nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0;
-                if (wordSynced) {
-                    // The wipe owns a word-synced row: applyWordColorsToCell
-                    // paints the base label and the mask path every tick, so
-                    // only the reveal layer is animated here. Scaling the base
-                    // label would fight the per-word mask and stutter.
-                    newCell.wipeLabel.alpha = YTMUPopStartAlpha;
-                    [UIView animateWithDuration:YTMUTransitionDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
-                        newCell.wipeLabel.alpha = 1.0;
-                    } completion:nil];
+                // The arrival motion, and it differs by payload the way braccato's
+                // own themes differ:
+                //   word-synced -> NO pop. The row's arrival gesture is the
+                //     per-word sway driven in -applyWordColorsToCell, and a pop
+                //     under it would fight the mask for 0.28s.
+                //   line-synced -> the restrained pop, on BOTH label copies so
+                //     the dim base and the bright reveal scale as one. That also
+                //     fixes the old restriction: scaling the base label used to
+                //     be skipped on word-synced rows because applyWordColors
+                //     repaints it every tick, but a transform rides on top of
+                //     that repaint and is dropped by the next configure.
+                if (UIAccessibilityIsReduceMotionEnabled()) {
+                    [newCell ytmu_fadeHighlightTo:1.0 duration:0.0];
+                } else if (wordSynced) {
+                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
                 } else {
                     newCell.lyricLabel.alpha = YTMUPopStartAlpha;
                     newCell.lyricLabel.transform = CGAffineTransformMakeScale(YTMUPopScale, YTMUPopScale);
+                    newCell.wipeLabel.transform = newCell.lyricLabel.transform;
                     [UIView animateWithDuration:YTMUTransitionDuration delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
                         newCell.lyricLabel.alpha = 1.0;
                         newCell.lyricLabel.transform = CGAffineTransformIdentity;
+                        newCell.wipeLabel.transform = CGAffineTransformIdentity;
                     } completion:nil];
+                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
                 }
             }
             // Starts the letter-by-letter reveal of the translation under the
@@ -3809,6 +4270,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 BOOL far = (oldIndex >= 0 && labs(newIndex - oldIndex) > 3);
                 [self ytmu_scrollToRow:newIndex instant:far];
             }
+        }
+        // Distance ladder, over every visible row rather than a band around the
+        // sung line: a seek moves the active line by twenty rows at once, and a
+        // band would leave the rows in between holding whatever brightness the
+        // last pass through the band gave them.
+        for (UITableViewCell *visible in self.tableView.visibleCells) {
+            if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
+            NSIndexPath *ip = [self.tableView indexPathForCell:visible];
+            if (!ip) continue;
+            NSInteger distance = labs((NSInteger)ip.row - newIndex);
+            NSInteger step = MIN(distance, YTMUDistanceLadderSteps);
+            [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:YTMUDistanceLadder[step]];
         }
     } else if (newActive.count > 0) {
         // Same set: keep every active word-synced wipe advancing.
@@ -3925,6 +4398,14 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     }
     self.activeIndexes = nil;
     self.lastColorKey = nil;
+    // Every row back to full brightness. The distance ladder is only re-applied
+    // on an activation CHANGE, so without this a song that follows a synced one
+    // inherits the previous song's faded rows and shows nothing at all.
+    for (UITableViewCell *visible in self.tableView.visibleCells) {
+        if ([visible isKindOfClass:[YTMULyricsCell class]]) {
+            [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:1.0];
+        }
+    }
     self.cachedWordLayoutKey = nil;
     self.cachedWordRects = nil;
 
@@ -4085,6 +4566,46 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     }
     NSInteger fracQ = (NSInteger)(curFrac * 24.0);
     NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord, (long)fracQ, (double)width];
+
+    // braccato's word wobble, as a whole-line sway on the pair of label copies
+    // (they share a frame, so they move as one and the mask rides along).
+    // translateX(0.05em) peaking a twelfth of the way into the word, easing back
+    // to rest by three quarters of it. The scaleX half of braccato's keyframe is
+    // deliberately absent: our labels are full-width, so a scaleX about their
+    // centre would slide the glyphs rather than squash the word.
+    //
+    // Deliberately BEFORE the quantization early-out below: a transform that is
+    // only written when the mask is rewritten can be stranded mid-sway on the
+    // ticks where the mask is not, since a word's fraction stops changing once it
+    // is fully sung.
+    CGFloat shift = 0.0;
+    if (curWord >= 0 && curWord < partCount && !UIAccessibilityIsReduceMotionEnabled()) {
+        NSDictionary *cur = parts[curWord];
+        double wordStart = [cur[@"startTimeMs"] doubleValue];
+        double wordDur = MAX([cur[@"durationMs"] doubleValue], 1.0);
+        double span = MIN(wordDur, YTMUWobbleDuration * 1000.0);
+        if (span > 0.0) {
+            double t = (nowMs - wordStart) / span;
+            CGFloat em = (cell.wipeLabel.font ? cell.wipeLabel.font.pointSize : 22.0) * YTMUWobblePeakEm;
+            if (t >= 0.0 && t < YTMUWobblePeakOffset) {
+                double s = t / YTMUWobblePeakOffset;
+                shift = (CGFloat)(em * (s * s * (3.0 - 2.0 * s)));
+            } else if (t < YTMUWobbleSettleOffset) {
+                double u = (t - YTMUWobblePeakOffset) / (YTMUWobbleSettleOffset - YTMUWobblePeakOffset);
+                shift = (CGFloat)(em * (1.0 - (u * u * (3.0 - 2.0 * u))));
+            }
+        }
+    }
+    if (fabs(shift) > 0.01) {
+        cell.lyricLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
+        cell.wipeLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
+    } else if (!CGAffineTransformIsIdentity(cell.lyricLabel.transform)) {
+        // Compared rather than assigned: writing an identity transform to a
+        // label that already has one marks its layer for a layout pass.
+        cell.lyricLabel.transform = CGAffineTransformIdentity;
+        cell.wipeLabel.transform = CGAffineTransformIdentity;
+    }
+
     if (!force && [key isEqualToString:cell.lastColorKey]) return;
 
     UIFont *font = cell.wipeLabel.font;
@@ -4151,14 +4672,26 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     }
     wipeFeather.hidden = YES;
 
+    CGRect curWordRect = CGRectNull;
     if (curWord >= 0 && curWord < rcount) {
         CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
         if (!CGRectIsNull(wordRect)) {
+            curWordRect = wordRect;
             CGFloat fraction = MIN(1.0, MAX(0.0, curFrac));
             BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-            CGFloat revealedWidth = wordRect.size.width * fraction;
-            CGFloat featherWidth = MIN(22.0, MAX(8.0, wordRect.size.width * 0.38));
-            CGFloat solidWidth = MAX(0.0, revealedWidth - featherWidth);
+            // braccato's overshoot: the leading edge runs past the word and is
+            // pulled back over the last fifth of it, so the highlight visibly
+            // catches up instead of stopping dead at the last glyph.
+            CGFloat overshoot = 0.0;
+            if (fraction >= 1.0 - YTMUSwipeOvershootTail && fraction <= 1.0) {
+                CGFloat t = (fraction - (1.0 - YTMUSwipeOvershootTail)) / YTMUSwipeOvershootTail;
+                overshoot = YTMUSwipeOvershoot * wordRect.size.width * (1.0 - t);
+            }
+            CGFloat revealedWidth = wordRect.size.width * fraction + overshoot;
+            // The SOLID run is still capped at the word: only the feather is
+            // allowed past the end, so the glow in the gap after the word never
+            // doubles as a premature reveal of the next one.
+            CGFloat solidWidth = MIN(wordRect.size.width, MAX(0.0, revealedWidth - MIN(22.0, MAX(8.0, wordRect.size.width * 0.38))));
 
             if (solidWidth > 0.0) {
                 CGRect solid = wordRect;
@@ -4167,6 +4700,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 [path appendPath:[UIBezierPath bezierPathWithRect:solid]];
             }
             if (revealedWidth > 0.0 && wipeFeather) {
+                CGFloat featherWidth = MIN(22.0, MAX(8.0, wordRect.size.width * 0.38));
                 CGFloat visibleFeather = MIN(featherWidth, revealedWidth);
                 CGRect feather = wordRect;
                 feather.size.width = visibleFeather;
@@ -4186,6 +4720,50 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     } else if (curWord >= rcount && display.length > 0) {
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
     }
+
+    // braccato's highlight glow: a shadow that starts fat around the word being
+    // sung and shrinks away over 1.2x that word's own time, never under 1.2s.
+    // A mask clips the shadow it is applied to, so the mask has to be widened to
+    // let the blur out -- and widened CAREFULLY, because an unclamped widening
+    // is also a widening of the reveal and would light the next word early.
+    CGFloat glow = 0.0;
+    if (curWord >= 0 && curWord < partCount && !CGRectIsNull(curWordRect)) {
+        NSDictionary *cur = parts[curWord];
+        double wordStart = [cur[@"startTimeMs"] doubleValue];
+        double wordDur = MAX([cur[@"durationMs"] doubleValue], 120.0);
+        if (curWord == partCount - 1 && wordDur > 1400.0) {
+            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+            wordDur = MIN(wordDur, MAX(avg * 1.5, 500.0));
+        }
+        double glowMs = MAX(wordDur * YTMUHighlightGlowRatio, YTMUHighlightGlowMinDuration * 1000.0);
+        double glowT = MIN(MAX((nowMs - wordStart) / glowMs, 0.0), 1.0);
+        glow = YTMUHighlightGlowRadius * (1.0 - glowT) * (1.0 - glowT);
+        if (glow > 0.5) {
+            // Never past the midpoint of the gap on either side, so the next
+            // word (and the one before, which is already lit) stay untouched.
+            CGFloat growL = glow, growR = glow;
+            if (curWord + 1 < rcount) {
+                CGRect nextRect = [cell.cachedWordRects[curWord + 1] CGRectValue];
+                if (!CGRectIsNull(nextRect)) growL = MIN(growL, MAX(0.0, (curWordRect.minX - nextRect.maxX) * 0.5));
+            }
+            if (curWord > 0 && curWord - 1 < rcount) {
+                CGRect prevRect = [cell.cachedWordRects[curWord - 1] CGRectValue];
+                if (!CGRectIsNull(prevRect)) growR = MIN(growR, MAX(0.0, (prevRect.minX - curWordRect.maxX) * 0.5));
+            }
+            // And never more than half the word's own height vertically, which
+            // is what keeps a wrapped line's next fragment out of it.
+            CGFloat growV = MIN(glow, curWordRect.size.height * 0.5);
+            CGRect glowRect = CGRectMake(curWordRect.minX - growL, curWordRect.minY - growV,
+                                         curWordRect.size.width + growL + growR,
+                                         curWordRect.size.height + growV * 2.0);
+            [path appendPath:[UIBezierPath bezierPathWithRect:glowRect]];
+        }
+    }
+    // Radius 0 with a non-nil shadow colour still draws a hard silhouette, so the
+    // opacity has to fall with it or every word leaves a doubled glyph.
+    cell.wipeLabel.layer.shadowRadius = glow;
+    cell.wipeLabel.layer.shadowOpacity = 0.75 * MIN(1.0, glow / 2.0);
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     cell.wipeMask.frame = cell.wipeLabel.bounds;
@@ -4248,27 +4826,105 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     return [t isEqualToString:@"[instrumental]"] || [t isEqualToString:@"[MUSIC] Instrumental"];
 }
 
+// Which side of the row a line belongs on, from the per-line `singer` index
+// (0-based, into the ttm:agent person list in declaration order) and `duet` for
+// a group agent. Both are already on the wire -- server/parsers_ttml.py emits
+// them from ttm:agent (commit 72225e9) -- so a duet moves its lines onto their
+// own side. That was the user's call, made in place of the three label designs
+// that were offered -- and then they asked for the label back as a setting, so
+// both ship. See the block comment above for why the label half is gone.
+//
+// GATED ON THE PREF here, and this is the single point that keeps the two modes
+// exclusive: in label mode (or off) it returns Natural, so a row is never both
+// right-aligned AND carrying a "Singer 2" marker.
+static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
+    if (YTMUDuetDisplayMode() != kYTMUDuetAlign) return NSTextAlignmentNatural;
+    if (![lyric isKindOfClass:[NSDictionary class]]) return NSTextAlignmentNatural;
+    if ([lyric[@"duet"] boolValue]) return NSTextAlignmentCenter;
+    id s = lyric[@"singer"];
+    if (![s isKindOfClass:[NSNumber class]]) return NSTextAlignmentNatural;
+    // Anything past the lead voice goes right. A solo track has no `singer` key
+    // at all (an agent that is declared but never referenced gets no key on
+    // purpose), so it is untouched.
+    return [s integerValue] >= 1 ? NSTextAlignmentRight : NSTextAlignmentNatural;
+}
+
+// Does this payload distinguish voices AT ALL? A solo track declares exactly one
+// person agent, so every line is singer 0, and printing "Singer 1" above all 50
+// of them would be noise rather than information. Cached per array identity
+// because -configureCell runs on every activation change and every scroll.
+//
+// The static holds the last payload's array for the life of the process. That is
+// one lyrics array, and it is what the open sheet is holding anyway.
+- (BOOL)ytmu_payloadHasMultipleVoices {
+    static NSArray *cachedRows = nil;
+    static NSUInteger cachedCount = NSNotFound;
+    static BOOL cachedAnswer = NO;
+    NSArray *rows = self.lyrics;
+    if (rows != cachedRows || rows.count != cachedCount) {
+        cachedRows = rows;
+        cachedCount = rows.count;
+        NSInteger topVoice = -1;
+        BOOL anyDuet = NO;
+        for (id row in rows) {
+            NSString *key = YTMUSingerVoiceKey(row);
+            if (!key) continue;
+            if ([key isEqualToString:@"both"]) { anyDuet = YES; break; }
+            // Keys are 1-based ("p1" -> 1), so anything above zero is a second
+            // voice.
+            topVoice = MAX(topVoice, [key integerValue]);
+        }
+        cachedAnswer = anyDuet || topVoice >= 1;
+    }
+    return cachedAnswer;
+}
+
+// The marker for this row, or nil when the row does not start a new vocal run.
+// Printed on a voice CHANGE, not on every line: Die With A Smile changes voice 18
+// times across 50 lines, and a label on all 50 would bury the lyrics.
+- (NSString *)ytmu_singerMarkerForRow:(NSInteger)index {
+    if (YTMUDuetDisplayMode() != kYTMUDuetLabel) return nil;
+    if (![self ytmu_payloadHasMultipleVoices]) return nil;
+    if (index < 0 || index >= (NSInteger)self.lyrics.count) return nil;
+    NSString *mine = YTMUSingerVoiceKey(self.lyrics[index]);
+    if (!mine) return nil;
+    // Walk back over rows the file was silent about -- a synthetic instrumental
+    // gap carries no voice -- so a gap in the middle of a run does not print a
+    // duplicate marker for the voice that was already announced. Bounded:
+    // gaps are short, and an unbounded walk would be O(n) per configure.
+    NSInteger floorIndex = MAX((NSInteger)0, index - 16);
+    for (NSInteger i = index - 1; i >= floorIndex; i--) {
+        NSString *prev = YTMUSingerVoiceKey(self.lyrics[i]);
+        if (!prev) continue;
+        if ([prev isEqualToString:mine]) return nil;
+        break;
+    }
+    return YTMUSingerMarkerText(self.lyrics[index]);
+}
+
 - (void)configureCell:(YTMULyricsCell *)cell atIndex:(NSInteger)index isActive:(BOOL)isActive currentTime:(double)currentTime {
     if (index < 0 || index >= self.lyrics.count) return;
 
     NSDictionary *lyric = self.lyrics[index];
     if ([self ytmuIsInstrumentalLyric:lyric]) {
-        // Instrumental gap: a music-note marker, shown ONLY while playback is
-        // inside this row's own window (the same isActive the lyric rows use),
-        // and aligned with the lyric gutter instead of floating centred. An
-        // untimed payload has no window at all, so the marker stays up for the
-        // whole song there -- it is the only content of its row.
-        // Font/alignment are reset explicitly in the text branch below because
-        // cells are reused.
+        // Instrumental gap: a wave ribbon, shown ONLY while playback is inside
+        // this row's own window (the same isActive the lyric rows use). It
+        // oscillates between two shapes and flattens across the gap, which is
+        // braccato's instrumental style; the old static music-note glyph is
+        // gone. An untimed payload has no window at all, so the wave stays up
+        // for the whole song there -- it is the only content of its row.
         // An inactive marker COLLAPSES to zero height (ytmu_setRowCollapsed:)
         // so it cannot steal a line from the lyrics; it still counts for
         // timing/active-set purposes and tapping it still seeks.
         BOOL showNote = isActive || !self.isSynced;
         if ([cell ytmu_setRowCollapsed:!showNote]) [self.tableView setNeedsLayout];
         cell.lyricLabel.attributedText = nil;
-        cell.lyricLabel.text = showNote ? @"\u266A" : @"";
+        cell.lyricLabel.text = @"";
         cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
-        cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
+        cell.ytmu_textAlign = YTMUVoiceAlignment(lyric);
+        cell.lyricLabel.textAlignment = cell.ytmu_textAlign;
+        cell.wipeLabel.textAlignment = cell.ytmu_textAlign;
+        cell.transLabel.textAlignment = cell.ytmu_textAlign;
         cell.lyricLabel.alpha = 1.0;
         cell.lyricLabel.transform = CGAffineTransformIdentity;
         cell.lyricLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
@@ -4280,22 +4936,53 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         [cell clearWipe];
         cell.transLabel.text = @"";
         cell.transLabel.hidden = YES;
+        // An instrumental gap is not sung by anyone, so it never carries a voice
+        // marker -- and this row may be a recycled cell still holding the
+        // previous row's marker.
+        [cell ytmu_setSingerMarker:nil];
+        cell.waveActive = showNote;
+        if (showNote) {
+            // Flatten across the gap: 0 the instant it opens, 1 as it closes.
+            double startMs = [self ytmu_startMsForLyric:lyric];
+            double endMs = [self ytmu_endMsForLyricAtIndex:index];
+            CGFloat progress = 0.0;
+            if (endMs > startMs) {
+                progress = (CGFloat)((currentTime * 1000.0 - startMs) / (endMs - startMs));
+            }
+            cell.waveProgress = MIN(MAX(progress, 0.0), 1.0);
+            cell.waveLayer.fillColor = [YTMULyricInk(1.0, 1.0, self.view) CGColor];
+            [cell setNeedsLayout];
+        } else {
+            cell.waveLayer.hidden = YES;
+        }
         return;
     }
     NSString *displayText = [self normalizedLyricText:lyric[@"text"]];
     // A normal line is never collapsed, whatever the cell held before it.
     [cell ytmu_setRowCollapsed:NO];
+    // The voice marker, on the rows where the singer actually changes, and only
+    // in label mode -- YTMUVoiceAlignment returns Natural there, so exactly one
+    // of the two duet styles ever draws. Placed after the collapse call, which
+    // forces the marker flat when a row collapses.
+    [cell ytmu_setSingerMarker:[self ytmu_singerMarkerForRow:index]];
     cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];
-    cell.lyricLabel.textAlignment = NSTextAlignmentNatural;
+    cell.ytmu_textAlign = YTMUVoiceAlignment(lyric);
+    cell.lyricLabel.textAlignment = cell.ytmu_textAlign;
+    cell.wipeLabel.textAlignment = cell.ytmu_textAlign;
+    cell.transLabel.textAlignment = cell.ytmu_textAlign;
     BOOL hasWords = [lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0;
     if (hasWords) displayText = [self wbwDisplayTextForLyric:lyric ranges:NULL];
     cell.lyricLabel.alpha = 1.0;
-    cell.lyricLabel.transform = CGAffineTransformIdentity;
-    // The activation pop animates this one on word-synced rows; a reconfigure
-    // is the only place a half-finished pop can be dropped.
-    cell.wipeLabel.alpha = 1.0;
+    // A reconfigure is the only place a half-finished pop or sway can be
+    // dropped, and both live on the pair of copies.
+    if (!CGAffineTransformIsIdentity(cell.lyricLabel.transform)) {
+        cell.lyricLabel.transform = CGAffineTransformIdentity;
+    }
+    if (!CGAffineTransformIsIdentity(cell.wipeLabel.transform)) {
+        cell.wipeLabel.transform = CGAffineTransformIdentity;
+    }
 
     if (!self.isSynced) {
         cell.lyricLabel.attributedText = nil;
@@ -4313,10 +5000,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         if (hasWords) {
             [self applyWordColorsToCell:cell lyric:lyric index:index currentTime:currentTime force:YES];
         } else {
+            // The ACTIVE colour lives on the reveal layer on both kinds of row
+            // now, so a line arriving is a cross-fade between two copies instead
+            // of an instant textColor swap. This branch used to be the reason a
+            // line-synced song snapped rather than faded.
             cell.lyricLabel.attributedText = nil;
             cell.lyricLabel.text = displayText;
-            cell.lyricLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
-            [cell clearWipe];
+            cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
+            cell.wipeLabel.attributedText = nil;
+            cell.wipeLabel.text = displayText;
+            cell.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
+            [cell ytmu_showFullWipe];
+            cell.lastColorKey = nil;
         }
 
         cell.lyricLabel.layer.shadowColor = YTMULyricShadow(self.view).CGColor;
@@ -4331,7 +5026,16 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         cell.lyricLabel.text = displayText;
         cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
         cell.lyricLabel.layer.shadowOpacity = 0.32;
-        [cell clearWipe];
+
+        // Leaving the active set FADES the highlight down instead of blanking
+        // it, so a line dims rather than snaps. The revealed text is kept for
+        // the length of the fade; the next reconfigure, a reload or a recycle
+        // drops it through -clearWipe.
+        if (cell.wipeLabel.text.length > 0) {
+            [cell ytmu_fadeHighlightTo:0.0 duration:YTMUHighlightFadeOutDuration];
+        } else {
+            [cell clearWipe];
+        }
 
         cell.transLabel.textColor = YTMULyricInk(0.35, 0.35, self.view);
     }
@@ -4428,7 +5132,24 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             YTMULyricsCell *newCell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (newCell) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:g_currentPlaybackTime];
+                // Same arrival as the tick's, so a tap-to-seek lights the line it
+                // lands on rather than snapping it. Reduced motion skips it.
+                if (!UIAccessibilityIsReduceMotionEnabled()) {
+                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
+                } else {
+                    [newCell ytmu_fadeHighlightTo:1.0 duration:0.0];
+                }
             }
+        }
+        // Same distance ladder as the tick, for the same reason: a tap can move
+        // the sung line twenty rows and a stale brightness would survive.
+        for (UITableViewCell *visible in self.tableView.visibleCells) {
+            if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
+            NSIndexPath *ip = [self.tableView indexPathForCell:visible];
+            if (!ip) continue;
+            NSInteger distance = labs((NSInteger)ip.row - (NSInteger)indexPath.row);
+            NSInteger step = MIN(distance, YTMUDistanceLadderSteps);
+            [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:YTMUDistanceLadder[step]];
         }
         // A tap is always a far jump: settle on the tapped line now, so the
         // next tick does not animate a scroll from the pre-tap position and

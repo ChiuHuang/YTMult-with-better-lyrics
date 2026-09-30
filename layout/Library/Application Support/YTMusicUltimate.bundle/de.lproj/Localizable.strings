@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Fernsteuerung";
 "LG_REMOTE_CONTROL_DESC" = "Dem Server erlauben, Oberflaechen-Features auf diesem Geraet zu deaktivieren. Ausgeschaltet kann er hier nichts abschalten; deine Schalter bleiben deine.";
 "LG_SECTION_REMOTE" = "Remote";
+"LYRICS_SINGER_BOTH" = "Beide";
+"LYRICS_SINGER_N" = "Sänger %ld";
+
+"LYRICS_DUET" = "Duettzeilen";
+
+"LYRICS_DUET_DESC" = "Wie ein Duett anzeigt, wer welche Zeile singt.";
+
+"LYRICS_DUET_OFF" = "Aus";
+
+"LYRICS_DUET_ALIGN" = "Ausrichten";
+
+"LYRICS_DUET_LABEL" = "Label";

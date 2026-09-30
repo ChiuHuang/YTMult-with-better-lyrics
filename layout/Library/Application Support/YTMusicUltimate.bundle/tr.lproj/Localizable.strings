@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Uzaktan kontrol";
 "LG_REMOTE_CONTROL_DESC" = "Sunucunun bu cihazda arayuz ozelliklerini kapatmasina izin ver. Kapaliyken hicbir seyi kapatamaz; anahtarlarin sende kalir.";
 "LG_SECTION_REMOTE" = "Uzaktan";
+"LYRICS_SINGER_BOTH" = "İkisi";
+"LYRICS_SINGER_N" = "Sanatçı %ld";
+
+"LYRICS_DUET" = "Düt сİzıleri";
+
+"LYRICS_DUET_DESC" = "Bir duetin her satırı kim tarafından söylendiğini gösterir.";
+
+"LYRICS_DUET_OFF" = "Kapalı";
+
+"LYRICS_DUET_ALIGN" = "Hizala";
+
+"LYRICS_DUET_LABEL" = "Etiket";

@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "ควบคุมจากระยะไกล";
 "LG_REMOTE_CONTROL_DESC" = "อนุญาตให้เซิร์ฟเวอร์ปิดฟีเจอร์อินเทอร์เฟซบนอุปกรณ์นี้ เมื่อปิด เซิร์ฟเวอร์จะปิดอะไรไม่ได้ สวิตช์ของคุณยังเป็นของคุณ";
 "LG_SECTION_REMOTE" = "ระยะไกล";
+"LYRICS_SINGER_BOTH" = "แหลุก";
+"LYRICS_SINGER_N" = "ศีกียา %ld";
+
+"LYRICS_DUET" = "เพิ่อดูและบอ";
+
+"LYRICS_DUET_DESC" = "วิธีแสดงผู้หมากถือปรองของฟันเสือง";
+
+"LYRICS_DUET_OFF" = "ปิด";
+
+"LYRICS_DUET_ALIGN" = "เข้อบของ";
+
+"LYRICS_DUET_LABEL" = "ประอัต";

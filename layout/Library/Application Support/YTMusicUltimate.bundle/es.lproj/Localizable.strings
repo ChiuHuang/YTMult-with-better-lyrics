@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL" = "Control remoto";
 "LG_REMOTE_CONTROL_DESC" = "Permitir que el servidor desactive funciones de la interfaz en este dispositivo. Apagado, no puede desactivar nada; tus interruptores siguen siendo tuyos.";
 "LG_SECTION_REMOTE" = "Remoto";
+"LYRICS_SINGER_BOTH" = "Ambos";
+"LYRICS_SINGER_N" = "Cantante %ld";
+
+"LYRICS_DUET" = "Líneas a dúo";
+
+"LYRICS_DUET_DESC" = "Cómo una dúda marca quién canta cada línea.";
+
+"LYRICS_DUET_OFF" = "Apagado";
+
+"LYRICS_DUET_ALIGN" = "Alinear";
+
+"LYRICS_DUET_LABEL" = "Etiqueta";

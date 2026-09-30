@@ -208,3 +208,15 @@
 "LG_REMOTE_CONTROL_DESC" = "Consenti al server di disattivare le funzioni dell'interfaccia su questo dispositivo. Spento non puo piu disattivare nulla; i tuoi interruttori restano tuoi.";
 "LG_SECTION_REMOTE" = "Remoto";
 "SHARE_ALL" = "Condividi tutti gli audio";
+"LYRICS_SINGER_BOTH" = "Entrambi";
+"LYRICS_SINGER_N" = "Cantante %ld";
+
+"LYRICS_DUET" = "Righe in duet";
+
+"LYRICS_DUET_DESC" = "Come un duet indica chi canta ogni riga.";
+
+"LYRICS_DUET_OFF" = "Spento";
+
+"LYRICS_DUET_ALIGN" = "Allinea";
+
+"LYRICS_DUET_LABEL" = "Etichetta";

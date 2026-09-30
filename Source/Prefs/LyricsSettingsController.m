@@ -211,6 +211,12 @@
         // never opened this page (and so was never seeded in viewDidLoad);
         // LyricsSheet.x reads the same key as YTMULyricsPreference(..., YES).
         @{@"title": LOC(@"LYRICS_FULLSCREEN"), @"desc": LOC(@"LYRICS_FULLSCREEN_DESC"), @"icon": @"iphone", @"key": @"lyricsFullscreenAutoOpen", @"defaultOn": @YES},
+        // Duet display: three-way, not a switch. The two ways of showing who
+        // sings a line are BOTH wanted -- align (second voice right, shared line
+        // centred) and label (a "Singer 2" marker above the line on each change)
+        // -- so it is a segmented control, not an on/off. Source/LyricsSheet.x
+        // reads the same key as YTMUDuetDisplayMode() and defaults to align.
+        @{@"title": LOC(@"LYRICS_DUET"), @"desc": LOC(@"LYRICS_DUET_DESC"), @"icon": @"person.2.fill", @"key": @"", @"duetDisplay": @YES},
         @{@"title": LOC(@"TYPEWRITER"), @"desc": LOC(@"TYPEWRITER_DESC"), @"icon": @"keyboard", @"key": @""}
     ];
 }
@@ -274,6 +280,25 @@
         cell.detailTextLabel.text = it[@"desc"];
         cell.imageView.image = [UIImage systemImageNamed:it[@"icon"]];
         NSString *key = it[@"key"];
+        if ([it[@"duetDisplay"] boolValue]) {
+            // Three segments, read straight from the pref. Absent key = align,
+            // matching YTMUDuetDisplayMode()'s default, and anything out of
+            // 0...2 falls back to align rather than leaving the control on a
+            // segment that does nothing.
+            NSDictionary *prefs = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+            NSInteger mode = [prefs[@"lyricsDuetDisplay"] integerValue];
+            if (mode < 0 || mode > 2) mode = 1;
+            UISegmentedControl *seg = [[UISegmentedControl alloc] initWithItems:@[
+                LOC(@"LYRICS_DUET_OFF"), LOC(@"LYRICS_DUET_ALIGN"), LOC(@"LYRICS_DUET_LABEL")
+            ]];
+            seg.frame = CGRectMake(0, 0, 210, 30);
+            seg.selectedSegmentIndex = (NSInteger)mode;
+            seg.accessibilityIdentifier = @"lyricsDuetDisplay";
+            seg.apportionsSegmentWidthsByContent = YES;
+            [seg addTarget:self action:@selector(duetDisplayChanged:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = seg;
+            return cell;
+        }
         if (!key.length) {
             // Typewriter speed: slider + live "<n> cps" readout. 0 turns the
             // reveal off (see LyricsStream.x, which bails on cps <= 0).
@@ -565,6 +590,21 @@
     d[@"lyricsTypewriterCPS"] = @(cps);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
     YTMUTypewriterCPSSet(cps);
+}
+
+// Duet display mode: 0 off, 1 align, 2 label. LyricsSheet.x re-reads it on the
+// next NSUserDefaultsDidChangeNotification.
+//
+// There is deliberately NO "reload the open sheet" call here: there is no
+// handle on the presented sheet from this controller, and inventing one is worse
+// than not having it. The change still lands without a rebuild --
+// -configureCell runs on every activation change and every scroll, so every
+// visible row recomputes its own marker or alignment within a moment of the
+// flip, and a row that was showing a marker drops it on the next pass.
+- (void)duetDisplayChanged:(UISegmentedControl *)sender {
+    NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
+    d[@"lyricsDuetDisplay"] = @(sender.selectedSegmentIndex);
+    [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
 }
 
 #pragma mark - Sync cache from server
