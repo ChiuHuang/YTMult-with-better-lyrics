@@ -24,6 +24,124 @@ import logging
 # ============================================================
 from .parsers_lrc import is_cjk
 
+# ===========================================================================
+# Per-line singer attribution (TTML `ttm:agent`) and section (`itunes:songPart`)
+# ===========================================================================
+# Why this exists. A duet TTML declares its voices ONCE, in <head><metadata>,
+# and then POINTS AT them from the line and section elements:
+#
+#   <ttm:agent type="person" xml:id="v1"/>
+#   <ttm:agent type="person" xml:id="v2"/>
+#   <ttm:agent type="group"  xml:id="v1000"/>
+#   <body ttm:agent="v2">
+#     <div itunes:songPart="Verse">
+#       <p ttm:agent="v1">a line</p>
+#
+# Scope is nearest-wins: the <p> beats its <div>, the <div> beats <body>. This
+# is real data, not decoration -- in Die With A Smile (kPa7bsKwL-c) the 50 lines
+# split v2/v1000/v1 = 22/18/10, the whole first verse AND first chorus are one
+# voice, verse 2 flips per line, and v1000 marks exactly the lines where both
+# voices sing. The parser walked root.iter('p') and read only begin/end/span, so
+# none of it ever left the file: the phone was not ignoring a singers tag, it
+# was never sent one.
+#
+# THE AGENTS CARRY NO NAME. <ttm:agent> is an xml:id reference and the elements
+# are empty -- there is no "Lady Gaga" anywhere in these files, only <songwriters>,
+# which is a different (5-name, unsorted-by-voice) list. So `singer` below is an
+# INDEX into the person agents in declaration order, never a name. Resolving
+# index -> artist name needs the track's credit order and is the caller's job
+# (see ttml_voice_count); guessing it here would bake a wrong mapping into every
+# cached entry.
+#
+# Emitted per line, and only when the file actually says something:
+#   'singer'  int   0-based index into the person agents, in <head> order
+#   'duet'    True  the line's agent is a type="group" agent (both voices)
+#   'section' str   nearest itunes:songPart -- 'Verse', 'Chorus', 'Bridge', ...
+# A solo track has one person agent, so every line gets singer 0 and there is
+# nothing to show; consumers must treat a uniform run as "no attribution".
+#
+# Invisible to the cache hash on purpose: server/utils.py _canonical_lyrics_bytes
+# packs only start/dur/text/translated/wordSynced/parts, so adding these keys
+# cannot invalidate an entry that is already on disk, and cannot make the server
+# and device hashes disagree.
+_NS_TTM = '{http://www.w3.org/ns/ttml#metadata}'
+_NS_XML = '{http://www.w3.org/XML/1998/namespace}'
+
+
+def _ttm_attr(node, local):
+    """Attribute whose LOCAL NAME is `local`, whatever namespace it is in.
+
+    This cannot look for one fixed namespace, because the two attributes live in
+    two different ones: `agent` is ttm (http://www.w3.org/ns/ttml#metadata) and
+    `songPart` is the vendor's own (http://music.apple.com/lyric-ttml-internal
+    for Apple, http://lrc.red/lyric-ttml-internal for lrc.red). ElementTree hands
+    back the expanded '{uri}local' form when the prefix is declared and the
+    literal 'prefix:local' when it is not, and the parser above has already
+    stripped some declarations by regex -- so all three spellings have to match.
+
+    Ordered so a namespaced attribute always beats a bare one: a file with both
+    `ttm:agent` and some unrelated bare `agent` must not depend on dict order.
+    """
+    if node is None:
+        return ''
+    bare = None
+    for key, val in node.attrib.items():
+        if val is None:
+            continue
+        local_part = key.rsplit('}', 1)[-1].rsplit(':', 1)[-1]
+        if local_part != local:
+            continue
+        if key.startswith('{'):
+            return str(val).strip()
+        if ':' in key:
+            return str(val).strip()
+        if not bare:
+            bare = str(val).strip()
+    return bare or ''
+
+
+def ttml_agent_table(root):
+    """({xml:id: type}, {xml:id: person index}, {group xml:id}) from the head.
+
+    Declaration order is the file's own voice order and is what `singer` counts,
+    so this must preserve document order -- a plain dict does (3.7+).
+    """
+    types, persons, groups = {}, {}, set()
+    for el in root.iter():
+        tag = el.tag
+        if not isinstance(tag, str):
+            continue
+        # '{uri}agent' when the prefix was declared, 'ttm:agent' when it was not.
+        local = tag.rsplit('}', 1)[-1].rsplit(':', 1)[-1]
+        if local != 'agent':
+            continue
+        aid = el.get(_NS_XML + 'id') or el.get('id') or ''
+        aid = str(aid).strip()
+        if not aid:
+            continue
+        kind = (el.get('type') or 'person').strip().lower()
+        types[aid] = kind
+        if kind == 'group':
+            groups.add(aid)
+        elif aid not in persons:
+            persons[aid] = len(persons)
+    return types, persons, groups
+
+
+def ttml_voice_count(lyrics):
+    """How many distinct person voices a parsed lyric list attributes to.
+
+    Derived from the lines themselves, so no extra payload key is needed for it.
+    Returns 0 when the file said nothing, 1 for a solo track.
+    """
+    best = -1
+    for line in (lyrics or []):
+        s = line.get('singer')
+        if isinstance(s, int) and not isinstance(s, bool) and s > best:
+            best = s
+    return best + 1 if best >= 0 else 0
+
+
 def parse_ttml_basic(ttml_text, duration_sec=0):
     """Basic TTML parser - extracts timed lines from TTML/AMLL XML."""
     try:
@@ -37,6 +155,27 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
         ttml_text = re.sub(r'xmlns="[^"]*"', '', ttml_text)
 
         root = ET.fromstring(ttml_text)
+
+        # -------------------------------------------------------------------
+        # Voice + section attribution tables (see the block comment above).
+        # Built once per file. `parent` is needed because ElementTree has no
+        # parent pointers and the agent scope is nearest-wins along the
+        # <p> -> <div> -> <body> chain.
+        # -------------------------------------------------------------------
+        _a_types, _a_persons, _a_groups = ttml_agent_table(root)
+        parent = {}
+        for _el in root.iter():
+            for _ch in list(_el):
+                parent[_ch] = _el
+
+        def _scope_attr(node, local):
+            """Nearest value of `local` walking node -> ... -> root."""
+            while node is not None:
+                v = _ttm_attr(node, local)
+                if v:
+                    return v
+                node = parent.get(node)
+            return ''
 
         # ---------------------------------------------------------------
         # Authoritative line text, when the file provides it.
@@ -171,6 +310,19 @@ def parse_ttml_basic(ttml_text, duration_sec=0):
             if parts and len(parts) > 1 and len({p.get('startTimeMs') for p in parts}) > 1:
                 entry['parts'] = parts
                 entry['wordSynced'] = True
+
+            # Voice + section, resolved nearest-wins down the p/div/body chain.
+            # Only written when the file actually carries the attribute, so a
+            # file with no agents produces byte-identical entries to before.
+            _aid = _scope_attr(p, 'agent')
+            if _aid:
+                if _aid in _a_groups:
+                    entry['duet'] = True
+                elif _aid in _a_persons:
+                    entry['singer'] = _a_persons[_aid]
+            _part = _scope_attr(p, 'songPart')
+            if _part:
+                entry['section'] = _part
 
             results.append(entry)
 
