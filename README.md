@@ -10,7 +10,7 @@
 ![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks)
 ![Nodes online](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=nodes)
 
-YouTube Music iOS tweak + a self-hosted lyrics server: synced and
+YouTube Music iOS tweak + a self-hosted (Defaulted public server) lyrics server: synced and
 word-synced lyrics, multi-provider race, translation, and an admin dashboard.
 Open source — forks and pull requests welcome.
 
