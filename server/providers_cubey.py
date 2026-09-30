@@ -20,6 +20,7 @@ import traceback
 import atexit
 import logging
 from .nodes import relay_http_request
+from .parsers_lrc import parse_lrc
 from .parsers_ttml import parse_ttml_basic
 
 # ============================================================
@@ -282,6 +283,55 @@ def _note_cubey_auth_failure(jwt_token, status):
         note_failure(jwt_token, f'cubey {status}')
     except Exception:
         pass  # never let bookkeeping break a fetch
+
+
+# How long to wait before the SECOND Cubey request for a song whose winner is
+# not word-by-word. Zero would re-send the identical request in the same
+# millisecond, which is how one rate-limit 429 or one 15s stream timeout
+# becomes two of each instead of one. Under a second: invisible next to the
+# multi-second full fetch it rides on.
+SECOND_PASS_DELAY = 0.8
+
+
+def second_pass_token(used):
+    """A DIFFERENT credential for the second Cubey pass when one exists.
+
+    A device JWT arrives as a plain argument and never touches jwt_pool, so
+    nothing demotes it after a 401 -- re-sending the same credential is not a
+    retry. Prefer another pool token; fall back to the one that was used,
+    because a token with no alternative is still worth the second request.
+    Never raises: this runs on the fetch path."""
+    fresh = None
+    try:
+        from .jwt_pool import pick_jwt
+        fresh = pick_jwt()
+    except Exception:
+        pass
+    if fresh and fresh != used:
+        return fresh
+    return used or fresh
+
+
+def cubey_candidate(raw, duration_sec=0, inner=None):
+    """One Cubey raw result -> the pipeline's {lyrics, source, synced} shape,
+    or None when that inner source carried nothing usable. Shared by the probe,
+    the race and the pipeline so all three agree on what a raw result means
+    (parsed TTML/QRC entries, else an LRC blob). Sanitizes in place, same as
+    every other consumer."""
+    if not isinstance(raw, dict):
+        return None
+    if raw.get('parsed'):
+        parsed = raw['parsed']
+    elif raw.get('synced'):
+        parsed = parse_lrc(raw['synced'], duration_sec)
+    else:
+        return None
+    if not parsed:
+        return None
+    from .cache import sanitize_lyrics_parts
+    sanitize_lyrics_parts(parsed)
+    return {'lyrics': parsed, 'source': raw.get('source') or inner,
+            'synced': True}
 
 
 def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=None):

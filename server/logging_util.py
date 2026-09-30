@@ -45,6 +45,10 @@ def _classify_log(msg):
         '[SEARCH]': ('info', 'fa-magnifying-glass'),
         '[TRANS]': ('translate', 'fa-language'),
         '[SEND]': ('response', 'fa-paper-plane'),
+        # Before '[REQ' so the second Cubey pass reads as itself instead of as
+        # one more line of whatever request it belongs to.
+        '[wbw-retry]': ('info', 'fa-cloud'),
+        'Cubey second pass': ('info', 'fa-cloud'),
         '[REQ': ('request', 'fa-search'),
         '[CLEAN]': ('info', 'fa-broom'),
         '[DUMP]': ('info', 'fa-file-arrow-up'),

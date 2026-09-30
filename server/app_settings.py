@@ -99,9 +99,13 @@ _SCHEMA = [
         'scope': 'server',
         'label': 'Second Cubey pass when not word-by-word',
         'desc': ('If a fetch ends without word-level timing, ask Cubey once '
-                 'more for its inner providers separately. The first pass takes '
+                 'more -- two tries per song, never more. The first pass takes '
                  'one merged answer and can hide a word-timed source that lost '
-                 'the merge. Costs one extra request per non-word-by-word song.'),
+                 'the merge, so the second pass asks for the inner providers '
+                 'separately, on a rotated token, after a short delay. Covers '
+                 'every Cubey caller: the full fetch, the SSE race and the '
+                 'background re-race. Costs one extra request per '
+                 'non-word-by-word song.'),
     },
     {
         'key': 'upload_logs',
@@ -184,6 +188,20 @@ def get_all():
             return _merged()
     except Exception:
         return dict(_DEFAULTS)
+
+
+def flag(key, default=True):
+    """One schema bool for a caller on a request path.
+
+    get_all() already merges the schema default in, so `default` only matters
+    for a key that is not in _SCHEMA at all -- which is why it is spelled out
+    at the call site: a typo must not read as 'off'. Fails OPEN, because every
+    caller here is a feature that can only improve a result (see
+    pipeline._wbw_retry_cubey)."""
+    try:
+        return bool(get_all().get(key, default))
+    except Exception:
+        return default
 
 
 def _check_key(key):

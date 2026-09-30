@@ -42,8 +42,8 @@ def _wbw_retry_cubey():
     read that raises leaves the feature on, because the pass can only upgrade
     a result."""
     try:
-        from .app_settings import get_all
-        return bool(get_all().get('fetch.wbw_retry_cubey', True))
+        from .app_settings import flag
+        return flag('fetch.wbw_retry_cubey')
     except Exception:
         return True
 
@@ -417,29 +417,40 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                       f"(score={_lyrics_score(result):.2f})")
                 break
 
-    # ---- optional second Cubey pass, only when the winner is not wbw ----
-    # The switch exists because the first Cubey leg asks for ONE merged answer
-    # (fetch_cubey), and _collect_cubey_lines keeps a single best per query.
-    # Cubey actually carries SIX independent inner providers, three of which
-    # carry real word timing (Musixmatch wordByWord, bLyrics TTML, BiniLyrics
-    # syllable TTML). So a merged best can hide a word-timed inner result that
-    # lost on line count or score, and the song lands on line-sync forever.
-    # fetch_cubey_all returns them separately, so one extra pass can find the
-    # wbw result the merge discarded. Every candidate it produces goes through
+    # ---- second Cubey pass: two attempts per song, never more ----
+    # The first Cubey leg asks for ONE merged answer (fetch_cubey), and
+    # _collect_cubey_lines keeps a single best per query. Cubey actually
+    # carries SIX independent inner providers, three of which carry real word
+    # timing (Musixmatch wordByWord, QQ QRC, bLyrics/BiniLyrics TTML). So a
+    # merged best can hide a word-timed inner result that lost on line count
+    # or score, and the song lands on line-sync forever. fetch_cubey_all
+    # returns them separately, so the second pass can find the wbw result the
+    # merge discarded -- and because it also runs on a rotated credential
+    # after a short delay, it recovers the transient cases too (one 429, one
+    # 15s stream timeout). Every candidate it produces goes through
     # consider(), which re-ranks by the same _lyrics_score and keeps the
     # incumbent unless the newcomer is strictly better -- so this can only
     # improve the tier, and whatever it finds is snapshotted like any other
     # provider (that is the "all providers in the DB" half).
+    # race._maybe_cubey_second_pass is the same gate for the SSE race and the
+    # background re-race loop, so all three Cubey callers stop at two.
     if (result and result.get('lyrics') and _wbw_line_count(result) == 0
             and _wbw_retry_cubey()):
         try:
-            from .providers_cubey import fetch_cubey_all
-            _jwt2 = jwt_token or pick_jwt()
+            from .providers_cubey import (fetch_cubey_all, cubey_candidate,
+                                          second_pass_token, SECOND_PASS_DELAY)
+            # A DIFFERENT credential when the pool has one: a device JWT is
+            # passed straight in and never demoted, so reusing the token that
+            # just answered (or 401'd) is not a second try.
+            _jwt2 = second_pass_token(jwt_token)
             if not _jwt2:
                 _log_wbw_retry(video_id, 'skipped', 'no JWT in pool')
             else:
                 _stage('Cubey-wbw', 'started')
                 _node2 = pick_node()
+                # Not in the same millisecond as pass 1 -- see
+                # providers_cubey.SECOND_PASS_DELAY.
+                time_module.sleep(SECOND_PASS_DELAY)
                 found = 0
                 for q in queries:
                     try:
@@ -449,13 +460,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                         print(f"  [wbw-retry] Cubey query error (continuing): {e}")
                         continue
                     for inner, raw in (got or {}).items():
-                        cand = None
-                        if raw.get('parsed'):
-                            cand = {'lyrics': raw['parsed'],
-                                    'source': raw.get('source', inner), 'synced': True}
-                        elif raw.get('synced'):
-                            cand = {'lyrics': parse_lrc(raw['synced'], duration),
-                                    'source': raw.get('source', inner), 'synced': True}
+                        cand = cubey_candidate(raw, duration, inner)
                         if not cand:
                             continue
                         before = result

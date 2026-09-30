@@ -23,7 +23,8 @@ from flask import Flask, request, jsonify, render_template, session, redirect, u
 from .metadata import get_search_queries
 from .providers_lrclib import fetch_lrclib
 from .providers_yt import fetch_yt_lyrics
-from .providers_cubey import fetch_cubey
+from .providers_cubey import (fetch_cubey, fetch_cubey_all, cubey_candidate,
+                               second_pass_token, SECOND_PASS_DELAY)
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
@@ -83,6 +84,67 @@ def _lyrics_score(res):
     return base + prov + min(len(res.get('lyrics', [])), 50) * 0.01 + min(wbw, 100) * 0.1
 
 
+def _maybe_cubey_second_pass(merged, queries, video_id, duration, used_jwt,
+                             via_node, req_id='?'):
+    """The gate every Cubey caller shares: pass 1 landed but without word
+    timing, so spend one more request before settling for line-sync. Returns
+    `merged` untouched when the winner is already word-by-word, when the switch
+    is off, or when the second pass finds nothing better."""
+    if _wbw_line_count(merged) > 0:
+        return merged
+    try:
+        from .app_settings import flag
+        if not flag('fetch.wbw_retry_cubey'):
+            return merged
+    except Exception:
+        pass  # fail open: the pass can only upgrade the tier
+    better = cubey_second_pass(queries, video_id, duration, used_jwt,
+                               via_node, req_id)
+    if better and _lyrics_score(better) > _lyrics_score(merged):
+        return better
+    return merged
+
+
+def cubey_second_pass(queries, video_id, duration, used_jwt, via_node=None,
+                      req_id='?'):
+    """Ask Cubey once more, for its inner providers SEPARATELY.
+
+    fetch_cubey takes ONE merged answer per query and _parse_cubey_lines keeps
+    a single best, so a word-timed inner source (Musixmatch wordByWord, QQ QRC,
+    bLyrics/BiniLyrics TTML) can lose that merge and leave the song on
+    line-sync forever. fetch_cubey_all returns the inners separately, which is
+    the only way to see what the merge discarded. Returns the best candidate
+    by _lyrics_score, or None -- the caller keeps whatever pass 1 found.
+
+    Costs one extra request per song whose winner is not word-by-word, which is
+    what the fetch.wbw_retry_cubey switch turns off."""
+    token = second_pass_token(used_jwt)
+    if not token:
+        print(f"  [REQ {req_id}] [Race] Cubey second pass skipped (no JWT)")
+        return None
+    # Never in the same millisecond as pass 1: an identical request fired
+    # immediately is how one 429 or one stream timeout becomes two.
+    time_module.sleep(SECOND_PASS_DELAY)
+    best = None
+    for q in queries:
+        try:
+            got = fetch_cubey_all(token, video_id, q['title'], q['artist'],
+                                  duration, via_node=via_node)
+        except Exception as e:
+            print(f"  [REQ {req_id}] [Race] Cubey second pass error: {e}")
+            continue
+        for inner, raw in (got or {}).items():
+            cand = cubey_candidate(raw, duration, inner)
+            if cand and (best is None or _lyrics_score(cand) > _lyrics_score(best)):
+                best = cand
+    if best:
+        print(f"  [REQ {req_id}] [Race] Cubey second pass best: {best.get('source')} "
+              f"score={_lyrics_score(best):.2f}")
+    else:
+        print(f"  [REQ {req_id}] [Race] Cubey second pass found nothing")
+    return best
+
+
 def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
     t0 = time_module.time()
     if not jwt_token:
@@ -103,12 +165,16 @@ def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
                     parsed = cubey['parsed']
                     sanitize_lyrics_parts(parsed)
                     print(f"  [REQ {req_id}] [Race] Cubey TTML hit from {cubey.get('source')} wbw={cubey.get('wordSynced')} ({(time_module.time()-t0)*1000:.0f}ms)")
-                    return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
+                    return _maybe_cubey_second_pass(
+                        {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True},
+                        queries, video_id, duration, jwt_token, via_node, req_id)
                 if cubey.get('synced'):
                     parsed = parse_lrc(cubey['synced'], duration)
                     sanitize_lyrics_parts(parsed)
                     print(f"  [REQ {req_id}] [Race] Cubey hit from {cubey.get('source')} ({(time_module.time()-t0)*1000:.0f}ms)")
-                    return {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True}
+                    return _maybe_cubey_second_pass(
+                        {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True},
+                        queries, video_id, duration, jwt_token, via_node, req_id)
     except Exception as e:
         print(f"  [REQ {req_id}] [Race] Cubey worker error: {e}")
     print(f"  [REQ {req_id}] [Race] Cubey miss ({(time_module.time()-t0)*1000:.0f}ms)")
