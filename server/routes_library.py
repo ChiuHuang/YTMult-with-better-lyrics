@@ -38,6 +38,13 @@ _rebase_job = {
     'results': [],
 }
 _rebase_lock = threading.Lock()
+# Serialises the two write halves of the version-bump feature against each
+# other. NOT the rebase lock above: that one guards a different job (the
+# tier-upgrade rebase) which is allowed to run at the same time, because both
+# only ever call set_cached with a full payload and last write wins per key.
+# The sweep and the `stale` refetch must not overlap, because each computes a
+# work list from on-disk state the other is rewriting underneath it.
+_migrate_lock = threading.Lock()
 _rebase_cancel = threading.Event()
 
 # Module-level retitle job state
@@ -631,6 +638,125 @@ def api_translate_retry():
             pass
     return jsonify({'ok': True, 'checked': len(found), 'enqueued': n,
                     **translate_queue_stats()})
+
+
+# -------------------------------------------------------------------
+# Database version sweep (db_migrate.py)
+#
+# Three separate facts, deliberately not one endpoint:
+#   status   what a sweep WOULD do (no writes). The operator reads this
+#            before touching the database.
+#   sweep    run the offline half now.
+#   refetch  the network half, which is bulk_refetch's `stale` scope -- it
+#            lives here rather than in db_migrate because the refetch
+#            machinery (worker pool, tier guard, progress rows) already
+#            exists there and duplicating it would be worse than a call.
+# -------------------------------------------------------------------
+@app.route('/api/admin/library/dbversion', methods=['GET'])
+@login_required
+def api_db_version():
+    from .db_migrate import scan, status, _CACHE_FORMAT_VERSION, _PARSER_EPOCH
+    return jsonify({'ok': True, 'format_version': _CACHE_FORMAT_VERSION,
+                    'parser_epoch': _PARSER_EPOCH,
+                    'scan': scan(), 'job': status()})
+
+
+@app.route('/api/admin/library/dbsweep/start', methods=['POST'])
+@login_required
+def api_db_sweep_start():
+    """Body: {dry_run?, force?, translations?}"""
+    from .db_migrate import sweep, status, scan
+    body = request.get_json(silent=True) or {}
+    with _migrate_lock:
+        # status() is None before the first sweep of the process -- there is no
+        # job yet, which is exactly the state where starting one is correct.
+        if (status() or {}).get('state') == 'running':
+            return jsonify({'ok': False, 'error': 'a sweep is already running'}), 409
+    job = sweep(dry_run=bool(body.get('dry_run')),
+                force=bool(body.get('force')),
+                repair_translations=body.get('translations', True) is not False,
+                migrate_candidates=body.get('candidates', True) is not False)
+    return jsonify({'ok': True, 'job': job, 'scan': scan()})
+
+
+@app.route('/api/admin/library/dbsweep/status', methods=['GET'])
+@login_required
+def api_db_sweep_status():
+    from .db_migrate import status
+    job = status()
+    return jsonify({'ok': True, 'job': job})
+
+
+@app.route('/api/admin/library/dbversion/refetch', methods=['POST'])
+@login_required
+def api_db_version_refetch():
+    """The network leg: re-fetch exactly the songs whose text is still
+    parser-stale after a sweep. Body: {workers?, cpu_workers?, translate?}.
+    Refuses with 409 when a bulk job is already running (the work list would
+    be computed against entries that job is rewriting underneath it)."""
+    from .bulk_refetch import start as bulk_start, BulkBusy, status as bulk_status
+    body = request.get_json(silent=True) or {}
+    with _migrate_lock:
+        # Same as above: no bulk job yet is not "a bulk job is running".
+        if (bulk_status() or {}).get('state') == 'running':
+            return jsonify({'ok': False,
+                            'error': 'a bulk refetch is already running'}), 409
+        try:
+            res = bulk_start({'scope': 'stale', 'mode': 'fresh',
+                              'lang': (body.get('lang') or 'zh-TW'),
+                              'workers': body.get('workers') or 4,
+                              'cpu_workers': body.get('cpu_workers') or 2,
+                              'translate': body.get('translate', True)})
+        except BulkBusy as e:
+            return jsonify({'ok': False, 'error': str(e)}), 409
+        except ValueError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+# -------------------------------------------------------------------
+# Retranslate the broken translations (retranslate.py)
+# -------------------------------------------------------------------
+@app.route('/api/admin/library/retranslate', methods=['GET'])
+@login_required
+def api_retranslate_scan():
+    from .retranslate import scan as rt_scan, status as rt_status
+    return jsonify({'ok': True, 'scan': rt_scan(
+        (request.args.get('lang') or '').strip()), 'job': rt_status()})
+
+
+@app.route('/api/admin/library/retranslate/start', methods=['POST'])
+@login_required
+def api_retranslate_start():
+    """Body: {lang?, dry_run?, limit?, workers?}"""
+    from .retranslate import start as rt_start, status as rt_status
+    body = request.get_json(silent=True) or {}
+    if (rt_status() or {}).get('state') == 'running':
+        return jsonify({'ok': False, 'error': 'a retranslate is already running'}), 409
+    try:
+        res = rt_start(lang=(body.get('lang') or ''),
+                        dry_run=bool(body.get('dry_run')),
+                        limit=int(body.get('limit') or 0),
+                        workers=body.get('workers') or 3)
+    except RuntimeError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 409
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@app.route('/api/admin/library/retranslate/status', methods=['GET'])
+@login_required
+def api_retranslate_status():
+    from .retranslate import status as rt_status
+    return jsonify({'ok': True, 'job': rt_status()})
+
+
+@app.route('/api/admin/library/retranslate/stop', methods=['POST'])
+@login_required
+def api_retranslate_stop():
+    from .retranslate import stop as rt_stop
+    return jsonify({'ok': True, 'stopped': rt_stop()})
 
 
 @app.route('/api/admin/library/retitle/stop', methods=['POST'])

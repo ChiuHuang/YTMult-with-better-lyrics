@@ -54,6 +54,25 @@ def is_not_found_result(data):
 # (`_SNAPSHOT_VERSION` in candidates.py) which must be bumped in the same change.
 _CACHE_FORMAT_VERSION = 4
 
+# THE OTHER HALF OF THE VERSION, and the one a bump cannot fake.
+#
+# `_CACHE_FORMAT_VERSION` says "the shape of the stored record changed".
+# `_PARSER_EPOCH` says "the TEXT was derived by a different set of parsers".
+# They are not interchangeable: postprocess_lyrics/sanitize_lyrics_parts below
+# are pure functions of already-parsed lyrics, so a postprocess fix can be
+# replayed over every entry on disk with no network and no source file. A
+# parser fix cannot -- the entry holds the parser's OUTPUT, and the only other
+# copy on disk (`database/candidates`) holds the same parsed output.
+#
+# So every entry written by this build stamps the current epoch, and an entry
+# whose epoch is missing or older is parser-stale: the offline sweep in
+# db_migrate.py may repair and re-stamp it, but it must NOT claim the epoch,
+# or the one gate that says "this text still needs a refetch" goes blind --
+# exactly the failure nodes.py just had.
+#
+# Bump this whenever a file in parsers_*.py changes its output.
+_PARSER_EPOCH = 1
+
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.
     Never interpolate fake wbw parts from line-by-line (LBL) lyrics."""
@@ -137,7 +156,13 @@ def set_cached(video_id, data):
     try:
         os.makedirs(LYRICS_DIR, exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'v': _CACHE_FORMAT_VERSION, 'data': data, 'ts': datetime.now().isoformat()}, f, ensure_ascii=False)
+            # `pv` is stamped HERE, not by the caller: everything reaching this
+            # function was parsed by the parsers in THIS build, including a
+            # node's payload (nodes.py only forwards one after checking its
+            # `cv` is our exact int, so it carries the same trust as `v`).
+            json.dump({'v': _CACHE_FORMAT_VERSION, 'pv': _PARSER_EPOCH,
+                       'data': data, 'ts': datetime.now().isoformat()},
+                      f, ensure_ascii=False)
         try:
             from .app import _sse_broadcast
             _sse_broadcast('cache', {'video_id': video_id, 'song': data.get('song', ''), 'artist': data.get('artist', ''), 'source': data.get('source', ''), 'synced': data.get('synced', False)})
@@ -145,6 +170,54 @@ def set_cached(video_id, data):
             pass
     except:
         pass
+
+
+def read_entry(key):
+    """Raw on-disk entry {v, pv, data, ts} for a cache key.
+
+    Deliberately bypasses BOTH gates in get_cached (the version check and the
+    3-day TTL), because the sweep in db_migrate.py exists to read exactly the
+    entries those two hide: `get_cached` returning None for a stale version is
+    the same None it returns for "never fetched", so a migration could not tell
+    them apart. Returns None when the file is missing or unreadable.
+    """
+    path = os.path.join(LYRICS_DIR, _cache_filename(key) + '.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            entry = json.load(f)
+    except Exception:
+        return None
+    if not isinstance(entry, dict):
+        return None
+    return entry
+
+
+def stamp_entry(key, data, ts=None, parser_epoch=None):
+    """Write a migrated entry: current format version, an optional PRESERVED
+    ts, and an explicit parser epoch.
+
+    Preserving ts matters: a migration that stamps `now` makes every song in
+    the library look freshly fetched, which resets the TTL on entries nobody
+    verified and rewrites the recency order the Library page is sorted by.
+    `parser_epoch=None` means "leave it alone" -- pass the OLD value when the
+    text was not re-derived, so needs-refetch stays true after the sweep.
+    Returns True on write. Never raises."""
+    path = os.path.join(LYRICS_DIR, _cache_filename(key) + '.json')
+    if data and data.get('lyrics'):
+        postprocess_lyrics(data['lyrics'], data.get('duration', 0))
+    prev = read_entry(key) or {}
+    epoch = prev.get('pv', 0) if parser_epoch is None else parser_epoch
+    try:
+        os.makedirs(LYRICS_DIR, exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'v': _CACHE_FORMAT_VERSION, 'pv': epoch, 'data': data,
+                       'ts': ts or prev.get('ts') or datetime.now().isoformat()},
+                      f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
 
 def clear_not_found_caches():
     if not os.path.exists(LYRICS_DIR):

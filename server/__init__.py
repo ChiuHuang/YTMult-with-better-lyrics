@@ -27,6 +27,8 @@ from . import routes_stream  # noqa: F401
 from . import routes_admin  # noqa: F401
 from . import routes_misc  # noqa: F401
 from . import library  # noqa: F401
+from . import db_migrate  # noqa: F401
+from . import retranslate  # noqa: F401
 from . import routes_library  # noqa: F401
 from . import routes_ai  # noqa: F401
 
@@ -44,6 +46,12 @@ def main():
     ensure_data_dir()
     migrate_legacy_cache_dir()
     clear_not_found_caches()
+    # Version-bump sweep, offline half only, on its own thread: a clean start
+    # must not pay for opening every file in the database, and a stale one must
+    # not make the server wait for it either. It no-ops when nothing is stale.
+    import threading as _th
+    from .db_migrate import run_startup_sweep
+    _th.Thread(target=run_startup_sweep, daemon=True, name='db-sweep').start()
     try:
         app.run(host='0.0.0.0', port=20016, debug=False, use_reloader=False, threaded=True)
     except Exception as e:

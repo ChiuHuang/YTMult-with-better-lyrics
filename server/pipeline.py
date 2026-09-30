@@ -32,6 +32,27 @@ from .candidates import save_candidates, graft_wbw_parts
 from .nodes import pick_node
 from .jwt_pool import pick_jwt
 
+
+def _wbw_retry_cubey():
+    """Server switch for the not-wbw second Cubey pass. Default ON.
+
+    Read from app_settings rather than an env var because this is an operator
+    decision with a per-request cost (one extra Cubey call per song that comes
+    back without word timing), not a deployment detail. Fail-open: a settings
+    read that raises leaves the feature on, because the pass can only upgrade
+    a result."""
+    try:
+        from .app_settings import get_all
+        return bool(get_all().get('fetch.wbw_retry_cubey', True))
+    except Exception:
+        return True
+
+
+def _log_wbw_retry(video_id, status, detail=''):
+    """One line per song so the dashboard log shows WHY a fetch made two
+    Cubey calls; without it a doubled request count is untraceable."""
+    print(f"  [wbw-retry] {video_id}: {status}{(' - ' + detail) if detail else ''}")
+
 # ============================================================
 # Main Lyrics Pipeline
 # ============================================================
@@ -97,6 +118,17 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     reports each provider stage (started/found/missed/error) for live UIs."""
 
     def _stage(name, status, detail=''):
+        # Every stage reports through here, so this is the one place that can
+        # record an outcome without touching the six provider stages: they
+        # already call _stage('X', 'found'|'missed'|'done'|'error'|'skipped').
+        # 'done' deliberately does NOT overwrite 'found' -- Cubey calls both,
+        # and the later 'done' would otherwise erase the finding.
+        if name and status in ('found', 'missed', 'error', 'skipped'):
+            try:
+                with _fetch_lock:
+                    _outcomes[name] = {'status': status, 'detail': detail or ''}
+            except Exception:
+                pass
         if on_stage is None:
             return
         try:
@@ -114,6 +146,12 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
 
     result = None  # best across providers, decided by score
     considered = []  # every (label, candidate) tried, for wbw graft + saving
+    # provider name -> stage outcome. Fed to save_candidates so a later
+    # rerace knows which provider gave what WITHOUT re-hitting it: the
+    # snapshot's `outcomes` is what makes "skip the known misses" work, and
+    # until now only probe_providers wrote it, so every song fetched through
+    # this path had its snapshot re-try all four providers that missed.
+    _outcomes = {}
     _fetch_lock = threading.Lock()
     _fetch_stages = []  # stage thunks; all run concurrently below
 
@@ -379,6 +417,63 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                       f"(score={_lyrics_score(result):.2f})")
                 break
 
+    # ---- optional second Cubey pass, only when the winner is not wbw ----
+    # The switch exists because the first Cubey leg asks for ONE merged answer
+    # (fetch_cubey), and _collect_cubey_lines keeps a single best per query.
+    # Cubey actually carries SIX independent inner providers, three of which
+    # carry real word timing (Musixmatch wordByWord, bLyrics TTML, BiniLyrics
+    # syllable TTML). So a merged best can hide a word-timed inner result that
+    # lost on line count or score, and the song lands on line-sync forever.
+    # fetch_cubey_all returns them separately, so one extra pass can find the
+    # wbw result the merge discarded. Every candidate it produces goes through
+    # consider(), which re-ranks by the same _lyrics_score and keeps the
+    # incumbent unless the newcomer is strictly better -- so this can only
+    # improve the tier, and whatever it finds is snapshotted like any other
+    # provider (that is the "all providers in the DB" half).
+    if (result and result.get('lyrics') and _wbw_line_count(result) == 0
+            and _wbw_retry_cubey()):
+        try:
+            from .providers_cubey import fetch_cubey_all
+            _jwt2 = jwt_token or pick_jwt()
+            if not _jwt2:
+                _log_wbw_retry(video_id, 'skipped', 'no JWT in pool')
+            else:
+                _stage('Cubey-wbw', 'started')
+                _node2 = pick_node()
+                found = 0
+                for q in queries:
+                    try:
+                        got = fetch_cubey_all(_jwt2, video_id, q['title'],
+                                              q['artist'], duration, via_node=_node2)
+                    except Exception as e:
+                        print(f"  [wbw-retry] Cubey query error (continuing): {e}")
+                        continue
+                    for inner, raw in (got or {}).items():
+                        cand = None
+                        if raw.get('parsed'):
+                            cand = {'lyrics': raw['parsed'],
+                                    'source': raw.get('source', inner), 'synced': True}
+                        elif raw.get('synced'):
+                            cand = {'lyrics': parse_lrc(raw['synced'], duration),
+                                    'source': raw.get('source', inner), 'synced': True}
+                        if not cand:
+                            continue
+                        before = result
+                        consider(cand, f'Cubey/{inner}')
+                        if result is not before:
+                            found += 1
+                if found:
+                    print(f"  [wbw-retry] {video_id}: adopted a better Cubey "
+                          f"result ({result.get('source')})")
+                    _log_wbw_retry(video_id, 'done',
+                                   f'{found} better candidate(s)')
+                else:
+                    _log_wbw_retry(video_id, 'done', 'no better Cubey result')
+                _stage('Cubey-wbw', 'found' if found else 'missed')
+        except Exception as e:
+            print(f"  [wbw-retry] {video_id} failed (winner kept): {e}")
+            _log_wbw_retry(video_id, 'error', str(e))
+
     # Snapshot every tried provider (latest wins) so re-race, the device
     # switcher, and later probes reuse all of them without re-fetching.
     # Saved pre-translation (raw lyrics, like probe snapshots); the cached
@@ -403,7 +498,11 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
             })
         if _snap_cands:
             _snap_cands.sort(key=lambda c: c['score'], reverse=True)
-            save_candidates(video_id, {'title': title, 'artist': artist}, _snap_cands)
+            # All providers go in, including the ones that lost: the device
+            # switcher offers every one of them, and save_candidates only
+            # prunes plain entries when db.keep_all_providers is off.
+            save_candidates(video_id, {'title': title, 'artist': artist},
+                            _snap_cands, outcomes=_outcomes or None)
     except Exception as e:
         print(f"  [fetch] [FAIL] snapshot save: {e}")
 
