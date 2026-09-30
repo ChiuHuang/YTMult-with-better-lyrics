@@ -26,14 +26,16 @@
 # ledger. usage_stats.json is the process-lifetime counter and is used as the
 # fallback when there is no log at all.
 #
-# State file: cache/badge_stats.json (cache/ is gitignored).
+# State file: database/badge_stats.json (database/ is gitignored).
 import json
 import os
 import threading
 import time
 
+from .paths import BADGE_STATS_FILE
+
 _STATE_VERSION = 1
-_STATS_PATH = os.path.join('cache', 'badge_stats.json')
+_STATS_PATH = BADGE_STATS_FILE
 _TTL = 30.0
 
 # One serve = one lyrics response. 'Returning ' is the /api/lyrics response

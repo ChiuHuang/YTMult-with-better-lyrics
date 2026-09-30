@@ -17,6 +17,7 @@ from .library import (
 )
 from .rerace import _tier
 from .cache import get_cached, set_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
+from .paths import LYRICS_DIR
 from .utils import _safe_cache_component
 from .pipeline import probe_providers
 from .providers_yt import get_song_info
@@ -659,7 +660,7 @@ def api_cache_preview():
     if data is None:
         # Try reading raw file even if expired (for preview)
         for key in [full_key, fast_key]:
-            fpath = f"cache/lyrics/{_cache_filename(key)}.json"
+            fpath = os.path.join(LYRICS_DIR, _cache_filename(key) + '.json')
             if os.path.exists(fpath):
                 try:
                     import json as _json

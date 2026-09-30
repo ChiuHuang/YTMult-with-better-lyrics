@@ -14,7 +14,7 @@
 #   - POST /api/admin/jwt/contribute (dashboard / manual curl)
 #   - inline 'jwt' query args still work unchanged (pool is a fallback)
 #
-# Raw tokens persist in cache/jwt.json (explicit admin tradeoff: without it
+# Raw tokens persist in database/jwt.json (explicit admin tradeoff: without it
 # every restart/update wipes the pool and Cubey goes dark until devices
 # re-contribute). Only hashes are ever served to clients. A background
 # thread re-probes each live token on a timer; a token is evicted only
@@ -31,8 +31,7 @@ import time as time_module
 from datetime import datetime
 
 from .nodes import pick_node
-
-JWT_FILE = os.path.join('cache', 'jwt.json')
+from .paths import JWT_FILE, ensure_data_dir
 VERIFY_INTERVAL = 300       # seconds between full pool probes
 POOL_MAX = 32               # newest-first cap; oldest evicted
 _VERIFY_VIDEO_ID = 'dQw4w9WgXcQ'
@@ -57,7 +56,7 @@ def _token_hash(token):
 
 
 def _persist():
-    os.makedirs('cache', exist_ok=True)
+    ensure_data_dir()
     try:
         records = [{
             'id': e['id'],
@@ -472,7 +471,7 @@ def start_jwt_pool():
             return
         n = _load_persisted()
         if n:
-            print(f"  [JWT] loaded {n} persisted token record(s) from cache/jwt.json")
+            print(f"  [JWT] loaded {n} persisted token record(s) from {JWT_FILE}")
         t = threading.Thread(target=_check_loop, daemon=True, name='jwt-pool-checker')
         t.start()
         _started = True

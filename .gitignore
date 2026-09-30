@@ -4,6 +4,11 @@ config/app_settings.json
 config/admin_config.json
 # Node registry: holds the key_hash of every node, so it is a secret.
 config/nodes.json
+# Persistent server state (lyrics, candidates, translations, token pool,
+# renames). Renamed from cache/ -- see server/paths.py.
+database/
+# Pre-rename location, kept only so the one-shot migration in paths.py can
+# find it on a deploy that still has the old directory. Remove once migrated.
 cache/
 logs/
 tmp/

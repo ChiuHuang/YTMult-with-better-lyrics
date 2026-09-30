@@ -20,6 +20,7 @@ import traceback
 import atexit
 import logging
 from .parsers_lrc import last_part_duration_ms
+from .paths import LYRICS_DIR, ensure_data_dir
 
 # ============================================================
 # Cache
@@ -39,7 +40,19 @@ def is_not_found_result(data):
 
 # Bump when parser/postprocess output format changes so stale on-disk
 # entries (mojibake, wrong last-word timing, fake wbw) are invalidated once.
-_CACHE_FORMAT_VERSION = 3
+#
+# v4: the TTML parser started preferring the declared `<text for>` line over a
+# join of the timed spans (19c5d2c), because those spans are split FINER than
+# words and joined into "Through the sha dow s of de s pair". Every entry on
+# disk from before that still carries the pre-fix `text`, and get_cached only
+# ever compared `v`, so the fix never reached a cached song. This bump is what
+# makes it reach one.
+#
+# A bump is NOT sufficient on its own: the provider snapshots in
+# `database/candidates` hold the same raw text and are written back into the
+# main cache by /providers/select, so they carry their own version
+# (`_SNAPSHOT_VERSION` in candidates.py) which must be bumped in the same change.
+_CACHE_FORMAT_VERSION = 4
 
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.
@@ -95,7 +108,7 @@ def _cache_key_from_filename(fname):
 
 
 def get_cached(video_id):
-    path = f"cache/lyrics/{_cache_filename(video_id)}.json"
+    path = os.path.join(LYRICS_DIR, _cache_filename(video_id) + '.json')
     if os.path.exists(path):
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -120,9 +133,9 @@ def set_cached(video_id, data):
         return
     if data and data.get('lyrics'):
         postprocess_lyrics(data['lyrics'], data.get('duration', 0))
-    path = f"cache/lyrics/{_cache_filename(video_id)}.json"
+    path = os.path.join(LYRICS_DIR, _cache_filename(video_id) + '.json')
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(LYRICS_DIR, exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             json.dump({'v': _CACHE_FORMAT_VERSION, 'data': data, 'ts': datetime.now().isoformat()}, f, ensure_ascii=False)
         try:
@@ -134,13 +147,12 @@ def set_cached(video_id, data):
         pass
 
 def clear_not_found_caches():
-    lyrics_dir = 'cache/lyrics'
-    if not os.path.exists(lyrics_dir):
+    if not os.path.exists(LYRICS_DIR):
         return
     removed = 0
-    for fname in os.listdir(lyrics_dir):
+    for fname in os.listdir(LYRICS_DIR):
         if _cache_key_from_filename(fname) is not None:
-            fpath = os.path.join(lyrics_dir, fname)
+            fpath = os.path.join(LYRICS_DIR, fname)
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     entry = json.load(f)

@@ -166,11 +166,12 @@ def orca_chat_translate(texts, target_lang='zh-TW'):
         return None
 
 import os
-os.makedirs('cache/lyrics', exist_ok=True)
-os.makedirs('cache/translate', exist_ok=True)
+from .paths import LYRICS_DIR, TRANSLATE_DIR
+os.makedirs(LYRICS_DIR, exist_ok=True)
+os.makedirs(TRANSLATE_DIR, exist_ok=True)
 
 def get_translate_cached(cache_key):
-    path = f"cache/translate/{hashlib.md5(cache_key.encode()).hexdigest()}.json"
+    path = os.path.join(TRANSLATE_DIR, hashlib.md5(cache_key.encode()).hexdigest() + '.json')
     if os.path.exists(path):
         try:
             with open(path, 'r', encoding='utf-8') as f:
@@ -180,7 +181,7 @@ def get_translate_cached(cache_key):
     return None
 
 def set_translate_cached(cache_key, data):
-    path = f"cache/translate/{hashlib.md5(cache_key.encode()).hexdigest()}.json"
+    path = os.path.join(TRANSLATE_DIR, hashlib.md5(cache_key.encode()).hexdigest() + '.json')
     try:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
@@ -1248,12 +1249,12 @@ def _needs_translation(data, lang):
 
 
 def find_untranslated(lang=''):
-    """Scan cache/lyrics for entries with lines still missing translations.
-    Returns [{key, lang, data}]. Expired entries included (re-caching them
-    revives the TTL). Never raises."""
+    """Scan the lyrics directory for entries with lines still missing
+    translations. Returns [{key, lang, data}]. Expired entries included
+    (re-caching them revives the TTL). Never raises."""
     from .cache import _cache_key_from_filename
     out = []
-    lyrics_dir = 'cache/lyrics'
+    lyrics_dir = LYRICS_DIR
     try:
         names = os.listdir(lyrics_dir)
     except Exception:

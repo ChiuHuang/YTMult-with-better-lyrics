@@ -187,20 +187,50 @@ def ask_nodes_for_cache(cache_key, timeout=2.0):
     cached, and if so, pull the data. Returns the data dict, or None.
     Sequential with a short per-node timeout -- fine since this only runs
     on a cache miss, and finding already-done work matters more than
-    shaving milliseconds off this path."""
+    shaving milliseconds off this path.
+
+    The node's cv is checked before its data is accepted, and this is the whole
+    reason the function is not a three-liner. Every caller writes what comes
+    back with set_cached(), which stamps OUR _CACHE_FORMAT_VERSION onto it, and
+    the node strips the version envelope when it replies (it sends entry['data'],
+    not the entry). So an unversioned reply is a pre-fix payload promoted to
+    "current": it lands in the store claiming to be v4, the text is the old
+    broken text, and no later version bump or directory rename can ever catch it
+    again. Bumping the version invalidates the server's own files; without this
+    gate the node mesh refills them with exactly the text the bump was meant to
+    retire. A node whose cv does not match is skipped, not trusted."""
+    from .cache import _CACHE_FORMAT_VERSION
+
+    def _cv_ok(reply):
+        # Strict int, no coercion. The template always sends a real int, so
+        # anything else means this is not the node we shipped: '4' and 4.0 would
+        # both compare equal to 4 and slip a payload through on a technicality,
+        # and True is an int in Python.
+        cv = reply.get('cv')
+        return isinstance(cv, int) and not isinstance(cv, bool) and cv == _CACHE_FORMAT_VERSION
+
     with _connected_nodes_lock:
         ids = list(connected_nodes.keys())
     for node_id in ids:
         reply = send_to_node(node_id, {
             'type': 'cache_check', 'request_id': _secrets.token_hex(8), 'cache_key': cache_key,
         }, timeout=timeout)
-        if reply and reply.get('found'):
-            data_reply = send_to_node(node_id, {
-                'type': 'cache_fetch', 'request_id': _secrets.token_hex(8), 'cache_key': cache_key,
-            }, timeout=timeout * 2)
-            if data_reply and data_reply.get('data'):
-                print(f"  [NODE] cache hit on {node_id} for {cache_key}")
-                return data_reply['data']
+        if not (reply and reply.get('found')):
+            continue
+        if not _cv_ok(reply):
+            print(f"  [NODE] skipping {node_id} for {cache_key}: node cache v{reply.get('cv')} "
+                  f"!= server v{_CACHE_FORMAT_VERSION} (node self-updates on the next ping)")
+            continue
+        data_reply = send_to_node(node_id, {
+            'type': 'cache_fetch', 'request_id': _secrets.token_hex(8), 'cache_key': cache_key,
+        }, timeout=timeout * 2)
+        if not (data_reply and data_reply.get('data')):
+            continue
+        if not _cv_ok(data_reply):
+            print(f"  [NODE] rejecting {node_id} fetch for {cache_key}: cv changed mid-flight")
+            continue
+        print(f"  [NODE] cache hit on {node_id} for {cache_key}")
+        return data_reply['data']
     return None
 
 
