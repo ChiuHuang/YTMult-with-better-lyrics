@@ -758,7 +758,7 @@ void YTMUAutoSyncIfDue(void) {
     if (now - [ud doubleForKey:@"YTMUAutoSyncAt"] < 6 * 3600) return;
     [ud setDouble:now forKey:@"YTMUAutoSyncAt"];
     NSString *lang = YTMUTargetLang();
-    BOOL autoZh = [YTMULyricsPreference(@"lyricsAutoZhConvert", YES) boolValue];
+    BOOL autoZh = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
 
     NSArray *cacheEntries = YTMULyricsCacheEntries();
     if (cacheEntries.count) {
@@ -809,49 +809,6 @@ void YTMUAutoSyncIfDue(void) {
         }
     }
     YTMUAutoSyncPullIfDue(lang, autoZh, YTMUAutoSyncPullMax());
-}
-    NSMutableArray *entries = [NSMutableArray array];
-    for (NSDictionary *e in cacheEntries) {
-        NSString *vid = e[@"video_id"];
-        NSString *hash = e[@"hash"];
-        if (!vid.length || !hash.length) continue;
-        [entries addObject:@{@"video_id": vid, @"hash": hash,
-                             @"cv": e[@"cv"] ?: @(YTMULyricsCacheFormatVersion()),
-                             @"tier": e[@"tier"] ?: @""}];
-        if (entries.count >= 500) break;
-    }
-    if (!entries.count) return;
-    NSDictionary *body = @{@"lang": YTMUTargetLang(),
-                           @"auto_zh": @(YTMULyricsPreference(@"lyricsAutoZhConvert", YES)),
-                           @"entries": entries,
-                           @"regenerate": @NO,
-                           @"max_items": @500};
-    NSData *bodyData = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    if (!bodyData) return;
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/lyrics/sync", YTMUApiBase()]];
-    if (!url) return;
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    req.HTTPBody = bodyData;
-    req.timeoutInterval = 30.0;
-    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
-        if (err || !data) return;
-        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-        if (![root isKindOfClass:[NSDictionary class]]) return;
-        NSInteger saved = 0;
-        for (NSDictionary *entry in root[@"need"]) {
-            if (![entry isKindOfClass:[NSDictionary class]]) continue;
-            NSString *vid = entry[@"videoID"];
-            NSArray *lyrics = entry[@"lyrics"];
-            if (!vid.length || !YTMULyricsIsUsable(lyrics, entry)) continue;
-            YTMULyricsCacheSave(vid, lyrics);
-            if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
-            g_lyricsCache[vid] = lyrics;
-            saved++;
-        }
-        sendDebugLog([NSString stringWithFormat:@"[SYNC] background auto-sync saved %ld", (long)saved]);
-    }] resume];
 }
 
 // ============================================================
