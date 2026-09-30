@@ -22,10 +22,16 @@
   Keep the whole block under 5 lines. Detail belongs in the sections below.
 
 Current:
-- `[ACTIVE] ses_f129b9195ffeZzqDUEC4w8qrMM | add the live mission marker to AGENTS.md | files: AGENTS.md | next: commit + push`
-- `[ACTIVE] (uncommitted, previous session, id unknown) | full player glass redesign + lyric wipe feather highlight, neither built or device-checked | files: Source/FullPlayerLiquidGlassV2.xm, Source/LyricsSheet.x | next: rebuild, look on device, then commit`
+- `[DONE] ses_f0be4a8e1ffeCAOI4oIOftOkZ7 | non-wbw songs now take a second, rotated, delayed Cubey pass on all three callers (full fetch, SSE race, re-race loop), capped at two per query | outcome: 30/30 checks, detail in Done recently`
+- `[ACTIVE] ses_f0decf33effd0CRfe5izTGum1T | REBUILD (standing blocker, still open): nothing on this branch has ever been compiled | files: (build only, no Source edits until it builds) | next: get theos building in WSL Ubuntu -- ~/theos exists but sdks/ and toolchains/ are EMPTY, so fetch SDK + darwin toolchain, then \`make\` and read the real errors. NO toolchain on Windows (no clang/make/ldid); WSL2 Ubuntu has /usr/bin/clang 21.1.8 + make and a theos checkout with no SDK and no toolchains/ dir at all. I cannot install to the device -- the user must do that. Verified on 11bb42e: pack guard \`!= 5\` at LyricsSheet.x:720 MATCHES the 5-element array at :705 (the instrumental-collapse trap is closed); LOC() import at :5 and LYRICS_SINGER_BOTH/N + LYRICS_DUET_* exist in en.strings (no key-name leak); the duet segmented control at LyricsSettingsController.m:283-298 writes the same lyricsDuetDisplay key YTMUDuetDisplayMode reads at :446`
+- cleared: `ses_f129b9195ffeZzqDUEC4w8qrMM` (the marker it added is in this file, mission done) and the `Source/FullPlayerLiquidGlassV2.xm` + `Source/LyricsSheet.x` glass/wipe mission, which named a diff that is NOT in the tree (`git status` clean for Source) -- dead, do not rebuild it from this note
 
 ## How we talk (user expectations — keep these)
+- Reply in Traditional Chinese, Taiwan usage (繁體中文／台灣用語). The user reads
+  and writes English casually but asked for zh-TW replies; this is a standing
+  preference, not a one-turn thing, and the user has said to keep it here after
+  one edit to this file dropped it. Code, identifiers, commit messages, log
+  lines and AGENTS.md itself stay English — only the conversation is zh-TW.
 - Short, concise, facts-first. No superlatives, no praise, no emotional validation.
 - No emojis anywhere: not in code, logs, UI strings, or filenames. Plain tags instead
   (`[OK]`, `[FAIL]`, `[WARN]`, `[REQ]`, `[MUSIC]`, ...).
@@ -162,6 +168,45 @@ Current:
 - Server log tags per request: `[REQ <id>]`, `[Cache]`, `[Provider]`, `[In-Flight]`.
 
 ## Done recently (HEAD -> back)
+- **a song without word-by-word gets a second Cubey pass -- on every Cubey
+  caller, and as a real second try** (user: "make server if a song dont have
+  wbw try cubic again(total 2 times)"). The rule already existed at 11bb42e
+  (`fetch.wbw_retry_cubey`, default ON, `pipeline.fetch_all_lyrics`), and 18
+  checks confirmed it fires -- so the real gaps were elsewhere. (1) THE RACE
+  NEVER RETRIED: `race._race_cubey` had exactly one Cubey call, and its two
+  callers are `rerace.py`'s background upgrade loop (the thing whose whole job
+  is lifting line-sync to wbw) and `/api/lyrics/stream`. Both now go through
+  `_maybe_cubey_second_pass`, the same gate: word timing present -> one call
+  and done; absent -> one more pass, keep the better by `_lyrics_score`.
+  (2) THE SECOND PASS WAS NOT A SECOND TRY: it reused the incoming credential
+  (`jwt_token or pick_jwt()`) and fired in the same millisecond. A device JWT
+  arrives as an argument and never enters `jwt_pool`, so nothing demotes it
+  after a 401 -- re-sending it is the same request, and a 429 or a 15s stream
+  timeout just happens twice. Now `providers_cubey.second_pass_token()`
+  prefers a DIFFERENT pool token (falls back to the one used, since a token
+  with no alternative is still worth the request) and both callers sleep
+  `SECOND_PASS_DELAY` (0.8s) first. (3) The raw-result shape was copy-pasted in
+  two places; `cubey_candidate()` in providers_cubey is now the single answer,
+  which also fixed a latent crash -- a non-dict inner value (None) would have
+  thrown AttributeError inside the pipeline's retry loop and abandoned every
+  remaining query. Cost is at most two Cubey requests PER QUERY: pass 1
+  short-circuits on its first hit, pass 2 walks the query list.
+  `app_settings.flag(key)` is the new one-line schema-bool reader both callers
+  share (fails OPEN, spells the default out so a typo cannot read as "off").
+  New log lines `[wbw-retry]` and `Cubey second pass` are classified in
+  `logging_util._classify_log` BEFORE the `'[REQ'` tag, or they would have been
+  swallowed as ordinary request lines. Verified: 30/30 in
+  `tmp/test_wbw_retry.py` driving the REAL `fetch_all_lyrics` and the REAL
+  `_race_cubey` with every provider stubbed (adopts wbw, keeps the incumbent
+  when pass 2 finds nothing, no second call when pass 1 was already wbw, no
+  second call with the switch off, runs anyway when pass 1 had no JWT but the
+  pool gained one, skips cleanly when there is no JWT at all, sleeps before
+  retrying, rotates the token); `compileall` over `server/`, package import,
+  `describe()` renders the new desc, `/api/app/settings` 200. The test's first
+  run had two WRONG expectations and one real trap: `second_pass_token`
+  imports `pick_jwt` from `jwt_pool` INSIDE the function, so patching
+  `pipeline.pick_jwt` alone left the retry reading the real (empty) pool --
+  the same function-local-import trap as `_run_retitle`'s `set_cached`.
 - **the retitle job: one LLM call per SONG, and a provider race even when
   the retitle changed nothing** (user pasted 101/205 rows of the Retitling
   dialog and asked "is this retitle ragebait? and we can put many songs in
