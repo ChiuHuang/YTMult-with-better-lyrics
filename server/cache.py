@@ -180,6 +180,31 @@ def get_cached(video_id):
             pass
     return None
 
+def is_parser_stale(key):
+    """True when a cache FILE exists for `key` but get_cached() refuses it.
+
+    The distinction matters and nothing else in the tree can make it. "There is
+    no cache for this song" and "there is a cache whose text an older
+    parsers_*.py produced" both look identical to every caller, because
+    get_cached() returns None for both -- and they need OPPOSITE handling: the
+    first is normal (fetch fresh), the second is what a parser bump creates and
+    re-racing cannot repair, because re-racing needs the old payload to compare
+    against and that is precisely what was withheld.
+
+    Reads the file rather than asking the gate, so it stays correct if the gate
+    ever grows a third reason to refuse.
+    """
+    path = os.path.join(LYRICS_DIR, _cache_filename(key) + '.json')
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            entry = json.load(f)
+    except Exception:
+        return False
+    return entry.get('pv') != _PARSER_EPOCH
+
+
 def set_cached(video_id, data):
     if is_not_found_result(data):
         return
