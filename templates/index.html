@@ -446,6 +446,26 @@
 
             <mdui-card variant="elevated" class="panel">
               <div class="panel-head">
+                <span class="section-title">Refusals that spared a token</span>
+                <span class="pill pill-mute" id="jwt-warn-count">no unknown reasons</span>
+              </div>
+              <div class="panel-body">
+                <div class="app-desc" style="margin-bottom:10px;">
+                  A 401/403 only retires a token when its
+                  <span class="mono">reason</span> is about the credential. Cubey
+                  answers an unauthenticated call with
+                  <span class="mono">missing_token</span> and a non-JWT with
+                  <span class="mono">malformed</span> &mdash; those are facts about
+                  the request, so the token is kept. Anything this build has never
+                  seen is flagged here instead of being guessed at: it is the signal
+                  that the vocabulary moved, and it never evicts on its own.
+                </div>
+                <div id="jwt-warn-list" class="list-grid"></div>
+              </div>
+            </mdui-card>
+
+            <mdui-card variant="elevated" class="panel">
+              <div class="panel-head">
                 <span class="section-title">Token traffic</span>
                 <span class="pill pill-mute" id="jwt-stats-note">no history yet</span>
                 <span class="spacer"></span>

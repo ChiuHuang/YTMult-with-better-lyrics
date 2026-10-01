@@ -156,6 +156,9 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.retired .v { font-family:Consolas, Menlo, monospace; }
 .list-row.retired .why-dead { color:rgb(198,40,40); }
 .list-row.retired .why-manual { color:rgb(var(--mdui-color-on-surface-variant)); }
+/* refusals that spared a token: reason / where / classification / when */
+.list-row.jwt-warn { grid-template-columns: minmax(110px,180px) 70px 150px 90px; font-size:12.5px; }
+.list-row.jwt-warn > span:first-child { font-family:Consolas, Menlo, monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
 /* ---- pre code block ---- */
 .code-block { position:relative; }

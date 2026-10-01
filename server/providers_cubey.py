@@ -280,7 +280,24 @@ def _note_cubey_auth_failure(jwt_token, status):
 CUBEY_URL = "https://lyrics.api.dacubeking.com/v2/lyrics"
 
 
-def _account(jwt_token, status_or_outcome, exception=False):
+def _safe_body(resp):
+    """A short, decoded peek at an error body.
+
+    `_safe_body` exists because the error body is the only thing that says
+    whether a 403 is about the token or about the request, and reading it must
+    never be the thing that breaks a fetch: the response is a STREAM here, so
+    `.text` on an already-consumed or binary response can raise, and that raise
+    would happen inside the error path of a failing request."""
+    try:
+        raw = getattr(resp, 'content', None)
+        if not raw:
+            return ''
+        return raw[:600].decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _account(jwt_token, status_or_outcome, exception=False, body=None):
     """The ONE bookkeeping call for a Cubey request (jwt_pool.note_request).
 
     Reached from every outcome below, including the failures, because the number
@@ -288,14 +305,26 @@ def _account(jwt_token, status_or_outcome, exception=False):
     token that burned a hundred requests on 429s has a very different value from
     one that answered a hundred.
 
-    An 'auth' outcome is ALSO the strike, because this is the only place the pool
-    hears that a credential was rejected. 429 / 5xx / a timeout are counted as
-    requests and are never death: the pool only evicts on a proven 401/403."""
+    `body` is the response text, and on a 401/403 it is the only thing that says
+    whether the rejection is about the TOKEN or about the REQUEST: Cubey answers
+    an unauthenticated call with reason=missing_token, and striking a token for
+    that is exactly backwards. It used to be discarded here, so the pool retired
+    healthy tokens for requests it never actually authenticated.
+
+    'auth' is the only outcome that can strike, and only when the reason says so.
+    429 / 5xx / a timeout are counted as requests and are never death."""
     outcome = 'other' if exception else _outcome_for(status_or_outcome)
     try:
         from .jwt_pool import note_request
-        note_request(jwt_token, outcome,
-                     reason=f'cubey {status_or_outcome}' if not exception else 'exception')
+        if outcome == 'auth':
+            from .jwt_pool import _cubey_reason
+            reason = f'cubey {status_or_outcome}'
+            note_request(jwt_token, outcome, reason=reason,
+                         provider_reason=_cubey_reason(body))
+        else:
+            note_request(jwt_token, outcome,
+                         reason=(f'cubey {status_or_outcome}' if not exception
+                                 else 'exception'))
     except Exception:
         pass  # never let bookkeeping break a fetch
 
@@ -403,7 +432,7 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
             if status == 200:
                 _account(jwt_token, 200)
                 return _collect_cubey_lines(text.splitlines(), duration_sec)
-            _account(jwt_token, status)
+            _account(jwt_token, status, body=text)
             print(f"  [FAIL] Cubey via node {via_node}: HTTP {status}")
             return {}
         print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
@@ -411,7 +440,7 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
-            _account(jwt_token, response.status_code)
+            _account(jwt_token, response.status_code, body=_safe_body(response))
             print(f"  [FAIL] Cubey API error: {response.status_code}")
             return {}
         _account(jwt_token, 200)
@@ -450,7 +479,7 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec, via_node=None)
             if status == 200:
                 _account(jwt_token, 200)
                 return _parse_cubey_lines(text.splitlines(), duration_sec)
-            _account(jwt_token, status)
+            _account(jwt_token, status, body=text)
             print(f"  [FAIL] Cubey via node {via_node}: HTTP {status}")
             return None
         print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
@@ -458,7 +487,7 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec, via_node=None)
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
-            _account(jwt_token, response.status_code)
+            _account(jwt_token, response.status_code, body=_safe_body(response))
             print(f"  [FAIL] Cubey API error: {response.status_code}")
             return None
         _account(jwt_token, 200)
