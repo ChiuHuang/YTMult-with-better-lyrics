@@ -716,24 +716,33 @@ def api_db_sweep_status():
 @login_required
 def api_db_version_refetch():
     """The network leg: re-fetch exactly the songs whose text is still
-    parser-stale after a sweep. Body: {workers?, cpu_workers?, translate?}.
-    Refuses with 409 when a bulk job is already running (the work list would
-    be computed against entries that job is rewriting underneath it)."""
+    parser-stale after a sweep. Body: {workers?, cpu_workers?, tq_workers?,
+    batch?, translate?, force?}. Refuses with 409 when a bulk job is already
+    running (the work list would be computed against entries that job is
+    rewriting underneath it) -- and carries that job's state, so the client can
+    show it instead of a bare refusal. `force` takes the slot."""
     from .bulk_refetch import start as bulk_start, BulkBusy, status as bulk_status
     body = request.get_json(silent=True) or {}
     with _migrate_lock:
         # Same as above: no bulk job yet is not "a bulk job is running".
-        if (bulk_status() or {}).get('state') == 'running':
+        if (bulk_status() or {}).get('state') in ('running', 'translating') \
+                and not body.get('force'):
+            from .bulk_refetch import _running_brief
             return jsonify({'ok': False,
-                            'error': 'a bulk refetch is already running'}), 409
+                            'error': 'a bulk refetch is already running',
+                            'running': _running_brief(bulk_status())}), 409
         try:
             res = bulk_start({'scope': 'stale', 'mode': 'fresh',
                               'lang': (body.get('lang') or 'zh-TW'),
                               'workers': body.get('workers') or 4,
                               'cpu_workers': body.get('cpu_workers') or 2,
-                              'translate': body.get('translate', True)})
+                              'tq_workers': body.get('tq_workers') or 2,
+                              'batch': body.get('batch') or 25,
+                              'translate': body.get('translate', True),
+                              'force': body.get('force', False)})
         except BulkBusy as e:
-            return jsonify({'ok': False, 'error': str(e)}), 409
+            return jsonify({'ok': False, 'error': str(e),
+                            'running': e.running}), 409
         except ValueError as e:
             return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, **res})
@@ -924,9 +933,14 @@ def _candidate_tier(cand):
 @login_required
 def api_bulk_refetch_start():
     """Start a bulk refetch-all job with admin-chosen options. Body:
-    {scope: all|non-wbw|unlyriced|plain, mode: fresh|rerace, lang,
+    {scope: all|non-wbw|unlyriced|plain|stale, mode: fresh|rerace, lang,
     workers (fetch threads 1-32), cpu_workers (parse processes),
-    translate (bool)}. 409 when a job is already running."""
+    tq_workers (translate queue threads), batch (songs per batch),
+    translate (bool), force (take the slot from a running job)}.
+
+    409 carries the running job's state so the client can show WHAT is running
+    instead of a bare refusal -- the panel used to sit on 'idle' next to a Start
+    button whose only possible answer was that error."""
     from .bulk_refetch import start, BulkBusy
     body = request.get_json(silent=True) or {}
     lang = (body.get('lang') or 'zh-TW').strip()
@@ -939,8 +953,32 @@ def api_bulk_refetch_start():
             'lang': lang,
             'workers': body.get('workers', 8),
             'cpu_workers': body.get('cpu_workers', 2),
+            'tq_workers': body.get('tq_workers', 2),
+            'batch': body.get('batch', 25),
             'translate': body.get('translate', True),
+            'force': body.get('force', False),
         })
+    except BulkBusy as e:
+        return jsonify({'ok': False, 'error': str(e), 'running': e.running}), 409
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@app.route('/api/admin/library/refetch/tune', methods=['POST'])
+@login_required
+def api_bulk_refetch_tune():
+    """Change the live knobs of the RUNNING job: {workers?, cpu_workers?,
+    tq_workers?, batch?, translate?}. Every key is optional and an unchanged
+    value is not an error -- the dashboard fires this on every keystroke of a
+    number field. workers takes effect within a tick (the dispatcher re-reads
+    it); cpu_workers/translate are read per song. 409 when nothing is running."""
+    from .bulk_refetch import tune, BulkBusy
+    body = request.get_json(silent=True) or {}
+    try:
+        res = tune(**{k: body.get(k) for k in
+                      ('workers', 'cpu_workers', 'tq_workers', 'batch', 'translate')
+                      if k in body})
     except BulkBusy as e:
         return jsonify({'ok': False, 'error': str(e)}), 409
     except (ValueError, TypeError) as e:
@@ -948,9 +986,13 @@ def api_bulk_refetch_start():
     return jsonify({'ok': True, **res})
 
 
+@app.route('/api/admin/library/refetch/status', methods=['GET'])
 @app.route('/api/admin/library/refetch/status/<job_id>', methods=['GET'])
 @login_required
-def api_bulk_refetch_status(job_id):
+def api_bulk_refetch_status(job_id=None):
+    """With no job_id this is the ADOPT endpoint: whatever job is running,
+    including one started from another tab or by the stale-refetch button. The
+    dashboard calls it when the page opens, so the panel cannot be blind."""
     from .bulk_refetch import status
     st = status(job_id)
     if st is None:
