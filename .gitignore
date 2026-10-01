@@ -4,6 +4,9 @@ config/app_settings.json
 config/admin_config.json
 # Node registry: holds the key_hash of every node, so it is a secret.
 config/nodes.json
+# Armed kill targets (server/kill_switch.py). Runtime operator state, and a
+# commit of it would ship an armed switch to every deploy.
+config/kill_targets.json
 # Persistent server state (lyrics, candidates, translations, token pool,
 # renames). Renamed from cache/ -- see server/paths.py.
 database/

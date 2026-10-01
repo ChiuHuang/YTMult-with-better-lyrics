@@ -498,7 +498,8 @@
           <div class="panel-body">
             <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
               Remote config for the tweak, served publicly at <span class="mono">GET /api/app/settings</span> (non-secret values only).
-              Devices re-check on foreground, at most once every 24&nbsp;h.
+              These switches reach every device on every build. Devices re-check on
+              foreground, at most once every 15&nbsp;min.
             </div>
             <div class="app-master">
               <div>
@@ -508,6 +509,48 @@
               <mdui-switch id="app-master" aria-label="Remote control"></mdui-switch>
             </div>
             <div id="app-groups"></div>
+            <details id="app-kill-wrap" open style="margin:12px 0;">
+              <summary>Targeted kill switch (by build)</summary>
+              <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin:6px 0 10px;">
+                The switches above reach <b>every device on every build</b>. This one
+                targets a build sha, a tag, or a range of builds, so a bad build can be
+                turned down without touching anyone else. The device sends the sha it
+                was built with and the server resolves the selector, so nothing is
+                evaluated on the device. A target that cannot be resolved is refused
+                rather than stored &mdash; one that silently matched nothing would look
+                armed while doing nothing.
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+                <mdui-select id="kill-build" label="Target" style="flex:1; min-width:320px;"></mdui-select>
+                <mdui-select id="kill-scope" label="Action" style="width:220px;">
+                  <mdui-select-item value="lg">All V2 surfaces off</mdui-select-item>
+                  <mdui-select-item value="tweak">Whole glass stack off</mdui-select-item>
+                  <mdui-select-item value="surface">One surface off</mdui-select-item>
+                </mdui-select>
+                <div id="kill-surface-row" style="display:none;">
+                  <mdui-select id="kill-surface" label="Surface" style="width:200px;"></mdui-select>
+                </div>
+                <mdui-text-field id="kill-note" label="Note" style="width:200px;"></mdui-text-field>
+                <mdui-button id="kill-preview-btn" variant="text" icon="visibility">Preview</mdui-button>
+                <mdui-button id="kill-add" variant="tonal" icon="add">Arm target</mdui-button>
+              </div>
+              <div id="kill-preview" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:12px;"></div>
+              <div class="app-group">
+                <div class="app-group-title">Active targets</div>
+                <div id="kill-list" class="list-grid" style="margin-bottom:12px;"></div>
+              </div>
+              <div class="app-group">
+                <div class="app-group-title">
+                  Devices per build
+                  <mdui-button id="kill-refresh" variant="text" icon="refresh" style="margin-left:8px;"></mdui-button>
+                </div>
+                <div class="app-desc" style="margin-bottom:6px;">
+                  Counted from the settings each device already polls, de-duplicated by
+                  client IP. Live = seen in the last 30 days.
+                </div>
+                <div id="kill-census" class="list-grid"></div>
+              </div>
+            </details>
             <details id="app-advanced">
               <summary>Advanced: raw key/value</summary>
               <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin:6px 0 10px;">

@@ -62,6 +62,20 @@ _SCHEMA = [
         'desc': ('Off disables every Liquid Glass surface on every device at '
                  'once. Individual switches below are finer grained.'),
     },
+    {
+        'key': 'ui.tweak',
+        'type': 'bool',
+        'default': True,
+        'group': 'server',
+        'scope': 'remote',
+        'label': 'Whole glass stack kill switch',
+        'desc': ('Off turns off the material system itself -- the same switch '
+                 'as "YTMusicUltimate" off in the tweak settings -- so both '
+                 'Liquid Glass generations and every surface go with it. '
+                 'Stricter than the switch above, which only turns off the V2 '
+                 'surfaces. This is the action the per-build kill switch uses '
+                 'when you target a build as broken outright.'),
+    },
     # ---- group: diagnostics ----
     # ---- group: database ----
     # Server-only keys: no device_key, so they are absent from the device's

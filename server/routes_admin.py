@@ -174,6 +174,72 @@ def admin_app_settings_reset():
     return jsonify({'ok': True, **describe()})
 
 
+# ---------------------------------------------------------------
+# Targeted kill switch (build sha -> action). The flat keys above are
+# "every device, every build"; these are "these builds, these keys".
+# Rules live in server/kill_switch.py and are folded into the map at serve
+# time, so GET /api/app/settings?sha=... returns an already-resolved verdict.
+# ---------------------------------------------------------------
+@app.route('/api/admin/kill/targets', methods=['GET'])
+@login_required
+def admin_kill_targets():
+    """Active targets + the build picker data, in one payload: the counts shown
+    next to each build have to come from the same instant as the list, and two
+    round trips let them disagree."""
+    from .kill_switch import describe_targets, options
+    return jsonify({'ok': True, 'targets': describe_targets(), **options()})
+
+
+@app.route('/api/admin/kill/targets', methods=['POST'])
+@login_required
+def admin_kill_target_add():
+    """Create one target.
+
+    Body: exactly one selector, plus an action.
+      selector  {sha} | {tag} | {from_sha, to_sha} | {} for every build
+      action    scope 'lg' (every V2 surface) | 'tweak' (the whole glass
+                stack) | 'surface' (+ key, one of the schema's device keys)
+      note      free text, shown in the list, max 200 chars
+    A selector that resolves to nothing is a 400, not a stored row that looks
+    armed: a tag or range endpoint that is not in the history kills nobody and
+    would sit in the UI doing nothing."""
+    from .kill_switch import add_target, describe_targets, options
+    try:
+        target = add_target(request.get_json(silent=True) or {})
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    print(f"[KILL] [OK] target {target['id']} scope={target['scope']} "
+          f"selector={target.get('sha') or target.get('tag') or (target.get('from_sha'), target.get('to_sha'))}")
+    return jsonify({'ok': True, 'targets': describe_targets(), **options()})
+
+
+@app.route('/api/admin/kill/targets', methods=['DELETE'])
+@login_required
+def admin_kill_target_del():
+    """Remove one target by id. Body: {id}."""
+    from .kill_switch import describe_targets, options, remove_target
+    body = request.get_json(silent=True) or {}
+    try:
+        removed = remove_target(body.get('id'))
+    except (ValueError, TypeError) as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    if not removed:
+        return jsonify({'ok': False, 'error': 'no such target'}), 404
+    print(f"[KILL] target removed: {body.get('id')}")
+    return jsonify({'ok': True, 'removed': True, 'targets': describe_targets(), **options()})
+
+
+@app.route('/api/admin/kill/preview', methods=['GET'])
+@login_required
+def admin_kill_preview():
+    """Dry run for one build: which targets fire and which keys end up off.
+    The dashboard calls this as the operator picks a build, because the whole
+    cost of a wrong target is discovered by users rather than by us.
+    Query: sha=<build sha>"""
+    from .kill_switch import preview
+    return jsonify({'ok': True, **preview(request.args.get('sha') or '')})
+
+
 @app.route('/api/admin/caches', methods=['GET'])
 @login_required
 def admin_caches():
