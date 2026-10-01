@@ -27,6 +27,7 @@ TRANSLATE_DIR = os.path.join(DATA_DIR, 'translate')
 CANDIDATES_DIR = os.path.join(DATA_DIR, 'candidates')
 JWT_FILE = os.path.join(DATA_DIR, 'jwt.json')
 USAGE_STATS_FILE = os.path.join(DATA_DIR, 'usage_stats.json')
+LATENCY_STATS_FILE = os.path.join(DATA_DIR, 'latency_stats.json')
 BADGE_STATS_FILE = os.path.join(DATA_DIR, 'badge_stats.json')
 RENAME_FILE = os.path.join(DATA_DIR, 'rename.json')
 PROVIDER_FILE = os.path.join(DATA_DIR, 'provider.json')
@@ -53,6 +54,10 @@ _MIGRATE_FILES = (
     'rename.json',
     'provider.json',
     'library_unlyriced.jsonl',
+    # Latency percentiles. Purely derived history, so losing it is harmless --
+    # it is listed for symmetry with usage_stats.json, not because the rings
+    # cannot be rebuilt (they refill from the next fetch).
+    'latency_stats.json',
 )
 
 

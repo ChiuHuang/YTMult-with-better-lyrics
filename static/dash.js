@@ -142,6 +142,8 @@
       }
       const chip = $('#instance-chip');
       if (chip && info.instance_id) chip.innerHTML = `<mdui-icon name="memory"></mdui-icon> ${esc(info.instance_id.slice(0,8))}`;
+      // Rides along on this same payload -- no extra request per refresh.
+      if (info.latency) renderLatency(info.latency);
       const rr = $('#recent-reqs');
       if (rr) {
         rr.innerHTML = '';
@@ -162,6 +164,110 @@
     } catch (e) {
       console.warn('overview load failed', e);
     }
+  };
+
+  /* ---- lyrics latency widget ----
+     Percentiles, not averages: a fetch is bimodal (cache hit ~1ms, cold fetch
+     seconds), so one mean describes neither end. Three cards for the numbers
+     the operator asks about, then every metric the server keeps. Labels live
+     here, not on the server, but the ORDER comes from the server's `order`
+     key so a new metric shows up with its raw name instead of vanishing. */
+  const LAT_CARDS = [
+    {key: 'song', title: 'Time per song', icon: 'music_note'},
+    {key: 'ttf_line', title: 'Time to line-sync', icon: 'view_headline'},
+    {key: 'ttf_wbw', title: 'Time to word-by-word', icon: 'subtitles'},
+  ];
+  const LAT_LABELS = {
+    song: 'Time per song',
+    ttf_line: 'Time to line-sync',
+    ttf_wbw: 'Time to word-by-word',
+    song_fetch: 'Per song (providers only)',
+    song_wbw: 'Per song, wbw winner',
+    song_line: 'Per song, line winner',
+    song_plain: 'Per song, plain winner',
+    miss: 'Per song, nothing found',
+    cache: 'Cache hit',
+  };
+  const fmtMs = ms => {
+    if (ms == null || !isFinite(ms)) return '--';
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)}s`;
+    return `${Math.round(ms / 60000)}m`;
+  };
+  // Fixed thresholds, not relative to the row: a relative colour would make a
+  // uniformly slow server paint green because every row is slow in the same
+  // way. p95 of 3s is the point where a song feels slow to wait for.
+  const latClass = ms => (ms == null ? '' : ms >= 10000 ? 'bad' : ms >= 3000 ? 'warn' : '');
+  const renderLatency = data => {
+    const metrics = (data && data.metrics) || {};
+    const cards = $('#lat-cards');
+    if (cards) {
+      cards.innerHTML = '';
+      LAT_CARDS.forEach(c => {
+        const m = metrics[c.key] || null;
+        const grid = el('div', {class: 'lat-grid3'});
+        [['p50', 50], ['p95', 95], ['p99', 99]].forEach(([k, p]) => {
+          const v = m ? m[k] : null;
+          grid.appendChild(el('div', {class: 'k'}, `${p}%`));
+          grid.appendChild(el('div', {class: `v lat-v ${latClass(v)}`}, fmtMs(v)));
+        });
+        cards.appendChild(el('div', {class: 'lat-card'},
+          el('div', {class: 'lat-t'}, c.title),
+          el('div', {class: 'lat-n'}, m ? `${m.n} sample(s), last ${fmtMs(m.last)}` : 'no samples yet'),
+          grid,
+        ));
+      });
+    }
+    const rows = $('#lat-rows');
+    if (rows) {
+      rows.innerHTML = '';
+      const order = (data && data.order) && data.order.length
+        ? data.order
+        : Object.keys(metrics);
+      const keys = order.filter(k => k in metrics);
+      if (!keys.length) rows.appendChild(el('div', {class: 'list-row'}, 'No latency samples yet.'));
+      keys.forEach(k => {
+        // A metric the server knows but has no samples for arrives as null, and
+        // the row is still worth showing (an empty ttf_wbw is the interesting
+        // case: nothing has ever reached word timing). Reading m.n straight off
+        // a null is how this table dies on a fresh install.
+        const m = metrics[k] || {};
+        rows.appendChild(el('div', {class: 'list-row lat'},
+          el('span', {}, LAT_LABELS[k] || k),
+          el('span', {class: 'v'}, fmt(m.n)),
+          el('span', {class: 'v lat-v ' + latClass(m.p50)}, fmtMs(m.p50)),
+          el('span', {class: 'v lat-v ' + latClass(m.p95)}, fmtMs(m.p95)),
+          el('span', {class: 'v lat-v ' + latClass(m.p99)}, fmtMs(m.p99)),
+          el('span', {class: 'v'}, fmtMs(m.min)),
+          el('span', {class: 'v'}, fmtMs(m.max)),
+        ));
+      });
+    }
+    const pill = $('#lat-updated');
+    if (pill) {
+      const at = (data && data.updated_at) || 0;
+      // `updated_at` is the newest SAMPLE, not the newest render, and it is a
+      // unix epoch rather than an ISO string -- the `ago()` helper takes ISO.
+      pill.textContent = at
+        ? `last sample ${ago(new Date(at * 1000).toISOString())} ago`
+        : 'no samples yet';
+    }
+  };
+  const loadLatency = async () => {
+    try { renderLatency(await json('/api/admin/latency')); }
+    catch (e) { console.warn('latency load failed', e); }
+  };
+  const clearLatency = async () => {
+    await mdui.confirm({
+      headline: 'Clear latency samples',
+      description: 'Drop every latency percentile? Only fetches from now on will be recorded.',
+      cancelText: 'Cancel', confirmText: 'Clear',
+      onConfirm: async () => {
+        const d = await (await API('/api/admin/latency/clear', {method: 'POST'})).json();
+        renderLatency(d);
+        mdui.snackbar({message: d.cleared ? 'Latency samples cleared' : 'There was nothing to clear'});
+      },
+    });
   };
 
   /* ---- logs ---- */
@@ -2182,6 +2288,10 @@
 
     const infoRefreshBtn = $('#info-refresh');
     if (infoRefreshBtn) infoRefreshBtn.addEventListener('click', loadOverview);
+    const latRefreshBtn = $('#lat-refresh');
+    if (latRefreshBtn) latRefreshBtn.addEventListener('click', loadLatency);
+    const latClearBtn = $('#lat-clear');
+    if (latClearBtn) latClearBtn.addEventListener('click', clearLatency);
 
     const rebaseStartBtn = $('#rebase-start');
     if (rebaseStartBtn) rebaseStartBtn.addEventListener('click', startRebase);

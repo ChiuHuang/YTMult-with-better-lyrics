@@ -49,6 +49,11 @@ def _classify_log(msg):
         # one more line of whatever request it belongs to.
         '[wbw-retry]': ('info', 'fa-cloud'),
         'Cubey second pass': ('info', 'fa-cloud'),
+        # Per-fetch latency line (pipeline.fetch_all_lyrics). Also before
+        # '[REQ': a fetch's [lat] line belongs to no single request id, and
+        # swallowing it as a request line would hide the only place the
+        # time-to-tier numbers exist in the log.
+        '[lat]': ('info', 'fa-gauge'),
         '[REQ': ('request', 'fa-search'),
         '[CLEAN]': ('info', 'fa-broom'),
         '[DUMP]': ('info', 'fa-file-arrow-up'),
