@@ -339,15 +339,6 @@ def _ruby_element(acc, el):
     acc['parts'].append(part)
 
 
-def _bg_text(raw):
-    """A background cue's own text, unwrapped from its brackets.
-
-    `(ちーん)` is a stage direction, not part of the sung line; both references
-    strip the wrapping parens so it renders as `ちーん`.
-    """
-    return re.sub(r'^[(（]+', '', re.sub(r'[)）]+$', '', raw)).strip()
-
-
 def _content(el, acc, depth=0):
     """Walk `el`'s children in document order, dispatching on ttm:role.
 
@@ -427,13 +418,28 @@ def _finish_parts(acc):
     return [p for p in parts if p['words']]
 
 
+def _unbracket(text):
+    """Drop the wrapping `(`/`（` … `)`/`）` a stage direction is written with."""
+    return re.sub(r'^[(（]+', '', re.sub(r'[)）]+$', '', text)).strip()
+
+
 def _sub_line(acc, bg=False):
     """The shape of a background cue / romanization: same as a line, minus the
     attribution. Returns None when there is nothing to show."""
     parts = _finish_parts(acc)
     text = _MULTI_SPACE_RE.sub(' ', acc['text']).strip()
     if bg:
-        text = _bg_text(text)
+        text = _unbracket(text)
+        # The parts too, not just the text. The device REBUILDS the display
+        # string from parts (wbwDisplayTextForLyric), so unwrapping only the
+        # text left `(切` and `ざ)` in the parts and the brackets still drew --
+        # verified on the real Cubism payload, whose cues are written
+        # `(切って貼った皮 あざ)`. Both references strip the first and last WORD,
+        # not the joined string.
+        if parts:
+            parts[0]['words'] = _unbracket(parts[0]['words'])
+            parts[-1]['words'] = _unbracket(parts[-1]['words'])
+            parts = [p for p in parts if p['words']]
     if not text and not parts:
         return None
     # Timing comes from the parts whenever there are any, including a single

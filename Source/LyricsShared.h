@@ -71,6 +71,19 @@
 // zero with it, so a solo track lays out exactly as it did before duet support.
 @property (nonatomic, strong) UILabel *singerLabel;
 
+// The background voice / stage direction a line carries (`bg` in the payload,
+// from TTML ttm:role="x-bg" or an LRC [bg:] group). Its OWN line under the
+// lyric, dimmed, never wiped and never translated -- Better Lyrics renders it
+// exactly this way, and folding it into the lyric text is what made it sing
+// along with the lead. Pinned to zero height when the line has none, so a track
+// with no background voice lays out byte-identically to one without this.
+@property (nonatomic, strong) UILabel *bgLabel;
+
+// Romanization / transliteration for the row (`romanization`, from TTML
+// x-roman or a <transliterations> block). Same placement and same collapse rule
+// as bgLabel: it is a reading OF the line, not another line.
+@property (nonatomic, strong) UILabel *romanLabel;
+
 // The instrumental-gap ribbon (braccato's instrumental-wave style). A bezier
 // wave that oscillates between two shapes and flattens across the gap, built
 // in -layoutSubviews because the width is not known until then.
@@ -98,6 +111,10 @@
 // Show or clear this row's voice marker; nil is the normal case and is safe to
 // call on every configure, including on a recycled cell.
 - (void)ytmu_setSingerMarker:(NSString *)text;
+// The background cue (`bg`) and the romanization (`romanization`) for this row.
+// Either may be nil, and nil is the normal case; both must be safe on every
+// configure because cells are recycled.
+- (void)ytmu_setSubRowsWithBg:(NSString *)bgText roman:(NSString *)romanText;
 @end
 
 // (Typewriter) category for the cell -- see the note on the view controller's
