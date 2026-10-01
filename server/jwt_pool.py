@@ -34,9 +34,39 @@ from .nodes import pick_node
 from .paths import JWT_FILE, ensure_data_dir
 VERIFY_INTERVAL = 300       # seconds between full pool probes
 POOL_MAX = 32               # newest-first cap; oldest evicted
+_CUBEY_URL = "https://lyrics.api.dacubeking.com/v2/lyrics"
 _VERIFY_VIDEO_ID = 'dQw4w9WgXcQ'
 _VERIFY_SONG = 'Never Gonna Give You Up'
 _VERIFY_ARTIST = 'Rick Astley'
+
+# The ONLY reasons that may strike a token. Measured 2026-10-01 against the live
+# endpoint:
+#     no token / empty token -> 403 {"reason":"missing_token"}
+#     not a JWT at all       -> 403 {"reason":"malformed"}
+#     wrong signature        -> 403 {"reason":"bad_signature"}
+# Everything below is a statement about the CREDENTIAL. `missing_token` and
+# `malformed` are statements about the REQUEST -- the first is literally "you did
+# not send me a token", which is our bug or a relay's, and striking the token for
+# it is backwards. An unrecognised reason is treated as unknown, because a reason
+# this build has never seen must not be able to empty the pool on its own.
+_TERMINAL_REASONS = frozenset({'expired', 'invalid', 'invalid_token',
+                               'bad_signature', 'revoked'})
+
+
+def _cubey_reason(body):
+    """Pull `reason` out of Cubey's JSON error body. Returns '' when the body is
+    not that shape -- an unparseable body is not a verdict, and treating it as
+    one is what this whole change exists to stop."""
+    try:
+        text = (body or '')[:400]
+        if '{' not in text:
+            return ''
+        d = json.loads(text[text.index('{'):])
+        r = d.get('reason')
+        return str(r).strip().lower() if isinstance(r, str) else ''
+    except Exception:
+        return ''
+
 
 _lock = threading.Lock()
 # jwt_id -> entry. A usable entry always carries the raw 'token' (persisted
@@ -385,8 +415,16 @@ def pick_jwt(with_meta=False):
 def _probe_token(token, via_node=None):
     """Ask Cubey whether a token still works. Returns True/False for a
     definite verdict, or None when the probe itself failed (rate limited,
-    timeout...) -- None must NOT be treated as "dead"."""
-    url = "https://lyrics.api.dacubeking.com/v2/lyrics"
+    timeout, or a refusal that is about the request rather than the token) --
+    None must NOT be treated as "dead"."""
+    # The probe MUST use the same egress as the real fetch. A verdict obtained
+    # through a path the fetch never takes is a verdict about THAT PATH, not
+    # about the token -- and this probe is what strikes tokens, so a mismatch
+    # here retires healthy ones. Measured 2026-10-01: it had been reaching Cubey
+    # through a node whose address was refused (403) while the same token
+    # answered 200 from the origin.
+    from .egress import egress_url
+    url = egress_url(_CUBEY_URL)
     data = {
         "videoId": _VERIFY_VIDEO_ID,
         "song": _VERIFY_SONG,
@@ -396,6 +434,12 @@ def _probe_token(token, via_node=None):
         "token": token,
     }
     try:
+        if via_node and url != _CUBEY_URL:
+            # The proxy IS in play for Cubey (the URL came back wrapped), so the
+            # probe goes out the same way the fetch does. Probing down a path the
+            # fetch never takes is how a token gets retired for something that
+            # happened to that path -- which is exactly the 2026-10-01 incident.
+            via_node = None
         if via_node:
             from .nodes import relay_http_request
             relayed = relay_http_request(via_node, 'POST', url, data=data, timeout=20)
@@ -410,6 +454,18 @@ def _probe_token(token, via_node=None):
         print(f"  [JWT] probe error: {e}")
         return None
     if status in (401, 403):
+        # The body is not decoration. Measured 2026-10-01, Cubey answers an
+        # unauthenticated request with
+        #     403 {"error":"Authorization token missing","reason":"missing_token"}
+        # which is a fact about the REQUEST, not about the token -- and it was
+        # being booked as the token's death, twice, until the pool emptied.
+        # Only a reason we understand as terminal may strike; anything else
+        # (including a reason this build has never seen) is UNKNOWN, and unknown
+        # verdicts have never evicted a token.
+        reason = _cubey_reason(text)
+        if reason and reason not in _TERMINAL_REASONS:
+            print(f"  [JWT] probe {status} reason={reason} -- not a token verdict, keeping it")
+            return None
         return False
     if status == 200:
         return True
