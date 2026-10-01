@@ -71,7 +71,14 @@ _CACHE_FORMAT_VERSION = 4
 # exactly the failure nodes.py just had.
 #
 # Bump this whenever a file in parsers_*.py changes its output.
-_PARSER_EPOCH = 1
+# 2: parsers_ttml.py stopped calling p.iter('span') and started walking direct
+#    children by ttm:role. Every TTML line's text and parts can change: an
+#    x-bg cue leaves the vocal line and arrives as `bg`, spacing now comes from
+#    the real whitespace text nodes instead of the has_gap/is_cjk guess, ruby
+#    stops arriving as extra words, and a <p> with no begin is no longer
+#    dropped. None of that is replayable offline -- the entry holds the parser's
+#    output -- so every TTML-derived entry is parser-stale and wants a refetch.
+_PARSER_EPOCH = 2
 
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.
