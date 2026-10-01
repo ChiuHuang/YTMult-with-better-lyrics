@@ -76,8 +76,7 @@ _SCHEMA = [
                  'surfaces. This is the action the per-build kill switch uses '
                  'when you target a build as broken outright.'),
     },
-    # ---- group: diagnostics ----
-    # ---- group: database ----
+    # ---- group: fetch (server-side fetch behaviour) ----
     # Server-only keys: no device_key, so they are absent from the device's
     # YTMUAppSettingBool lookup entirely. Read by db_migrate.py and
     # pipeline._wbw_retry_cubey on the server.
@@ -109,7 +108,7 @@ _SCHEMA = [
         'key': 'fetch.wbw_retry_cubey',
         'type': 'bool',
         'default': True,
-        'group': 'database',
+        'group': 'fetch',
         'scope': 'server',
         'label': 'Second Cubey pass when not word-by-word',
         'desc': ('If a fetch ends without word-level timing, ask Cubey once '
@@ -120,6 +119,82 @@ _SCHEMA = [
                  'every Cubey caller: the full fetch, the SSE race and the '
                  'background re-race. Costs one extra request per '
                  'non-word-by-word song.'),
+    },
+    {
+        'key': 'fetch.wbw_retry_delay_s',
+        # float, not int: the default is 0.8s, and an int-typed key rounded it
+        # to 1s -- silently making every second pass half a second later than
+        # the constant it replaced.
+        'type': 'float',
+        'default': 0.8,
+        'min': 0,
+        'max': 30,
+        'group': 'fetch',
+        'scope': 'server',
+        'label': 'Delay before that second pass (seconds)',
+        'desc': ('The two attempts are deliberately not in the same millisecond: '
+                 'a repeat of the same JWT in the same instant is the same '
+                 'request, so a 429 or a stream timeout just happens twice. '
+                 'Raise it when the second pass keeps landing on rate limits, '
+                 'lower it when you would rather spend the quota sooner. 0 '
+                 'means no wait at all (the retry is still a real second call).'),
+    },
+    # ---- group: bulk (defaults for a NEW bulk job) ----
+    # These are DEFAULTS, not a cap: the bulk panel can still change every one
+    # of them while a job runs, and whatever it was last set to is what the next
+    # Start sends. They exist so a job started by anything other than the panel
+    # (the stale-refetch button, a script) uses the operator's chosen numbers.
+    {
+        'key': 'bulk.workers',
+        'type': 'int',
+        'default': 8,
+        'min': 1,
+        'max': 32,
+        'group': 'bulk',
+        'scope': 'server',
+        'label': 'Fetch threads',
+        'desc': 'Network fetch threads per bulk job. The panel can raise or lower this mid-job.',
+    },
+    {
+        'key': 'bulk.cpu_workers',
+        'type': 'int',
+        'default': 2,
+        'min': 1,
+        'max': 64,
+        'group': 'bulk',
+        'scope': 'server',
+        'label': 'CPU workers',
+        'desc': ('Worker processes for the normalize+score step. Capped by the '
+                 'real core count. Pure CPU work, so raising it past the cores '
+                 'buys nothing.'),
+    },
+    {
+        'key': 'bulk.tq_workers',
+        'type': 'int',
+        'default': 2,
+        'min': 1,
+        'max': 16,
+        'group': 'bulk',
+        'scope': 'server',
+        'label': 'Translate workers',
+        'desc': ('Threads translating in the background while the fetch threads '
+                 'keep working. Raise it when the job spends its last minutes '
+                 'waiting on translations; watch for rate limits before going '
+                 'high.'),
+    },
+    {
+        'key': 'bulk.batch',
+        'type': 'int',
+        'default': 25,
+        'min': 1,
+        'max': 500,
+        'group': 'bulk',
+        'scope': 'server',
+        'label': 'Songs per batch',
+        'desc': ('How many songs are dispatched before the job reports a batch '
+                 'and re-reads its knobs. Smaller batches show progress sooner '
+                 'and make Stop more responsive; bigger batches spend less time '
+                 'between boundaries.'),
     },
     {
         'key': 'upload_logs',
@@ -218,6 +293,40 @@ def flag(key, default=True):
         return default
 
 
+def number(key, default, lo=None, hi=None):
+    """One schema number for a caller on a request path.
+
+    The type decides the return: an `int` key comes back int, a `float` key
+    comes back float with three decimals. That is not fussiness -- the wbw retry
+    delay defaults to 0.8s, and rounding it to 1s because the key happened to be
+    declared as an integer is exactly the kind of change nobody notices until
+    they wonder why every second pass is slower.
+
+    The schema's own min/max win over the caller's, because the schema is what
+    the dashboard renders bounds from -- a control that promises 1..32 and then
+    stores 99 is worse than no control at all. Clamps rather than refuses, so a
+    stale setting from an older schema cannot wedge a caller, and a missing key
+    (a typo, or a setting file written before this key existed) falls back to
+    the caller's default rather than to 0."""
+    spec = _SCHEMA_BY_KEY.get(key) or {}
+    lo = spec.get('min', lo)
+    hi = spec.get('max', hi)
+    is_float = spec.get('type') == 'float'
+    try:
+        val = get_all().get(key, default)
+        if isinstance(val, bool):
+            val = default
+        val = float(val)
+        val = round(val, 3) if is_float else float(round(val))
+    except Exception:
+        val = float(default) if not is_float else float(default)
+    if lo is not None:
+        val = max(float(lo), val)
+    if hi is not None:
+        val = min(float(hi), val)
+    return val if is_float else int(val)
+
+
 def _check_key(key):
     # Not `key or ''`: a non-string key ({"key": 123}) has no .strip(), and the
     # resulting AttributeError escaped the routes' (ValueError, TypeError)
@@ -246,6 +355,29 @@ def _check_value(value, key=None):
         if isinstance(value, str) and value.strip().lower() in ('true', 'false', '1', '0'):
             return value.strip().lower() in ('true', '1')
         raise ValueError(f"{key} is a boolean: send true or false")
+    if spec and spec.get('type') in ('int', 'float'):
+        # bool is an int subclass, so `True` would silently become 1 and look
+        # like a real value; a numeric string is accepted because the dashboard
+        # sends what the number field held.
+        if isinstance(value, bool):
+            raise ValueError(f"{key} is a number, not a boolean")
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError(f"{key} needs a number")
+        try:
+            num = float(value)
+        except Exception:
+            raise ValueError(f"{key} needs a number")
+        if num != num or num in (float('inf'), float('-inf')):
+            raise ValueError(f"{key} needs a finite number")
+        num = round(num) if spec['type'] == 'int' else round(num, 3)
+        lo, hi = spec.get('min'), spec.get('max')
+        if lo is not None and num < lo:
+            num = lo
+        if hi is not None and num > hi:
+            num = hi
+        return num
     return value
 
 
@@ -294,9 +426,19 @@ def reset_defaults():
 GROUPS = [
     ('server', 'Server'),
     ('ui', 'Liquid Glass surfaces'),
+    ('fetch', 'Lyrics fetching'),
+    ('bulk', 'Bulk refetch defaults'),
     ('database', 'Database'),
     ('diagnostics', 'Diagnostics'),
 ]
+
+# Which groups belong to which dashboard page. The App page is remote config
+# for devices; the Settings page is this server's own behaviour. The split used
+# to be absent, so a server-only switch (the wbw second pass) sat inside the
+# page framed as "remote config for the tweak", where it read like a device
+# setting it was never going to reach.
+GROUPS_REMOTE = ('server', 'ui', 'diagnostics')
+GROUPS_SERVER = ('fetch', 'bulk', 'database')
 
 
 def get_overrides():
@@ -328,4 +470,6 @@ def describe():
     extra = [{'key': k, 'value': v, 'scope': 'advanced', 'is_override': True}
              for k, v in sorted(overrides.items()) if k not in known]
     return {'schema': entries, 'groups': GROUPS, 'extra': extra,
+            'groups_remote': list(GROUPS_REMOTE),
+            'groups_server': list(GROUPS_SERVER),
             'overrides': sorted(overrides)}

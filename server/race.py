@@ -24,7 +24,7 @@ from .metadata import get_search_queries
 from .providers_lrclib import fetch_lrclib
 from .providers_yt import fetch_yt_lyrics
 from .providers_cubey import (fetch_cubey, fetch_cubey_all, cubey_candidate,
-                               second_pass_token, SECOND_PASS_DELAY)
+                               second_pass_token, second_pass_delay)
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
@@ -124,7 +124,7 @@ def cubey_second_pass(queries, video_id, duration, used_jwt, via_node=None,
         return None
     # Never in the same millisecond as pass 1: an identical request fired
     # immediately is how one 429 or one stream timeout becomes two.
-    time_module.sleep(SECOND_PASS_DELAY)
+    time_module.sleep(second_pass_delay())
     best = None
     for q in queries:
         try:
