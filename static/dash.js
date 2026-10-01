@@ -2211,10 +2211,36 @@
         if (j.candidates_written) bits.push(`${j.candidates_written}/${j.candidates} snapshot(s)`);
         if (j.errors) bits.push(`${j.errors} error(s)`);
       }
+      // The old cache/ directory, when it is still there. Its state files were
+      // migrated automatically at startup; its lyrics were deliberately left,
+      // so the button is the only way to do anything with them.
+      const lg = d.legacy;
+      if (lg && (lg.lyrics || lg.candidates)) {
+        bits.push(`old cache/: ${lg.lyrics} file(s) not adopted`);
+        if (lg.would_adopt) bits.push(`${lg.would_adopt} ready to adopt`);
+        else if (!lg.already_present) bits.push('all already adopted');
+      }
+      if (d.adopt) {
+        const a = d.adopt;
+        if (a.dry_run) bits.push(`adopt dry run: ${a.lyrics} lyric(s), ${a.candidates} snapshot(s) would be imported as stale`);
+        else bits.push(`adopted ${a.lyrics} lyric(s) + ${a.candidates} snapshot(s), all left stale for Refetch stale`);
+        if (a.skipped_present) bits.push(`${a.skipped_present} already present`);
+        if (a.unreadable) bits.push(`${a.unreadable} unreadable`);
+        if (a.claimed_epoch) bits.push(`${a.claimed_epoch} had the epoch claim dropped`);
+      }
       line.textContent = bits.join(' | ');
     }
     const refetchBtn = $('#dbver-refetch');
     if (refetchBtn) refetchBtn.disabled = !(s.needs_refetch > 0);
+    // Only offered when there is something in cache/ we have not taken, and the
+    // count comes from the server's own filesystem walk rather than a guess.
+    const adoptBtn = $('#dbver-adopt');
+    if (adoptBtn) {
+      const lg = d.legacy;
+      const show = !!(lg && lg.would_adopt > 0);
+      adoptBtn.style.display = show ? '' : 'none';
+      adoptBtn.disabled = !show;
+    }
     if (list) {
       const rows = (j && j.results) || [];
       list.innerHTML = '';
@@ -2248,6 +2274,37 @@
       mdui.snackbar({message: d.job.dry_run ? 'Dry run finished' : `Sweep: ${d.job.fixed} fixed, ${d.job.demoted} demoted, ${d.job.needs_refetch} still need a refetch`});
       loadLibrary();
     } catch (e) { mdui.snackbar({message:'Sweep failed: '+e.message}); }
+    if (btn) btn.loading = false;
+  };
+  // Two clicks on purpose: the first is a dry run and says exactly what would
+  // be imported, the second writes. 2000 files is too many to write off a
+  // single unconfirmed click, and the whole point of the operation is that the
+  // imported text is NOT usable until it has been refetched -- so the operator
+  // should see that count before agreeing to it.
+  let adoptArmed = false;
+  const adoptLegacy = async () => {
+    const btn = $('#dbver-adopt');
+    if (btn) btn.loading = true;
+    try {
+      const r = await API('/api/admin/library/dbversion/adopt', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({dry_run: !adoptArmed})});
+      const d = await r.json();
+      if (!d.ok) throw new Error((d.report && d.report.error) || 'adopt failed');
+      const a = d.report || {};
+      if (!adoptArmed) {
+        adoptArmed = true;
+        if (btn) { btn.textContent = `Adopt ${a.lyrics || 0} now`; btn.disabled = false; }
+        mdui.snackbar({message: a.lyrics
+          ? `Would import ${a.lyrics} lyric file(s) + ${a.candidates || 0} snapshot(s) AS STALE. Click again to write; they need Refetch stale after.`
+          : 'Nothing left in cache/ to adopt'});
+      } else {
+        adoptArmed = false;
+        if (btn) { btn.textContent = 'Adopt old cache/'; }
+        mdui.snackbar({message: `Adopted ${a.lyrics || 0} lyric(s) + ${a.candidates || 0} snapshot(s), all left stale. Run Refetch stale to re-derive them.`});
+        await loadDbVer();
+      }
+    } catch (e) { adoptArmed = false; mdui.snackbar({message:'Adopt failed: '+e.message}); }
     if (btn) btn.loading = false;
   };
   const refetchStale = async () => {
@@ -2539,6 +2596,8 @@
     if (dbvSweep) dbvSweep.addEventListener('click', () => runDbSweep(false));
     const dbvRefetch = $('#dbver-refetch');
     if (dbvRefetch) dbvRefetch.addEventListener('click', refetchStale);
+    const dbvAdopt = $('#dbver-adopt');
+    if (dbvAdopt) dbvAdopt.addEventListener('click', adoptLegacy);
     const rtScan = $('#rtrans-scan');
     if (rtScan) rtScan.addEventListener('click', scanRTrans);
     const rtStart = $('#rtrans-start');
