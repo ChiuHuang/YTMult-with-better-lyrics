@@ -35,10 +35,12 @@ import json
 import os
 import threading
 import time as time_module
+from datetime import datetime
 
 from .paths import LYRICS_DIR, CANDIDATES_DIR
 from .cache import (
     _CACHE_FORMAT_VERSION, _PARSER_EPOCH,
+    _cache_filename, _cache_key_from_filename,
     sanitize_lyrics_parts, postprocess_lyrics,
     read_entry, stamp_entry, is_not_found_result, _cache_filename,
 )
@@ -269,6 +271,140 @@ def _iter_keys():
         key = _cache_key_from_filename(fname)
         if key:
             yield key
+
+
+def legacy_dir_state():
+    """What is sitting in the old cache/ that has NOT been adopted.
+
+    paths.migrate_legacy_cache_dir moves the small state files across and
+    deliberately leaves lyrics/candidates/translate behind, because those hold
+    pre-fix parsed text. That is the right default, but it leaves an operator
+    with 2000 files and no way to do anything with them, so this reports them
+    and adopt_legacy_data is the opt-in."""
+    from .paths import DATA_DIR
+    legacy = 'cache'
+    if not os.path.isdir(legacy):
+        return None
+    out = {'dir': legacy, 'data_dir': DATA_DIR, 'lyrics': 0,
+           'candidates': 0, 'translate': 0, 'would_adopt': 0,
+           'already_present': 0}
+    for name, sub in (('lyrics', 'lyrics'), ('candidates', 'candidates'),
+                      ('translate', 'translate')):
+        d = os.path.join(legacy, sub)
+        try:
+            n = len([f for f in os.listdir(d)
+                     if f.endswith('.json') and not f.endswith('.tmp')])
+        except Exception:
+            n = 0
+        out[name] = n
+    try:
+        have = set(_iter_keys())
+    except Exception:
+        have = set()
+    try:
+        for fname in os.listdir(os.path.join(legacy, 'lyrics')):
+            if not fname.endswith('.json') or fname.endswith('.tmp'):
+                continue
+            from .cache import _cache_key_from_filename
+            key = _cache_key_from_filename(fname)
+            if not key:
+                continue
+            if key in have:
+                out['already_present'] += 1
+            else:
+                out['would_adopt'] += 1
+    except Exception:
+        pass
+    return out
+
+
+def adopt_legacy_data(dry_run=False, include=('lyrics', 'candidates')):
+    """Import cache/lyrics and cache/candidates into database/, AS STALE.
+
+    The one rule, and it is the whole point: this copies the record SHAPE and
+    never the parser epoch. Every adopted entry keeps whatever `pv` the source
+    had (0 when it had none, which is every entry from before the epoch
+    existed), so the serving gate refuses it exactly as it refuses any other
+    parser-stale entry, needs_refetch_keys lists it, and Refetch stale
+    re-derives the text with the parsers this build actually runs.
+
+    That is the difference between this and a file copy, and the reason a plain
+    copy is the bug the cache/ -> database/ rename was built to kill: it would
+    put 2000 pre-fix texts on disk where a later `pv` bump could not tell they
+    were old, because a bumped epoch only retires entries that CARRY an old
+    one. Adopting them unstamped keeps them visible in the Library (title,
+    artist, lang, so the refetch knows what to search for) while making it
+    impossible to serve them.
+
+    Never overwrites: a key that already exists in database/ is left alone, so
+    this is safe to run twice and safe to run after a partial migration.
+
+    Returns counts. dry_run does no writes."""
+    from .cache import (_CACHE_FORMAT_VERSION as _V, _PARSER_EPOCH as _PV)
+    legacy = 'cache'
+    if not os.path.isdir(legacy):
+        return {'ok': False, 'error': 'no cache/ directory to adopt from'}
+    report = {'ok': True, 'dry_run': bool(dry_run), 'lyrics': 0,
+              'candidates': 0, 'skipped_present': 0, 'unreadable': 0,
+              'left_stale': 0, 'claimed_epoch': 0,
+              'note': 'adopted entries are parser-stale by construction; run '
+                      '"Refetch stale" to re-derive their text'}
+
+    def _adopt_dir(sub, dest_dir, count_key):
+        src_dir = os.path.join(legacy, sub)
+        try:
+            names = [f for f in os.listdir(src_dir)
+                     if f.endswith('.json') and not f.endswith('.tmp')]
+        except Exception:
+            return
+        for fname in names:
+            src = os.path.join(src_dir, fname)
+            dst = os.path.join(dest_dir, fname)
+            if os.path.exists(dst):
+                report['skipped_present'] += 1
+                continue
+            try:
+                with open(src, 'r', encoding='utf-8') as f:
+                    entry = json.load(f)
+            except Exception:
+                report['unreadable'] += 1
+                continue
+            if not isinstance(entry, dict) or 'data' not in entry:
+                report['unreadable'] += 1
+                continue
+            report[count_key] += 1
+            # The epoch is copied through UNCHANGED on purpose. `entry.get('pv')`
+            # is 0 for every pre-epoch file, which is the honest value.
+            src_pv = entry.get('pv', 0)
+            if src_pv == _PV:
+                # Already claims the current epoch. Adopting it would serve
+                # text we cannot vouch for, so drop the claim instead of
+                # carrying it across.
+                report['claimed_epoch'] += 1
+                src_pv = 0
+            report['left_stale'] += 1
+            if dry_run:
+                continue
+            out = {'v': _V, 'pv': src_pv, 'data': entry.get('data'),
+                   'ts': entry.get('ts') or datetime.now().isoformat()}
+            try:
+                os.makedirs(dest_dir, exist_ok=True)
+                tmp = dst + '.tmp'
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump(out, f, ensure_ascii=False)
+                os.replace(tmp, dst)
+            except Exception:
+                report['unreadable'] += 1
+                report[count_key] -= 1
+                report['left_stale'] -= 1
+
+    if 'lyrics' in include:
+        _adopt_dir('lyrics', LYRICS_DIR, 'lyrics')
+    if 'candidates' in include:
+        _adopt_dir('candidates', CANDIDATES_DIR, 'candidates')
+    if dry_run:
+        report['note'] += ' (dry run: nothing written)'
+    return report
 
 
 def scan():

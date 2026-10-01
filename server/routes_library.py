@@ -655,10 +655,35 @@ def api_translate_retry():
 @app.route('/api/admin/library/dbversion', methods=['GET'])
 @login_required
 def api_db_version():
-    from .db_migrate import scan, status, _CACHE_FORMAT_VERSION, _PARSER_EPOCH
+    from .db_migrate import (scan, status, legacy_dir_state,
+                             _CACHE_FORMAT_VERSION, _PARSER_EPOCH)
     return jsonify({'ok': True, 'format_version': _CACHE_FORMAT_VERSION,
                     'parser_epoch': _PARSER_EPOCH,
-                    'scan': scan(), 'job': status()})
+                    'scan': scan(), 'job': status(),
+                    'legacy': legacy_dir_state()})
+
+
+@app.route('/api/admin/library/dbversion/adopt', methods=['POST'])
+@login_required
+def api_db_version_adopt():
+    """Adopt the old cache/ lyrics + candidates into database/.
+
+    Body: {dry_run?, lyrics?, candidates?}. The adopted entries are parser-stale
+    ON PURPOSE -- see db_migrate.adopt_legacy_data -- so this makes the old
+    library visible and refetchable, never servable. `dry_run` is the default
+    here, because the operator's next click is the one that writes 2000 files.
+    """
+    from .db_migrate import adopt_legacy_data, legacy_dir_state
+    body = request.get_json(silent=True) or {}
+    include = []
+    if body.get('lyrics', True):
+        include.append('lyrics')
+    if body.get('candidates', True):
+        include.append('candidates')
+    report = adopt_legacy_data(dry_run=body.get('dry_run', True),
+                               include=tuple(include))
+    return jsonify({'ok': bool(report.get('ok')), 'report': report,
+                    'legacy': legacy_dir_state()})
 
 
 @app.route('/api/admin/library/dbsweep/start', methods=['POST'])
