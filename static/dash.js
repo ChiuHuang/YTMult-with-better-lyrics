@@ -17,6 +17,12 @@
 
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
+  // Build an element. Coerces primitive children to text nodes and skips
+  // null/undefined/false. Only objects are appended as nodes -- a bare number
+  // reaches here constantly (a count, a percentile) and `appendChild(51)` is a
+  // TypeError on a real DOM, so `typeof c === 'string'` would have let one tile
+  // with a numeric value take the whole panel's render down with it. This is the
+  // ONE el() for the dashboard, so the coercion has to live here.
   const el = (tag, attrs, ...kids) => {
     const e = document.createElement(tag);
     if (attrs) Object.entries(attrs).forEach(([k, v]) => {
@@ -24,7 +30,12 @@
       else if (k === 'html') e.innerHTML = v;
       else e.setAttribute(k, v);
     });
-    kids.forEach(c => { if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    // Primitive children become text nodes; only objects are appended as nodes.
+    kids.forEach(c => {
+      if (c == null || c === false) return;
+      if (typeof c === 'object') e.appendChild(c);
+      else e.appendChild(document.createTextNode(String(c)));
+    });
     return e;
   };
   const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
@@ -679,6 +690,9 @@
     tokens.forEach(t => {
       const okFail = `${t.successes || 0}/${t.fails || 0}`;
       const lastOk = t.last_ok ? `ok ${ago(t.last_ok)} ago` : 'never ok';
+      const reqs = el('span', {class:'mono', title:`${t.requests || 0} request(s): ${t.req_ok || 0} ok, ${t.req_auth_fail || 0} auth, ${t.req_other_fail || 0} other`},
+        `${t.requests || 0}`);
+      if (!(t.requests || 0)) reqs.style.opacity = '.45';   // in the pool, never used
       const row = el('div', {class:'list-row jwt', style:'font-size:13px;'},
         el('span', {class:'mono truncate'}, t.id || '--'),
         el('span', {class:'truncate'}, t.node_id ? `${t.node_id.slice(0,10)}` : '--'),
@@ -686,6 +700,7 @@
         el('span', {}, t.last_checked ? ago(t.last_checked)+' ago' : '--'),
         el('span', {class:'mono', title: lastOk}, okFail),
         jwtVerdict(t.verdict),
+        reqs,
         jwtStatus(t),
         el('mdui-button-icon', {icon: 'close', variant: 'text', style:'justify-self:end; color:rgb(var(--mdui-color-error));'})
       );
@@ -693,7 +708,7 @@
       rmBtn.addEventListener('click', async () => {
         rmBtn.loading = true;
         try {
-          await API('/api/admin/jwt/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: t.id})});
+          await API('/api/admin/jwt/remove', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: t.id, reason: 'removed'})});
           mdui.snackbar({message:'Removed from pool'});
           loadJwt();
         } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
@@ -702,11 +717,205 @@
       list.appendChild(row);
     });
   };
+
+  /* ---- jwt charts ---- */
+  // Plain divs, because that is all a stacked column per hour needs. Shared
+  // helpers so the live-token bars and the death histogram cannot drift apart.
+  const hbars = (hostSel, rows, opt = {}) => {
+    const host = $(hostSel);
+    if (!host) return;
+    host.innerHTML = '';
+    if (!rows.length) {
+      host.appendChild(el('div', {class:'chart-empty'}, opt.empty || 'Nothing recorded yet'));
+      return;
+    }
+    const max = Math.max(1, ...rows.map(r => r.value));
+    const wrap = el('div', {class:'hbars'});
+    rows.forEach(r => {
+      const fill = el('div', {class:`hb-fill ${r.cls || ''}`});
+      fill.style.width = `${Math.max(1, (r.value / max) * 100)}%`;
+      fill.title = r.title || '';
+      wrap.appendChild(el('div', {class:'hbar'},
+        el('span', {class:'hb-name', title:r.name}, r.name),
+        el('div', {class:'hb-track'}, fill),
+        el('span', {class:'hb-val'}, r.label != null ? r.label : fmt(r.value))));
+    });
+    host.appendChild(wrap);
+  };
+
+  const renderJwtHours = hourly => {
+    const host = $('#jwt-chart-hours');
+    if (!host) return;
+    host.innerHTML = '';
+    const rows = hourly || [];
+    if (!rows.length || !rows.some(h => h.requests || h.contributed || h.retired)) {
+      host.appendChild(el('div', {class:'chart-empty'}, 'No traffic recorded yet. Every Cubey request a token makes lands here.'));
+      return;
+    }
+    const max = Math.max(1, ...rows.map(h => h.requests));
+    const axis = el('div', {class:'chart-axis'});
+    rows.forEach(h => {
+      const col = el('div', {class:'col'});
+      col.dataset.in = (h.contributed || h.retired) ? '1' : '0';
+      col.title = `${h.hour.replace('T',' ').slice(5,16)}`
+        + `\nrequests ${h.requests} (ok ${h.ok}, auth ${h.auth_fail}, other ${h.other_fail})`
+        + `\nprobes ${h.probes}  added ${h.contributed}  left ${h.retired}`;
+      // bottom-up: other, auth, ok -- so the reading is "green on top of red on
+      // top of amber", and the tallest colour is the one that filled the hour.
+      [['other', h.other_fail], ['auth', h.auth_fail], ['ok', h.ok]].forEach(([k, v]) => {
+        if (!v) return;
+        const seg = el('div', {class:`seg ${k}`});
+        seg.style.height = `${(v / max) * 100}%`;
+        col.appendChild(seg);
+      });
+      host.appendChild(col);
+    });
+    const first = rows[0], last = rows[rows.length - 1];
+    axis.appendChild(el('span', {}, first ? first.hour.replace('T',' ').slice(5,16) : ''));
+    axis.appendChild(el('span', {}, `${max} peak`));
+    axis.appendChild(el('span', {}, last ? last.hour.replace('T',' ').slice(5,16) : ''));
+    // The axis and the legend are siblings of the chart, not children: the chart
+    // itself is a flex row of columns and an axis inside it would be laid out
+    // as another column. Guarded, because a chart that throws because its host
+    // was moved takes the whole JWT page's render with it.
+    const parent = host.parentNode;
+    if (!parent) return;
+    parent.appendChild(axis);
+    let legend = parent.querySelector('.chart-legend');
+    if (!legend) {
+      legend = el('div', {class:'chart-legend'});
+      parent.appendChild(legend);
+    }
+    legend.innerHTML = '';
+    const swatch = (color) => {
+      // NOT Object.assign(el, {style}): that overwrites the element's style
+      // OBJECT with a string, which leaves a real element unstyled -- an
+      // invisible swatch and no error anywhere.
+      const i = el('i');
+      i.style.background = color;
+      return i;
+    };
+    [['rgb(46,125,50)', 'answered'],
+     ['rgb(198,40,40)', '401/403'],
+     ['rgb(234,179,8)', '429 / 5xx / timeout'],
+     ['rgb(var(--mdui-color-primary))', 'token added'],
+     ['rgb(var(--mdui-color-outline))', 'token left']].forEach(([color, label]) => {
+      const text = el('span', {}, label);
+      text.style.color = color;
+      legend.appendChild(swatch(color));
+      legend.appendChild(text);
+    });
+  };
+
+  const RETIRE_REASON = {
+    dead_twice: 'died (2x 401/403)',
+    removed: 'operator removed',
+    pool_cap: 'pool cap (32)',
+    ttl: 'past 7d TTL',
+    unknown: 'unknown',
+  };
+
+  const renderJwtStats = d => {
+    if (!d) return;
+    const s = d.summary || {};
+
+    // ---- tiles ----
+    const tiles = $('#jwt-stats-tiles');
+    if (tiles) {
+      tiles.innerHTML = '';
+      const tile = (label, value, sub) => {
+        const c = el('mdui-card', {variant:'elevated', class:'stat-card'});
+        c.appendChild(el('div', {},
+          el('div', {class:'stat-label'}, label),
+          el('div', {class:'stat-value mono'}, value),
+          sub ? el('div', {class:'stat-label'}, sub) : null));
+        tiles.appendChild(c);
+      };
+      tile('Requests served', fmt(s.requests_total || 0), `${fmt(s.requests_24h || 0)} in 24h`);
+      tile('Live tokens', fmt((d.live || []).length), `${fmt(s.retired_total || 0)} retired all-time`);
+      tile('Per token (median)', s.tokens_seen ? (s.death_requests_p50 ?? '--') : '--', 'requests before death');
+      tile('Died in 24h', fmt(s.died_24h || 0), `${fmt(s.dead_total || 0)} all-time`);
+      tile('Best token served', s.death_requests_max != null ? fmt(s.death_requests_max) : '--', 'requests');
+      tile('Median lifetime', s.lifetime_s_p50 != null ? fmtDur(s.lifetime_s_p50) : '--', 'contribution to death');
+    }
+
+    const note = $('#jwt-stats-note');
+    if (note) {
+      note.textContent = s.requests_total
+        ? `${fmt(s.requests_total)} requests, ${fmt(s.ok_total)} ok, ${fmt(s.auth_fail_total)} auth, ${fmt(s.other_fail_total)} other`
+        : 'no history yet';
+    }
+
+    renderJwtHours(d.hourly || []);
+
+    // ---- live tokens: who is doing the work ----
+    const live = (d.live || []).slice().sort((a, b) => (b.requests || 0) - (a.requests || 0));
+    hbars('#jwt-chart-live', live.map(t => ({
+      name: `${(t.id || '').slice(0, 10)}${t.node_id ? ' ' + t.node_id.slice(0, 6) : ''}`,
+      value: t.requests || 0,
+      cls: (t.req_auth_fail || 0) > (t.req_ok || 0) ? 'auth' : 'ok',
+      label: `${t.requests || 0}`,
+      title: `${t.requests || 0} requests: ${t.req_ok || 0} ok, ${t.req_auth_fail || 0} auth, ${t.req_other_fail || 0} other\n`
+        + `${t.probes || 0} probe(s), verdict ${t.verdict || 'unverified'}`,
+    })), {empty: 'No live token has served a request yet.'});
+
+    // ---- death histogram: the question that started this ----
+    const hist = d.death_histogram || [];
+    const deadTotal = hist.reduce((a, b) => a + (b.count || 0), 0);
+    hbars('#jwt-chart-death', hist.map(b => ({
+      name: b.label,
+      value: b.count || 0,
+      label: fmt(b.count || 0),
+      title: `${b.count || 0} token(s) died after serving ${b.label} request(s)`,
+    })), {empty: 'No token has died yet, so there is no distribution to show.'});
+    const dnote = $('#jwt-death-note');
+    if (dnote) {
+      const parts = [];
+      if (deadTotal) {
+        parts.push(`${deadTotal} token(s) died`);
+        if (s.death_requests_p50 != null) parts.push(`median ${s.death_requests_p50} request(s) each`);
+        if (s.death_requests_max != null) parts.push(`best ${s.death_requests_max}`);
+      }
+      const others = (s.retire_reasons || {});
+      const manual = Object.entries(others).filter(([k]) => k !== 'dead_twice');
+      if (manual.length) {
+        parts.push(`left for other reasons: ${manual.map(([k, v]) => `${v}x ${RETIRE_REASON[k] || k}`).join(', ')}`);
+      }
+      dnote.textContent = parts.join(' | ') || 'nothing retired yet';
+    }
+
+    // ---- retired table ----
+    const rl = $('#jwt-retired');
+    if (rl) {
+      rl.innerHTML = '';
+      const rows = (d.retired || []).slice().reverse();
+      if (!rows.length) {
+        rl.appendChild(el('div', {class:'list-row'}, 'No retired tokens recorded'));
+      } else {
+        rows.slice(0, 60).forEach(r => {
+          const why = RETIRE_REASON[r.reason] || r.reason;
+          rl.appendChild(el('div', {class:'list-row retired'},
+            el('span', {class:'mono truncate'}, r.id || '--'),
+            el('span', {class:'truncate'}, r.node_id ? r.node_id.slice(0,10) : '--'),
+            el('span', {class: r.reason === 'dead_twice' ? 'why-dead' : 'why-manual'}, why),
+            el('span', {class:'v'}, fmt(r.requests || 0)),
+            el('span', {class:'v'}, `${r.req_ok || 0}/${r.req_auth_fail || 0}/${r.req_other_fail || 0}`),
+            el('span', {class:'v'}, r.lifetime_s != null ? fmtDur(r.lifetime_s) : '--'),
+            el('span', {}, r.retired_at ? ago(r.retired_at)+' ago' : '--')));
+        });
+      }
+    }
+  };
+
   const loadJwt = async () => {
     try {
-      const data = await json('/api/admin/jwt/list');
+      const [data, stats] = await Promise.all([
+        json('/api/admin/jwt/list'),
+        json('/api/admin/jwt/stats').catch(() => null),
+      ]);
       setVal('#jwt-count', fmt(data.count));
       renderJwt(data.jwt || []);
+      if (stats) renderJwtStats(stats);
     } catch {}
   };
   const checkJwt = async (btn) => {
@@ -2847,6 +3056,22 @@
 
     const jwtCheckBtn = $('#jwt-check');
     if (jwtCheckBtn) jwtCheckBtn.addEventListener('click', () => checkJwt(jwtCheckBtn));
+    const jwtStatsClear = $('#jwt-stats-clear');
+    if (jwtStatsClear) jwtStatsClear.addEventListener('click', async () => {
+      // Confirmed, because "clear history" reads like it clears the POOL. It
+      // does not: the tokens keep working, only the ledger and the graphs go.
+      await mdui.confirm({headline:'Clear token history',
+        description:'Drops the request counters, the hourly buckets and the retirement ledger. '
+          + 'The pool itself is untouched -- every token keeps working, its counters just start at zero.',
+        cancelText:'Cancel', confirmText:'Clear history',
+        onConfirm: async () => {
+          try {
+            await API('/api/admin/jwt/stats/clear', {method:'POST'});
+            mdui.snackbar({message:'History cleared (the pool is unchanged)'});
+            loadJwt();
+          } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        }});
+    });
     const jwtContribBtn = $('#jwt-contribute');
     if (jwtContribBtn) jwtContribBtn.addEventListener('click', contributeJwt);
     const jwtPushKeyBtn = $('#jwt-pushkey');

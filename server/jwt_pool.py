@@ -73,6 +73,14 @@ def _persist():
             'ok': bool(e.get('ok')),
             'successes': int(e.get('successes', 0)),
             'fails': int(e.get('fails', 0)),
+            # Per-REQUEST counters (jwt_stats.note_request). 'successes' above is
+            # probe successes only, so it says nothing about real traffic.
+            'requests': int(e.get('requests', 0)),
+            'req_ok': int(e.get('req_ok', 0)),
+            'req_auth_fail': int(e.get('req_auth_fail', 0)),
+            'req_other_fail': int(e.get('req_other_fail', 0)),
+            'probes': int(e.get('probes', 0)),
+            'first_used': e.get('first_used'),
             'verdict': e.get('verdict', 'unverified'),
         } for e in _pool.values()]
         with open(JWT_FILE, 'w', encoding='utf-8') as f:
@@ -109,6 +117,10 @@ def _load_persisted():
             except Exception:
                 added_age = 0
             if added_age > _ttl:
+                # Past the contribution TTL: it is leaving the pool, so it gets a
+                # ledger record like any other departure (reason 'ttl'), otherwise
+                # the chart would show a pool that shrank with no explanation.
+                _retire({**rec, 'token': rec.get('token')}, 'ttl')
                 continue  # ancient contribution, drop
             _pool[jid] = {
                 'id': jid,
@@ -122,6 +134,12 @@ def _load_persisted():
                 'ok': bool(rec.get('ok')),
                 'successes': _safe_int(rec.get('successes')),
                 'fails': _safe_int(rec.get('fails')),
+                'requests': _safe_int(rec.get('requests')),
+                'req_ok': _safe_int(rec.get('req_ok')),
+                'req_auth_fail': _safe_int(rec.get('req_auth_fail')),
+                'req_other_fail': _safe_int(rec.get('req_other_fail')),
+                'probes': _safe_int(rec.get('probes')),
+                'first_used': rec.get('first_used'),
                 'verdict': rec.get('verdict') or 'unverified',
             }
             loaded += 1
@@ -157,30 +175,111 @@ def contribute_jwt(token, node_id=None):
             'ok': was_ok,
             'successes': int((prev or {}).get('successes', 0)),
             'fails': 0,
+            # A re-contribution is a REFRESH, not a new token: the request
+            # counters carry over, because they describe the same credential and
+            # a graph that reset to zero on every device poll would be a lie.
+            # Only the strike state and the verdict start clean.
+            'requests': int((prev or {}).get('requests', 0)),
+            'req_ok': int((prev or {}).get('req_ok', 0)),
+            'req_auth_fail': int((prev or {}).get('req_auth_fail', 0)),
+            'req_other_fail': int((prev or {}).get('req_other_fail', 0)),
+            'probes': int((prev or {}).get('probes', 0)),
+            'first_used': (prev or {}).get('first_used'),
             'verdict': 'unverified',
         }
         _pool[jid] = entry
         if len(_pool) > POOL_MAX:
             # drop the oldest-added entries past the cap
             for old in sorted(_pool.values(), key=lambda e: e.get('added', ''))[:len(_pool) - POOL_MAX]:
-                _pool.pop(old['id'], None)
+                _retire(_pool.pop(old['id'], None), 'pool_cap')
         n = len(_pool)
+    try:
+        from .jwt_stats import note_contributed
+        note_contributed()
+    except Exception:
+        pass
     _persist()
     print(f"  [JWT] contributed {jid} node={node_id or '-'} pool={n}")
     return {'ok': True, 'id': jid, 'num_pool': n}
 
 
-def remove_jwt(jid):
+def remove_jwt(jid, reason='removed'):
+    """Take a token out of the pool.
+
+    `reason` is what the ledger shows next to the death, so it is not a detail:
+    'dead_twice' (two proven 401/403 strikes) is a different fact from 'removed'
+    (an operator deleted it) or 'ttl'. The retirement record is written even when
+    the id was not in the pool, because a double remove must not count as two
+    deaths -- but it is a no-op when nothing was known, so there is no record to
+    write."""
     with _lock:
         was = _pool.pop(jid, None)
     if was:
+        _retire(was, reason)
         _persist()
         return True
     return False
 
 
+def _retire(entry, reason):
+    """Write the ledger record for a departing token. Never raises."""
+    try:
+        from .jwt_stats import retire
+        retire(entry, reason)
+    except Exception as e:
+        print(f"  [JWT] retire bookkeeping failed: {e}")
+
+
+def note_request(token, outcome, reason=''):
+    """One real Cubey request made with this token -- the single bookkeeping
+    entry point for it.
+
+    outcome: 'ok' (200), 'auth' (401/403), 'other' (429/5xx/timeout).
+
+    'auth' ALSO strikes the token, because this is the only place the pool
+    learns that a credential was rejected. It used to be two calls at every HTTP
+    site (`note_request` to count, `note_failure` to strike), which is a trap:
+    forget the second and a dead token keeps serving requests forever with no
+    error anywhere. One call site, one meaning.
+
+    Only a DEFINITE auth rejection strikes. A 429, a 5xx or a timeout is a
+    request that did not work, not a dead token, and the pool's rule has always
+    been that unknown verdicts never count (see _probe_token).
+
+    Never raises, never stores the token. Returns True when the token was known
+    to the pool (i.e. when the counters had somewhere to go)."""
+    try:
+        known = False
+        jid = None
+        field = {'ok': 'req_ok', 'auth': 'req_auth_fail',
+                 'other': 'req_other_fail'}.get(outcome, 'req_other_fail')
+        if isinstance(token, str) and token:
+            jid = _token_id(token)
+            with _lock:
+                e = _pool.get(jid)
+                if e is not None:
+                    known = True
+                    e['requests'] = int(e.get('requests', 0)) + 1
+                    e[field] = int(e.get(field, 0)) + 1
+                    if not e.get('first_used'):
+                        e['first_used'] = datetime.now().isoformat()
+        # Counted even for an unknown token: the request happened and must show
+        # up in the totals, it just cannot be attributed to a pool entry.
+        from .jwt_stats import note_request as _nr
+        _nr(jid if known else None, outcome)
+        if outcome == 'auth' and known:
+            tag = ' '.join((reason or 'api').split())[:40]
+            _strike_dead(jid, datetime.now().isoformat(), f'note_request({tag})')
+            _persist()
+        return known
+    except Exception as ex:
+        print(f"  [JWT] note_request error: {ex}")
+        return False
+
+
 def list_jwt():
     """Safe listing for the admin panel: never exposes raw tokens."""
+    now = time_module.time()
     with _lock:
         items = []
         for e in _pool.values():
@@ -196,6 +295,14 @@ def list_jwt():
                 'live': bool(e.get('token')),
                 'successes': int(e.get('successes', 0)),
                 'fails': int(e.get('fails', 0)),
+                'requests': int(e.get('requests', 0)),
+                'req_ok': int(e.get('req_ok', 0)),
+                'req_auth_fail': int(e.get('req_auth_fail', 0)),
+                'req_other_fail': int(e.get('req_other_fail', 0)),
+                'probes': int(e.get('probes', 0)),
+                'first_used': e.get('first_used'),
+                'idle_s': round(now - float(e.get('last_used') or 0), 1)
+                          if e.get('last_used') else None,
                 'verdict': e.get('verdict', 'unverified'),
             })
         items.sort(key=lambda x: x['added'] or '', reverse=True)
@@ -335,19 +442,19 @@ def _strike_dead(jid, now_iso, via, evict=True):
     if fails >= 2:
         print(f"  [JWT] {jid} {via} DEAD twice, evicting")
         if evict:
-            remove_jwt(jid)
+            # 'dead_twice' is the reason the death chart groups on; a probe and a
+            # live request that both landed the second strike are the same fact.
+            remove_jwt(jid, reason='dead_twice')
     else:
         print(f"  [JWT] {jid} {via} DEAD once, keeping (twice rule)")
     return fails, known
 
 
 def note_failure(token, reason=''):
-    """Report a definite Cubey auth failure (401/403) seen by a LIVE request,
-    so a dead token leaves rotation immediately instead of staying the pool's
-    first pick until the next 300s probe sweep -- each request in the meantime
-    burned a whole Cubey stage on it. Same bookkeeping as the prober
-    (_strike_dead): one strike only demotes, the second consecutive one
-    evicts, and the pick policy/threshold are untouched.
+    """Deprecated alias. It is kept because it names the one thing callers care
+    about ("tell the pool this token died"), but the counting AND the strike now
+    live in one function (note_request) -- two entry points for a single HTTP
+    outcome is exactly how a strike goes missing without an error.
 
     Only a definite 401/403 may be reported. A 429, a timeout or any other
     unknown outcome must NOT be reported here: the pool's own rule is that
@@ -356,21 +463,20 @@ def note_failure(token, reason=''):
 
     Never raises, never logs the raw token, no-op for a None/unknown token.
     Returns True when the token was known to the pool."""
+    # Reason is caller text that lands in a log line: note_request collapses
+    # it to one short single-line token so a weird value cannot inject lines.
+    return note_request(token, 'auth', reason=reason)
+
+
+def _note_probe(ok):
+    """Count one verifier probe. Separate from requests on purpose: the probe is
+    the pool asking Cubey 'still good?', and folding it into the traffic counters
+    would make a token nobody used look busy."""
     try:
-        if not isinstance(token, str) or not token:
-            return False
-        jid = _token_id(token)
-        # Reason is caller text that lands in a log line: collapse it to one
-        # short single-line token so a weird value cannot inject log lines.
-        tag = ' '.join((reason or '').split())[:40] or 'api'
-        fails, known = _strike_dead(jid, datetime.now().isoformat(),
-                                   f'note_failure({tag})')
-        if known and fails < 2:
-            _persist()
-        return known
+        from .jwt_stats import note_probe
+        note_probe(ok)
     except Exception as e:
-        print(f"  [JWT] note_failure error: {e}")
-        return False
+        print(f"  [JWT] probe bookkeeping failed: {e}")
 
 
 def check_all(evict=True):
@@ -394,16 +500,20 @@ def check_all(evict=True):
                     cur['verdict'] = 'ok'
                     cur['fails'] = 0
                     cur['successes'] = int(cur.get('successes', 0)) + 1
+                    cur['probes'] = int(cur.get('probes', 0)) + 1
                     cur['last_ok'] = now_iso
                     cur['last_checked'] = now_iso
+            _note_probe(True)
         elif verdict is False:
             fails, _known = _strike_dead(entry['id'], now_iso, 'probe', evict=evict)
+            _note_probe(False)
             if fails >= 2:
                 dead_n += 1
             else:
                 unknown_n += 1
         else:
             unknown_n += 1
+            _note_probe(False)
             with _lock:
                 if entry['id'] in _pool:
                     # Keep a probation label ('dead x1') so the table still

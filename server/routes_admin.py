@@ -537,13 +537,47 @@ def admin_jwt_list():
 @app.route('/api/admin/jwt/remove', methods=['POST'])
 @login_required
 def admin_jwt_remove():
-    """Drop a single pooled token by its hash id."""
+    """Drop a single pooled token by its hash id.
+
+    reason is recorded in the ledger next to the death, so an operator delete is
+    never counted as a token that died on its own -- those are different facts
+    and the chart labels them differently."""
     body = request.get_json(silent=True) or request.form.to_dict() or {}
     jid = (body.get('id') or '').strip()
     if not jid:
         return jsonify({'ok': False, 'error': 'missing id'}), 400
-    removed = remove_jwt(jid)
+    removed = remove_jwt(jid, reason=(body.get('reason') or 'removed'))
     return jsonify({'ok': True, 'removed': removed, 'count': len(list_jwt())})
+
+
+@app.route('/api/admin/jwt/stats', methods=['GET'])
+@login_required
+def admin_jwt_stats():
+    """Per-request accounting and the retirement ledger, for the graphs.
+
+    Separate from /api/admin/jwt/list on purpose: the list is the current pool,
+    this is the history (how many requests each token served, how many it served
+    before it died, when). Raw tokens are never in either."""
+    from .jwt_stats import snapshot as jwt_snapshot
+    live = list_jwt()
+    snap = jwt_snapshot()
+    # Attach the pool's live counters to the snapshot in one place, so the chart
+    # and the table cannot disagree about what a token has served.
+    by_id = {e['id']: e for e in live}
+    snap['live'] = live
+    snap['live_requests'] = sum(int(e.get('requests') or 0) for e in live)
+    snap['live_by_id'] = by_id
+    return jsonify({'ok': True, **snap})
+
+
+@app.route('/api/admin/jwt/stats/clear', methods=['POST'])
+@login_required
+def admin_jwt_stats_clear():
+    """Drop the request history and the ledger. The live pool is untouched --
+    a token keeps working, its counters just start from zero again."""
+    from .jwt_stats import clear as jwt_clear
+    jwt_clear()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/admin/jwt/check', methods=['POST'])
