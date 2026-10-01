@@ -27,7 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[DONE] ses_f092fed6bffdF2AwCJRV0vhzLE | latency widgets shipped in 7dac3ed (p50/p95/p99 per song, to line-sync, to wbw) | files: server/latency_stats.py (new), pipeline.py, routes_lyrics.py, routes_admin.py, logging_util.py, paths.py, static/dash.js, static/dash.css, templates/index.html | next: none — open items: a browser screenshot of the panel was never taken (no desktop browser attached), and the parse_lrc stub in tmp/test_latency_stats.py exists only so a parser change cannot fail a latency check | does: 63 python checks + 27 node checks green; AGENTS.md, server/parsers_lrc.py, server/parsers_ttml.py and server/parsers_credits.py were deliberately NOT committed (another session is mid-flight on them)`
+- `[DONE] ses_f08ea153affdqh6N7c3mREfQEC | per-build targeted kill switch shipped in 5ecf199 (selector sha/tag/from..to, action lg/tweak/surface, server-side resolution + device census) | files: server/kill_switch.py (new), app_settings.py, routes_misc.py, routes_admin.py, static/dash.js, templates/index.html, Source/LyricsCore.x, Source/YTMULiquidGlassPreferences.h, docs/settings-api.md, .gitignore | next: none — open items: never exercised on a device (the sha it reports is TWEAK_GIT_COMMIT, which only a real install has), and the dashboard panel has no browser screenshot | does: 4 python suites green (unit / Flask test-client / real-repo git timing / live server over a socket), 39/39 + 18/18 logos+clang syntax, node --check`
 
 ## How we talk (user expectations — keep these)
 - Reply in Traditional Chinese, Taiwan usage (繁體中文／台灣用語). The user reads
@@ -199,6 +199,14 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `5ecf199` — the kill switch targets a build, not every device: selector
+  `sha | tag | from_sha..to_sha | blanket`, action `lg | tweak | surface`,
+  resolved server-side from the `?sha=` the device already sends, plus a census
+  of devices per build taken from that same poll. New remote key `ui.tweak`.
+  Trap: `git for-each-ref` does NOT expand `%x1f` (it emits the six characters
+  verbatim, so the tag list parsed as one field and 184 tags became 0 with no
+  error) — use `%00`. Second trap: the `unknown` sha sentinel is a word, so
+  prefix-matching let a target for the sha `unk` capture every such device.
 - `c19d3bd`/`216b512` — the lyrics parsers learn what the format actually
   defines: TTML `ttm:role` (`x-bg` becomes its own row instead of a karaoke
   word of the vocal line), `x-roman`, `tts:ruby`, `amll:obscene`/`empty-beat`,
