@@ -38,6 +38,7 @@ from .library import get_rename
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
 from .logging_util import _log_crash
+from .latency_stats import snapshot as latency_snapshot
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -523,7 +524,29 @@ def admin_server_info():
         'translate_count': translate_count,
         'recent_requests': list(_recent_requests)[-20:],
         'log_files': sorted(log_files, key=lambda x: x['modified'], reverse=True)[:20],
+        # Free with the payload the Overview page already fetches, so the
+        # latency widget costs no extra request on every refresh.
+        'latency': latency_snapshot(),
     })
+
+
+# Standalone read of the same payload, for anything that wants the percentiles
+# without the rest of server_info. Admin-gated like the dashboard itself: the
+# numbers are harmless, but they describe the server's traffic.
+@app.route('/api/admin/latency', methods=['GET'])
+@login_required
+def admin_latency():
+    return jsonify(latency_snapshot())
+
+
+@app.route('/api/admin/latency/clear', methods=['POST'])
+@login_required
+def admin_latency_clear():
+    """Drop every latency ring. There is no undo: the history is only
+    rebuildable from the fetches that happen after this."""
+    from .latency_stats import clear as _lat_clear
+    had = _lat_clear()
+    return jsonify({'ok': True, 'cleared': bool(had), **latency_snapshot()})
 
 @app.route('/api/admin/logs/download', methods=['GET'])
 @login_required

@@ -109,6 +109,23 @@
 
         <mdui-card variant="elevated" class="panel">
           <div class="panel-head">
+            <span class="section-title">Lyrics latency</span>
+            <span class="pill" id="lat-updated">no samples yet</span>
+            <span class="spacer"></span>
+            <mdui-button id="lat-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+            <mdui-button id="lat-clear" variant="text" icon="delete_sweep">Clear</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="lat-cards" id="lat-cards"></div>
+            <div class="list-head lh-lat">
+              <span>Metric</span><span>n</span><span>p50</span><span>p95</span><span>p99</span><span>min</span><span>max</span>
+            </div>
+            <div id="lat-rows" class="list-grid"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
             <span class="section-title">Recent lyrics requests</span>
           </div>
           <div class="panel-body">

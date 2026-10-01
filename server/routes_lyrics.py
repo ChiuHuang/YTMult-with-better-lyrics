@@ -178,6 +178,18 @@ def api_lyrics():
             apply_display_transforms(data['lyrics'], translate_to, auto_zh)
         if isinstance(data, dict):
             data['cached'] = bool(cached)
+            # The free path, measured: a cache hit is ~1ms and a live fetch is
+            # seconds, so recording the two in ONE bucket would drag every
+            # percentile down to the floor and hide the fetch tail entirely.
+            # Recorded here, in serve(), because that is the single place all
+            # three cached paths go through -- disk, node cache and the
+            # in-flight dedup wait.
+            if cached:
+                try:
+                    from .latency_stats import record as _lat_record
+                    _lat_record('cache', (time_module.time() - _req_start) * 1000.0)
+                except Exception:
+                    pass
         # Arm the device switcher with every provider this video has in RAM
         # (transport-only: set_cached already ran on this dict, so the extra
         # keys never reach disk).

@@ -31,6 +31,7 @@ from .cache import is_not_found_result, sanitize_lyrics_parts
 from .candidates import save_candidates, graft_wbw_parts
 from .nodes import pick_node
 from .jwt_pool import pick_jwt
+from .latency_stats import record as _latency_record
 
 
 def _wbw_retry_cubey():
@@ -142,7 +143,14 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     duration = song_info.get('duration', 0)
     queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
 
-    from .race import _lyrics_score
+    from .race import _lyrics_score, _wbw_line_count
+
+    # Latency clock. One clock for the whole fetch, read at three points: the
+    # per-song samples at the end, and the time-to-first-tier stamps inside
+    # consider() / after the graft. Percentiles live in latency_stats, so the
+    # dashboard can answer "how slow is a slow song" without grepping the log.
+    _t0 = time_module.perf_counter()
+    _ttf = {'line': None, 'wbw': None}  # ms from _t0 to the first hit of each tier
 
     result = None  # best across providers, decided by score
     considered = []  # every (label, candidate) tried, for wbw graft + saving
@@ -189,6 +197,22 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         if not candidate or not candidate.get('lyrics'):
             return
         sanitize_lyrics_parts(candidate['lyrics'])
+        # Time to first tier, stamped on the FIRST candidate of each kind, not
+        # on the winner: the winner is often decided much later (the wbw second
+        # Cubey pass, or a graft onto a line-sync result), and it is the arrival
+        # time of usable timing that explains the wait. wbw counts as wbw only
+        # and not as line -- a song that lands word timing at 4s must not also
+        # report ttf_line=4s, or the "how fast do we get line-sync" number
+        # silently inherits the slow path it was supposed to measure around.
+        try:
+            _ms = (time_module.perf_counter() - _t0) * 1000.0
+            if _wbw_line_count(candidate) > 0:
+                if _ttf['wbw'] is None:
+                    _ttf['wbw'] = _ms
+            elif candidate.get('synced') and _ttf['line'] is None:
+                _ttf['line'] = _ms
+        except Exception:
+            pass
         with _fetch_lock:
             considered.append((label, candidate))
             if result is None or _lyrics_score(candidate) > _lyrics_score(result):
@@ -401,7 +425,6 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     # Same lines, better timing: when the winner is line-sync/plain but
     # another tried provider has real word timing for the same lines, graft
     # the word parts onto the winner instead of settling for the lesser tier.
-    from .race import _wbw_line_count
     if result and result.get('lyrics') and _wbw_line_count(result) == 0:
         for _label, cand in considered:
             if cand is result or _wbw_line_count(cand) == 0:
@@ -413,6 +436,17 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                 result['synced'] = True
                 result['wordSynced'] = True
                 result['graftedFrom'] = cand.get('source', '')
+                # Word timing exists now, so this is the real time-to-wbw for a
+                # song whose wbw came from a graft rather than from a provider
+                # that won on its own. Only filled when nothing was stamped
+                # already: consider() runs first and its stamp is the honest
+                # arrival time, so overwriting it here would move the number to
+                # whenever the graft happened to be tried.
+                if _ttf['wbw'] is None:
+                    try:
+                        _ttf['wbw'] = (time_module.perf_counter() - _t0) * 1000.0
+                    except Exception:
+                        pass
                 print(f"  [graft] {result.get('source')} + word timing from {cand.get('source')} "
                       f"(score={_lyrics_score(result):.2f})")
                 break
@@ -514,6 +548,10 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     # Add song metadata
     result['song'] = title
     result['artist'] = artist
+    # Providers are done: stamp the fetch-only elapsed time HERE, so
+    # song_fetch (this) and song (end of function) differ by exactly the
+    # translation tail, and not by whatever the snapshot save happened to cost.
+    _fetch_ms = (time_module.perf_counter() - _t0) * 1000.0
     # Translation (shared helper -- the background queue uses the same one)
     if translate_to and result.get('lyrics'):
         print(f"  [TRANS] Translating {len(result['lyrics'])} lines with Cohere...")
@@ -525,6 +563,47 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
         sanitize_lyrics_parts(result['lyrics'])
 
     result['wordSynced'] = any(l.get('wordSynced') for l in (result.get('lyrics') or []))
+
+    # ---- latency samples ----
+    # _fetch_ms was stamped above, right after the last provider did its work;
+    # `song` is measured here, so the difference between the two is exactly the
+    # translate + sanitize tail. Without that split one number has to describe
+    # both "the providers are slow" and "the model is slow", which are different
+    # problems with different fixes.
+    # Recording happens in this function, not in a route, so the device, the
+    # SSE stream, precache, playlist sync, bulk refetch and rebase all land in
+    # the same percentiles instead of only the endpoint someone instrumented.
+    try:
+        _total_ms = (time_module.perf_counter() - _t0) * 1000.0
+        _is_wbw = bool(result.get('wordSynced'))
+        _tier = 'wbw' if _is_wbw else ('line' if result.get('synced') else 'plain')
+        _latency_record('song_fetch', _fetch_ms)
+        if is_not_found_result(result):
+            # Kept OUT of `song`: a miss is a different population (nothing has
+            # these lyrics anywhere) and folding it in would drag the per-song
+            # p95 up for every song that did resolve fine.
+            _latency_record('miss', _fetch_ms)
+        else:
+            _latency_record('song', _total_ms)
+            _latency_record(f'song_{_tier}', _total_ms)
+        if _ttf['line'] is not None:
+            _latency_record('ttf_line', _ttf['line'])
+        if _ttf['wbw'] is not None:
+            _latency_record('ttf_wbw', _ttf['wbw'])
+        # One line per fetch so a slow song is traceable from the log alone,
+        # not just from the aggregate. Every value is rounded to whole ms -- a
+        # perf_counter delta is 55.73279999998704 and nobody reads that. The
+        # ttf_* ones carry no unit so a `-` (never reached) does not read as
+        # "-ms". ASCII only (the console is cp950).
+        _line_t = '-' if _ttf['line'] is None else f"{_ttf['line']:.0f}"
+        _wbw_t = '-' if _ttf['wbw'] is None else f"{_ttf['wbw']:.0f}"
+        print(f"  [lat] {video_id} tier={_tier} fetch={_fetch_ms:.0f}ms "
+              f"total={_total_ms:.0f}ms "
+              f"ttf_line={_line_t} ttf_wbw={_wbw_t} "
+              f"lines={len(result.get('lyrics') or [])} source={result.get('source', '')}")
+    except Exception as e:
+        print(f"  [lat] {video_id} sample failed (continuing): {e}")
+
     _stage('best', 'done', f"{result.get('source', '')} tier="
             f"{'wbw' if result.get('wordSynced') else ('line' if result.get('synced') else 'plain')}")
 
