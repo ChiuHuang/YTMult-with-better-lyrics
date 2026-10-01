@@ -13,6 +13,7 @@ import concurrent.futures
 from .cache import (
     get_cached, set_cached, is_not_found_result,
     _cache_key_from_filename, _cache_filename, sanitize_lyrics_parts,
+    is_parser_stale,
 )
 from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
@@ -395,10 +396,21 @@ def rebase_cached(job, on_result, cancel_event=None, max_workers=8,
         artist = cand['artist']
         old_data = get_cached(f"{vid}:{lang}")
         if old_data is None:
+            # get_cached() returns None both for "no cache" and for "cache whose
+            # text an older parser produced", and those need different words:
+            # the second is what a parser bump looks like from this panel, and a
+            # bare "old cache miss" reads as a broken tool rather than as
+            # "rebase cannot do this, use Refetch stale". The row is left
+            # exactly as it is either way -- claiming an epoch we cannot prove
+            # is the one thing this must never do.
+            stale = is_parser_stale(f"{vid}:{lang}")
             return {
                 'video_id': vid, 'song': song, 'artist': artist,
                 'from': old_tier, 'to': old_tier, 'status': 'error',
-                'source': '', 'message': 'old cache miss',
+                'source': '',
+                'message': ('parser-stale entry, rebase cannot repair it -- '
+                            'use Library > Refetch stale (bulk scope=stale)'
+                            if stale else 'old cache miss'),
             }
         try:
             upgraded = _rerace_video(vid, lang, old_data)

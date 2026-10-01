@@ -10,7 +10,7 @@ import time as time_module
 import concurrent.futures
 
 from .cache import (get_cached, set_cached, is_not_found_result,
-                    _cache_filename, read_entry)
+                    _cache_filename, read_entry, is_parser_stale)
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, apply_saved_rename,
     _try_llm_retitle_fetch,
@@ -268,6 +268,20 @@ def _rerace_one(job, opts, cancel, target):
     try:
         old_data = get_cached(f"{vid}:{lang}")
         if old_data is None:
+            # A file that EXISTS but will not load is parser-stale: get_cached
+            # refuses it on purpose because its text came from an older
+            # parsers_*.py, so there is nothing to re-race against -- re-racing
+            # needs the old payload to compare against, and withholding that is
+            # the whole point of the gate. A fresh fetch is the only repair, and
+            # it is the SAME situation as an unlyriced row, which the branch
+            # above already sends to _fresh_one. Verified: before this, a job
+            # run after a parser bump reported "old cache miss" on every row,
+            # which reads as a broken tool rather than as "pick the stale
+            # scope", and `all` + `rerace` was unusable for the same reason.
+            if is_parser_stale(f"{vid}:{lang}"):
+                t2 = dict(target)
+                _fresh_one(job, opts, cancel, t2)
+                return
             raise ValueError('old cache miss')
         upgraded = _rerace_video(vid, lang, old_data)
         new_val = _tier(upgraded) if upgraded else -1
