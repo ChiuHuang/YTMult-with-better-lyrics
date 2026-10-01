@@ -718,9 +718,13 @@
         ['Local SHA', `<span class="mono">${esc(shortSha(data.local_sha))}</span>`],
         ['Remote SHA', `<span class="mono">${esc(shortSha(data.remote_sha))}</span>`],
         ['Parent SHA', `<span class="mono">${esc(shortSha(data.parent_sha))}</span>`],
-        ['Local file hash', `<span class="mono">${esc(data.local_file_hash||'')}</span>`],
-        ['Remote file hash', `<span class="mono">${esc(data.remote_file_hash||'')}</span>`],
+        ['Tracked file', `<span class="mono">${esc(data.main_file_name||'')}</span>`],
       ];
+      /* The hash pair is only sent when the tracked file IS the remote path;
+         otherwise the two numbers were never comparable, so showing them reads
+         as a mismatch that does not exist. */
+      if (data.local_file_hash) rows.push(['Local file hash', `<span class="mono">${esc(data.local_file_hash)}</span>`]);
+      if (data.remote_file_hash) rows.push(['Remote file hash', `<span class="mono">${esc(data.remote_file_hash)}</span>`]);
       rows.forEach(([k,v]) => { kv.appendChild(el('div',{class:'k'},k)); kv.appendChild(el('div',{class:'v',html:v})); });
       const chip = $('#update-status'); if (chip) {
         if (data.up_to_date === true) { chip.className='pill pill-ok'; chip.textContent='Up to date'; }
