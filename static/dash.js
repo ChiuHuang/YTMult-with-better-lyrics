@@ -1300,6 +1300,206 @@
         }});
     });
   };
+  /* ---- targeted kill switch (build sha -> action) ---- */
+  // The switches above are "every device, every build". This panel is "these
+  // builds only", which is the shape that is actually useful once more than one
+  // build is in the wild: kill the glass on build-42 and leave everyone else
+  // alone. The server resolves the selector against the sha the device reports
+  // (server/kill_switch.py), so nothing here is evaluated on the device.
+  const killState = {targets: [], builds: [], tags: [], census: [], surfaces: [], scopes: []};
+
+  const killApply = (d) => {
+    killState.targets = d.targets || [];
+    killState.builds = d.builds || [];
+    killState.tags = d.tags || [];
+    killState.census = d.census || [];
+    killState.surfaces = d.surfaces || [];
+    killState.scopes = d.scopes || [];
+    renderKill();
+    killFillOptions();
+  };
+
+  // Device counts next to every build. `n` is the live count (seen inside the
+  // 30-day window); `ever` is the unpruned history, because "0 live, 900 ever"
+  // is the shape of a build everybody already left and killing it is a no-op.
+  const devCount = (n, ever) => {
+    if (!n && !ever) return '<span class="pill pill-mute">0 devices</span>';
+    const cls = n ? 'pill pill-warn' : 'pill pill-mute';
+    const label = n
+      ? `${n} device${n === 1 ? '' : 's'}`
+      : `0 live / ${ever} ever`;
+    return `<span class="${cls}">${esc(label)}</span>`;
+  };
+
+  const agoText = (ts) => {
+    if (!ts) return 'never';
+    const s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  };
+
+  const shaOpts = (selected) => {
+    let h = `<option value="">every build (no selector)</option>`;
+    killState.tags.forEach(t => {
+      // A tagged build already appears in the sha list carrying its tag name,
+      // so the tag list is only for commits that fell out of the 400-commit
+      // window -- otherwise the same release is offered twice.
+      if (t.known) return;
+      h += `<option value="tag:${esc(t.tag)}"${selected === `tag:${t.tag}` ? ' selected' : ''}>tag ${esc(t.tag)} - ${esc(t.sha)} (older than the window) - ${t.devices} devices</option>`;
+    });
+    killState.builds.forEach(b => {
+      const tag = b.tags && b.tags.length ? ` ${b.tags.join(', ')}` : '';
+      h += `<option value="sha:${b.sha}"${selected === `sha:${b.sha}` ? ' selected' : ''}>${esc(b.sha)}${esc(tag)} - ${esc(b.subject)} - ${b.devices} devices</option>`;
+    });
+    return h;
+  };
+
+  const renderKill = () => {
+    const host = $('#kill-list');
+    if (host) {
+      host.innerHTML = '';
+      if (!killState.targets.length) {
+        host.appendChild(el('div', {class:'list-row'}, 'No active kill targets'));
+      }
+      killState.targets.forEach(t => {
+        const sel = t.sha ? `build ${t.sha}`
+          : t.tag ? `tag ${t.tag}`
+          : (t.from_sha || t.to_sha) ? `${t.from_sha || 'oldest'} .. ${t.to_sha || 'newest'}`
+          : 'EVERY build';
+        const scopeText = t.scope === 'surface' ? `one surface: ${t.key}`
+          : t.scope === 'tweak' ? 'whole glass stack' : 'all V2 surfaces';
+        const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto auto;'});
+        row.appendChild(el('div', {class:'app-text'},
+          el('div', {class:'app-label mono'}, sel),
+          el('div', {class:'app-desc'}, `${scopeText} -> ${(t.keys || []).join(', ')}${t.note ? ' - ' + t.note : ''}`)));
+        row.appendChild(el('span', {class: t.status === 'blanket' ? 'pill pill-warn' : 'pill pill-ok'}, t.status));
+        row.appendChild(el('span', {class:'pill pill-mute'}, `${t.devices || 0} devices`));
+        const del = el('mdui-button', {variant:'text', icon:'delete'});
+        del.textContent = 'Remove';
+        del.addEventListener('click', async () => {
+          try {
+            const r = await API('/api/admin/kill/targets', {method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: t.id})});
+            const d = await r.json();
+            if (d.ok) { killApply(d); mdui.snackbar({message: 'Target removed'}); }
+            else mdui.snackbar({message: d.error || 'Failed'});
+          } catch (e) { mdui.snackbar({message: 'Failed: '+e.message}); }
+        });
+        row.appendChild(del);
+        host.appendChild(row);
+      });
+    }
+
+    // Build census: the "how many devices are on a version" answer, one row per
+    // build the server has heard from.
+    const cen = $('#kill-census');
+    if (cen) {
+      cen.innerHTML = '';
+      if (!killState.census.length) {
+        cen.appendChild(el('div', {class:'list-row'}, 'No device has reported a build yet'));
+      }
+      killState.census.slice(0, 25).forEach(r => {
+        const full = killState.builds.find(b => b.sha === r.sha);
+        const subject = full ? full.subject : '(outside the history window)';
+        const row = el('div', {class:'list-row', style:'grid-template-columns: 1fr auto auto;'});
+        row.appendChild(el('div', {class:'app-text'},
+          el('div', {class:'app-label mono'}, `${r.sha}${r.version ? '  v' + r.version : ''}`),
+          el('div', {class:'app-desc'}, `${subject} - last seen ${agoText(r.last_seen)}`)));
+        row.appendChild(devCount(r.devices, r.devices_total));
+        row.appendChild(el('span', {class:'pill pill-mute'}, `first ${agoText(r.first_seen)}`));
+        cen.appendChild(row);
+      });
+    }
+  };
+
+  const loadKill = async () => {
+    try {
+      const r = await API('/api/admin/kill/targets');
+      const d = await r.json();
+      if (d.ok) killApply(d);
+    } catch (e) { /* the App tab still works without this panel */ }
+  };
+
+  const killScopeChanged = () => {
+    const scope = ($('#kill-scope') || {}).value || 'lg';
+    const surf = $('#kill-surface-row');
+    if (surf) surf.style.display = scope === 'surface' ? '' : 'none';
+  };
+
+  const killPreview = async () => {
+    const sel = (($('#kill-build') || {}).value) || '';
+    const host = $('#kill-preview');
+    if (!host) return;
+    host.innerHTML = '';
+    if (!sel) { host.appendChild(el('span', {class:'pill pill-mute'}, 'pick a build to preview')); return; }
+    const sha = sel.startsWith('sha:') ? sel.slice(4) : '';
+    if (!sha) { host.innerHTML = '<span class="pill pill-mute">a tag selector cannot be previewed per-device; it resolves on the server</span>'; return; }
+    try {
+      const r = await API('/api/admin/kill/preview?sha=' + encodeURIComponent(sha));
+      const d = await r.json();
+      host.innerHTML = '';
+      if (!d.ok) { host.appendChild(el('span', {class:'pill pill-mute'}, 'Preview failed')); return; }
+      const hits = d.hits || [];
+      host.appendChild(el('span', {class: hits.length ? 'pill pill-warn' : 'pill pill-ok'},
+        hits.length ? `${hits.length} active target(s) fire here` : 'no target fires here'));
+      (d.keys_off || []).forEach(k => host.appendChild(el('span', {class:'pill pill-bad mono'}, k)));
+      if (!(d.keys_off || []).length && !hits.length) {
+        host.appendChild(el('span', {class:'app-desc'}, 'This build receives the plain remote config.'));
+      }
+    } catch (e) {
+      host.innerHTML = '';
+      host.appendChild(el('span', {class:'pill pill-mute'}, 'Preview failed: '+e.message));
+    }
+  };
+
+  const killAdd = async () => {
+    const sel = (($('#kill-build') || {}).value) || '';
+    const scope = (($('#kill-scope') || {}).value) || 'lg';
+    const key = ((($('#kill-surface') || {}).value) || '').trim();
+    const note = ((($('#kill-note') || {}).value) || '').trim();
+    if (scope === 'surface' && !key) { mdui.snackbar({message: 'Pick a surface'}); return; }
+    const body = {scope, note};
+    if (sel.startsWith('sha:')) body.sha = sel.slice(4);
+    else if (sel.startsWith('tag:')) body.tag = sel.slice(4);
+    if (scope === 'surface') body.key = key;
+    try {
+      const r = await API('/api/admin/kill/targets', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+      const d = await r.json();
+      if (!d.ok) { mdui.snackbar({message: d.error || 'Failed'}); return; }
+      killApply(d);
+      mdui.snackbar({message: 'Target armed'});
+    } catch (e) { mdui.snackbar({message: 'Failed: '+e.message}); }
+  };
+
+  const killInit = () => {
+    const scope = $('#kill-scope');
+    if (scope) scope.addEventListener('change', killScopeChanged);
+    const pv = $('#kill-preview-btn');
+    if (pv) pv.addEventListener('click', killPreview);
+    const add = $('#kill-add');
+    if (add) add.addEventListener('click', killAdd);
+    const rf = $('#kill-refresh');
+    if (rf) rf.addEventListener('click', loadKill);
+    const bs = $('#kill-build');
+    if (bs) bs.addEventListener('change', killPreview);
+    killScopeChanged();
+  };
+
+  // Both pickers are options lists served by the server: the build list comes
+  // from git (plus the census, for the device counts) and the surface list from
+  // the app_settings schema, so neither can name something the device does not
+  // actually read. Populated on load, not from a hardcoded copy here.
+  const killFillOptions = () => {
+    const bs = $('#kill-build');
+    if (bs) bs.innerHTML = shaOpts((bs.value || '').trim());
+    const sf = $('#kill-surface');
+    if (sf) {
+      sf.innerHTML = '';
+      killState.surfaces.forEach(([k, label]) => {
+        sf.appendChild(el('mdui-select-item', {value: k}, label || k));
+      });
+    }
+  };
   /* ---- lyrics preview (braccato renderer + hidden YT clock) ---- */
   let prevData = null;
   let prevPlayhead = 0;
@@ -2161,7 +2361,7 @@
     else if (p==='update') loadUpdate();
     else if (p==='files') loadFiles();
     else if (p==='crashes') loadCrashes();
-    else if (p==='app') loadApp();
+    else if (p==='app') { loadApp(); loadKill(); }
   };
   const initNav = () => {
     $$('#nav-list mdui-list-item').forEach(item => {
@@ -2347,6 +2547,7 @@
     if (rtStop) rtStop.addEventListener('click', stopRTrans);
     aiInit();
     appInit();
+    killInit();
     document.querySelectorAll('#rebase-mode mdui-segmented-button-item').forEach(item => {
       item.addEventListener('click', () => {
         rebaseMode = item.getAttribute('value') || 'cached';

@@ -52,9 +52,34 @@ def handle_500(e):
 @app.route('/api/app/settings', methods=['GET'])
 def api_app_settings():
     """Public remote config for the tweak. Open by design (values are
-    non-secret); managed from the dashboard App tab."""
+    non-secret); managed from the dashboard App tab.
+
+    Query parameters (all optional, all non-secret):
+      sha  the device's build sha (TWEAK_GIT_COMMIT). When present, the kill
+           targets in server/kill_switch.py that match THIS build are folded
+           into the map, so the device reads a verdict and never evaluates a
+           selector. Also recorded in the build census, which is what the
+           dashboard shows device counts from.
+      v    the tweak version, stored alongside the count for display only.
+      rev  the rev digest the device already holds. If nothing that would
+           change the answer has changed, the response is
+           {ok, unchanged, rev} and the device skips the map write entirely.
+           That is what makes a 15-minute poll affordable."""
     from .app_settings import get_all
-    return jsonify({'ok': True, 'settings': get_all()})
+    from .kill_switch import resolve, revision, record_poll
+    sha = (request.args.get('sha') or '').strip()
+    version = (request.args.get('v') or '').strip()
+    client_ip = (request.headers.get('CF-Connecting-IP')
+                 or request.headers.get('X-Forwarded-For')
+                 or request.remote_addr or '')
+    if sha:
+        record_poll(sha, version, client_ip)
+    settings, hits = resolve(get_all(), sha, version)
+    rev = revision(settings)
+    if (request.args.get('rev') or '').strip() == rev and rev:
+        return jsonify({'ok': True, 'unchanged': True, 'rev': rev})
+    return jsonify({'ok': True, 'settings': settings, 'rev': rev,
+                    'kill': hits, 'sha': sha.lower()[:12]})
 
 
 @app.route('/api/app/stats', methods=['GET'])

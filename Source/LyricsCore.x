@@ -282,42 +282,89 @@ BOOL YTMUAppSettingBool(NSString *key, BOOL dflt) {
 }
 
 // Remote gate for every Liquid Glass feature, and the ONLY remote read that
-// can turn a user-visible feature off. Four guards, in order:
+// can turn a user-visible feature off. Five guards, in order:
 //   1. allowServerFeatureControl -- the user's own local opt-out, a hard
 //      ceiling on remote power. Local on purpose: a user who wants the server
 //      out of their UI must not need the server's permission.
 //   2. ui.remote_control          -- the server's own master switch. Off means
 //      "I am not using remote control", so every kill switch below goes inert.
-//   3. ui.liquid_glass            -- kill every surface at once.
-//   4. ui.<key>                   -- one surface.
+//   3. ui.tweak                   -- the whole glass stack, both generations,
+//      the remote twin of the tweak's own on/off row. Checked before the
+//      blanket so a targeted kill does not have to name eighteen surfaces.
+//   4. ui.liquid_glass            -- kill every V2 surface at once.
+//   5. ui.<key>                   -- one surface.
 // Every step fails OPEN (default YES), so an unreachable, empty or partially
 // written server leaves the tweak behaving exactly as if this code were gone.
+//
+// key == nil is the stack-master probe (guard 3 only) and is what
+// YTMULGTweakEnabled() in YTMULiquidGlassPreferences.h calls. It must stay a
+// distinct shape: building "ui." + "" would look up a key that does not exist
+// and read as "on", which is harmless, but the nil case is the contract.
 BOOL YTMULGServerAllows(NSString *key) {
     if (!YTMURemoteControlAllowed()) return YES;
     if (!YTMUAppSettingBool(@"ui.remote_control", YES)) return YES;
+    if (!YTMUAppSettingBool(@"ui.tweak", YES)) return NO;
     if (!YTMUAppSettingBool(@"ui.liquid_glass", YES)) return NO;
     if (!key.length) return YES;
     return YTMUAppSettingBool([@"ui." stringByAppendingString:key], YES);
 }
 
+// Fetch the remote config, including the per-build kill switches.
+//
+// Two things changed here and both are about the switch being useful at all:
+//   * the interval was 24h, so a kill switch you flipped took up to a day to
+//     land. It is now 15 minutes, which is still nothing per device (a phone
+//     that is open for an hour makes four calls) and bounded by the fact that
+//     this only runs on foreground/active.
+//   * the call carries ?sha=<TWEAK_GIT_COMMIT>, which is what makes the kill
+//     switch TARGETED: the server resolves build-selector rules against that
+//     sha (server/kill_switch.py) and returns a map that is already resolved
+//     for this device. Nothing is evaluated here.
+//
+// The response also carries a `rev` digest of the map. It is echoed back as
+// ?rev= on the next poll, so the common case -- nothing changed since last
+// time -- is answered with a few dozen bytes and no NSUserDefaults write at
+// all. That is what makes the 15-minute interval affordable.
 void YTMUFetchAppSettings(void) {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     NSTimeInterval last = [ud doubleForKey:@"YTMUAppSettingsFetchedAt"];
-    if (last > 0 && [[NSDate date] timeIntervalSince1970] - last < 24.0 * 60.0 * 60.0) return;
-    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/app/settings", YTMUApiBase()]];
+    if (last > 0 && [[NSDate date] timeIntervalSince1970] - last < 15.0 * 60.0) return;
+    NSString *rev = [ud stringForKey:@"YTMUAppSettingsRev"];
+    NSString *urlStr = [NSString stringWithFormat:@"%@/api/app/settings?sha=%@&v=%@%@",
+                        YTMUApiBase(),
+                        YTMUUrlEncode(@TWEAK_GIT_COMMIT),
+                        YTMUUrlEncode(@OS_STRINGIFY(TWEAK_VERSION)),
+                        rev.length ? [NSString stringWithFormat:@"&rev=%@", YTMUUrlEncode(rev)] : @""];
+    NSURL *url = [NSURL URLWithString:urlStr];
     if (!url) return;
     [[[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
         if (err || !data) return;
         NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        if (![json isKindOfClass:[NSDictionary class]]) return;
+        NSUserDefaults *ud2 = [NSUserDefaults standardUserDefaults];
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if ([json[@"unchanged"] boolValue]) {
+            // Same map we already hold. Just move the gate forward, or the
+            // 15-minute check below never lets another poll through.
+            [ud2 setDouble:now forKey:@"YTMUAppSettingsFetchedAt"];
+            return;
+        }
         NSDictionary *s = json[@"settings"];
         if (![s isKindOfClass:[NSDictionary class]]) return;
-        NSUserDefaults *ud2 = [NSUserDefaults standardUserDefaults];
         [ud2 setObject:s forKey:@"YTMUAppSettings"];
-        [ud2 setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"YTMUAppSettingsFetchedAt"];
+        NSString *newRev = [json[@"rev"] isKindOfClass:[NSString class]] ? json[@"rev"] : nil;
+        if (newRev.length) [ud2 setObject:newRev forKey:@"YTMUAppSettingsRev"];
+        else [ud2 removeObjectForKey:@"YTMUAppSettingsRev"];
+        [ud2 setDouble:now forKey:@"YTMUAppSettingsFetchedAt"];
         // A remote flip (a kill switch) has to take effect now, not at the next
         // launch: nothing else re-reads the map, and the layout gates are the
         // only consumers.
         YTMUAppSettingsInvalidateCache();
+        NSArray *hits = json[@"kill"];
+        if ([hits isKindOfClass:[NSArray class]] && hits.count) {
+            sendDebugLog([NSString stringWithFormat:@"kill switch active for this build (%@): %@",
+                          @TWEAK_GIT_COMMIT, [hits componentsJoinedByString:@","]]);
+        }
     }] resume];
 }
 

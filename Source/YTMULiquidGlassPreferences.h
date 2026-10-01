@@ -73,9 +73,18 @@ static inline BOOL YTMULGPreference(NSString *key, BOOL fallback) {
 // The tweak's own master switch (row 0 of the main settings page). Every V1 and
 // V2 predicate is ANDed with it, so turning the tweak off kills both
 // generations.
+//
+// `ui.tweak` is the REMOTE half of the same switch, and it reads nil on purpose:
+// YTMULGServerAllows(nil) is the one call shape that checks the glass master and
+// then stops, without looking up a per-surface key (there is no "ui." + "").
+// That keeps this header free of a second remote-read helper while still letting
+// the server kill the whole stack for one build without spelling out eighteen
+// per-surface keys. YTMULGServerAllows is declared in the extern "C" block at
+// the top of this header, so this definition can call it here.
 static inline BOOL YTMULGTweakEnabled(void) {
     NSDictionary *p = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
-    return [p[@"YTMUltimateIsEnabled"] boolValue];
+    if (![p[@"YTMUltimateIsEnabled"] boolValue]) return NO;
+    return YTMULGServerAllows(nil);
 }
 
 // The whole V2 stack is built on the iOS 13 material system
