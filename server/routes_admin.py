@@ -634,19 +634,28 @@ def admin_self_update_check():
     local = _get_local_sha()
     remote, parent, meta = _get_remote_sha()
     main_file = _get_main_file()
-    # Also compute file hashes for accurate comparison when not in git repo
+    # The file-hash pair is only a real comparison when the file we track locally
+    # IS the file the remote path names. main_file is user-configurable
+    # (admin_config.json -> main_file, or $MAIN_FILE) while
+    # SELF_UPDATE_REMOTE_PATH is hardcoded, so on a deploy that tracks app.py
+    # these hashed two DIFFERENT files: they could never match, and the pair sat
+    # on the card looking exactly like a genuine mismatch. Nothing was wrong --
+    # the two numbers were not comparable, and a red-looking pair trains you to
+    # ignore the card. Omit them unless they are comparable, and name the file
+    # being tracked so a misconfigured main_file is visible instead of implied.
     local_file_hash = None
     remote_file_hash = None
-    try:
-        if os.path.exists(main_file):
-            local_file_hash = hashlib.sha256(open(main_file, 'rb').read()).hexdigest()[:12]
-    except: pass
-    try:
-        # fetch remote file to compute hash (quick, cached by GitHub)
-        content = _fetch_remote_file(remote) if remote else None
-        if content:
-            remote_file_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
-    except: pass
+    if os.path.basename(main_file) == SELF_UPDATE_REMOTE_PATH:
+        try:
+            if os.path.exists(main_file):
+                local_file_hash = hashlib.sha256(open(main_file, 'rb').read()).hexdigest()[:12]
+        except: pass
+        try:
+            # fetch remote file to compute hash (quick, cached by GitHub)
+            content = _fetch_remote_file(remote) if remote else None
+            if content:
+                remote_file_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()[:12]
+        except: pass
     # Determine update availability: prefer git sha if both are 40-char, else file hash
     up_to_date = None
     update_available = False
