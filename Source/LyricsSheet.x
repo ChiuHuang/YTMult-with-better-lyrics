@@ -2,7 +2,7 @@
 // LOC() for the duet marker strings. It resolves against the tweak's own bundle
 // (Source/Utils/NSBundle+YTMU.m), NOT the main bundle -- plain NSLocalizedString
 // would miss every key here and return the key name itself.
-#import "Localization.h"
+#import "Headers/Localization.h"
 
 static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     return ((c >= 0x3040 && c <= 0x309F) ||
