@@ -23,6 +23,9 @@ import logging
 # LRC Parser & Karaoke Interpolation
 # ============================================================
 
+from .parsers_credits import is_credit_line
+
+
 def is_cjk(text):
     for c in text:
         if '\u4e00' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff':
@@ -119,6 +122,65 @@ def generate_interpolated_parts(text, start_ms, duration_ms):
         curr_ms += p_dur
     return res
 
+# LySy enhanced LRC marks a background voice with a trailing [bg:...] group.
+# Anchored at the end, and greedy, so a cue that itself contains ']' survives.
+_BG_MARKER_RE = re.compile(r'\[bg:(.*)\]\s*$', re.I)
+
+# LRC ID tags. `au` is the song's author and `lr` its lyricist; `by` names
+# whoever made the FILE, which is not a songwriter. Read as a set so an unknown
+# vendor tag does not fall through to the time-tag branch and get parsed as a
+# lyric line.
+_LRC_ID_TAGS = frozenset(('ti', 'ar', 'al', 'au', 'lr', 'length', 'by',
+                          'offset', 're', 'tool', 've', '#'))
+
+
+def _lrc_word_parts(text, parse_time_tag, offset_ms):
+    """One enhanced-LRC segment -> (plain text, parts).
+
+    Split out of parse_lrc because the [bg:] group is the same grammar and used
+    to be re-implemented (badly, by not being handled at all).
+    """
+    plain_text = re.sub(r'\s+', ' ', _LRC_WORD_RE.sub('', text)).strip()
+
+    current_parts = []
+    first_match = _LRC_WORD_RE.search(text)
+    if first_match and first_match.start() > 0:
+        # Leading text before the first tag: it belongs to the line, and its
+        # timing is the line's own start.
+        lead = text[:first_match.start()].strip()
+        if lead:
+            current_parts.append({
+                'startTimeMs': 0,  # bound to the line start by the caller
+                'words': lead + (' ' if not is_cjk(lead) else ''),
+                'durationMs': 0
+            })
+
+    for tm_min, tm_sec, tm_cs, word_str in _LRC_TOKEN_RE.findall(text):
+        if not word_str:
+            continue
+        current_parts.append({
+            'startTimeMs': parse_time_tag(tm_min, tm_sec, tm_cs) + offset_ms,
+            'words': word_str,
+            'durationMs': 0
+        })
+
+    # Durations come from the next part's start; the last one has no successor
+    # inside the segment and gets a nominal 500ms, which postprocess_lyrics
+    # later replaces with a real figure.
+    for pi in range(len(current_parts)):
+        if pi < len(current_parts) - 1:
+            dur = (current_parts[pi + 1]['startTimeMs']
+                   - current_parts[pi]['startTimeMs'])
+            current_parts[pi]['durationMs'] = max(dur, 0)
+        else:
+            current_parts[pi]['durationMs'] = 500
+    return plain_text, current_parts
+
+
+_LRC_WORD_RE = re.compile(r'<(\d+):(\d+)\.(\d+)>')
+_LRC_TOKEN_RE = re.compile(r'<(\d+):(\d+)\.(\d+)>([^<]*)')
+
+
 def parse_lrc(lrc_text, duration_sec=0):
     """Parse LRC format into structured JSON array.
     Supports standard [mm:ss.xx] and enhanced <mm:ss.xx> word-sync tags.
@@ -156,7 +218,7 @@ def parse_lrc(lrc_text, duration_sec=0):
             except:
                 pass
             continue
-        if id_match and id_match.group(1) in ['ti', 'ar', 'al', 'au', 'lr', 'length', 'by', 're', 'tool', 've', '#']:
+        if id_match and id_match.group(1) in _LRC_ID_TAGS:
             continue
 
         # Extract time tags
@@ -168,46 +230,39 @@ def parse_lrc(lrc_text, duration_sec=0):
         if not text:
             continue
 
+        # LySy enhanced LRC writes a background voice as a trailing [bg:...]
+        # group on the same line. The marker is format and comes off; whatever
+        # the source wrote inside passes through untouched, parens included --
+        # it is the same convention TTML spells ttm:role="x-bg", and it used to
+        # be glued into the vocal text here, so the second voice was sung by
+        # the first one.
+        bg_raw = None
+        _bgm = _BG_MARKER_RE.search(text)
+        if _bgm:
+            bg_raw = _bgm.group(1)
+            text = text[:_bgm.start()].strip()
+
         # Parse word-level sync if present (<mm:ss.xx>word)
         parts = []
+        bg_parts = []
+        bg_text = ''
         word_matches = list(word_regex.finditer(text))
         if word_matches:
-            plain_text = re.sub(r'\s+', ' ', word_regex.sub('', text)).strip()
-
-            # Check for leading text before first tag
-            first_match = word_matches[0]
-            current_parts = []
-            if first_match.start() > 0:
-                lead = text[:first_match.start()].strip()
-                if lead:
-                    current_parts.append({
-                        'startTimeMs': 0, # Will be set to line start_ms
-                        'words': lead + (' ' if not is_cjk(lead) else ''),
-                        'durationMs': 0
-                    })
-
-            # Find tokens: (<time>) followed by chars up to next tag
-            tokens = re.findall(r'<(\d+):(\d+)\.(\d+)>([^<]*)', text)
-            for tm_min, tm_sec, tm_cs, word_str in tokens:
-                w_ms = parse_time_tag(tm_min, tm_sec, tm_cs) + offset_ms
-                clean_word = word_str
-                if clean_word:
-                    current_parts.append({
-                        'startTimeMs': w_ms,
-                        'words': clean_word,
-                        'durationMs': 0
-                    })
-
-            # Calculate durations for each word part
-            for pi in range(len(current_parts)):
-                if pi < len(current_parts) - 1:
-                    dur = current_parts[pi+1]['startTimeMs'] - current_parts[pi]['startTimeMs']
-                    current_parts[pi]['durationMs'] = max(dur, 0)
-                else:
-                    current_parts[pi]['durationMs'] = 500
-
+            plain_text, current_parts = _lrc_word_parts(text, parse_time_tag, offset_ms)
             parts = current_parts
             text = plain_text
+        if bg_raw is not None:
+            bg_word_matches = list(word_regex.finditer(bg_raw))
+            if bg_word_matches:
+                bg_text, bg_parts = _lrc_word_parts(bg_raw, parse_time_tag, offset_ms)
+            else:
+                bg_text = re.sub(r'\s+', ' ', bg_raw).strip()
+
+        # A credit line is not a lyric. `作词：周杰伦` used to sail straight
+        # through as a sung line -- parsers_lrc had no credit handling at all,
+        # and parsers_qrc had one English regex that cannot read CJK.
+        if is_credit_line(text):
+            continue
 
         for tm in time_matches:
             start_ms = parse_time_tag(tm.group(1), tm.group(2), tm.group(3)) + offset_ms
@@ -231,6 +286,29 @@ def parse_lrc(lrc_text, duration_sec=0):
                 # Enhanced LRC carries real per-word timestamps. Generated
                 # timings must never be treated as karaoke data by clients.
                 entry['wordSynced'] = True
+
+            # The [bg:] voice becomes its own sub-line, the same shape TTML's
+            # x-bg produces, so the device has ONE thing to render rather than
+            # two conventions. It is never merged into `text` and never counts
+            # towards the line's own word timing.
+            if bg_text or bg_parts:
+                bg_entry = {'text': bg_text, 'parts': bg_parts}
+                if bg_parts:
+                    if bg_parts[0]['startTimeMs'] == 0:
+                        bg_parts[0]['startTimeMs'] = start_ms
+                    b_words = [p for p in bg_parts if p.get('words')]
+                    if len(b_words) > 1:
+                        bg_entry['wordSynced'] = True
+                _b_start = min((p['startTimeMs'] for p in bg_parts),
+                               default=start_ms)
+                _b_end = max((p['startTimeMs'] + p['durationMs'] for p in bg_parts),
+                             default=start_ms)
+                bg_entry['startTimeMs'] = _b_start
+                bg_entry['durationMs'] = max(_b_end - _b_start, 0)
+                bg_entry['duration'] = round(bg_entry['durationMs'] / 1000.0, 3)
+                if not bg_parts:
+                    bg_entry.pop('parts')
+                entry['bg'] = bg_entry
 
             result.append(entry)
 

@@ -78,7 +78,13 @@ _CACHE_FORMAT_VERSION = 4
 #    stops arriving as extra words, and a <p> with no begin is no longer
 #    dropped. None of that is replayable offline -- the entry holds the parser's
 #    output -- so every TTML-derived entry is parser-stale and wants a refetch.
-_PARSER_EPOCH = 2
+# 3: parsers_lrc.py learned the LySy `[bg:...]` background group and drops CJK
+#    credit lines; parsers_qrc.py learned the `Name:` singer prefix (voice
+#    attribution, which the duet feature had zero data for), the
+#    <QrcInfos LyricContent="..."> envelope, CJK credit roles and the
+#    title-echo drop. Every QRC line from QQ can now carry `singer`/`duet`, and
+#    an LRC line with a second voice no longer has it sung by the first.
+_PARSER_EPOCH = 3
 
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.

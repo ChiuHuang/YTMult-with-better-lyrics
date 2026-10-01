@@ -402,6 +402,11 @@ static const CGFloat YTMURowPadBottom = 14.0;
 // marker belongs to the row it introduces, so it sits closer to the content
 // edge and the lyric line below it keeps the same rhythm as every other line.
 static const CGFloat YTMUSingerPadTop = 8.0;
+// Gap between a lyric line and the background cue / romanization hanging off
+// it. Tighter than YTMURowPadGap: the cue belongs to the line above it the way
+// the voice marker does, while the translation is a separate thing and keeps
+// the full gap.
+static const CGFloat YTMUSubRowPadGap = 4.0;
 
 // ---------------------------------------------------------------------------
 // Duet display mode. Two answers to the same question, both asked for, so both
@@ -653,6 +658,39 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.singerLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.singerLabel];
 
+        // Background cue / stage direction (payload `bg`), then the
+        // romanization (payload `romanization`). Both sit between the lyric and
+        // the translation, both are dimmer than the lyric, and both are pinned
+        // to zero height until -configureCell finds text for them -- the same
+        // trick singerLabel uses, so a track without either pays nothing.
+        self.bgLabel = [[UILabel alloc] init];
+        self.bgLabel.numberOfLines = 0;
+        self.bgLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() - 1.0 weight:UIFontWeightRegular];
+        self.bgLabel.textColor = YTMULyricInk(0.5, 0.45, self.contentView);
+        self.bgLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
+        self.bgLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        self.bgLabel.layer.shadowRadius = 2.0;
+        self.bgLabel.layer.shadowOpacity = 0.3;
+        self.bgLabel.layer.masksToBounds = NO;
+        self.bgLabel.layer.shouldRasterize = YES;
+        self.bgLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        self.bgLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.bgLabel];
+
+        self.romanLabel = [[UILabel alloc] init];
+        self.romanLabel.numberOfLines = 0;
+        self.romanLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() - 1.0 weight:UIFontWeightRegular];
+        self.romanLabel.textColor = YTMULyricInk(0.5, 0.45, self.contentView);
+        self.romanLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
+        self.romanLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        self.romanLabel.layer.shadowRadius = 2.0;
+        self.romanLabel.layer.shadowOpacity = 0.3;
+        self.romanLabel.layer.masksToBounds = NO;
+        self.romanLabel.layer.shouldRasterize = YES;
+        self.romanLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        self.romanLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.contentView addSubview:self.romanLabel];
+
         // Content sits well in from both edges; see YTMULyricGutter* above.
         CGFloat gutterLead = YTMULyricGutterLeading();
         CGFloat gutterTrail = YTMULyricGutterTrailing();
@@ -669,7 +707,13 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
             [self.transLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
 
             [self.singerLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
-            [self.singerLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
+            [self.singerLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
+
+            [self.bgLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
+            [self.bgLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
+
+            [self.romanLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
+            [self.romanLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
         ]];
         // The three vertical padding constraints are kept (not inline) because
         // -ytmu_setRowCollapsed: rewrites their constants: an instrumental
@@ -681,13 +725,27 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
             constraintEqualToAnchor:self.contentView.topAnchor constant:YTMUSingerPadTop];
         NSLayoutConstraint *padTop = [self.lyricLabel.topAnchor
             constraintEqualToAnchor:self.singerLabel.bottomAnchor constant:YTMURowPadTop];
+        // The cue and the romanization hang off the lyric, so the translation's
+        // top now hangs off romanLabel instead of lyricLabel. That is the only
+        // way to give a row FIVE stacked lines without a second layout pass,
+        // and it costs nothing when both are flat: a zero-height label with a
+        // zero constant between it and the next one is invisible.
+        NSLayoutConstraint *bgGap = [self.bgLabel.topAnchor
+            constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:YTMUSubRowPadGap];
+        NSLayoutConstraint *romanGap = [self.romanLabel.topAnchor
+            constraintEqualToAnchor:self.bgLabel.bottomAnchor constant:YTMUSubRowPadGap];
         NSLayoutConstraint *padGap = [self.transLabel.topAnchor
-            constraintEqualToAnchor:self.lyricLabel.bottomAnchor constant:YTMURowPadGap];
+            constraintEqualToAnchor:self.romanLabel.bottomAnchor constant:YTMURowPadGap];
         NSLayoutConstraint *padBottom = [self.transLabel.bottomAnchor
             constraintEqualToAnchor:self.contentView.bottomAnchor constant:-YTMURowPadBottom];
-        [NSLayoutConstraint activateConstraints:@[singerPadTop, padTop, padGap, padBottom]];
+        [NSLayoutConstraint activateConstraints:@[singerPadTop, padTop, bgGap,
+                                                  romanGap, padGap, padBottom]];
         NSLayoutConstraint *flat = [self.transLabel.heightAnchor constraintEqualToConstant:0.0];
         flat.active = NO;
+        NSLayoutConstraint *bgFlat = [self.bgLabel.heightAnchor constraintEqualToConstant:0.0];
+        bgFlat.active = YES;
+        NSLayoutConstraint *romanFlat = [self.romanLabel.heightAnchor constraintEqualToConstant:0.0];
+        romanFlat.active = YES;
         // singerFlat does for the voice marker what `flat` does for the
         // translation label: pins it to zero height, so it starts ACTIVE and a
         // solo track costs nothing. padTop now hangs off singerLabel.bottom
@@ -696,13 +754,15 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         // `changed` test in -ytmu_setRowCollapsed: is untouched.
         NSLayoutConstraint *singerFlat = [self.singerLabel.heightAnchor constraintEqualToConstant:0.0];
         singerFlat.active = YES;
-        // FIVE entries now, and the guard in -ytmu_setRowCollapsed: checks the
+        // SEVEN entries now, and the guard in -ytmu_setRowCollapsed: checks the
         // count. Growing this array without growing that guard is the silent way
         // to turn row collapsing off for every row in the sheet: it returns NO,
         // no constraint breaks, and the only symptom is that a collapsed
-        // instrumental row keeps a full line of height.
+        // instrumental row keeps a full line of height. It was 5 until the
+        // background cue and the romanization added bgFlat + romanFlat.
         objc_setAssociatedObject(self, @selector(ytmu_setRowCollapsed:),
-                                 @[padTop, padGap, padBottom, flat, singerFlat],
+                                 @[padTop, bgGap, romanGap, padGap, padBottom,
+                                   flat, singerFlat, bgFlat, romanFlat],
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return self;
@@ -716,15 +776,21 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     // A count mismatch here returns NO, i.e. the row silently stops collapsing
     // -- no constraint breaks and nothing is logged -- so this number has to
     // match the array in -init exactly. It was 4 until the duet voice marker
-    // added singerFlat.
-    if (pack.count != 5) return NO;
+    // added singerFlat, and 5 until the cue + romanization rows arrived.
+    if (pack.count != 9) return NO;
     NSLayoutConstraint *padTop = pack[0];
-    NSLayoutConstraint *padGap = pack[1];
-    NSLayoutConstraint *padBottom = pack[2];
-    NSLayoutConstraint *flat = pack[3];
-    NSLayoutConstraint *singerFlat = pack[4];
+    NSLayoutConstraint *bgGap = pack[1];
+    NSLayoutConstraint *romanGap = pack[2];
+    NSLayoutConstraint *padGap = pack[3];
+    NSLayoutConstraint *padBottom = pack[4];
+    NSLayoutConstraint *flat = pack[5];
+    NSLayoutConstraint *singerFlat = pack[6];
+    NSLayoutConstraint *bgFlat = pack[7];
+    NSLayoutConstraint *romanFlat = pack[8];
     BOOL changed = (padTop.constant != (collapsed ? 0.0 : YTMURowPadTop)) || (flat.active != collapsed);
     padTop.constant = collapsed ? 0.0 : YTMURowPadTop;
+    bgGap.constant = collapsed ? 0.0 : YTMUSubRowPadGap;
+    romanGap.constant = collapsed ? 0.0 : YTMUSubRowPadGap;
     padGap.constant = collapsed ? 0.0 : YTMURowPadGap;
     padBottom.constant = collapsed ? 0.0 : -YTMURowPadBottom;
     if (flat.active != collapsed) flat.active = collapsed;
@@ -735,6 +801,20 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.singerLabel.text = @"";
         singerFlat.active = YES;
         changed = YES;
+    }
+    // Same for the cue and the romanization: an instrumental marker carries
+    // neither. Left alone on expand for the same reason as the marker above.
+    if (collapsed) {
+        if (self.bgLabel.text.length || !bgFlat.active) {
+            self.bgLabel.text = @"";
+            bgFlat.active = YES;
+            changed = YES;
+        }
+        if (self.romanLabel.text.length || !romanFlat.active) {
+            self.romanLabel.text = @"";
+            romanFlat.active = YES;
+            changed = YES;
+        }
     }
     [self setNeedsUpdateConstraints];
     [self setNeedsLayout];
@@ -748,13 +828,44 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     BOOL show = text.length > 0;
     self.singerLabel.text = show ? text : @"";
     NSArray *pack = objc_getAssociatedObject(self, @selector(ytmu_setRowCollapsed:));
-    if (pack.count != 5) return;
-    NSLayoutConstraint *singerFlat = pack[4];
+    if (pack.count != 9) return;
+    NSLayoutConstraint *singerFlat = pack[6];
     // singerFlat ACTIVE == pinned to zero height, so it is active when hidden.
     if (singerFlat.active == !show) return;
     singerFlat.active = !show;
     [self setNeedsUpdateConstraints];
     [self setNeedsLayout];
+}
+
+// The background cue and the romanization for this row, from the payload's
+// `bg` / `romanization`. Nil or empty for either is the normal case and must be
+// safe on every configure, because cells are recycled: a row that showed a cue
+// for the previous song has to give the height back or the sheet grows a blank
+// line under every track that has none.
+//
+// Neither label is ever wiped and neither is translated. That is not a shortcut:
+// the cue is a stage direction in the SONG's language, and the translate pass
+// only ever sees `text`, so folding it in is what made it sing in the wrong
+// language.
+- (void)ytmu_setSubRowsWithBg:(NSString *)bgText roman:(NSString *)romanText {
+    NSArray *pack = objc_getAssociatedObject(self, @selector(ytmu_setRowCollapsed:));
+    if (pack.count != 9) return;
+    NSLayoutConstraint *bgFlat = pack[7];
+    NSLayoutConstraint *romanFlat = pack[8];
+
+    BOOL bgShow = bgText.length > 0;
+    BOOL romanShow = romanText.length > 0;
+    self.bgLabel.text = bgShow ? bgText : @"";
+    self.romanLabel.text = romanShow ? romanText : @"";
+
+    // *_flat ACTIVE == pinned to zero height, so it is active when hidden.
+    BOOL changed = NO;
+    if (bgFlat.active == bgShow) { bgFlat.active = !bgShow; changed = YES; }
+    if (romanFlat.active == romanShow) { romanFlat.active = !romanShow; changed = YES; }
+    if (changed) {
+        [self setNeedsUpdateConstraints];
+        [self setNeedsLayout];
+    }
 }
 
 
@@ -4484,6 +4595,30 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     return out;
 }
 
+// The text of a line's background cue or romanization, ready to draw.
+//
+// Two rules that are not obvious:
+//   * a `parts` array wins over `text`, because the device REBUILDS the display
+//     string from parts everywhere else (see -wbwDisplayTextForLyric), and a
+//     cue whose parts still carried the source's brackets drew them;
+//   * a cue is never translated, so `translated` is deliberately not consulted
+//     here even though a translation may exist for the line.
+- (NSString *)ytmu_subRowText:(NSDictionary *)lyric key:(NSString *)key {
+    NSDictionary *sub = lyric[key];
+    if (![sub isKindOfClass:[NSDictionary class]]) return nil;
+    NSArray *parts = sub[@"parts"];
+    if ([parts isKindOfClass:[NSArray class]] && parts.count > 1) {
+        NSArray *ranges = nil;
+        NSString *rebuilt = [self wbwDisplayTextForLyric:sub ranges:&ranges];
+        if (rebuilt.length) return rebuilt;
+    }
+    id text = sub[@"text"];
+    if ([text isKindOfClass:[NSString class]] && [text length]) {
+        return [self normalizedLyricText:text];
+    }
+    return nil;
+}
+
 - (NSString *)wbwDisplayTextForLyric:(NSDictionary *)lyric ranges:(NSArray **)outRanges {
     NSArray *parts = lyric[@"parts"];
     NSCharacterSet *wsTrim = [NSCharacterSet whitespaceAndNewlineCharacterSet];
@@ -4944,6 +5079,8 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         // marker -- and this row may be a recycled cell still holding the
         // previous row's marker.
         [cell ytmu_setSingerMarker:nil];
+        // Same for the cue / romanization rows.
+        [cell ytmu_setSubRowsWithBg:nil roman:nil];
         cell.waveActive = showNote;
         if (showNote) {
             // Flatten across the gap: 0 the instant it opens, 1 as it closes.
@@ -4969,6 +5106,14 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
     // of the two duet styles ever draws. Placed after the collapse call, which
     // forces the marker flat when a row collapses.
     [cell ytmu_setSingerMarker:[self ytmu_singerMarkerForRow:index]];
+    // The background cue and the romanization, in that order: the cue belongs to
+    // the vocal line directly above it, the romanization is a reading of the
+    // same line. Both come straight off the payload dict and both are nil for
+    // the overwhelming majority of rows, which is why they are pinned flat.
+    [cell ytmu_setSubRowsWithBg:[self ytmu_subRowText:lyric key:@"bg"]
+                           roman:[self ytmu_subRowText:lyric key:@"romanization"]];
+    cell.bgLabel.textAlignment = cell.ytmu_textAlign;
+    cell.romanLabel.textAlignment = cell.ytmu_textAlign;
     cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];

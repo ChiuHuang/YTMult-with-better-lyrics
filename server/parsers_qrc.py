@@ -30,7 +30,47 @@ import logging
 # handles parts/timing downstream with no special cases.
 # ============================================================
 
+from .parsers_credits import is_credit_role, string_similarity
+
+# Kept because it catches one shape the credit recognizer deliberately does
+# not: a credit with no colon at all ("Lyrics by Someone" on its own line),
+# which is not a credit LINE by the colon rule.
 _QRC_CREDIT_RE = re.compile(r'\b(lyrics|composed|arranged|produced|written|vocals?|chorus|mixed|mastered)\s*by\b', re.I)
+
+# QQ Music serves QRC inside an XML envelope with the body hidden in a
+# LyricContent attribute. A bare body passes through untouched, which is what a
+# caller holding an already-unwrapped document has.
+_QRC_ENVELOPE_RE = re.compile(r'LyricContent="([\s\S]*?)"\s*(?:/?>|[a-zA-Z]+=)')
+
+# QQ prefixes a line with the singer's name and a colon, and that name is the
+# ONLY voice attribution a QQ lyric carries. `合` / `ALL` / `合唱` mean every
+# voice at once, which maps onto our `duet` flag.
+_QRC_GROUP_SINGERS = ('合', 'ALL', '合唱')
+
+
+def _unwrap_qrc_envelope(blob):
+    """Peel `<QrcInfos LyricContent="..."/>` and unescape it.
+
+    The previous version handled Cubey's JSON envelope and a bare `{...}`, but
+    not this one, so a provider that returns the real QQ XML lost every line.
+    """
+    if not isinstance(blob, str):
+        return blob
+    m = _QRC_ENVELOPE_RE.search(blob)
+    if not m:
+        return blob
+    return (m.group(1).replace('&quot;', '"').replace('&amp;', '&')
+            .replace('&lt;', '<').replace('&gt;', '>'))
+
+
+def _qrc_singer_agent(name, alias_map, state):
+    """xml:id for a singer name, allocating v1..vN or the group id v1000."""
+    if name not in alias_map:
+        group = name.upper() in _QRC_GROUP_SINGERS
+        alias_map[name] = 'v1000' if group else 'v%d' % state['next_voice']
+        if not group:
+            state['next_voice'] += 1
+    return alias_map[name]
 
 def _qrc_tag(ms, bracket=True):
     ms = max(int(ms), 0)
@@ -95,6 +135,80 @@ def _qrc_split_words(line_start, seg):
     return words
 
 
+def _qrc_take_singer_prefix(words, text, alias_map, state):
+    """Strip a leading `Name:` off a QRC line and record who is singing.
+
+    QQ Music is the only attribution a QQ lyric carries, and we were dropping it
+    on the floor: a duet came out with every line marked as one voice, so the
+    duet alignment feature had nothing to align. Two shapes exist and both have
+    to work:
+
+      `[start,dur]周杰伦(0,300)hello(300,300)`     the whole line is a name tag
+      `[start,dur]周杰伦(0,300)：(300,200)你(500,300)好`  the colon lands mid-syllable
+
+    The name is taken from the accumulated syllables rather than from the joined
+    text, because in the second shape the colon falls inside a syllable and a
+    regex over the text would either miss it or cut a word in half.
+
+    Returns (words, text). `state['current']` carries the singer onto the lines
+    that follow, which is what QQ means by naming them once.
+    """
+    if not words:
+        return words, text
+
+    acc = ''
+    consumed = 0
+    for syl in words:
+        acc += syl[0]
+        consumed += 1
+        if ':' in acc or '：' in acc:
+            break
+        if len(acc) > 40:
+            return words, text
+
+    # Whole line is `Name:` and nothing else.
+    whole = re.match(r'^([^:：]+)\s*[:：]\s*$', acc)
+    if whole:
+        name = whole.group(1).strip()
+        if is_credit_role(name):
+            return None, None          # a credit line, not a lyric
+        if len(name) > 30:
+            return words, text         # too long to be a name; leave it alone
+        rest = words[consumed:]
+        if not rest:
+            return None, None
+        state['current'] = _qrc_singer_agent(name, alias_map, state)
+        return rest, _qrc_clean_text(_qrc_join_words([w for w, _, _ in rest]))
+
+    # `Name: lyrics...` with content after the colon.
+    prefix = re.match(r'^([^:：]+)\s*[:：]\s*([\s\S]*)$', acc)
+    if not prefix:
+        if state['current']:
+            pass                      # keep the carried singer; nothing to strip
+        return words, text
+    name = prefix.group(1).strip()
+    after_colon = prefix.group(2) or ''
+    if is_credit_role(name):
+        return None, None
+    if len(name) > 20:
+        return words, text
+
+    colon_idx = consumed - 1
+    colon_syl = words[colon_idx]
+    tail = re.search(r'[:：]\s*([\s\S]*)$', colon_syl[0])
+    remainder = tail.group(1) if tail else ''
+    if remainder:
+        trimmed = list(words)
+        trimmed[colon_idx] = (remainder, colon_syl[1], colon_syl[2])
+        rest = trimmed[colon_idx:]
+    else:
+        rest = words[consumed:]
+
+    state['current'] = _qrc_singer_agent(name, alias_map, state)
+    return rest, _qrc_clean_text(after_colon or
+                                 _qrc_join_words([w for w, _, _ in rest]))
+
+
 def parse_qrc_structured(blob):
     """Convert QQ QRC payload straight to structured lyric entries, keeping
     the real per-word durations and the real line duration so the last word
@@ -119,12 +233,19 @@ def parse_qrc_structured(blob):
             pass
     if not isinstance(s, str) or not s:
         return []
+    s = _unwrap_qrc_envelope(s)
     # Tolerate partially-decoded escapes
     if '\\n' in s and '\n' not in s:
         s = s.replace('\\n', '\n')
     # Title text (ti:) marks the header line to drop (it carries timed words)
     ti_match = re.search(r'\[ti:(.*?)\]', s)
     ti_text = _qrc_clean_text(ti_match.group(1)) if ti_match else ''
+
+    # Voice attribution state, carried across lines the same way braccato does
+    # it: QQ names the singer once and every line after it belongs to them
+    # until the next name appears.
+    alias_map = {}
+    singer_state = {'next_voice': 1, 'current': None}
 
     out = []
     for m in re.finditer(r'\[(\d+),(\d+)\]([^\[]*)', s):
@@ -138,8 +259,20 @@ def parse_qrc_structured(blob):
             continue
         if ti_text and ti_text in text:
             continue
-        if _QRC_CREDIT_RE.search(text):
+        if _QRC_CREDIT_RE.search(text) or is_credit_role(text.split(':', 1)[0]
+                                                          if ':' in text else ''):
             continue
+        # A line that just echoes the song title is a header, not a lyric. The
+        # ti: containment test above only catches an exact repeat; QQ routinely
+        # prepends the title plus a word or two, which is what the similarity
+        # test is for. Only the opening lines are considered, because a chorus
+        # that repeats the title later is a real line.
+        if len(out) < 5 and ti_text and string_similarity(text, ti_text) > 0.5:
+            continue
+        # `Name:` prefix -> voice attribution, and the prefix leaves the text.
+        words, text = _qrc_take_singer_prefix(words, text, alias_map, singer_state)
+        if not words or not text:
+            continue        # the line was only a credit or only a name tag
         line_ms = max(line_dur, 1)
         parts = []
         prev_end = line_start
@@ -179,6 +312,18 @@ def parse_qrc_structured(blob):
             'parts': parts,
             'wordSynced': True,
         }
+        # Voice attribution, in the same vocabulary the TTML parser emits, so
+        # the device has one duet code path: `singer` is an index into the
+        # voices this document names, `duet` marks the everyone-at-once agent.
+        agent = singer_state.get('current')
+        if agent:
+            if agent == 'v1000':
+                entry['duet'] = True
+            else:
+                try:
+                    entry['singer'] = int(agent[1:]) - 1
+                except (ValueError, IndexError):
+                    pass
         out.append(entry)
     if not out:
         return []
