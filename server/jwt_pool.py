@@ -52,6 +52,40 @@ _VERIFY_ARTIST = 'Rick Astley'
 _TERMINAL_REASONS = frozenset({'expired', 'invalid', 'invalid_token',
                                'bad_signature', 'revoked'})
 
+# Reasons we have SEEN and that are about the request rather than the credential.
+# Kept explicitly rather than as "everything else", so the dashboard can tell a
+# known-benign refusal apart from a reason that has never been seen -- the second
+# is the one worth a warning.
+_REQUEST_SHAPED_REASONS = frozenset({'missing_token', 'malformed'})
+
+
+def auth_verdict(provider_reason):
+    """'strike' | 'benign' | 'unknown', from Cubey's `reason` field.
+
+    '' (no reason at all) is 'strike': the body was not the structured shape, so
+    this is the bare 403 that was working for hours before the reason field
+    existed, and the twice rule is what protects us there.
+    """
+    r = (provider_reason or '').strip().lower()
+    if not r:
+        return 'strike'
+    if r in _TERMINAL_REASONS:
+        return 'strike'
+    if r in _REQUEST_SHAPED_REASONS:
+        return 'benign'
+    return 'unknown'
+
+
+def _note_auth_reason(provider_reason, where):
+    """Record a non-terminal auth refusal so the dashboard can warn about it.
+    Never raises."""
+    try:
+        from .jwt_stats import note_auth
+        r = (provider_reason or '').strip().lower()
+        note_auth(r or 'no_reason', where, auth_verdict(r))
+    except Exception as e:
+        print(f"  [JWT] auth-note failed: {e}")
+
 
 def _cubey_reason(body):
     """Pull `reason` out of Cubey's JSON error body. Returns '' when the body is
@@ -260,21 +294,25 @@ def _retire(entry, reason):
         print(f"  [JWT] retire bookkeeping failed: {e}")
 
 
-def note_request(token, outcome, reason=''):
+def note_request(token, outcome, reason='', provider_reason=''):
     """One real Cubey request made with this token -- the single bookkeeping
     entry point for it.
 
     outcome: 'ok' (200), 'auth' (401/403), 'other' (429/5xx/timeout).
 
-    'auth' ALSO strikes the token, because this is the only place the pool
-    learns that a credential was rejected. It used to be two calls at every HTTP
-    site (`note_request` to count, `note_failure` to strike), which is a trap:
-    forget the second and a dead token keeps serving requests forever with no
-    error anywhere. One call site, one meaning.
+    'auth' strikes the token ONLY when provider_reason says the rejection is
+    about the credential. Cubey answers with a structured `reason`, and two of
+    the measured ones (`missing_token`, `malformed`) are statements about the
+    REQUEST: striking a token for "you did not send me one" is backwards, and on
+    2026-10-01 that emptied the pool in twenty-five seconds. An unrecognised
+    reason is UNKNOWN -- it is recorded and surfaced on the dashboard as a
+    warning, but it never evicts, because a reason this build has never seen
+    must not be able to clear the pool on its own.
 
-    Only a DEFINITE auth rejection strikes. A 429, a 5xx or a timeout is a
-    request that did not work, not a dead token, and the pool's rule has always
-    been that unknown verdicts never count (see _probe_token).
+    provider_reason is the `reason` field from the response body (caller text,
+    NOT a token). Leave it empty when the caller has no body: a bare 403 keeps
+    the old behaviour, which was correct for hours before the reason field
+    existed.
 
     Never raises, never stores the token. Returns True when the token was known
     to the pool (i.e. when the counters had somewhere to go)."""
@@ -298,6 +336,14 @@ def note_request(token, outcome, reason=''):
         from .jwt_stats import note_request as _nr
         _nr(jid if known else None, outcome)
         if outcome == 'auth' and known:
+            verdict = auth_verdict(provider_reason)
+            if verdict != 'strike':
+                # Recorded either way: a reason the dashboard has never seen is
+                # the signal that the vocabulary moved under us.
+                _note_auth_reason(provider_reason, 'fetch')
+                print(f"  [JWT] {jid} 403 reason={provider_reason or 'none'} "
+                      f"-- {verdict}, token kept")
+                return known
             tag = ' '.join((reason or 'api').split())[:40]
             _strike_dead(jid, datetime.now().isoformat(), f'note_request({tag})')
             _persist()
@@ -463,8 +509,11 @@ def _probe_token(token, via_node=None):
         # (including a reason this build has never seen) is UNKNOWN, and unknown
         # verdicts have never evicted a token.
         reason = _cubey_reason(text)
-        if reason and reason not in _TERMINAL_REASONS:
-            print(f"  [JWT] probe {status} reason={reason} -- not a token verdict, keeping it")
+        verdict = auth_verdict(reason)
+        if verdict != 'strike':
+            _note_auth_reason(reason, 'probe')
+            print(f"  [JWT] probe {status} reason={reason or 'none'} -- "
+                  f"{verdict}, keeping the token")
             return None
         return False
     if status == 200:

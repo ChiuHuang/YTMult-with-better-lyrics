@@ -41,6 +41,10 @@ _PATH = JWT_LEDGER_FILE
 # is for questions like "what did a token used to be worth", which are answered
 # by recent history, not by the pool's first week.
 _RETIRED_CAP = 1000
+# Auth refusals that did not retire a token. Small on purpose: this is a
+# recent-events feed for a warning badge, not an audit log, and the log file
+# keeps the full history.
+_AUTH_NOTES_CAP = 100
 # 72 hourly buckets is three days of traffic: long enough to see a weekend, short
 # enough that the file stays tiny.
 _HOURS_KEPT = 72
@@ -56,9 +60,10 @@ _SAVE_EVERY_S = 30
 
 
 def _blank():
-    return {'hours': {}, 'retired': [], 'totals': {
+    return {'hours': {}, 'retired': [], 'auth_notes': [], 'totals': {
         'requests': 0, 'ok': 0, 'auth_fail': 0, 'other_fail': 0,
-        'probes': 0, 'probe_ok': 0, 'contributed': 0}}
+        'probes': 0, 'probe_ok': 0, 'contributed': 0, 'auth_notes': 0,
+        'auth_unknown': 0}}
 
 
 def _hour_key(ts=None):
@@ -79,10 +84,12 @@ def _load():
                 raise ValueError('not an object')
             hours = d.get('hours') if isinstance(d.get('hours'), dict) else {}
             retired = d.get('retired') if isinstance(d.get('retired'), list) else []
+            notes = d.get('auth_notes') if isinstance(d.get('auth_notes'), list) else []
             totals = d.get('totals') if isinstance(d.get('totals'), dict) else {}
             _STATE = _blank()
             _STATE['hours'] = {k: v for k, v in hours.items() if isinstance(v, dict)}
             _STATE['retired'] = [r for r in retired if isinstance(r, dict)][-_RETIRED_CAP:]
+            _STATE['auth_notes'] = [r for r in notes if isinstance(r, dict)][-_AUTH_NOTES_CAP:]
             _STATE['totals'].update({k: v for k, v in totals.items()
                                      if isinstance(v, (int, float)) and not isinstance(v, bool)})
         except Exception:
@@ -170,6 +177,31 @@ def note_contributed():
             _maybe_save_locked()
     except Exception:
         pass
+
+
+def note_auth(reason, where, verdict):
+    """A 401/403 whose `reason` did NOT retire a token.
+
+    This is the file's early-warning channel. `verdict` is jwt_pool's
+    classification: 'benign' for a reason we know is about the request
+    (missing_token, malformed) and 'unknown' for one this build has never seen.
+    'unknown' is the interesting one -- it means the provider's vocabulary moved
+    under us, and the dashboard turns it into a visible warning instead of
+    letting it pass silently. Never raises, never stores a token."""
+    try:
+        st = _load()
+        now = datetime.now().isoformat()
+        with _LOCK:
+            notes = st.setdefault('auth_notes', [])
+            notes.append({'reason': reason or 'none', 'where': where or '?',
+                          'verdict': verdict or 'unknown', 'at': now})
+            del notes[:-_AUTH_NOTES_CAP]
+            st['totals']['auth_notes'] = int(st['totals'].get('auth_notes', 0)) + 1
+            if verdict == 'unknown':
+                st['totals']['auth_unknown'] = int(st['totals'].get('auth_unknown', 0)) + 1
+            _maybe_save_locked()
+    except Exception as e:
+        print(f"  [JWTSTATS] [WARN] note_auth failed: {e}")
 
 
 def retire(entry, reason):
@@ -276,10 +308,11 @@ def snapshot(now=None):
         with _LOCK:
             hours = {k: dict(v) for k, v in st['hours'].items()}
             retired = [dict(r) for r in st['retired']]
+            notes = [dict(n) for n in st.get('auth_notes', [])]
             totals = dict(st['totals'])
     except Exception:
-        return {'live': [], 'retired': [], 'hourly': [], 'death_histogram': [],
-                'summary': {}, 'totals': {}}
+        return {'live': [], 'retired': [], 'auth_notes': [], 'hourly': [],
+                'death_histogram': [], 'summary': {}, 'totals': {}}
 
     # A continuous axis: every hour in the window, zeros included.
     now_hour = datetime.fromtimestamp(now).replace(minute=0, second=0, microsecond=0)
@@ -310,6 +343,7 @@ def snapshot(now=None):
     return {
         'hourly': hourly,
         'retired': retired,
+        'auth_notes': notes,
         'totals': totals,
         'death_histogram': _histogram(dead_counts),
         'summary': {
@@ -318,6 +352,11 @@ def snapshot(now=None):
             'auth_fail_total': int(totals.get('auth_fail', 0)),
             'other_fail_total': int(totals.get('other_fail', 0)),
             'probes_total': int(totals.get('probes', 0)),
+            # A NON-ZERO unknown count is the warning: it means Cubey answered
+            # with a `reason` this build has never seen, so nobody can say
+            # whether it retires a token -- and the rule is that it must not.
+            'auth_notes_total': int(totals.get('auth_notes', 0)),
+            'auth_unknown_total': int(totals.get('auth_unknown', 0)),
             'retired_total': len(retired),
             'dead_total': len(dead_counts),
             'requests_24h': req_24h,
@@ -341,6 +380,7 @@ def clear():
         with _LOCK:
             st['hours'] = {}
             st['retired'] = []
+            st['auth_notes'] = []
             st['totals'] = _blank()['totals']
             _save_locked()
         return True

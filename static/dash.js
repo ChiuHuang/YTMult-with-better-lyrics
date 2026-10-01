@@ -907,6 +907,46 @@
     }
   };
 
+  /* ---- unknown-reason warnings ----
+     A 401/403 whose `reason` is not about the credential never retires a token
+     -- it is recorded instead, and the ones we have NEVER seen are the point:
+     they mean the provider's vocabulary moved under us and nobody can say
+     whether that refusal retires a token. So it gets a badge and a list rather
+     than a silent pass. */
+  const renderAuthWarnings = d => {
+    const badge = $('#jwt-warn-count');
+    const list = $('#jwt-warn-list');
+    const s = (d && d.summary) || {};
+    const notes = (d && d.auth_notes) || [];
+    const unknown = s.auth_unknown_total || 0;
+    if (badge) {
+      // Only the UNKNOWN ones are a warning. missing_token is a known-benign
+      // refusal, and painting it red every time a node drops the form field
+      // would train the operator to ignore the badge.
+      badge.textContent = unknown ? `${unknown} unknown reason${unknown === 1 ? '' : 's'}` : 'no unknown reasons';
+      badge.className = 'pill ' + (unknown ? 'pill-warn' : 'pill-ok');
+      badge.title = unknown
+        ? 'Cubey answered with a reason this build has never seen. Those refusals do NOT retire a token -- check the list and add the reason to _TERMINAL_REASONS or _REQUEST_SHAPED_REASONS if it turns out to mean something.'
+        : 'Every 401/403 reason seen so far is a known one.';
+    }
+    if (!list) return;
+    list.innerHTML = '';
+    if (!notes.length) {
+      list.appendChild(el('div', {class:'list-row'}, 'No 401/403 refusal that spared a token yet'));
+      return;
+    }
+    notes.slice(-25).reverse().forEach(n => {
+      const unknownOne = n.verdict === 'unknown';
+      list.appendChild(el('div', {class:'list-row jwt-warn'},
+        el('span', {class:'mono'}, n.reason || 'none'),
+        el('span', {}, n.where || '?'),
+        el('span', {class: unknownOne ? 'pill pill-warn' : 'pill pill-mute'},
+          unknownOne ? 'unknown to us' : 'not a token verdict'),
+        el('span', {}, ago(n.at) + ' ago'),
+      ));
+    });
+  };
+
   const loadJwt = async () => {
     try {
       const [data, stats] = await Promise.all([
@@ -915,7 +955,7 @@
       ]);
       setVal('#jwt-count', fmt(data.count));
       renderJwt(data.jwt || []);
-      if (stats) renderJwtStats(stats);
+      if (stats) { renderJwtStats(stats); renderAuthWarnings(stats); }
     } catch {}
   };
   const checkJwt = async (btn) => {
