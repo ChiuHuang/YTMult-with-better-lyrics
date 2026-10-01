@@ -47,6 +47,7 @@
       <mdui-list-item icon="system_update" data-page="update" href="#/update">Self-Update</mdui-list-item>
       <mdui-list-item icon="folder" data-page="files" href="#/files">Files</mdui-list-item>
       <mdui-list-item icon="bug_report" data-page="crashes" href="#/crashes">Crashes</mdui-list-item>
+      <mdui-list-item icon="tune" data-page="settings" href="#/settings">Settings</mdui-list-item>
       <mdui-list-item icon="phone_iphone" data-page="app" href="#/app">App</mdui-list-item>
     </mdui-list>
     <div class="drawer-foot">server dashboard</div>
@@ -495,6 +496,32 @@
           </div>
           <div class="panel-body">
             <div id="crash-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
+
+      <section id="page-settings" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Server settings</span>
+            <span class="pill pill-mute" id="srv-note">this server only</span>
+            <span class="spacer"></span>
+            <mdui-button id="srv-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+            <mdui-button id="srv-reset" variant="text" icon="restart_alt">Reset defaults</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              This server's own behaviour. These keys are stored in
+              <span class="mono">config/app_settings.json</span> next to the remote
+              ones and are read by the server itself, so they take effect on the
+              next request &mdash; no restart, and nothing is sent to a device.
+              Device-facing switches live on the <b>App</b> page.
+            </div>
+            <div id="srv-groups"></div>
+            <details id="srv-raw" style="margin-top:12px;">
+              <summary>Advanced: keys outside the schema</summary>
+              <div class="app-desc" id="srv-raw-note" style="margin:6px 0 0;"></div>
+            </details>
           </div>
         </mdui-card>
       </section>

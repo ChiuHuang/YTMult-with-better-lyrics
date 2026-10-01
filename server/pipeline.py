@@ -472,7 +472,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
             and _wbw_retry_cubey()):
         try:
             from .providers_cubey import (fetch_cubey_all, cubey_candidate,
-                                          second_pass_token, SECOND_PASS_DELAY)
+                                          second_pass_token, second_pass_delay)
             # A DIFFERENT credential when the pool has one: a device JWT is
             # passed straight in and never demoted, so reusing the token that
             # just answered (or 401'd) is not a second try.
@@ -483,8 +483,8 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                 _stage('Cubey-wbw', 'started')
                 _node2 = pick_node()
                 # Not in the same millisecond as pass 1 -- see
-                # providers_cubey.SECOND_PASS_DELAY.
-                time_module.sleep(SECOND_PASS_DELAY)
+                # providers_cubey.second_pass_delay() (and its setting).
+                time_module.sleep(second_pass_delay())
                 found = 0
                 for q in queries:
                     try:

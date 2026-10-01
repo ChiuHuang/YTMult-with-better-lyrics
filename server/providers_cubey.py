@@ -293,6 +293,20 @@ def _note_cubey_auth_failure(jwt_token, status):
 SECOND_PASS_DELAY = 0.8
 
 
+def second_pass_delay():
+    """SECOND_PASS_DELAY, or the operator's `fetch.wbw_retry_delay_s`.
+
+    A function, not a constant read at import: a setting edited in the dashboard
+    has to take effect without a server restart, and reading the module constant
+    at call sites would freeze whatever it was when the process started.
+    Fails back to the constant -- a settings read must not stop a fetch."""
+    try:
+        from .app_settings import number
+        return number('fetch.wbw_retry_delay_s', SECOND_PASS_DELAY, 0, 30)
+    except Exception:
+        return SECOND_PASS_DELAY
+
+
 def second_pass_token(used):
     """A DIFFERENT credential for the second Cubey pass when one exists.
 

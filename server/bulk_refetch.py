@@ -89,6 +89,15 @@ def _flag(job, key, dflt=True):
     return bool(v)
 
 
+def _default_int(key, dflt):
+    """A stored server setting, for a knob the caller did not send."""
+    try:
+        from .app_settings import number
+        return number(key, dflt)
+    except Exception:
+        return dflt
+
+
 def _beat(job):
     try:
         with _JOB_LOCK:
@@ -608,10 +617,19 @@ def start(opts):
         # "old cache miss" and the job would report errors instead of work.
         mode = 'fresh'
     lang = (opts.get('lang') or 'zh-TW').strip()
-    workers = max(1, min(int(opts.get('workers') or 8), _MAX_WORKERS))
-    cpu_workers = max(1, min(int(opts.get('cpu_workers') or 2), max(1, cpu_count())))
-    tq_workers = max(1, min(int(opts.get('tq_workers') or 2), _MAX_TQ_WORKERS))
-    batch = max(_MIN_BATCH, min(int(opts.get('batch') or 25), _MAX_BATCH))
+    # Every knob falls back to the operator's stored default, not to a literal
+    # here: the dashboard always sends its own numbers (so the panel wins while
+    # a job runs), and anything else that starts a job -- the stale-refetch
+    # button, a script, a future caller -- gets the server's settings instead of
+    # a second copy of these numbers that could drift.
+    workers = max(1, min(int(opts.get('workers') or _default_int('bulk.workers', 8)),
+                         _MAX_WORKERS))
+    cpu_workers = max(1, min(int(opts.get('cpu_workers') or _default_int('bulk.cpu_workers', 2)),
+                             max(1, cpu_count())))
+    tq_workers = max(1, min(int(opts.get('tq_workers') or _default_int('bulk.tq_workers', 2)),
+                            _MAX_TQ_WORKERS))
+    batch = max(_MIN_BATCH, min(int(opts.get('batch') or _default_int('bulk.batch', 25)),
+                                _MAX_BATCH))
     translate = bool(opts.get('translate', True))
     force = bool(opts.get('force', False))
     if scope not in ('all', 'non-wbw', 'unlyriced', 'plain', 'stale'):

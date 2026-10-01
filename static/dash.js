@@ -1167,7 +1167,8 @@
   // up here without touching the dashboard. The raw key/value form survives
   // under "Advanced" for keys that are not in the schema.
   const MASTER_KEY = 'ui.remote_control';
-  const appState = { schema: [], groups: [], extra: [], data: {} };
+  const appState = { schema: [], groups: [], extra: [], data: {},
+                     groups_remote: [], groups_server: [] };
 
   const appPost = async (values) => {
     const r = await API('/api/admin/app/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({values})});
@@ -1181,7 +1182,16 @@
     if (!d.ok) throw new Error(d.error || 'Failed');
     return d;
   };
-  const applyApp = (d) => { appState.schema = d.schema || []; appState.groups = d.groups || []; appState.extra = d.extra || []; renderApp(); };
+  const applyApp = (d) => {
+    appState.schema = d.schema || [];
+    appState.groups = d.groups || [];
+    appState.extra = d.extra || [];
+    appState.groups_remote = d.groups_remote || [];
+    appState.groups_server = d.groups_server || [];
+    renderApp();
+    renderServerSettings();
+    seedBulkDefaults();
+  };
 
   // A row is: label + description on the left, a typed control and a state
   // pill on the right. The pill says whether the value is the server default
@@ -1194,44 +1204,101 @@
       el('div', {class:'app-desc', title:e.desc || ''}, e.desc || e.key));
     row.appendChild(text);
 
-    const sw = el('mdui-switch', {'aria-label': e.label || e.key});
-    sw.checked = e.value !== false;
-    sw.dataset.key = e.key;
-    row.appendChild(sw);
+    // bool -> a switch, int/float -> a number field. The type comes from the
+    // schema, so a new key never renders as the wrong control: a boolean stored
+    // as a number (or a number rendered as a switch) is a setting that reads
+    // wrong on the one screen that is supposed to describe it.
+    const isNum = e.type === 'int' || e.type === 'float';
+    const sw = isNum ? null : el('mdui-switch', {'aria-label': e.label || e.key});
+    const num = isNum ? el('mdui-text-field', {type:'number', variant:'outlined',
+      'aria-label': e.label || e.key}) : null;
+    if (sw) sw.checked = e.value !== false;
+    if (num) {
+      num.value = String(e.value != null ? e.value : '');
+      // Only promise a step on a whole-number field: step=1 on a float key
+      // would make the arrow keys jump 0.8 -> 1.8.
+      if (e.type === 'int') num.step = '1';
+      else num.step = '0.1';
+      num.min = e.min != null ? String(e.min) : '';
+      num.max = e.max != null ? String(e.max) : '';
+      num.style.width = '110px';
+      num.dataset.key = e.key;
+    }
+    row.appendChild(sw || num);
 
     const pill = el('span', {class: e.is_override ? 'pill pill-warn' : 'pill pill-mute'},
       e.is_override ? 'override' : 'default');
     row.appendChild(pill);
-    return {row, sw, pill, entry: e};
+    return {row, sw, num, pill, entry: e};
   };
 
-  const renderAppGroups = (host) => {
+  // One pass, one host, one group filter -- the App page and the server
+  // Settings page render the SAME rows from the SAME schema, only the group
+  // list differs. Two renderers would drift, and they did: the wbw second pass
+  // is a server switch and used to be rendered inside the page framed as
+  // remote config for devices.
+  const renderSettingGroups = (hostSel, groupIds, snackPrefix) => {
+    const host = $(hostSel);
+    if (!host) return;
     host.innerHTML = '';
-    appState.groups.forEach(([gid, gname]) => {
+    const seen = new Set();
+    (groupIds || []).forEach(gid => {
+      const gname = (appState.groups.find(g => g[0] === gid) || [gid, gid])[1];
       const entries = appState.schema.filter(e => e.group === gid);
       if (!entries.length) return;
+      seen.add(gid);
       const wrap = el('div', {class:'app-group'});
       wrap.appendChild(el('div', {class:'app-group-title'}, gname));
       const grid = el('div', {class:'list-grid'});
       entries.forEach(e => {
-        if (e.key === MASTER_KEY) return;   // rendered as the master card
-        const {row, sw, pill} = appRow(e);
-        sw.addEventListener('change', async () => {
-          sw.disabled = true;
+        if (e.key === MASTER_KEY) return;   // the App page's master card
+        const {row, sw, num, pill} = appRow(e);
+        const save = async (value) => {
+          const old = num ? num.value : sw.checked;
+          if (num) num.disabled = true; else sw.disabled = true;
           try {
-            const d = await appPost({[e.key]: sw.checked});
+            const d = await appPost({[e.key]: value});
             applyApp(d);
-            mdui.snackbar({message: `${e.label || e.key}: ${sw.checked ? 'on' : 'off'} on every device`});
+            mdui.snackbar({message: `${e.label || e.key}: saved${snackPrefix || ''}`});
           } catch (err) {
-            sw.checked = !sw.checked;   // never leave a lying switch
+            // never leave a control showing something the server refused
+            if (num) num.value = old; else sw.checked = !sw.checked;
             mdui.snackbar({message: 'Failed: '+err.message});
-          } finally { sw.disabled = false; }
-        });
+          } finally { if (num) num.disabled = false; else sw.disabled = false; }
+        };
+        if (sw) sw.addEventListener('change', () => save(sw.checked));
+        if (num) {
+          // `change` (blur/enter), not `input`: a number field fires input per
+          // keystroke and "1" then "16" would save 1 then 16.
+          num.addEventListener('change', () => {
+            const raw = String(num.value).trim();
+            const v = e.type === 'int' ? parseInt(raw, 10) : parseFloat(raw);
+            if (isNaN(v)) { num.value = String(e.value); return; }
+            save(v);
+          });
+        }
         grid.appendChild(row);
       });
       if (grid.children.length) wrap.appendChild(grid);
       if (wrap.children.length) host.appendChild(wrap);
     });
+    // A key whose group NEITHER page claims must still be reachable, or it becomes
+    // invisible the moment a group is renamed. Deliberately not "not in my
+    // groups": that would pull the other page's keys in as orphans, which is
+    // how the wbw retry ended up under "Other" on the page for device switches.
+    const claimed = new Set([...(appState.groups_remote || []), ...(appState.groups_server || [])]);
+    const orphans = appState.schema.filter(e => !claimed.has(e.group));
+    if (orphans.length) {
+      const wrap = el('div', {class:'app-group'});
+      wrap.appendChild(el('div', {class:'app-group-title'}, 'Other (group not on any page)'));
+      const grid = el('div', {class:'list-grid'});
+      orphans.forEach(e => {
+        const {row} = appRow(e);
+        grid.appendChild(row);
+      });
+      wrap.appendChild(grid);
+      host.appendChild(wrap);
+    }
   };
 
   const renderAppMaster = () => {
@@ -1249,7 +1316,10 @@
   const renderApp = () => {
     const host = $('#app-groups');
     renderAppMaster();
-    if (host) renderAppGroups(host);
+    // Remote groups only: the server's own switches moved to the Settings page,
+    // where a switch that never reaches a device cannot be mistaken for one
+    // that does.
+    if (host) renderSettingGroups('#app-groups', appState.groups_remote, ' on every device');
 
     // Advanced: unrecognised overrides, plus the raw form target.
     const list = $('#app-list');
@@ -1285,6 +1355,36 @@
   const loadApp = async () => {
     try { applyApp(await json('/api/admin/app/settings')); }
     catch (e) { const g = $('#app-groups'); if (g) g.innerHTML = ''; }
+  };
+
+  const renderServerSettings = () => {
+    renderSettingGroups('#srv-groups', appState.groups_server, ' on this server');
+    const note = $('#srv-raw-note');
+    if (note) {
+      const extras = appState.extra || [];
+      note.textContent = extras.length
+        ? `${extras.length} override(s) outside the schema: ${extras.map(x => x.key).join(', ')}`
+        : 'No overrides outside the schema.';
+    }
+  };
+
+  // The bulk panel's fields are DEFAULTS for a new job; whatever the panel last
+  // held is what it sends. Seed them from the server so the panel opens showing
+  // what the server would actually do, but never over a field the operator has
+  // already typed into.
+  const seedBulkDefaults = () => {
+    const map = {workers: 'bulk.workers', cpu_workers: 'bulk.cpu_workers',
+                 tq_workers: 'bulk.tq_workers', batch: 'bulk.batch'};
+    Object.entries(map).forEach(([field, key]) => {
+      const e = appState.schema.find(x => x.key === key);
+      if (!e) return;
+      const input = $(field === 'workers' ? '#bulk-workers'
+                    : field === 'cpu_workers' ? '#bulk-cpu'
+                    : field === 'tq_workers' ? '#bulk-tq' : '#bulk-batch');
+      if (!input) return;
+      const cur = parseInt(input.value, 10);
+      if (isNaN(cur) || cur === e.default) input.value = String(e.value);
+    });
   };
 
   const appInit = () => {
@@ -1331,6 +1431,22 @@
           } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
         }});
     });
+    // The Settings page gets its own confirm with its own wording: "every device"
+    // is the wrong thing to say about a switch that never leaves this server.
+    const srs = $('#srv-reset');
+    if (srs) srs.addEventListener('click', async () => {
+      await mdui.confirm({headline:'Reset server settings',
+        description:'Drops every override, including the remote ones the devices use. This cannot be undone.',
+        cancelText:'Cancel', confirmText:'Reset', onConfirm: async () => {
+          try {
+            const r = await API('/api/admin/app/settings/reset', {method:'POST'});
+            const d = await r.json();
+            if (d.ok) { applyApp(d); mdui.snackbar({message:'Defaults restored'}); }
+          } catch (e) { mdui.snackbar({message:'Failed: '+e.message}); }
+        }});
+    });
+    const srefresh = $('#srv-refresh');
+    if (srefresh) srefresh.addEventListener('click', loadApp);
   };
   /* ---- targeted kill switch (build sha -> action) ---- */
   // The switches above are "every device, every build". This panel is "these
@@ -2620,7 +2736,7 @@
   };
 
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
-  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','app'];
+  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','settings','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
   const switchPage = p => {
     if (!pages.includes(p)) return;
@@ -2637,7 +2753,11 @@
     else if (p==='update') loadUpdate();
     else if (p==='files') loadFiles();
     else if (p==='crashes') loadCrashes();
-    else if (p==='app') { loadApp(); loadKill(); }
+    // Settings and App render from the SAME payload (the schema describes every
+    // key); they differ only in which groups they draw, so opening either page
+    // fetches once.
+    else if (p==='settings' || p==='app') loadApp();
+    if (p==='app') loadKill();
   };
   const initNav = () => {
     $$('#nav-list mdui-list-item').forEach(item => {
