@@ -4,7 +4,16 @@
 #import "YTMULiquidGlassPreferences.h"
 
 static BOOL YTMUQueueV2(void){return YTMULGFeatureEnabled(@"queueV2Enabled");}
-static const void*kQueueGlass=&kQueueGlass,&kQueueTint=&kQueueTint,&kQueueSampled=&kQueueSampled;
+// The associated-object keys. Each must be the ADDRESS of a distinct object
+// with static storage duration -- a `static const void *k = &k;` cannot compile
+// at all (forming `void **` out of a `const void *`), and self-seeded keys would
+// not be unique even if it did.
+static char kQueueGlassKey;
+static char kQueueTintKey;
+static char kQueueSampledKey;
+static const void *kQueueGlass = &kQueueGlassKey;
+static const void *kQueueTint = &kQueueTintKey;
+static const void *kQueueSampled = &kQueueSampledKey;
 
 // One 1x1 downscale of the row's thumbnail -- the same whole-CGImage draw the
 // song theme uses. The caller caches the result against the image pointer, so
@@ -57,7 +66,9 @@ static void YTMUQueueCard(UIView*h,UIImage*thumb){
     // Only re-sample when this cell is showing a different cover (the queue
     // recycles cells while scrolling, and the same cell is re-laid-out on every
     // queue header update otherwise).
-    void*key=(__bridge void*)thumb.CGImage;
+    // A plain C cast, not __bridge: CGImageRef is a CoreFoundation type, not an
+    // Objective-C object, so there is nothing to bridge and __bridge is rejected.
+    void*key=(void*)thumb.CGImage;
     NSValue*last=objc_getAssociatedObject(h,kQueueSampled);
     if(!last||last.pointerValue!=key){
         objc_setAssociatedObject(h,kQueueSampled,[NSValue valueWithPointer:key],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -102,7 +113,7 @@ static void YTMUQueueCard(UIView*h,UIImage*thumb){
     for(UIView*v in self.contentView.subviews){
         if(![NSStringFromClass(v.class)isEqualToString:@"YTImageView"]||CGRectGetWidth(v.bounds)>64)continue;
         v.layer.cornerRadius=10;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;
-        if(!thumb)[thumb=((UIImageView*)v).image];
+        if(!thumb){UIImage*found=((UIImageView*)v).image;if(found)thumb=found;}
     }
     YTMUQueueCard(self.contentView,thumb);
 }

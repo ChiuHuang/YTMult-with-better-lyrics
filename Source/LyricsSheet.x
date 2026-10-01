@@ -4744,18 +4744,22 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             CGFloat growL = glow, growR = glow;
             if (curWord + 1 < rcount) {
                 CGRect nextRect = [cell.cachedWordRects[curWord + 1] CGRectValue];
-                if (!CGRectIsNull(nextRect)) growL = MIN(growL, MAX(0.0, (curWordRect.minX - nextRect.maxX) * 0.5));
+                if (!CGRectIsNull(nextRect)) {
+                    growL = MIN(growL, MAX(0.0, (CGRectGetMinX(curWordRect) - CGRectGetMaxX(nextRect)) * 0.5));
+                }
             }
             if (curWord > 0 && curWord - 1 < rcount) {
                 CGRect prevRect = [cell.cachedWordRects[curWord - 1] CGRectValue];
-                if (!CGRectIsNull(prevRect)) growR = MIN(growR, MAX(0.0, (prevRect.minX - curWordRect.maxX) * 0.5));
+                if (!CGRectIsNull(prevRect)) {
+                    growR = MIN(growR, MAX(0.0, (CGRectGetMinX(prevRect) - CGRectGetMaxX(curWordRect)) * 0.5));
+                }
             }
             // And never more than half the word's own height vertically, which
             // is what keeps a wrapped line's next fragment out of it.
-            CGFloat growV = MIN(glow, curWordRect.size.height * 0.5);
-            CGRect glowRect = CGRectMake(curWordRect.minX - growL, curWordRect.minY - growV,
-                                         curWordRect.size.width + growL + growR,
-                                         curWordRect.size.height + growV * 2.0);
+            CGFloat growV = MIN(glow, CGRectGetHeight(curWordRect) * 0.5);
+            CGRect glowRect = CGRectMake(CGRectGetMinX(curWordRect) - growL, CGRectGetMinY(curWordRect) - growV,
+                                         CGRectGetWidth(curWordRect) + growL + growR,
+                                         CGRectGetHeight(curWordRect) + growV * 2.0);
             [path appendPath:[UIBezierPath bezierPathWithRect:glowRect]];
         }
     }

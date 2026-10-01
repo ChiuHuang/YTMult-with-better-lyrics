@@ -5,7 +5,14 @@ static BOOL YTMU(NSString *key) {
     return [YTMUltimateDict[key] boolValue];
 }
 
-static BOOL volumeBar = YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
+// A FUNCTION, not a file-scope initializer. `static BOOL volumeBar = f();` is
+// not a constant expression, so it cannot initialize an object with static
+// storage duration -- clang rejects it outright. Calling it at each use also
+// means the pref is read live rather than frozen at load time, which is what a
+// settings toggle needs.
+static BOOL YTMUVolumeBarEnabled(void) {
+    return YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
+}
 
 @interface YTMWatchView: UIView
 @property (readonly, nonatomic) BOOL isExpanded;
@@ -22,7 +29,7 @@ static BOOL volumeBar = YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
 - (instancetype)initWithColorScheme:(id)scheme {
     self = %orig;
 
-    if (self && volumeBar) {
+    if (self && YTMUVolumeBarEnabled()) {
         self.volumeBar = [[GSVolBar alloc] initWithFrame:CGRectMake(self.frame.size.width / 2 - (self.frame.size.width / 2) / 2, 0, self.frame.size.width / 2, 25)];
 
         [self addSubview:self.volumeBar];
@@ -34,7 +41,7 @@ static BOOL volumeBar = YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
 - (void)layoutSubviews {
     %orig;
 
-    if (volumeBar) {
+    if (YTMUVolumeBarEnabled()) {
         self.volumeBar.frame = CGRectMake(self.frame.size.width / 2 - (self.frame.size.width / 2) / 2, CGRectGetMinY(self.tabView.frame) - 25, self.frame.size.width / 2, 25);
     }
 }
@@ -42,7 +49,7 @@ static BOOL volumeBar = YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
 - (void)updateColorsAfterLayoutChangeTo:(long long)arg1 {
     %orig;
 
-    if (volumeBar) {
+    if (YTMUVolumeBarEnabled()) {
         [self updateVolBarVisibility];
     }
 }
@@ -50,14 +57,14 @@ static BOOL volumeBar = YTMU(@"YTMUltimateIsEnabled") && YTMU(@"volBar");
 - (void)updateColorsBeforeLayoutChangeTo:(long long)arg1 {
     %orig;
 
-    if (volumeBar) {
+    if (YTMUVolumeBarEnabled()) {
         self.volumeBar.hidden = YES;
     }
 }
 
 %new
 - (void)updateVolBarVisibility {
-    if (volumeBar) {
+    if (YTMUVolumeBarEnabled()) {
         dispatch_async(dispatch_get_main_queue(), ^(void){
             self.volumeBar.hidden = !(self.isExpanded && self.currentLayout == 2);
         });
