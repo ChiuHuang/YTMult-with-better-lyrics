@@ -141,6 +141,26 @@ def get_cached(video_id):
                 entry = json.load(f)
             if entry.get('v') != _CACHE_FORMAT_VERSION:
                 return None
+            # The SECOND gate, and the one the epoch bookkeeping exists for.
+            # db_migrate.py re-stamps a parser-stale entry with the current
+            # format version but deliberately does NOT claim the current epoch
+            # (see stamp_entry's parser_epoch=None, and its header: "re-stamped
+            # WITHOUT claiming the epoch, so the gate that produced this list
+            # stays true after the sweep instead of going blind"). That is only
+            # true if something refuses a stale epoch on the serving path, and
+            # until now nothing did: `v` matched, so the entry was served with
+            # the exact pre-fix text the bump was meant to retire, permanently.
+            # Candidates already gated on pv (candidates.py); the lyrics path
+            # did not, so the two stores disagreed about what "current" means.
+            #
+            # A MISSING pv counts as stale, deliberately. Every entry written
+            # before the epoch split lacks the field, and there is no way to
+            # tell from disk whether its text came from the parsers we have
+            # since fixed -- so it gets refetched. That is the honest cost of a
+            # parser fix, and it is why the sweep reports needs_refetch instead
+            # of claiming an epoch it cannot prove.
+            if entry.get('pv') != _PARSER_EPOCH:
+                return None
             data = entry.get('data')
             if is_not_found_result(data):
                 return None
