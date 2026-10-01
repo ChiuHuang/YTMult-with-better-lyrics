@@ -189,25 +189,35 @@ def ask_nodes_for_cache(cache_key, timeout=2.0):
     on a cache miss, and finding already-done work matters more than
     shaving milliseconds off this path.
 
-    The node's cv is checked before its data is accepted, and this is the whole
-    reason the function is not a three-liner. Every caller writes what comes
-    back with set_cached(), which stamps OUR _CACHE_FORMAT_VERSION onto it, and
-    the node strips the version envelope when it replies (it sends entry['data'],
-    not the entry). So an unversioned reply is a pre-fix payload promoted to
-    "current": it lands in the store claiming to be v4, the text is the old
-    broken text, and no later version bump or directory rename can ever catch it
-    again. Bumping the version invalidates the server's own files; without this
-    gate the node mesh refills them with exactly the text the bump was meant to
-    retire. A node whose cv does not match is skipped, not trusted."""
-    from .cache import _CACHE_FORMAT_VERSION
+    The node's cv AND pe are checked before its data is accepted, and this is the
+    whole reason the function is not a three-liner. Every caller writes what
+    comes back with set_cached(), which stamps OUR _CACHE_FORMAT_VERSION *and*
+    _PARSER_EPOCH onto it, and the node strips the version envelope when it
+    replies (it sends entry['data'], not the entry). So an unversioned reply is
+    a pre-fix payload promoted to "current": it lands in the store claiming to be
+    v4/epoch-2, the text is the old broken text, and no later version bump,
+    epoch bump or directory rename can ever catch it again. Bumping either
+    version invalidates the server's own files; without this gate the node mesh
+    refills them with exactly the text the bump was meant to retire.
 
-    def _cv_ok(reply):
+    Both gates are needed and they are not interchangeable. `cv` says the SHAPE
+    of the record is one this build understands; `pe` says the TEXT was derived
+    by the parsers this build runs. A node can have the right cv and still be
+    holding text an older parser produced, and once set_cached stamps the current
+    epoch on it the damage is permanent. A node whose cv or pe does not match is
+    skipped, not trusted."""
+    from .cache import _CACHE_FORMAT_VERSION, _PARSER_EPOCH
+
+    def _is_exact_int(value, want):
         # Strict int, no coercion. The template always sends a real int, so
         # anything else means this is not the node we shipped: '4' and 4.0 would
         # both compare equal to 4 and slip a payload through on a technicality,
         # and True is an int in Python.
-        cv = reply.get('cv')
-        return isinstance(cv, int) and not isinstance(cv, bool) and cv == _CACHE_FORMAT_VERSION
+        return isinstance(value, int) and not isinstance(value, bool) and value == want
+
+    def _cv_ok(reply):
+        return (_is_exact_int(reply.get('cv'), _CACHE_FORMAT_VERSION)
+                and _is_exact_int(reply.get('pe'), _PARSER_EPOCH))
 
     with _connected_nodes_lock:
         ids = list(connected_nodes.keys())
@@ -218,8 +228,10 @@ def ask_nodes_for_cache(cache_key, timeout=2.0):
         if not (reply and reply.get('found')):
             continue
         if not _cv_ok(reply):
-            print(f"  [NODE] skipping {node_id} for {cache_key}: node cache v{reply.get('cv')} "
-                  f"!= server v{_CACHE_FORMAT_VERSION} (node self-updates on the next ping)")
+            print(f"  [NODE] skipping {node_id} for {cache_key}: node cache "
+                  f"v{reply.get('cv')}/epoch{reply.get('pe')} != server "
+                  f"v{_CACHE_FORMAT_VERSION}/epoch{_PARSER_EPOCH} "
+                  f"(node self-updates on the next ping)")
             continue
         data_reply = send_to_node(node_id, {
             'type': 'cache_fetch', 'request_id': _secrets.token_hex(8), 'cache_key': cache_key,
@@ -227,7 +239,8 @@ def ask_nodes_for_cache(cache_key, timeout=2.0):
         if not (data_reply and data_reply.get('data')):
             continue
         if not _cv_ok(data_reply):
-            print(f"  [NODE] rejecting {node_id} fetch for {cache_key}: cv changed mid-flight")
+            print(f"  [NODE] rejecting {node_id} fetch for {cache_key}: "
+                  f"v/pe changed mid-flight")
             continue
         print(f"  [NODE] cache hit on {node_id} for {cache_key}")
         return data_reply['data']
@@ -291,6 +304,23 @@ def _current_server_sha():
         return None
 
 
+def _parser_epoch():
+    """The parser epoch nodes must be holding text from, handed to them in
+    hello_ack and every ping.
+
+    Sent rather than hardcoded in node.py on purpose. node.py is a standalone
+    generated script with no access to server/, so a constant there is a second
+    place to forget. It was stale within minutes of being written: the epoch
+    moved 2 -> 3 while this was being added, and a node still claiming 2 would
+    have had its cache silently refused forever. Bumping _PARSER_EPOCH in
+    cache.py is now the only edit a parser change needs."""
+    try:
+        from .cache import _PARSER_EPOCH
+        return _PARSER_EPOCH
+    except Exception:
+        return None
+
+
 def _broadcast_pings():
     """Keep every node honest: periodically tell it the server's node-template
     code_sha (plus the server's own repo sha). A node whose own script version
@@ -302,7 +332,8 @@ def _broadcast_pings():
         except Exception:
             code_sha = None
         server_sha = _current_server_sha()
-        msg = json.dumps({'type': 'ping', 'server_sha': server_sha, 'code_sha': code_sha, 'ts': time_module.time()})
+        msg = json.dumps({'type': 'ping', 'server_sha': server_sha, 'code_sha': code_sha,
+                          'pe': _parser_epoch(), 'ts': time_module.time()})
         with _connected_nodes_lock:
             ws_list = [e['ws'] for e in connected_nodes.values()]
         for entry_ws in ws_list:
@@ -474,7 +505,8 @@ def ws_node(ws):
             pass
         ws.send(json.dumps({'type': 'hello_ack', 'ok': True,
                             'code_sha': _node_template_sha(),
-                            'server_sha': _current_server_sha()}))
+                            'server_sha': _current_server_sha(),
+                            'pe': _parser_epoch()}))
         threading.Thread(target=_jwt_sync_for, args=(node_id,), daemon=True).start()
 
         while True:
