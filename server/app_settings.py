@@ -196,6 +196,45 @@ _SCHEMA = [
                  'and make Stop more responsive; bigger batches spend less time '
                  'between boundaries.'),
     },
+    # ---- group: egress ----
+    # Routed through a proxy so no single origin address is the one that gets
+    # blocked. Protocol, auth and body/header forwarding were all MEASURED
+    # (see server/egress.py) -- these keys only choose whether to use it and how
+    # wide.
+    {
+        'key': 'egress.enabled',
+        'type': 'bool',
+        'default': True,
+        'group': 'egress',
+        'scope': 'server',
+        'label': 'Route providers through the egress proxy',
+        'desc': ('Off sends every provider request straight out from this host, '
+                 'which is one address for the whole operation. The proxy '
+                 'spreads the same traffic over a large pool instead.'),
+    },
+    {
+        'key': 'egress.proxy_url',
+        'type': 'text',
+        'default': 'https://proxy.chiuhuang.dev',
+        'group': 'egress',
+        'scope': 'server',
+        'label': 'Proxy base URL',
+        'desc': ('Prefix; the provider URL is appended to it whole. Set it to '
+                 '"off" to disable without touching the switch. Leave empty to '
+                 'use the YTMU_EGRESS_PROXY environment variable if one is '
+                 'set.'),
+    },
+    {
+        'key': 'egress.scope',
+        'type': 'text',
+        'default': 'cubey',
+        'group': 'egress',
+        'scope': 'server',
+        'label': 'Which providers (cubey | all)',
+        'desc': ('cubey routes only the provider that refuses us. "all" puts '
+                 'every provider through the proxy, which adds a hop to '
+                 'requests that already work. Anything else reads as cubey.'),
+    },
     {
         'key': 'upload_logs',
         'type': 'bool',
@@ -378,6 +417,20 @@ def _check_value(value, key=None):
         if hi is not None and num > hi:
             num = hi
         return num
+    if spec and spec.get('type') == 'text':
+        # Trimmed, and refused rather than silently mangled when it is not text:
+        # an operator typing a URL must not get a bool coerced into a string, and
+        # a 4000-char limit on a URL is a paste accident, not a value.
+        if isinstance(value, bool):
+            raise ValueError(f'{key} is text, not a boolean')
+        if isinstance(value, (int, float)):
+            value = str(value)
+        if not isinstance(value, str):
+            raise ValueError(f'{key} is text')
+        value = value.strip()
+        if len(value) > 400:
+            raise ValueError(f'{key} is too long (max 400)')
+        return value
     return value
 
 
@@ -428,6 +481,7 @@ GROUPS = [
     ('ui', 'Liquid Glass surfaces'),
     ('fetch', 'Lyrics fetching'),
     ('bulk', 'Bulk refetch defaults'),
+    ('egress', 'Egress proxy'),
     ('database', 'Database'),
     ('diagnostics', 'Diagnostics'),
 ]
@@ -438,7 +492,7 @@ GROUPS = [
 # page framed as "remote config for the tweak", where it read like a device
 # setting it was never going to reach.
 GROUPS_REMOTE = ('server', 'ui', 'diagnostics')
-GROUPS_SERVER = ('fetch', 'bulk', 'database')
+GROUPS_SERVER = ('fetch', 'bulk', 'egress', 'database')
 
 
 def get_overrides():

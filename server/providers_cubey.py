@@ -20,6 +20,7 @@ import traceback
 import atexit
 import logging
 from .nodes import relay_http_request
+from .egress import egress_url
 from .parsers_lrc import parse_lrc
 from .parsers_ttml import parse_ttml_basic
 
@@ -273,6 +274,12 @@ def _note_cubey_auth_failure(jwt_token, status):
     _account(jwt_token, status)
 
 
+# The direct Cubey URL. Wrapped by egress.egress_url() at each call site, not
+# here, so the proxy decision is per-request and live rather than frozen at
+# import time.
+CUBEY_URL = "https://lyrics.api.dacubeking.com/v2/lyrics"
+
+
 def _account(jwt_token, status_or_outcome, exception=False):
     """The ONE bookkeeping call for a Cubey request (jwt_pool.note_request).
 
@@ -372,7 +379,14 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
     {inner_name: raw_result} instead of the single best merge. Returns {} on
     any failure. Raw values are the same shapes fetch_cubey yields ({synced}
     LRC text or {parsed} entries with source/wordSynced flags)."""
-    url = "https://lyrics.api.dacubeking.com/v2/lyrics"
+    url = egress_url(CUBEY_URL)
+    if via_node and url != CUBEY_URL:
+        # The proxy won over the node for this provider, so the node is SKIPPED
+        # rather than chained: node -> proxy -> Cubey would spend a hop to end
+        # up on the proxy's address anyway, which is the exact thing the node
+        # was picked to avoid. Turn egress.enabled off to give Cubey back to the
+        # nodes.
+        via_node = None
     data = {
         "videoId": video_id,
         "song": title,
@@ -409,7 +423,11 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
 
 
 def fetch_cubey(jwt_token, video_id, title, artist, duration_sec, via_node=None):
-    url = "https://lyrics.api.dacubeking.com/v2/lyrics"
+    url = egress_url(CUBEY_URL)
+    if via_node and url != CUBEY_URL:
+        # Same precedence as fetch_cubey_all: the proxy wins over the node for
+        # this provider. Chaining them would defeat the node entirely.
+        via_node = None
     data = {
         "videoId": video_id,
         "song": title,
