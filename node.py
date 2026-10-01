@@ -64,6 +64,44 @@ JWT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "node_cache"
 # 'v' key and are therefore rejected too, which is the point.
 CACHE_FORMAT_VERSION = 4
 
+# The parser epoch is a SEPARATE gate from the format version above, because the
+# two answer different questions. `v` says the shape of the record is one the
+# server understands; the epoch says the TEXT was derived by the parsers the
+# server currently runs. server.set_cached() stamps ITS OWN current epoch onto
+# anything it is handed, so a node holding text from an older parser would be
+# promoted to "current text" on the way in and no future epoch bump could ever
+# catch it -- the same blind spot nodes.py had for `cv`.
+#
+# NOT a hardcoded constant, and that is the whole point. It was 3 here and the
+# server moved 2 -> 3 while this was being written; a hardcoded copy is stale
+# the moment anyone bumps cache.py's _PARSER_EPOCH, and it cannot even recover
+# on its own: the server tells a node to refetch only when node.py's own
+# content hash changes, and bumping an epoch in cache.py does not change
+# node.py. So every node would go permanently dead on the next parser change,
+# silently, with nothing to grep for. The server states its epoch in hello_ack
+# and in every ping instead, so bumping cache.py is the only edit a parser
+# change needs.
+#
+# Until a ping arrives _server_epoch is None and this node has nothing it can
+# vouch for. That is the correct answer rather than a degraded one: nothing
+# refills a node's store any more (the server stopped pushing and a node does
+# not fetch), so every file in it is frozen legacy data anyway.
+_server_epoch = None
+
+
+def _set_server_epoch(value):
+    """Adopt the server's parser epoch. Strict int, no coercion: the server
+    always sends a real int, and '3'/3.0/True must not pass for one."""
+    global _server_epoch
+    if isinstance(value, int) and not isinstance(value, bool):
+        _server_epoch = value
+        return True
+    return False
+
+
+def _epoch_known():
+    return _server_epoch is not None
+
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 _SAFE_COMPONENT_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
@@ -92,6 +130,12 @@ def _load_local_cache(cache_key):
             entry = json.load(f)
         if entry.get('v') != CACHE_FORMAT_VERSION:
             return None
+        # The epoch gate, same shape as the version gate above. A missing `pe`
+        # counts as stale: entries written before the epoch existed cannot be
+        # shown to hold current-parser text, and this node has no way to
+        # re-derive it.
+        if entry.get('pe') != _server_epoch:
+            return None
         if time.time() - entry.get('ts', 0) > CACHE_TTL_SECONDS:
             return None
         return entry.get('data')
@@ -105,7 +149,8 @@ def _save_local_cache(cache_key, data):
         return
     try:
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump({'v': CACHE_FORMAT_VERSION, 'data': data, 'ts': time.time()}, f, ensure_ascii=False)
+            json.dump({'v': CACHE_FORMAT_VERSION, 'pe': _server_epoch,
+                       'data': data, 'ts': time.time()}, f, ensure_ascii=False)
     except Exception:
         pass
 
@@ -253,6 +298,27 @@ def on_open(ws):
     ws.send(json.dumps({'type': 'hello', 'node_id': NODE_ID, 'key': NODE_KEY, 'code_sha': _code_sha()}))
 
 
+def _learn_epoch(msg):
+    """Adopt the parser epoch the server states in hello_ack / ping. Logged only
+    when it actually moves: a parser bump must be visible in the node log, and a
+    line every 30s would bury everything else."""
+    global _server_epoch, _EPOCH_LOGGED
+    if 'pe' not in msg:
+        return False
+    if not _set_server_epoch(msg.get('pe')):
+        return False
+    if _server_epoch != _EPOCH_LOGGED:
+        _EPOCH_LOGGED = _server_epoch
+        print(f"[node] server parser epoch is {_server_epoch}")
+    return True
+
+
+# Last epoch we announced, so _learn_epoch stays quiet on the 99% of pings that
+# changed nothing. Module-level because on_message would otherwise need a
+# global statement for it.
+_EPOCH_LOGGED = None
+
+
 # Counts the server's pings so the reply cadence is a module-level counter
 # (a bare `global` inside on_message would need a global statement there,
 # which reads worse than owning the count next to its policy constant).
@@ -275,6 +341,9 @@ def on_message(ws, raw):
             # hand the next outage a 10s wait.
             _SESSION['authed_at'] = time.time()
             print(f"[node] connected and authenticated as {NODE_ID}")
+            # The server's parser epoch arrives here and on every ping. Until it
+            # does, _server_epoch is None and this node refuses its own store.
+            _learn_epoch(msg)
             if not _maybe_self_update(msg.get('code_sha')):
                 _maybe_contribute_jwt(ws)
         else:
@@ -285,6 +354,7 @@ def on_message(ws, raw):
     if mtype == 'ping':
         # server broadcast -- self-update when the template sha moved on
         _maybe_self_update(msg.get('code_sha'))
+        _learn_epoch(msg)
         # Answer, or the server reaps us: its receive() timeout is reset only
         # by an application message (a protocol Pong does not reach it), so a
         # node that only listens is dropped every 90s regardless of health.
@@ -323,13 +393,14 @@ def on_message(ws, raw):
         # would silently promote pre-fix text to "current" and make it
         # un-retirable by any future version bump.
         ws.send(json.dumps({'type': 'cache_check_result', 'request_id': request_id,
-                            'found': found, 'cv': CACHE_FORMAT_VERSION}))
+                            'found': found, 'cv': CACHE_FORMAT_VERSION,
+                            'pe': _server_epoch}))
         return
 
     if mtype == 'cache_fetch':
         data = _load_local_cache(msg.get('cache_key', ''))
         ws.send(json.dumps({'type': 'cache_data', 'request_id': request_id, 'data': data,
-                            'cv': CACHE_FORMAT_VERSION}))
+                            'cv': CACHE_FORMAT_VERSION, 'pe': _server_epoch}))
         return
 
     if mtype == 'task':
