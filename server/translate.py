@@ -1203,6 +1203,11 @@ _TQ_QUEUE = queue_module.Queue()
 _TQ_STATS = {'queued': 0, 'done': 0, 'errors': 0}
 _TQ_LOCK = threading.Lock()
 _TQ_WORKERS = 2
+# Desired worker count, live-tunable (set_translate_queue_workers). Kept
+# separate from the live set because "how many should there be" and "how many
+# are running" are different questions while a shrink is still draining.
+_TQ_TARGET = _TQ_WORKERS
+_TQ_ALIVE = set()
 _TQ_STARTED = False
 # On 429 the worker waits and retries instead of dropping the item, so the
 # queue eventually completes once quota resets. Bounds are env-tunable.
@@ -1210,10 +1215,22 @@ _TQ_MAX_RETRIES = max(0, int(os.environ.get('YTMU_TQ_MAX_RETRIES', '40')))
 _TQ_RETRY_SLEEP = max(5, int(os.environ.get('YTMU_TQ_RETRY_SLEEP', '60')))
 
 
-def _translate_queue_worker():
+def _translate_queue_worker(index=0):
     from .cache import set_cached
     while True:
-        item = _TQ_QUEUE.get()
+        # A TIMED get, not a blocking one, and that is the whole reason this
+        # function can be retired while the queue is idle: a blocking get()
+        # would notice a lowered worker count only after the next song
+        # finished, which on a slow Cohere call is minutes.
+        try:
+            item = _TQ_QUEUE.get(timeout=1.0)
+        except queue_module.Empty:
+            with _TQ_LOCK:
+                if index >= _TQ_TARGET:
+                    _TQ_ALIVE.discard(index)
+                    print(f"[TRANSQ] worker {index} retiring (target={_TQ_TARGET})")
+                    return
+            continue
         try:
             retries = item.get('retries', 0)
             n = translate_result_in_place(item.get('data'), item.get('lang'))
@@ -1248,15 +1265,37 @@ def _translate_queue_worker():
 
 
 def _ensure_translate_queue():
-    global _TQ_STARTED
+    """Spawn any worker index the live target asks for. Idempotent, and safe
+    to call on every enqueue: it only starts a thread when one is missing."""
     with _TQ_LOCK:
-        if _TQ_STARTED:
-            return
+        missing = [i for i in range(_TQ_TARGET) if i not in _TQ_ALIVE]
+        for i in missing:
+            _TQ_ALIVE.add(i)
+            t = threading.Thread(target=_translate_queue_worker, args=(i,),
+                                 daemon=True, name=f'translate-q-{i}')
+            t.start()
         _TQ_STARTED = True
-    for i in range(_TQ_WORKERS):
-        t = threading.Thread(target=_translate_queue_worker, daemon=True,
-                             name=f'translate-q-{i}')
-        t.start()
+
+
+def set_translate_queue_workers(n):
+    """Live-tune the silent translate queue. Growing starts workers
+    immediately; lowering asks the highest-index ones to retire at their next
+    idle tick (a worker sleeping through a 429 retry will notice after that
+    sleep, not before -- killing it mid-song would throw away a paid call).
+    Never raises. Returns the count now targeted."""
+    try:
+        want = max(1, min(int(n), 16))
+    except Exception:
+        want = _TQ_WORKERS
+    try:
+        with _TQ_LOCK:
+            global _TQ_TARGET
+            _TQ_TARGET = want
+        _ensure_translate_queue()
+        return want
+    except Exception as e:
+        print(f"[TRANSQ] [WARN] tune failed: {e}")
+        return _TQ_TARGET
 
 
 def translate_queue_enqueue(cache_key, lang, data):
@@ -1325,7 +1364,14 @@ def find_untranslated(lang=''):
 def translate_queue_stats():
     with _TQ_LOCK:
         s = dict(_TQ_STATS)
+        workers = len(_TQ_ALIVE)
+        target = _TQ_TARGET
     s['pending'] = s['queued'] - s['done'] - s['errors']
+    # workers/target are the live pool, not the constant: the dashboard shows
+    # them next to the pending count, and "3 pending with 1 worker" is a
+    # different story from "3 pending with 8".
+    s['workers'] = workers
+    s['target'] = target
     return s
 
 

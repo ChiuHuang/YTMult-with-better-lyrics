@@ -413,6 +413,29 @@
           bulkState.stage = '';
         } else if (d.type === 'stage') {
           bulkState.stage = `${d.song || d.video_id || '?'} | trying ${d.provider || '?'}...`;
+        } else if (d.type === 'batch' || d.type === 'batch_done') {
+          if (d.batch != null) bulkState.batch_index = d.batch;
+          if (d.batches != null) bulkState.batch_total = d.batches;
+          if (d.size != null) bulkState.batch_size = d.size;
+          if (d.queued != null) bulkState.queued = d.queued;
+          if (d.upgraded != null) bulkState.upgraded = d.upgraded;
+          if (d.kept != null) bulkState.kept = d.kept;
+          if (d.failed != null) bulkState.failed = d.failed;
+          if (d.errors != null) bulkState.errors = d.errors;
+          if (d.done != null) bulkState.done = d.done;
+        } else if (d.type === 'drain') {
+          // Fetches are done, the job is now waiting on the translate queue.
+          bulkState.state = 'translating';
+          bulkState.stage = d.tq_pending
+            ? `translating: ${d.tq_pending} waiting on Cohere`
+            : 'translations drained';
+          if (d.tq_pending != null) bulkState.tq_pending = d.tq_pending;
+        } else if (d.type === 'tune') {
+          if (d.workers != null) setBulkField('#bulk-workers', d.workers);
+          if (d.cpu_workers != null) setBulkField('#bulk-cpu', d.cpu_workers);
+          if (d.tq_workers != null) setBulkField('#bulk-tq', d.tq_workers);
+          if (d.batch != null) setBulkField('#bulk-batch', d.batch);
+          if (d.translate != null && $('#bulk-translate')) $('#bulk-translate').checked = !!d.translate;
         } else if (d.type === 'row' && d.row) {
           bulkState.results.push(d.row);
           while (bulkState.results.length > 300) bulkState.results.shift();
@@ -421,13 +444,18 @@
           if (d.kept != null) bulkState.kept = d.kept;
           if (d.failed != null) bulkState.failed = d.failed;
           if (d.errors != null) bulkState.errors = d.errors;
+          if (d.skipped != null) bulkState.skipped = d.skipped;
           if (d.tq_done != null) bulkState.tq_done = d.tq_done;
           if (d.tq_queued != null) bulkState.tq_queued = d.tq_queued;
+          if (d.tq_pending != null) bulkState.tq_pending = d.tq_pending;
+          if (d.tq_workers != null) bulkState.tq_workers = d.tq_workers;
           bulkState.stage = '';
         } else if (d.type === 'done') {
           bulkState.state = d.state || 'done';
           bulkState.current = null;
           bulkState.stage = '';
+          if (d.skipped != null) bulkState.skipped = d.skipped;
+          if (d.tq_pending != null) bulkState.tq_pending = d.tq_pending;
         }
         renderBulk(bulkState);
         if (d.type === 'done') { try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {} loadCaches(); loadLibrary(); }
@@ -882,6 +910,10 @@
       setVal('#stat-none', fmt(scan.buckets?.none) + (scan.unlyriced ? ` (+${fmt(scan.unlyriced)} unlyriced)` : ''));
       renderRebaseStatus(status);
       renderRetitleStatus(retitleStatus);
+      // One small GET, no polling: it makes the bulk panel show a job that was
+      // started elsewhere (or after this page was left open) instead of an idle
+      // panel whose Start button can only 409.
+      loadBulkStatus().catch(() => {});
       // The version/retranslate panels fetch their own (much bigger) scans, and
       // neither is needed to draw the library stats, so they are not in the
       // Promise.all above: a slow full-directory walk would otherwise hold up
@@ -2097,20 +2129,88 @@
   };
   let bulkJobId = null;
   let bulkState = null;
+  const fmtDur = s => {
+    if (s == null || !isFinite(s)) return '--';
+    s = Math.round(s);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s`;
+    return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+  };
+  const bulkLive = () => {
+    // state is 'running' or 'translating' (waiting on the translate queue).
+    // Both mean a job owns the slot.
+    const s = bulkState && bulkState.state;
+    return s === 'running' || s === 'translating';
+  };
+  const setBulkField = (id, v) => {
+    const e = $(id);
+    // Stringified, not assigned raw: these are mdui-text-field value properties
+    // and the server sends numbers, so a strict component would either coerce
+    // oddly or show nothing at all.
+    if (e && v != null && e.value !== undefined && String(e.value) !== String(v)) {
+      e.value = String(v);
+    }
+  };
   const renderBulk = st => {
     const progress = $('#bulk-progress');
     const summary = $('#bulk-summary');
     const status = $('#bulk-status');
     const list = $('#bulk-results');
     const stageLine = $('#bulk-stage');
-    const running = st && (st.state === 'running');
-    if (status) status.textContent = (st && st.state) || 'idle';
+    const live = $('#bulk-live');
+    const running = st && (st.state === 'running' || st.state === 'translating');
+    if (status) {
+      status.textContent = (st && st.state) || 'idle';
+      status.className = 'pill ' + (st && st.state === 'translating' ? 'pill-warn'
+        : running ? 'pill-ok' : 'pill-mute');
+    }
     const stopBtn = $('#bulk-stop');
     if (stopBtn) stopBtn.style.display = running ? '' : 'none';
+    // Start is disabled while a job owns the slot and Take over takes its
+    // place. This is the whole fix for "a bulk refetch is already running" with
+    // nothing on screen: the panel now shows the job that owns the slot.
+    const startBtn = $('#bulk-start');
+    if (startBtn) startBtn.disabled = !!running;
+    const takeBtn = $('#bulk-takeover');
+    if (takeBtn) takeBtn.style.display = running ? '' : 'none';
     if (progress) progress.value = (st && st.total > 0) ? Math.min(1, st.done / st.total) : 0;
-    if (summary) summary.textContent = st && st.total > 0
-      ? `${st.done}/${st.total} up=${st.upgraded || 0} kept=${st.kept || 0} failed=${st.failed || 0} err=${st.errors || 0} tr=${st.tq_done || 0}/${st.tq_queued || 0}${st.current ? '  ' + (st.current.song || st.current.video_id) : ''}`
-      : '';
+    if (summary) {
+      const bits = [];
+      if (st && st.total > 0) {
+        bits.push(`${st.done}/${st.total}`);
+        bits.push(`up=${st.upgraded || 0}`);
+        bits.push(`kept=${st.kept || 0}`);
+        bits.push(`failed=${st.failed || 0}`);
+        if (st.errors) bits.push(`err=${st.errors}`);
+        if (st.skipped) bits.push(`skipped=${st.skipped}`);
+        // Translate is part of the job, not a background detail: pending > 0 is
+        // why a finished fetch is still running.
+        bits.push(`tr ${st.tq_done || 0}/${st.tq_queued || 0}`);
+        if (st.tq_pending) bits.push(`tr-pending=${st.tq_pending}`);
+      }
+      if (running && st && st.batch_total) {
+        bits.push(`batch ${st.batch_index || 0}/${st.batch_total}`);
+        bits.push(`in-flight=${st.in_flight || 0}`);
+      }
+      if (running && st && st.elapsed_s != null) {
+        bits.push(`${fmtDur(st.elapsed_s)} elapsed`);
+        if (st.eta_s != null) bits.push(`~${fmtDur(st.eta_s)} left`);
+      }
+      if (st && st.current && (st.current.song || st.current.video_id)) {
+        bits.push(st.current.song || st.current.video_id);
+      }
+      summary.textContent = bits.join('  ');
+    }
+    if (live) {
+      if (running && st) {
+        const stale = st.stale ? ` | last beat ${fmtDur(st.beat_age_s)} ago (looks stuck)` : '';
+        live.textContent = `Running ${st.scope || ''}/${st.mode || ''} ${st.lang || ''}`
+          + ` -- fetch ${st.workers || '?'} thr, cpu ${st.cpu_workers || '?'}, tr ${st.tq_workers || '?'} thr`
+          + `, batch ${st.batch || '?'} | live: these numbers can be changed now${stale}`;
+      } else {
+        live.textContent = 'Fetch threads, CPU workers, translate workers and batch size stay editable while a job runs.';
+      }
+    }
     if (stageLine) stageLine.textContent = (running && st && st.stage) ? st.stage : '';
     if (list) {
       list.innerHTML = '';
@@ -2133,6 +2233,68 @@
         list.appendChild(row);
       });
     }
+  };
+  const bulkNum = (id, dflt, lo, hi) => {
+    const v = parseInt((($('#' + id) && $('#' + id).value) || dflt), 10);
+    return Math.max(lo, Math.min(hi, isNaN(v) ? dflt : v));
+  };
+  // Push a knob change to the RUNNING job. Debounced because a number field
+  // fires per keystroke and each one would be a request; the server treats an
+  // unchanged value as a silent no-op, so a duplicate is harmless anyway.
+  let bulkTuneTimer = null;
+  const tuneBulkLive = () => {
+    if (!bulkLive()) return;
+    clearTimeout(bulkTuneTimer);
+    bulkTuneTimer = setTimeout(async () => {
+      if (!bulkLive()) return;
+      try {
+        const r = await API('/api/admin/library/refetch/tune', {method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            workers: bulkNum('bulk-workers', 8, 1, 32),
+            cpu_workers: bulkNum('bulk-cpu', 2, 1, 64),
+            tq_workers: bulkNum('bulk-tq', 2, 1, 16),
+            batch: bulkNum('bulk-batch', 25, 1, 500),
+            translate: !!(($('#bulk-translate') && $('#bulk-translate').checked)),
+          })});
+        const d = await r.json();
+        if (d && d.ok && bulkState) {
+          // Adopt what the server actually clamped, so the field never shows a
+          // number the job is not using.
+          setBulkField('#bulk-workers', d.workers);
+          setBulkField('#bulk-cpu', d.cpu_workers);
+          setBulkField('#bulk-tq', d.tq_workers);
+          setBulkField('#bulk-batch', d.batch);
+          if (d.translate != null && $('#bulk-translate')) $('#bulk-translate').checked = !!d.translate;
+        }
+      } catch (e) { console.warn('bulk tune failed', e); }
+    }, 400);
+  };
+  const applyBulkStatus = st => {
+    if (!st || !st.job_id) return false;
+    bulkJobId = st.job_id;
+    bulkState = {...bulkState, ...st};
+    setBulkField('#bulk-workers', st.workers);
+    setBulkField('#bulk-cpu', st.cpu_workers);
+    setBulkField('#bulk-tq', st.tq_workers);
+    setBulkField('#bulk-batch', st.batch);
+    if ($('#bulk-translate') && st.translate != null) $('#bulk-translate').checked = !!st.translate;
+    try { sessionStorage.setItem('ymtu-bulk-job', st.job_id); } catch {}
+    renderBulk(bulkState);
+    return true;
+  };
+  // The ADOPT path: ask the server what is running, with no job id. Called on
+  // page load and after any 409, so a job started in another tab (or by the
+  // stale-refetch button) is never invisible.
+  const loadBulkStatus = async () => {
+    try {
+      const st = await json('/api/admin/library/refetch/status');
+      if (st && st.job_id && (st.state === 'running' || st.state === 'translating')) {
+        applyBulkStatus(st);
+        return true;
+      }
+    } catch (e) { console.warn('bulk status failed', e); }
+    return false;
   };
   const stopBulk = async () => {
     try { await API('/api/admin/library/refetch/stop', {method:'POST'}); } catch {}
@@ -2160,25 +2322,75 @@
       return Math.max(lo, Math.min(hi, isNaN(v) ? dflt : v));
     };
     try {
-      const r = await API('/api/admin/library/refetch/start', {method:'POST', headers:{'Content-Type':'application/json'},
+      // Raw fetch, not API(): a 409 body carries the RUNNING job and that is
+      // exactly what this handler needs, and API() throws the body away.
+      const resp = await fetch('/api/admin/library/refetch/start', {method:'POST',
+        headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           scope: segVal('bulk-scope', 'non-wbw'),
           mode: segVal('bulk-mode', 'fresh'),
           lang: (($('#bulk-lang') && $('#bulk-lang').value) || 'zh-TW').trim(),
           workers: num('bulk-workers', 8, 1, 32),
           cpu_workers: num('bulk-cpu', 2, 1, 64),
+          tq_workers: num('bulk-tq', 2, 1, 16),
+          batch: num('bulk-batch', 25, 1, 500),
           translate: !!(($('#bulk-translate') && $('#bulk-translate').checked)),
+          force: !!bulkForceNext,
         })});
-      const d = await r.json();
-      if (!d.ok) throw new Error(d.error || 'start failed');
+      const d = await resp.json().catch(() => ({}));
+      bulkForceNext = false;
+      if (d.running && d.running.job_id) {
+        // The 409 path: adopt what is actually running instead of pretending
+        // the panel is idle.
+        applyBulkStatus(d.running);
+        mdui.snackbar({message:`Already running: ${d.running.done}/${d.running.total}`
+          + ` (${d.running.scope}/${d.running.mode}) -- showing it. Take over to replace it.`});
+        return;
+      }
+      if (!d.ok) throw new Error(d.error || `start failed (HTTP ${resp.status})`);
       bulkJobId = d.job_id;
       // Rows + stage lines arrive as bulk_progress SSE events; nothing to poll.
       bulkState = {state:'running', total: d.total || 0, done: 0, upgraded: 0, kept: 0,
-                   failed: 0, errors: 0, tq_done: 0, tq_queued: 0, current: null, stage: '', results: []};
+                   failed: 0, errors: 0, skipped: 0, tq_done: 0, tq_queued: 0,
+                   tq_pending: 0, workers: d.workers, cpu_workers: d.cpu_workers,
+                   tq_workers: d.tq_workers, batch: d.batch,
+                   batch_index: 0, batch_total: d.batches || 0, in_flight: 0,
+                   elapsed_s: 0, scope: segVal('bulk-scope', 'non-wbw'),
+                   mode: segVal('bulk-mode', 'fresh'),
+                   lang: (($('#bulk-lang') && $('#bulk-lang').value) || 'zh-TW').trim(),
+                   translate: !!(($('#bulk-translate') && $('#bulk-translate').checked)),
+                   current: null, stage: '', results: []};
       try { sessionStorage.setItem('ymtu-bulk-job', bulkJobId); } catch {}
       renderBulk(bulkState);
-    } catch (e) { mdui.snackbar({message:'Bulk refetch failed: '+e.message}); }
+    } catch (e) {
+      // A 409 used to be a dead end: the panel stayed on 'idle' and every click
+      // produced the same error. Now the response carries the running job, so
+      // adopt it and let the operator watch or take it over.
+      const run = e && e.running;
+      if (run && run.job_id) {
+        applyBulkStatus(run);
+        mdui.snackbar({message:`A bulk refetch is already running: ${run.done}/${run.total}`
+          + ` (${run.scope}/${run.mode}) -- showing it. Take over to replace it.`});
+      } else {
+        mdui.snackbar({message:'Bulk refetch failed: '+e.message});
+      }
+    }
     if (startBtn) startBtn.loading = false;
+  };
+  // Take over: same request with force, after a confirm naming what is being
+  // replaced -- force cancels the running job, which is not something to do by
+  // accident from a mis-click.
+  let bulkForceNext = false;
+  const takeOverBulk = async () => {
+    const run = (bulkState && bulkState.job_id) ? bulkState : null;
+    await mdui.confirm({
+      headline: 'Take over the running refetch',
+      description: run
+        ? `Stop job ${run.job_id} (${run.done || 0}/${run.total || 0}) and start a new one with the options above? Its remaining songs are dropped.`
+        : 'Stop the running refetch and start a new one with the options above?',
+      cancelText: 'Cancel', confirmText: 'Take over',
+      onConfirm: async () => { bulkForceNext = true; await startBulk(); },
+    });
   };
 
   /* ---- Database version sweep (server/db_migrate.py) ---- */
@@ -2314,15 +2526,22 @@
       const r = await API('/api/admin/library/dbversion/refetch', {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({workers: 4})});
       const d = await r.json();
-      if (!d.ok) throw new Error(d.error || 'refetch failed');
-      mdui.snackbar({message:`Refetching ${d.total} stale song(s) -- watch the bulk panel`});
+      if (!d.ok) {
+        if (d.running && d.running.job_id) {
+          applyBulkStatus(d.running);
+          mdui.snackbar({message:`Already running: ${d.running.done}/${d.running.total} -- showing it in the bulk panel`});
+        } else {
+          throw new Error(d.error || 'refetch failed');
+        }
+        return;
+      }
+      mdui.snackbar({message:`Refetching ${d.total} stale song(s) in ${d.batches || 1} batch(es) -- watch the bulk panel`});
       // Hand the work to the bulk panel rather than starting a second,
       // invisible job: bulk_progress is the only stream it renders.
-      bulkJobId = d.job_id;
-      bulkState = {state:'running', total: d.total || 0, done: 0, upgraded: 0, kept: 0,
-                   failed: 0, errors: 0, tq_done: 0, tq_queued: 0, current: null, stage: '', results: []};
-      try { sessionStorage.setItem('ymtu-bulk-job', d.job_id); } catch {}
-      renderBulk(bulkState);
+      applyBulkStatus({job_id: d.job_id, state: 'running', total: d.total || 0,
+                       workers: d.workers, cpu_workers: d.cpu_workers,
+                       tq_workers: d.tq_workers, batch: d.batch,
+                       batch_total: d.batches || 0, scope: 'stale', mode: 'fresh'});
       const stop = $('#bulk-stop');
       if (stop) stop.style.display = '';
     } catch (e) { mdui.snackbar({message:'Refetch stale failed: '+e.message}); }
@@ -2434,17 +2653,17 @@
   const adoptRunningJobs = async () => {
     // Rejoin jobs that outlived a page reload: one status fetch each (not a
     // poll), then live SSE takes over. Dead ids are dropped silently.
+    // FIRST ask the server what is running, with no job id at all. The
+    // sessionStorage path below only knows about jobs THIS browser started, so
+    // a job started in another tab -- or by the stale-refetch button -- left the
+    // panel reading 'idle' with a Start button that could only answer 409.
+    if (await loadBulkStatus()) return;
     try {
       const bj = sessionStorage.getItem('ymtu-bulk-job');
       if (bj) {
         const st = await json(`/api/admin/library/refetch/status/${encodeURIComponent(bj)}`);
-        if (st && st.state === 'running') {
-          bulkJobId = bj;
-          bulkState = {state:'running', total: st.total || 0, done: st.done || 0,
-            upgraded: st.upgraded || 0, kept: st.kept || 0, failed: st.failed || 0,
-            errors: st.errors || 0, tq_done: st.tq_done || 0, tq_queued: st.tq_queued || 0,
-            current: st.current || null, stage: '', results: st.results || []};
-          renderBulk(bulkState);
+        if (st && (st.state === 'running' || st.state === 'translating')) {
+          applyBulkStatus(st);
         } else sessionStorage.removeItem('ymtu-bulk-job');
       }
     } catch { try { sessionStorage.removeItem('ymtu-bulk-job'); } catch {} }
@@ -2586,6 +2805,17 @@
     if (bulkStartBtn) bulkStartBtn.addEventListener('click', startBulk);
     const bulkStopBtn = $('#bulk-stop');
     if (bulkStopBtn) bulkStopBtn.addEventListener('click', stopBulk);
+    const bulkTakeBtn = $('#bulk-takeover');
+    if (bulkTakeBtn) bulkTakeBtn.addEventListener('click', takeOverBulk);
+    // Live knobs. `change` (not every keystroke) plus the debounce in
+    // tuneBulkLive: mdui-text-field fires input per character, and a request per
+    // character is a request storm against a job that is already busy.
+    ['bulk-workers', 'bulk-cpu', 'bulk-tq', 'bulk-batch'].forEach(id => {
+      const e = $('#' + id);
+      if (e) e.addEventListener('change', tuneBulkLive);
+    });
+    const bulkTr = $('#bulk-translate');
+    if (bulkTr) bulkTr.addEventListener('change', tuneBulkLive);
     const bulkTransBtn = $('#bulk-translate-missing');
     if (bulkTransBtn) bulkTransBtn.addEventListener('click', translateMissing);
     const dbvRefresh = $('#dbver-refresh');

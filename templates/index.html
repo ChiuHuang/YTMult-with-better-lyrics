@@ -303,6 +303,7 @@
             <span class="pill pill-mute" id="bulk-status">idle</span>
             <span class="spacer"></span>
             <mdui-button id="bulk-start" variant="filled" icon="upgrade">Start</mdui-button>
+            <mdui-button id="bulk-takeover" variant="tonal" icon="bolt" style="display:none;">Take over</mdui-button>
             <mdui-button id="bulk-stop" variant="tonal" icon="stop" style="display:none;">Stop</mdui-button>
             <mdui-button id="bulk-translate-missing" variant="text" icon="translate">Translate missing</mdui-button>
           </div>
@@ -338,10 +339,19 @@
                 <mdui-text-field id="bulk-cpu" variant="outlined" type="number" value="2"></mdui-text-field>
               </div>
               <div class="bulk-opt">
+                <div class="bulk-label">Translate workers</div>
+                <mdui-text-field id="bulk-tq" variant="outlined" type="number" value="2" min="1" max="16"></mdui-text-field>
+              </div>
+              <div class="bulk-opt">
+                <div class="bulk-label">Batch size</div>
+                <mdui-text-field id="bulk-batch" variant="outlined" type="number" value="25" min="1" max="500"></mdui-text-field>
+              </div>
+              <div class="bulk-opt">
                 <div class="bulk-label">Translate</div>
                 <mdui-switch id="bulk-translate" checked></mdui-switch>
               </div>
             </div>
+            <div id="bulk-live" class="refetch-meta">Fetch threads, CPU workers, translate workers and batch size stay editable while a job runs.</div>
             <div style="display:flex; align-items:center; gap:12px; margin:10px 0;">
               <mdui-linear-progress id="bulk-progress" value="0" style="flex:1;"></mdui-linear-progress>
               <span id="bulk-summary" style="font-size:13px; white-space:nowrap;"></span>
