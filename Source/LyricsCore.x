@@ -749,7 +749,107 @@ BOOL _safe_cache_component(NSString *s) {
 //    This is what actually grows the on-device library.
 //
 // Both are throttled together (6h) and gated on `lyricsAutoSync`.
-static void YTMUAutoSyncPullIfDue(NSString *lang, BOOL autoZh, NSInteger budget);
+//
+// 9ce4a26 declared YTMUAutoSyncPullIfDue and called it, but never wrote either
+// it or the YTMUAutoSyncPullMax it passes. A bare call to a function that is
+// declared and never defined is an implicit declaration in C, which is a hard
+// error in C99 and later -- it is what killed CI run 36843432282. Both are
+// below now.
+
+// How many songs one pull may download. The server's /api/cache/list returns
+// them newest-first, so the cap keeps the pull on the recent end of the library
+// instead of walking all of it every 6h.
+static NSInteger YTMUAutoSyncPullMax(void) {
+    return 60;
+}
+
+// One server->device pull for a single song. force=0 is the whole point: the
+// server already holds this entry, so it serves from disk instead of running the
+// provider race. Returns YES when something was saved.
+static BOOL YTMUAutoSyncPullOne(NSString *videoID, NSString *lang, BOOL autoZh) {
+    if (!videoID.length) return NO;
+    NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&lang=%@&force=0",
+                        YTMUApiBase(), videoID, lang ?: YTMUTargetLang()];
+    // The query key is `az`, not `auto_zh`: routes_lyrics.py:151 reads
+    // request.args.get('az'). `auto_zh` is the JSON body spelling, used by
+    // /api/lyrics/sync, and sending it here would silently drop the setting.
+    if (autoZh) urlStr = [urlStr stringByAppendingString:@"&az=1"];
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url) return NO;
+
+    __block BOOL saved = NO;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+        dataTaskWithURL:url
+      completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        if (err || !data) { dispatch_semaphore_signal(done); return; }
+        NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        NSArray *lyrics = [root isKindOfClass:[NSDictionary class]] ? root[@"lyrics"] : nil;
+        if (YTMULyricsIsUsable(lyrics, root)) {
+            YTMULyricsCacheSave(videoID, lyrics);
+            if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
+            g_lyricsCache[videoID] = lyrics;
+            saved = YES;
+        }
+        dispatch_semaphore_signal(done);
+    }];
+    [task resume];
+    // 20s per song, and never longer than the whole budget: this runs on a
+    // background queue from YTMUAutoSyncIfDue, and a hung request must not pin
+    // it forever.
+    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(done, deadline);
+    return saved;
+}
+
+// The server->device half: ask what the server holds, then download the songs
+// this device does NOT have yet. Serial on purpose -- one at a time keeps the
+// request rate flat and makes the budget exact. Runs on whatever queue the
+// caller chose; YTMUAutoSyncIfDue is called from a background one.
+static void YTMUAutoSyncPullIfDue(NSString *lang, BOOL autoZh, NSInteger budget) {
+    if (budget <= 0) return;
+    NSString *listStr = [NSString stringWithFormat:@"%@/api/cache/list?limit=%ld&lang=%@",
+                         YTMUApiBase(), (long)(budget * 4), lang ?: YTMUTargetLang()];
+    NSURL *listURL = [NSURL URLWithString:listStr];
+    if (!listURL) return;
+
+    __block NSArray *items = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+        dataTaskWithURL:listURL
+      completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+        if (!err && data) {
+            NSDictionary *root = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            if ([root isKindOfClass:[NSDictionary class]] &&
+                [root[@"items"] isKindOfClass:[NSArray class]]) {
+                items = root[@"items"];
+            }
+        }
+        dispatch_semaphore_signal(done);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)));
+    if (!items.count) return;
+
+    NSInteger downloaded = 0;
+    for (id row in items) {
+        if (downloaded >= budget) break;
+        if (![row isKindOfClass:[NSDictionary class]]) continue;
+        NSString *vid = row[@"video_id"];
+        NSString *rowLang = row[@"lang"];
+        if (![vid isKindOfClass:[NSString class]] || !vid.length) continue;
+        // The list endpoint already filters by lang, but a row with no lang of
+        // its own would be re-fetched under the wrong key.
+        if (![rowLang isKindOfClass:[NSString class]] || ![rowLang isEqualToString:lang]) continue;
+        // The only thing worth downloading is something we are missing.
+        if (YTMULyricsCacheLoad(vid)) continue;
+        if (YTMUAutoSyncPullOne(vid, rowLang, autoZh)) downloaded++;
+    }
+    if (downloaded > 0) {
+        sendDebugLog([NSString stringWithFormat:@"[SYNC] background auto-sync pulled %ld new song(s)",
+                      (long)downloaded]);
+    }
+}
 
 void YTMUAutoSyncIfDue(void) {
     if (!YTMULyricsPreference(@"lyricsAutoSync", YES)) return;
