@@ -265,24 +265,43 @@ def _collect_cubey_lines(line_iter, duration_sec=0):
 
 
 def _note_cubey_auth_failure(jwt_token, status):
-    """Report a definite Cubey auth rejection (401/403) back to the JWT pool
-    so a dead token leaves rotation NOW instead of staying the pool's first
-    pick until the next 300s probe sweep -- until then every request burned
-    a whole Cubey stage on it. Bookkeeping is the pool's (jwt_pool.
-    note_failure): one strike only demotes, the second consecutive one evicts.
-
-    Anything else is NOT death and must not be counted: a 429 (rate limit),
-    a 5xx or a timeout is an unknown verdict, and the pool's own rule is that
-    unknown verdicts never count (jwt_pool._probe_token) -- counting them
-    here would evict healthy tokens on a rate limit.
-    """
+    """Deprecated shim, kept so the name still resolves: the counting and the
+    strike now happen together in _account(), which every outcome site calls.
+    A 429/5xx/timeout still counts as a request but is NOT death."""
     if status not in (401, 403):
         return
+    _account(jwt_token, status)
+
+
+def _account(jwt_token, status_or_outcome, exception=False):
+    """The ONE bookkeeping call for a Cubey request (jwt_pool.note_request).
+
+    Reached from every outcome below, including the failures, because the number
+    that matters is "requests this token served", not "requests that worked" -- a
+    token that burned a hundred requests on 429s has a very different value from
+    one that answered a hundred.
+
+    An 'auth' outcome is ALSO the strike, because this is the only place the pool
+    hears that a credential was rejected. 429 / 5xx / a timeout are counted as
+    requests and are never death: the pool only evicts on a proven 401/403."""
+    outcome = 'other' if exception else _outcome_for(status_or_outcome)
     try:
-        from .jwt_pool import note_failure
-        note_failure(jwt_token, f'cubey {status}')
+        from .jwt_pool import note_request
+        note_request(jwt_token, outcome,
+                     reason=f'cubey {status_or_outcome}' if not exception else 'exception')
     except Exception:
         pass  # never let bookkeeping break a fetch
+
+
+def _outcome_for(status):
+    """Map an HTTP status onto a request outcome. 200 worked; 401/403 is an auth
+    rejection (the only kind that can kill a token); everything else -- 429, 5xx,
+    a redirect -- is an unknown verdict."""
+    if status == 200:
+        return 'ok'
+    if status in (401, 403):
+        return 'auth'
+    return 'other'
 
 
 # How long to wait before the SECOND Cubey request for a song whose winner is
@@ -368,8 +387,9 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
         if relayed is not None:
             status, text = relayed
             if status == 200:
+                _account(jwt_token, 200)
                 return _collect_cubey_lines(text.splitlines(), duration_sec)
-            _note_cubey_auth_failure(jwt_token, status)
+            _account(jwt_token, status)
             print(f"  [FAIL] Cubey via node {via_node}: HTTP {status}")
             return {}
         print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
@@ -377,13 +397,13 @@ def fetch_cubey_all(jwt_token, video_id, title, artist, duration_sec, via_node=N
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
-            # 401/403 means this JWT is dead -> tell the pool. 429/timeout/
-            # 5xx are NOT death and are deliberately not reported.
-            _note_cubey_auth_failure(jwt_token, response.status_code)
+            _account(jwt_token, response.status_code)
             print(f"  [FAIL] Cubey API error: {response.status_code}")
             return {}
+        _account(jwt_token, 200)
         return _collect_cubey_lines(response.iter_lines(), duration_sec)
     except Exception as e:
+        _account(jwt_token, None, exception=True)
         print(f"  [FAIL] Cubey API request failed: {e}")
         return {}
 
@@ -410,10 +430,9 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec, via_node=None)
         if relayed is not None:
             status, text = relayed
             if status == 200:
+                _account(jwt_token, 200)
                 return _parse_cubey_lines(text.splitlines(), duration_sec)
-            # 401/403 = dead JWT (see _note_cubey_auth_failure); a relayed 429
-            # or relay timeout is NOT a token failure and is not counted.
-            _note_cubey_auth_failure(jwt_token, status)
+            _account(jwt_token, status)
             print(f"  [FAIL] Cubey via node {via_node}: HTTP {status}")
             return None
         print(f"  [WARN] Node {via_node} relay failed, falling back to a direct request")
@@ -421,16 +440,13 @@ def fetch_cubey(jwt_token, video_id, title, artist, duration_sec, via_node=None)
     try:
         response = requests.post(url, data=data, stream=True, timeout=15)
         if response.status_code != 200:
-            # 401/403 means this JWT is dead -> tell the pool (a second
-            # consecutive one evicts it). 429/timeout/5xx are NOT death and
-            # are deliberately not reported: the pool only counts proven
-            # 401/403 verdicts, so counting a rate limit would evict a
-            # perfectly good token.
-            _note_cubey_auth_failure(jwt_token, response.status_code)
+            _account(jwt_token, response.status_code)
             print(f"  [FAIL] Cubey API error: {response.status_code}")
             return None
+        _account(jwt_token, 200)
         return _parse_cubey_lines(response.iter_lines(), duration_sec)
     except Exception as e:
+        _account(jwt_token, None, exception=True)
         print(f"  [FAIL] Cubey API request failed: {e}")
         return None
 

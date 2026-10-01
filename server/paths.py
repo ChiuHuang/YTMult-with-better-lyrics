@@ -26,6 +26,9 @@ LYRICS_DIR = os.path.join(DATA_DIR, 'lyrics')
 TRANSLATE_DIR = os.path.join(DATA_DIR, 'translate')
 CANDIDATES_DIR = os.path.join(DATA_DIR, 'candidates')
 JWT_FILE = os.path.join(DATA_DIR, 'jwt.json')
+# Retired tokens with their final counters, so "how many requests did this one
+# serve before it died" is still answerable after the pool entry is gone.
+JWT_LEDGER_FILE = os.path.join(DATA_DIR, 'jwt_ledger.json')
 USAGE_STATS_FILE = os.path.join(DATA_DIR, 'usage_stats.json')
 LATENCY_STATS_FILE = os.path.join(DATA_DIR, 'latency_stats.json')
 BADGE_STATS_FILE = os.path.join(DATA_DIR, 'badge_stats.json')

@@ -442,8 +442,55 @@
             <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
               Tokens are shared with the Cubey provider and persist across restarts/updates. Raw tokens are never exposed here -- only hashes. A token is evicted only after two consecutive dead probes. "Copy push key" is the credential the browser userscript (tools/jwt-uploader) uses to POST /api/jwt/push without a dashboard session; it is created on first click and stored in config/admin_config.json.
             </div>
+            <div class="stat-grid stagger" id="jwt-stats-tiles" style="margin-bottom:16px;"></div>
+
+            <mdui-card variant="elevated" class="panel">
+              <div class="panel-head">
+                <span class="section-title">Token traffic</span>
+                <span class="pill pill-mute" id="jwt-stats-note">no history yet</span>
+                <span class="spacer"></span>
+                <mdui-button id="jwt-stats-clear" variant="text" icon="delete_sweep">Clear history</mdui-button>
+              </div>
+              <div class="panel-body">
+                <div class="app-desc" style="margin-bottom:10px;">
+                  One bar per hour, last 72. Green is a request that answered, red is a
+                  401/403 (the only kind that can kill a token), amber is anything else
+                  (rate limit, 5xx, timeout). The two hairlines under the chart are tokens
+                  entering the pool (blue) and leaving it (grey) &mdash; a bar with no
+                  blue hairline but a grey one is where the pool got thin.
+                </div>
+                <div class="chart" id="jwt-chart-hours"></div>
+                <div class="app-group">
+                  <div class="app-group-title">Requests served per live token</div>
+                  <div class="chart" id="jwt-chart-live"></div>
+                </div>
+              </div>
+            </mdui-card>
+
+            <mdui-card variant="elevated" class="panel">
+              <div class="panel-head">
+                <span class="section-title">Requests before death</span>
+                <span class="spacer"></span>
+                <span class="app-desc" id="jwt-death-note"></span>
+              </div>
+              <div class="panel-body">
+                <div class="app-desc" style="margin-bottom:10px;">
+                  Every token that left the pool because it died (two proven auth
+                  rejections), bucketed by how many requests it had served at that
+                  moment. A pile-up in the first bucket means tokens are expiring
+                  before they are used; an empty chart with a live pool means the pool
+                  has never lost one.
+                </div>
+                <div class="chart" id="jwt-chart-death"></div>
+                <div class="list-head lh-retired">
+                  <span>ID</span><span>Source</span><span>Why it left</span><span>Requests</span><span>OK/Auth/Other</span><span>Lifetime</span><span>Retired</span>
+                </div>
+                <div id="jwt-retired" class="list-grid"></div>
+              </div>
+            </mdui-card>
+
             <div class="list-head lh-jwt">
-              <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>OK/Fail</span><span>Verdict</span><span>Status</span><span></span>
+              <span>ID</span><span>Source</span><span>Added</span><span>Checked</span><span>OK/Fail</span><span>Verdict</span><span>Requests</span><span>Status</span><span></span>
             </div>
             <div id="jwt-list" class="list-grid"></div>
           </div>

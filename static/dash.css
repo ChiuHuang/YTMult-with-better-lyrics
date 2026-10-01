@@ -92,13 +92,13 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; }
 .list-row.file { grid-template-columns: 1fr 90px 160px 44px; }
 .list-row.node { grid-template-columns: 1fr 120px 120px 90px 80px 36px; }
-.list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 100px 36px; }
+.list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 80px 100px 36px; }
 .list-head { font-size:11px; color: rgb(var(--mdui-color-on-surface-variant)); font-weight:500; padding:0 16px 6px; }
 .list-head.lh-rq { grid-template-columns: 1fr 80px 80px 100px 70px; display:grid; gap:10px; }
 .list-head.lh-cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; display:grid; gap:10px; }
 .list-head.lh-file { grid-template-columns: 1fr 90px 160px 44px; display:grid; gap:10px; }
 .list-head.lh-node { grid-template-columns: 1fr 120px 120px 90px 36px; display:grid; gap:10px; }
-.list-head.lh-jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 100px 36px; display:grid; gap:10px; }
+.list-head.lh-jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 80px 100px 36px; display:grid; gap:10px; }
 
 /* ---- lyrics latency widget ----
    Three cards for the numbers an operator actually asks for (per song, time to
@@ -119,6 +119,43 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.lat { grid-template-columns: 1fr 54px 76px 76px 76px 76px 76px; font-size:13px; }
 .list-row.lat .v { font-family: Consolas, Menlo, monospace; text-align:right; }
 .list-row.lat .lat-key { font-family: Consolas, Menlo, monospace; font-size:11.5px; color: rgb(var(--mdui-color-on-surface-variant)); }
+
+/* ---- jwt charts ----
+   Plain divs, no chart library: the data is a few dozen bars and one stacked
+   column per hour, and every dependency this dashboard would need for that is
+   bigger than the whole page. Bars are stacked (ok / auth / other) so a column's
+   HEIGHT is the request count and its COLOURS are the outcome split -- the two
+   questions ("how busy", "how many died") must not fight over one axis. */
+.chart { display:flex; align-items:flex-end; gap:2px; height:120px; padding:14px 2px 0; border-bottom:1px solid rgb(var(--mdui-color-outline-variant)); overflow-x:auto; }
+.chart .col { position:relative; flex:1 1 0; min-width:5px; display:flex; flex-direction:column-reverse; justify-content:flex-start; }
+.chart .seg { width:100%; }
+.chart .seg.ok { background: rgb(46,125,50); }
+.chart .seg.auth { background: rgb(198,40,40); }
+.chart .seg.other { background: rgb(234,179,8); }
+/* the two hairlines: in / out of the pool */
+.chart .col::after, .chart .col::before { content:''; position:absolute; left:0; right:0; height:2px; }
+.chart .col::after { bottom:-5px; background: rgb(var(--mdui-color-primary)); opacity:.85; }
+.chart .col::before { bottom:-11px; background: rgb(var(--mdui-color-outline)); }
+.chart .col[data-in="0"]::after, .chart .col[data-in="0"]::before { display:none; }
+.chart-axis { display:flex; justify-content:space-between; font-size:10.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-top:14px; }
+.chart-legend { display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-top:8px; align-items:center; }
+.chart-legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+.chart-empty { font-size:12.5px; color:rgb(var(--mdui-color-outline)); padding:14px 2px; }
+/* horizontal bars: live tokens and the death histogram */
+.hbars { display:flex; flex-direction:column; gap:6px; }
+.hbar { display:grid; grid-template-columns:minmax(90px,150px) 1fr 64px; gap:10px; align-items:center; font-size:12.5px; }
+.hbar .hb-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:Consolas, Menlo, monospace; font-size:11.5px; }
+.hbar .hb-track { position:relative; height:14px; background:rgba(var(--mdui-color-on-surface-variant),.10); border-radius:3px; overflow:hidden; }
+.hbar .hb-fill { position:absolute; inset:0 auto 0 0; background:rgb(var(--mdui-color-primary)); border-radius:3px; }
+.hbar .hb-fill.ok { background:rgb(46,125,50); }
+.hbar .hb-fill.auth { background:rgb(198,40,40); }
+.hbar .hb-fill.other { background:rgb(234,179,8); }
+.hbar .hb-val { text-align:right; font-family:Consolas, Menlo, monospace; }
+.list-head.lh-retired { grid-template-columns: minmax(90px,120px) 90px 110px 70px 130px 90px 130px; display:grid; gap:10px; }
+.list-row.retired { grid-template-columns: minmax(90px,120px) 90px 110px 70px 130px 90px 130px; font-size:12.5px; }
+.list-row.retired .v { font-family:Consolas, Menlo, monospace; }
+.list-row.retired .why-dead { color:rgb(198,40,40); }
+.list-row.retired .why-manual { color:rgb(var(--mdui-color-on-surface-variant)); }
 
 /* ---- pre code block ---- */
 .code-block { position:relative; }
