@@ -258,6 +258,17 @@ static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
 // re-rendered at screen scale. Four steps over the radius is smooth enough to
 // read as a shrink and cheap enough to keep the bitmap between them.
 static const CGFloat YTMUHighlightGlowStep = 3.2;
+// How often the wipe mask may be rewritten, in milliseconds. Below the 8.3ms of
+// a 120Hz frame, so it never costs the wipe a visible step, and above zero so a
+// paused player (or a cursor that has not moved) writes nothing at all.
+//
+// This replaced a 24-step quantization of each word's fraction. That number was
+// protecting the mask from being rebuilt -- but the mask is re-rendered every
+// frame regardless, because the feather inside it moves, so the only thing the
+// quantization ever saved was the construction of a few rectangles. It cost
+// smoothness and bought nothing: 24 steps across a 400ms word is a step every
+// 17ms, which reads as a crawl rather than a wipe.
+static const double YTMUMaskWriteFloorMs = 4.0;
 // The word wobble is GONE, and this is the note so it does not come back.
 //
 // braccato's keyframes are translateX(0.05em) + scaleX(1.025) peaking at 12.5%
@@ -5007,9 +5018,19 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     // does. It cannot ride this method's cursor: an LRC [bg:] cue carries parts
     // on a LINE-synced row, which never reaches the rest of this method at all.
     [self ytmu_tickCueForCell:cell nowMs:nowMs];
-    NSInteger fracQ = (NSInteger)(curFrac * 24.0);
-    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord,
-                     (long)fracQ, (double)width];
+    // The gate is a 4ms floor, not a quantum of the word's fraction.
+    //
+    // It used to be `curFrac * 24`, and that staircase was visible: 24 steps
+    // across one word is a step every 17ms on a 400ms word, which on a long word
+    // is a crawl. The reason for quantizing at all was to avoid rebuilding the
+    // mask, but the mask re-renders every single frame anyway -- the feather
+    // inside it moves -- so quantizing the PATH only ever saved the construction
+    // of a handful of rectangles. It was never buying a frame; it was only
+    // costing smoothness.
+    //
+    // 4ms is finer than any display (8.3ms at 120Hz) and still skips the rebuild
+    // entirely while playback is paused or the cursor has not moved.
+    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%.0f", (long)index, (long)curWord, (double)width];
 
     // No wobble here any more. It was braccato's translateX(0.05em) with the
     // scaleX half dropped (a full-width label cannot squash one word), and a
@@ -5018,7 +5039,14 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     // re-rendering a long CJK line with a shadow every frame, for a second per
     // word. See the note by the constants. What is left here is the wipe.
 
-    if (!force && [key isEqualToString:cell.lastColorKey]) return;
+    if (!force && [key isEqualToString:cell.lastColorKey] &&
+        (nowMs - cell.lastMaskWriteMs) < YTMUMaskWriteFloorMs) {
+        return;
+    }
+    // NOTE: a paused player parks currentTime, so this floor also keeps a paused
+    // row from rewriting an identical mask. A word that has finished entirely
+    // (curWord past the end) lands here too, which is why the key carries the
+    // word index: crossing into a new word must never be skipped by the floor.
 
     UIFont *font = cell.wipeLabel.font;
     if (!font) font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
@@ -5065,6 +5093,7 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         cell.cachedWordLayoutKey = layoutKey;
     }
     cell.lastColorKey = key;
+    cell.lastMaskWriteMs = nowMs;
 
     UIBezierPath *path = [UIBezierPath bezierPath];
     NSInteger rcount = MIN(partCount, (NSInteger)[cell.cachedWordRects count]);
