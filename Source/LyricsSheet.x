@@ -257,7 +257,11 @@ static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
 // label relies on (see shouldRasterize in the cell init) and the blur is
 // re-rendered at screen scale. Four steps over the radius is smooth enough to
 // read as a shrink and cheap enough to keep the bitmap between them.
-static const CGFloat YTMUHighlightGlowStep = 3.2;
+// The highlight glow: a blur of FIXED radius, whose visible extent is the mask
+// opening around the word being sung and closing again. The radius is written
+// once in the cell init and never touched, because a layer shadow is drawn as
+// part of the layer and a new radius discards the rasterized bitmap.
+static const CGFloat YTMUHighlightGlowOpacity = 0.5;
 // How often the wipe mask may be rewritten, in milliseconds. Below the 8.3ms of
 // a 120Hz frame, so it never costs the wipe a visible step, and above zero so a
 // paused player (or a cursor that has not moved) writes nothing at all.
@@ -651,15 +655,16 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
-        // YTMULyricGlow, not YTMULyricShadow: see its comment. This is the
-        // animated highlight glow, not a drop -- the constant downward drop that
-        // keeps the bright text readable over artwork lives in the attributed
-        // string's NSShadow, so this one is free to swell around the word being
-        // sung. See -applyWordColorsToCell:...force:.
+        // YTMULyricGlow, not YTMULyricShadow: see its comment. The constant downward
+        // drop that keeps the bright text readable over artwork lives in the
+        // attributed string's NSShadow, so this one is free to be the highlight
+        // glow -- which means the RADIUS is written ONCE, HERE, and never again:
+        // animating it re-rendered the whole line every tick (see
+        // -applyWordColorsToCell, where the motion now lives in the mask).
         self.wipeLabel.layer.shadowColor = YTMULyricGlow(self.contentView).CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeZero;
-        self.wipeLabel.layer.shadowRadius = 0.0;
-        self.wipeLabel.layer.shadowOpacity = 0.0;
+        self.wipeLabel.layer.shadowRadius = YTMUHighlightGlowRadius;
+        self.wipeLabel.layer.shadowOpacity = YTMUHighlightGlowOpacity;
         self.wipeLabel.layer.masksToBounds = NO;
         self.wipeLabel.layer.shouldRasterize = YES;
         self.wipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
@@ -1112,9 +1117,11 @@ static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
     [self.contentView setNeedsLayout];
 }
 
+// Hides the moving edge and stops the mask from showing any glow. It does NOT
+// zero the shadow radius: the radius is a constant written once (animating it was
+// what cost the frame rate) and the mask already clips the shadow to nothing
+// here, so zeroing it would only mean the next activation had to write it back.
 - (void)ytmu_clearGlow {
-    self.wipeLabel.layer.shadowRadius = 0.0;
-    self.wipeLabel.layer.shadowOpacity = 0.0;
     for (CALayer *sub in self.wipeMask.sublayers) {
         if ([sub.name isEqualToString:@"YTMULyricsWipeFeather"]) sub.hidden = YES;
     }
@@ -1249,10 +1256,10 @@ static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
     self.wipeLabel.transform = CGAffineTransformIdentity;
     self.lyricLabel.transform = CGAffineTransformIdentity;
     self.lyricLabel.alpha = 1.0;
-    // The glow is per-word state too: leaving it on a blanked row would light a
-    // halo around nothing.
-    self.wipeLabel.layer.shadowRadius = 0.0;
-    self.wipeLabel.layer.shadowOpacity = 0.0;
+    // The mask is what shows any glow, and it is empty here, so the constant shadow
+    // radius needs no clearing: leaving it alone is what keeps the blur's
+    // rasterized bitmap alive for the next line.
+    [self ytmu_clearGlow];
     self.waveActive = NO;
     self.waveLayer.hidden = YES;
 }
@@ -1274,6 +1281,9 @@ static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
     self.cachedCueLayoutKey = nil;
     self.lyricLabel.attributedText = nil;
     self.lastColorKey = nil;
+    // The glow is the mask's widening around the current word, and the radius is
+    // a constant -- so a recycled row has no per-word glow state to drop.
+    [self ytmu_clearGlow];
     // A collapsed (zero-height) row must never be recycled as a normal line.
     [self ytmu_setRowCollapsed:NO];
     // ...and a duet voice marker must never survive into another row, let alone
@@ -5153,11 +5163,25 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
     }
 
-    // braccato's highlight glow: a shadow that starts fat around the word being
-    // sung and shrinks away over 1.2x that word's own time, never under 1.2s.
-    // A mask clips the shadow it is applied to, so the mask has to be widened to
-    // let the blur out -- and widened CAREFULLY, because an unclamped widening
-    // is also a widening of the reveal and would light the next word early.
+    // braccato's highlight glow: something fat around the word being sung that
+    // shrinks away over 1.2x that word's own time, never under 1.2s.
+    //
+    // The SHADOW is written once, in the cell init, and never touched again: a
+    // layer shadow is part of how the layer draws itself, so every new radius
+    // threw away the rasterized text+blur bitmap the label keeps and re-rendered
+    // a long CJK line with a shadow at screen scale -- twenty-four times a word
+    // when this ran per tick. Animating the radius was the single most expensive
+    // thing in the tick, and it was introduced in ac9ca4e, the day AFTER the
+    // feather (8a9fb21) that it gets blamed for.
+    //
+    // So the motion moved to the MASK, where it costs nothing: the shadow keeps
+    // one fixed blur for the life of the cell, and what shrinks is how far the
+    // mask is widened around the current word. The glow is that widening, seen
+    // through a constant blur -- visually the same "starts fat, recedes" read,
+    // with the raster cache left alone.
+    //
+    // Widened CAREFULLY, because an unclamped widening is also a widening of the
+    // reveal and would light the next word early.
     CGFloat glow = 0.0;
     if (curWord >= 0 && curWord < partCount && !CGRectIsNull(curWordRect)) {
         NSDictionary *cur = parts[curWord];
@@ -5170,14 +5194,6 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         double glowMs = MAX(wordDur * YTMUHighlightGlowRatio, YTMUHighlightGlowMinDuration * 1000.0);
         double glowT = MIN(MAX((nowMs - wordStart) / glowMs, 0.0), 1.0);
         glow = YTMUHighlightGlowRadius * (1.0 - glowT) * (1.0 - glowT);
-        // Snap it to a coarse ladder. shadowRadius is part of how the layer draws
-        // itself, so every new value throws away the rasterized text+blur bitmap
-        // this label keeps (shouldRasterize) and the blur is re-rendered at 3x.
-        // The wipe's own geometry is quantized to 24 steps per word; four glow
-        // steps instead of twenty-four is the difference between rebuilding that
-        // bitmap sixty times a second and four times a word.
-        glow = floor(glow / YTMUHighlightGlowStep) * YTMUHighlightGlowStep;
-        if (glow < YTMUHighlightGlowStep * 0.5) glow = 0.0;
         if (glow > 0.5) {
             // Never past the midpoint of the gap on either side, so the next
             // word (and the one before, which is already lit) stay untouched.
@@ -5185,13 +5201,13 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
             if (curWord + 1 < rcount) {
                 CGRect nextRect = [cell.cachedWordRects[curWord + 1] CGRectValue];
                 if (!CGRectIsNull(nextRect)) {
-                    growL = MIN(growL, MAX(0.0, (CGRectGetMinX(curWordRect) - CGRectGetMaxX(nextRect)) * 0.5));
+                    growL = MIN(glow, MAX(0.0, (CGRectGetMinX(curWordRect) - CGRectGetMaxX(nextRect)) * 0.5));
                 }
             }
             if (curWord > 0 && curWord - 1 < rcount) {
                 CGRect prevRect = [cell.cachedWordRects[curWord - 1] CGRectValue];
                 if (!CGRectIsNull(prevRect)) {
-                    growR = MIN(growR, MAX(0.0, (CGRectGetMinX(prevRect) - CGRectGetMaxX(curWordRect)) * 0.5));
+                    growR = MIN(glow, MAX(0.0, (CGRectGetMinX(prevRect) - CGRectGetMaxX(curWordRect)) * 0.5));
                 }
             }
             // And never more than half the word's own height vertically, which
@@ -5203,10 +5219,6 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
             [path appendPath:[UIBezierPath bezierPathWithRect:glowRect]];
         }
     }
-    // Radius 0 with a non-nil shadow colour still draws a hard silhouette, so the
-    // opacity has to fall with it or every word leaves a doubled glyph.
-    cell.wipeLabel.layer.shadowRadius = glow;
-    cell.wipeLabel.layer.shadowOpacity = 0.75 * MIN(1.0, glow / 2.0);
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
