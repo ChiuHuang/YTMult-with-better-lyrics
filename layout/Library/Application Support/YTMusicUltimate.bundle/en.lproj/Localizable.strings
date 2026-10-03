@@ -250,3 +250,5 @@
 "LYRICS_DUET_ALIGN" = "Align";
 
 "LYRICS_DUET_LABEL" = "Label";
+"LYRICS_PINYIN" = "Pinyin";
+"LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";
