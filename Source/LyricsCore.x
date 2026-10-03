@@ -449,6 +449,23 @@ NSInteger YTMULyricsCacheFormatVersion(void) {
     // that and stamped this constant instead, so it could never converge.
     return 4;
 }
+NSInteger YTMULyricsCacheParserEpoch(void) {
+    // The TEXT epoch, and it must EQUAL server/cache.py `_PARSER_EPOCH`.
+    //
+    // `cv` above is the wrong gate for a parser fix on purpose: a parser change
+    // keeps the payload's SHAPE and changes what the words are, so every device
+    // entry written before the fix stays perfectly loadable and the phone keeps
+    // drawing the old text -- from its own file, not from the server, so the
+    // server's epoch sweep cannot reach it either. That is how a line kept
+    // printing a reading the parser had already learned to strip: the file said
+    // `ぎゅって抱いた空（ぎゅたて抱いた空）` and no request was ever going to
+    // change that.
+    //
+    // Bumping this drops every cached entry, which is the point: the next play
+    // refetches and the phone shows what the current parser produces. Keep it in
+    // step with cache.py or the device silently diverges from the server.
+    return 4;
+}
 NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID) {
     if (!videoID.length) return 0;
     NSString *path = YTMULyricsCachePathForVideoID(videoID);
@@ -490,7 +507,7 @@ void YTMULyricsCacheSave(NSString *videoID, NSArray *lyrics) {
         [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
         return;
     }
-    NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID, @"cv": @(YTMULyricsCacheFormatVersion())};
+    NSDictionary *dict = @{@"lyrics": lyrics, @"ts": @([[NSDate date] timeIntervalSince1970]), @"videoID": videoID, @"cv": @(YTMULyricsCacheFormatVersion()), @"pe": @(YTMULyricsCacheParserEpoch())};
     NSData *data = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
     if (data) [data writeToFile:path atomically:YES];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
@@ -552,6 +569,14 @@ NSArray *YTMULyricsCacheLoad(NSString *videoID) {
         // `_CACHE_FORMAT_VERSION` gate.
         NSInteger cv = [dict[@"cv"] integerValue];
         if (cv > 0 && cv != YTMULyricsCacheFormatVersion()) {
+            [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+            return nil;
+        }
+        // Same idea for the TEXT: an entry parsed by an older parser is readable
+        // but wrong, and only a refetch fixes it. Missing `pe` counts as stale --
+        // every file written before this gate existed is exactly the case.
+        NSInteger pe = [dict[@"pe"] integerValue];
+        if (pe != YTMULyricsCacheParserEpoch()) {
             [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
             return nil;
         }
