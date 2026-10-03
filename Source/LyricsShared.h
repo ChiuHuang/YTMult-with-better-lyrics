@@ -60,6 +60,10 @@
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, copy) NSString *lastColorKey;
+// Playback time of the last mask write, so the tick can floor how often the
+// wipe geometry is rebuilt (YTMUMaskWriteFloorMs) without quantizing the word
+// fraction, which is what used to make the wipe step.
+@property (nonatomic, assign) double lastMaskWriteMs;
 // How bright this row is by its distance from the sung line. 1 for the sung
 // line itself, 0.0 five lines out. A multiplier on top of the inactive ink, so
 // the existing colour maths is untouched.
