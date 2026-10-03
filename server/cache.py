@@ -84,7 +84,102 @@ _CACHE_FORMAT_VERSION = 4
 #    <QrcInfos LyricContent="..."> envelope, CJK credit roles and the
 #    title-echo drop. Every QRC line from QQ can now carry `singer`/`duet`, and
 #    an LRC line with a second voice no longer has it sung by the first.
-_PARSER_EPOCH = 3
+# 4: sanitize_lyrics_parts takes a reading out of a trailing `base（reading）`,
+#    in the line text AND in every part's `words` -- which is the copy the device
+#    rebuilds the display string from. Rubies written inline were being drawn as
+#    a second copy of the line in brackets and, because the wipe indexes by part,
+#    the bracket run became karaoke words of its own. The reading is kept as
+#    `ruby` / `inlineReading`. Replayable offline, but bumped anyway: the epoch
+#    is what makes every stored entry refetch, and a stale entry is exactly what
+#    the device was drawing.
+_PARSER_EPOCH = 4
+
+# ---------------------------------------------------------------------------
+# A reading written inline, in parentheses: ぎゅって抱いた空（ぎゅたて抱いた空）
+# ---------------------------------------------------------------------------
+# Why this is here and not in a parser. The device REBUILDS the display string
+# from `parts` (LyricsSheet's -wbwDisplayTextForLyric), so whatever a provider
+# writes inside a part's `words` is what the phone draws, character for character.
+# Files that cannot typeset furigana write it inline instead, and the device
+# screenshots showed the result: the line printed its own reading a second time in
+# brackets, and -- because the wipe indexes by part -- the bracket run became
+# karaoke words of their own, so the highlight ran backwards through the line
+# (white, grey, then white again) and lit the reading before the base.
+#
+# The rules are deliberately narrow, because a trailing parenthesis is ordinary
+# text in a song title and eating it would be worse than the bug:
+#   * the group has to be TRAILING and balanced (one pair, nothing after it);
+#   * the base has to contain a kanji/kana syllable it could be read for;
+#   * the reading has to be kana only (kanji readings do exist, but those are
+#     alternative WORDINGS, e.g. 空（から）, and are kept -- see below).
+# A reading made of kanji, or one that repeats the base, is left alone.
+
+_TRAILING_PAREN_RE = re.compile(r'^(?P<base>.*?)[（(]\s*(?P<reading>[^（()（）]+?)\s*[)）]\s*$')
+# Kana only -- hiragana, katakana, the small-kana extension, the prolonged sound
+# mark, the katakana middle dot, and spaces. Nothing else, and in particular no
+# Latin, no digits and NO kanji: a hanzi in the group means it is not a reading.
+_READING_CHARS_RE = re.compile(r'^[\u3040-\u30ff\u31f0-\u31ff\u00b7\s]+$')
+_HAS_KANJI_RE = re.compile(r'[\u3400-\u9fff]')
+
+
+def _is_reading_of(base, reading):
+    """True when `reading` is a reading OF `base`, by one of two shapes.
+
+    (a) kana only -- `空（そら）`, the ordinary syllabic reading;
+    (b) the base with its kanji readings spelled out in kana --
+        `ぎゅって抱いた空（ぎゅたて抱いた空）`, which is what a file writes when it
+        cannot typeset furigana over a whole phrase rather than over syllables.
+        For (b) every kanji in the group must be one the base already has, and
+        there cannot be more of them than the base has: a group that ADDS a kanji
+        is a gloss or a different phrase, which is the case that must survive.
+    """
+    if _READING_CHARS_RE.match(reading):
+        return True
+    base_kanji = [c for c in base if _HAS_KANJI_RE.match(c)]
+    if not base_kanji:
+        return False
+    group_kanji = [c for c in reading if _HAS_KANJI_RE.match(c)]
+    if len(group_kanji) > len(base_kanji):
+        return False
+    return all(c in base_kanji for c in group_kanji)
+
+
+def split_inline_reading(text):
+    """`base（reading）` -> ('base', 'reading'). Anything else -> (text, None).
+
+    Returns the pair unchanged when the parentheses are not a reading: a group
+    with characters the base does not have, a group that repeats the base
+    verbatim, or a base with no kanji in it (you cannot read らららん, and
+    `らららん（啦啦啦啦）` is a translation, not a reading).
+    """
+    if not text:
+        return text, None
+    m = _TRAILING_PAREN_RE.match(text)
+    if not m:
+        return text, None
+    base = m.group('base').strip()
+    reading = m.group('reading').strip()
+    if not reading:
+        return text, None
+    if not base:
+        # Nothing to read it FOR: a part that is nothing but a reading (a hum, a
+        # doubled syllable) or a bracketed kana sound. The parentheses were never
+        # content, so unwrap rather than claim a ruby with no base.
+        if _READING_CHARS_RE.match(reading):
+            return reading, None
+        return text, None
+    if reading == base:
+        return text, None
+    if not _HAS_KANJI_RE.search(base):
+        return text, None
+    if not _is_reading_of(base, reading):
+        return text, None
+    # A reading is never longer than what it reads, by more than the marks that
+    # stretch a syllable out (ー, っ). Anything longer is a gloss.
+    if len(reading) > len(base) + 2:
+        return text, None
+    return base, reading
+
 
 def sanitize_lyrics_parts(lyrics):
     """Ensure every line has valid, monotonically increasing parts with proper durations and spaces.
@@ -94,6 +189,16 @@ def sanitize_lyrics_parts(lyrics):
     for l in lyrics:
         if not l.get('text'):
             continue
+        # The line text first, and for EVERY line including the non-word-synced
+        # ones: an LBL file carries the same inline reading with no parts at all,
+        # and the phone draws `text` verbatim when there are no parts. Cleaning it
+        # here also means the translator is never handed the brackets -- the
+        # duplicated reading in the Chinese line was the model copying them.
+        _base, _reading = split_inline_reading(l['text'])
+        if _base != l['text']:
+            l['text'] = _base
+        if _reading:
+            l['inlineReading'] = _reading
         l_ms = int(l.get('startTimeMs', l.get('time', 0) * 1000))
         l_dur = int(l.get('durationMs', l.get('duration', 0) * 1000))
         parts = l.get('parts')
@@ -105,9 +210,30 @@ def sanitize_lyrics_parts(lyrics):
 
         prev_ms = l_ms
         for pi, p in enumerate(parts):
+            # Same reading-out of every part's own text, for the reason above: the
+            # device rebuilds the line from these strings, so this is the copy the
+            # phone actually draws. The reading is kept on the part as `ruby`, the
+            # shape _ruby_element already emits, so the two spellings of furigana
+            # arrive at the device as one thing.
+            _pbase, _preading = split_inline_reading(p.get('words') or '')
+            if _pbase != p.get('words'):
+                p['words'] = _pbase
+            if _preading:
+                p['ruby'] = [{'text': _preading,
+                              'startTimeMs': p.get('startTimeMs', 0),
+                              'durationMs': p.get('durationMs', 0)}]
             if not p.get('startTimeMs') or p['startTimeMs'] < l_ms:
                 p['startTimeMs'] = prev_ms + (0 if pi == 0 else 200)
             prev_ms = p['startTimeMs']
+        # A part can be left with nothing but a reading, i.e. no drawable text at
+        # all. Drop those and re-apply the >=2 rule, because one word is not
+        # karaoke -- the device's wipe has no second word to move to.
+        parts = [p for p in parts if (p.get('words') or '').strip()]
+        if len(parts) <= 1:
+            l.pop('parts', None)
+            l['wordSynced'] = False
+            continue
+        l['parts'] = parts
         # Preserve real provider durations; only synthesize missing ones
         # or clamp bloated last-word durations that stretch into the inter-line gap.
         for pi in range(len(parts)):

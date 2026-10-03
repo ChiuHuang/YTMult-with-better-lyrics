@@ -27,7 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[DONE] ses_f08ea153affdqh6N7c3mREfQEC | per-build targeted kill switch shipped in 5ecf199 (selector sha/tag/from..to, action lg/tweak/surface, server-side resolution + device census) | files: server/kill_switch.py (new), app_settings.py, routes_misc.py, routes_admin.py, static/dash.js, templates/index.html, Source/LyricsCore.x, Source/YTMULiquidGlassPreferences.h, docs/settings-api.md, .gitignore | next: none — open items: never exercised on a device (the sha it reports is TWEAK_GIT_COMMIT, which only a real install has), and the dashboard panel has no browser screenshot | does: 4 python suites green (unit / Flask test-client / real-repo git timing / live server over a socket), 39/39 + 18/18 logos+clang syntax, node --check`
+- `[DONE] ses_f033796faffeC32ISpNDwW0STV | karaoke wipe: the black box, the backwards reveal, the stale glow, the raster-thrashing fps, the stale-payload parens, the 4x duplicate provider, the over-sized x-bg cue | files: Source/LyricsSheet.x, Source/LyricsCore.x, server/cache.py, server/candidates.py, server/translate.py | next: rebuild on a device and read the [FPS] log line | does: the "highlight box" is the wipe label's own DARK layer shadow, clipped by the mask the code deliberately widens by the glow radius — a glow cannot be dark and unclipped at once, so it is the bright ink now (YTMULyricGlow). The fade-out left the mask + radius alive for its 0.5s, which is what the finished line was wearing. The reveal is now a PREFIX by construction: one range per PART (a textless part used to shift every later rect by one), holes filled, boxes trimmed to the previous word. The glow is quantized to 4 steps because every new shadowRadius throws away the raster cache the label keeps. server/cache.py takes a trailing base（reading） out of the line and out of every part, _PARSER_EPOCH is 4, and the DEVICE cache finally has the matching gate (LyricsCore YTMULyricsCacheParserEpoch) — a parser fix used to be invisible on the phone forever, because its own file was still readable. TRAPS: the clip is the whole bug — widening a mask to let a blur escape also widens what the shadow is allowed to paint, so a glow drawn under a mask MUST be the text's own colour; and the epochs are two numbers in two languages that must be edited together or the device silently diverges from the server.`
 
 ## How we talk (user expectations — keep these)
 - Reply in Traditional Chinese, Taiwan usage (繁體中文／台灣用語). The user reads
@@ -199,6 +199,35 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `this session` — the karaoke wipe stopped drawing a black box and stopped
+  running backwards, and the phone's own lyrics cache finally respects a parser
+  bump. Traps: a mask CLIPS the shadow under it, so widening a mask to let a glow
+  escape also widens what that shadow may paint — a dark glow under a mask is a
+  hard-edged rectangle, and it has to be the text's own colour; `ranges` is
+  indexed by part but was built by skipping textless parts, which shifted every
+  rect after one; and a parser fix was invisible on the device forever because
+  `cv` (the payload's SHAPE) was the only gate the device had.
+- `0ed2a6a` — the JWT pool counts the requests a token really served (the old
+  `successes` moved only for probes) and keeps a ledger of retired tokens with
+  the reason, so "requests before death" is a fact. Charts on the JWT Pool page.
+  Trap: two bookkeeping entry points per HTTP site is how a strike goes missing
+  silently, and `el()` used to coerce only string children — a numeric tile value
+  was a TypeError that took the page render with it.
+- `ba1b0e2` — a Settings page for THIS server, split out of the App page: the
+  wbw second Cubey pass is a server-only key that was being rendered inside the
+  page promising every switch reaches every device. The schema now carries
+  `GROUPS_REMOTE`/`GROUPS_SERVER` and one renderer draws both. New keys:
+  `fetch.wbw_retry_delay_s` (float — an int-typed 0.8s default rounds to 1s and
+  nobody would notice) and `bulk.*` defaults for a new job.
+- `802614b` — the bulk refetch panel stopped answering only "a bulk refetch is
+  already running": it now adopts whatever job holds the slot (even one started
+  in another tab), shows its progress, and offers Take over. Work runs in
+  batches and fetch threads / CPU workers / translate workers / batch size /
+  the translate switch are all editable WHILE it runs; the job waits for the
+  translate queue to drain before it calls itself done. Traps: the heartbeat
+  only fired when a song finished (a stuck job looked dead for 10 minutes), and
+  the translate queue's blocking `get()` meant a lowered worker count only took
+  effect after the next song.
 - `5ecf199` — the kill switch targets a build, not every device: selector
   `sha | tag | from_sha..to_sha | blanket`, action `lg | tweak | surface`,
   resolved server-side from the `?sha=` the device already sends, plus a census
@@ -234,9 +263,6 @@ Current:
 - `11bb42e`/`9ce4a26` — parser epoch split from format version, and the node
   mesh no longer defeats the version gate.
 - `ac9ca4e` — duet lines get a setting (align / label / off).
-- `c729dbb`/`5f2e396`/`19c5d2c` — ttml: `ttm:agent` singer + section kept, no
-  invented spaces, `<text for>` is the line text.
-- `6df5a58` — retitle batches 20 songs per LLM call, no-ops skip the pipeline.
 - `ef25ad8`/`a31e8c8` — `tools/jwt-uploader/`: Chrome extension + silent
   userscript + key-authed `POST /api/jwt/push` (no CORS headers on purpose, so
   a random page cannot make a browser send it).
@@ -264,6 +290,29 @@ Current:
   the display string from parts. Still open: SRT (a format we do not have),
   `amll:meta` song metadata, songwriters, and the device's ruby-over-the-syllable
   + obscure handling. §6 lists what we do differently on purpose.
+- **The wipe, on a device, with the `[FPS]` line in the log.** The panel has an
+  fps counter (`updatePlaybackTime`, Debug page) that logs
+  `[FPS] lyric render rate N/M fps` every second — that number is the only honest
+  way to judge the frame-rate complaint, and it is per-panel not per-app. On a
+  wbw line, in one pass: NO dark rectangle around the sung word or around the
+  word that just finished (the glow is now the bright ink); the reveal never
+  goes white -> grey -> white; the highlight edge is smooth rather than stepping
+  in 24 jumps; and the fps holds. Everything else in this commit is a one-shot
+  observable: the provider switcher must not offer the same provider twice (the
+  switcher is built straight from the candidates snapshot, and one song offered
+  `Unison 1/10 .. 4/10`), the x-bg cue must sit clearly under its line as a small
+  dim annotation instead of a third lyric row, and every device cache entry is
+  dropped once by the new parser-epoch gate (so the first play of a song refetches
+  — that is the fix for a line still printing `ぎゅって抱いた空（ぎゅたて抱いた空）`,
+  which was a STALE payload, not a live parse: the current Unison TTML for Cubism
+  has no parentheses at all).
+- **The landscape active line looks pinned to the top of the column with a dead
+  band above it, in every landscape screenshot.** NOT reproduced from the code:
+  `ytmu_scrollToRow` targets 37% of the visible height and clamps against
+  `adjustedContentInset`, and the dead band above is not the distance ladder
+  (rows 1-3 out are 0.88/0.72/0.52 alpha, plainly visible in portrait). Do not
+  "fix" it by changing the ratio without a measurement — get the real
+  `contentOffset`, `contentSize` and `bounds.height` from a debug line first.
 - **Device rebuild outstanding** (all CODE-DONE, never run on a device):
   rebuild `client_edits_pack.py` and check, in one pass: the single X in all
   four panel configurations; landscape->portrait CLOSES the fullscreen lyrics

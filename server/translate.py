@@ -142,7 +142,17 @@ def _translate_prompt(texts, target_lang):
         f"Translate the following song lyrics into {lang_name}. "
         f"Keep the same numbered format [1], [2], etc., exactly one output line per input line. "
         f"These are song lyrics, so keep the poetic style and meaning intact. "
-        f"IMPORTANT: Do not translate onomatopoeia, scat singing, or nonsense words (like 'ba ba', 'la la') literally. Leave them as-is or transliterate them. "
+        # The rule below used to end with "leave them as-is or transliterate
+        # them", and the second half is what produced garbage: a backing run
+        # written ラララランラララ came back as 蘭啦啦啦啦 -- a hanzi that is not
+        # the reading of ANY syllable in the source, because "transliterate"
+        # invited the model to spell kana out in hanzi. Real Cubism, real
+        # translation, both lines.
+        f"IMPORTANT: a run of onomatopoeia, scat or nonsense syllables (ラララ, "
+        f"啦啦, 'ba ba', 'la la') is a VOCALISE, not words. Render it as a plain "
+        f"repetition of the matching onomatopoeia in {lang_name} (ララララ -> 啦啦啦啦), "
+        f"or keep the kana exactly as written. Never invent characters for it and "
+        f"never spell one syllable out as a different hanzi (ラ is 拉, never 蘭). "
         f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
         f"STRICT OUTPUT RULES: output ONLY the translated lines with their numbers. "
         f"Never repeat the original text. Never add romanization, transliteration, "

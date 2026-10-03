@@ -52,6 +52,19 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 static CGFloat s_lyricFontSize = 28.0;
 static CGFloat YTMULyricMainFontSize(void) { return s_lyricFontSize; }
 static CGFloat YTMULyricTransFontSize(void) { return s_lyricFontSize * 19.0 / 28.0; }
+// The background cue (payload `bg`) and the romanization: an ANNOTATION under
+// the line, not a line of its own.
+//
+// They were one point under the translation and BRIGHTER than it (ink 0.5 vs the
+// translation's 0.35 on a dark backdrop), so a row carrying a cue read as three
+// stacked lines. On Cubism that is worse than ugly: the TTML's x-bg is the vocal
+// line again with the last morpheme swapped (the line is
+// `ぎゅって抱いた空 って 泣いたから`, the cue `ぎゅって抱いた空 から`), so the
+// reader was handed the same sentence twice at two sizes -- which is what the
+// screenshots showed. better-lyrics*web does not draw the cue at all; this is
+// the closest honest equivalent that keeps the data, and the ratio is a ratio so
+// it follows the font-size setting instead of drifting at one size.
+static CGFloat YTMULyricCueFontSize(void) { return s_lyricFontSize * 13.0 / 28.0; }
 
 // Background-derived ink: the sheet sits on blurred artwork, which can be
 // bright white while the OS is in dark mode (or dark while in light mode),
@@ -116,6 +129,24 @@ static UIColor *YTMULyricShadow(UIView *refView) {
     if (YTMUBgIsLight(refView))
         return [[UIColor darkGrayColor] colorWithAlphaComponent:0.35];
     return [[UIColor blackColor] colorWithAlphaComponent:0.8];
+}
+// The highlight glow's colour, and deliberately NOT YTMULyricShadow.
+//
+// The wipe mask is widened by the glow radius on purpose, so the blur can escape
+// the word it belongs to -- but a mask CLIPS the shadow drawn under it, so a dark
+// shadow clipped to that widened rect is not a halo: it is a hard-edged dark
+// rectangle sitting on the artwork around the word being sung. That is exactly
+// what the device screenshots showed, on the active line AND on the line just
+// finished (the fade-out kept the mask and the radius alive for its 0.5s).
+//
+// A glow cannot be dark and unclipped at the same time, so it is the bright ink's
+// own colour instead: on a dark backdrop a white halo, on a light one a black
+// one, and neither can be mistaken for a box because it fades to nothing at the
+// rectangle's edge the same way a real blur does.
+static UIColor *YTMULyricGlow(UIView *refView) {
+    if (YTMUBgIsLight(refView))
+        return [[UIColor blackColor] colorWithAlphaComponent:0.5];
+    return [[UIColor whiteColor] colorWithAlphaComponent:0.8];
 }
 // Same idea as YTMULyricInk for pill/track fills.
 static UIColor *YTMULyricFill(UIView *refView) {
@@ -220,6 +251,12 @@ static const CGFloat YTMUScrollTargetRatio = 0.37;
 static const CGFloat YTMUHighlightGlowRadius = 12.8;
 static const CGFloat YTMUHighlightGlowRatio = 1.2;
 static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
+// Ladder step for the glow radius. It is a layer shadow, and a layer shadow is
+// drawn as part of the layer, so a new radius invalidates the raster cache this
+// label relies on (see shouldRasterize in the cell init) and the blur is
+// re-rendered at screen scale. Four steps over the radius is smooth enough to
+// read as a shrink and cheap enough to keep the bitmap between them.
+static const CGFloat YTMUHighlightGlowStep = 3.2;
 // Word wobble, applied per WORD as a whole-line sway. braccato's own keyframes
 // are translateX(0.05em) + scaleX(1.025) at 12.5%, settling at 75%, over 1s
 // (variables.css:111-120). Only the translate half survives here: our lyric
@@ -565,12 +602,12 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
-        self.wipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
-        // Centred, because this shadow is now the animated highlight glow rather
-        // than a drop: the constant downward drop that keeps the bright text
-        // readable over artwork lives in the attributed string's NSShadow, so
-        // this one is free to swell around the word being sung. See
-        // -applyWordColorsToCell:...force:.
+        // YTMULyricGlow, not YTMULyricShadow: see its comment. This is the
+        // animated highlight glow, not a drop -- the constant downward drop that
+        // keeps the bright text readable over artwork lives in the attributed
+        // string's NSShadow, so this one is free to swell around the word being
+        // sung. See -applyWordColorsToCell:...force:.
+        self.wipeLabel.layer.shadowColor = YTMULyricGlow(self.contentView).CGColor;
         self.wipeLabel.layer.shadowOffset = CGSizeZero;
         self.wipeLabel.layer.shadowRadius = 0.0;
         self.wipeLabel.layer.shadowOpacity = 0.0;
@@ -665,8 +702,8 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         // trick singerLabel uses, so a track without either pays nothing.
         self.bgLabel = [[UILabel alloc] init];
         self.bgLabel.numberOfLines = 0;
-        self.bgLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() - 1.0 weight:UIFontWeightRegular];
-        self.bgLabel.textColor = YTMULyricInk(0.5, 0.45, self.contentView);
+        self.bgLabel.font = [UIFont systemFontOfSize:YTMULyricCueFontSize() weight:UIFontWeightRegular];
+        self.bgLabel.textColor = YTMULyricInk(0.28, 0.32, self.contentView);
         self.bgLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.bgLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.bgLabel.layer.shadowRadius = 2.0;
@@ -679,8 +716,8 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
 
         self.romanLabel = [[UILabel alloc] init];
         self.romanLabel.numberOfLines = 0;
-        self.romanLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() - 1.0 weight:UIFontWeightRegular];
-        self.romanLabel.textColor = YTMULyricInk(0.5, 0.45, self.contentView);
+        self.romanLabel.font = [UIFont systemFontOfSize:YTMULyricCueFontSize() weight:UIFontWeightRegular];
+        self.romanLabel.textColor = YTMULyricInk(0.28, 0.32, self.contentView);
         self.romanLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.romanLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.romanLabel.layer.shadowRadius = 2.0;
@@ -891,6 +928,15 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     CGFloat from = presented ? (CGFloat)presented.opacity : (CGFloat)layer.opacity;
     [layer removeAnimationForKey:@"ytmuHighlightFade"];
     alpha = MIN(MAX(alpha, 0.0), 1.0);
+    // A line that is going OUT takes its glow with it. The glow is a shadow on a
+    // masked layer, so it survives the text fading away and leaves a lit patch
+    // hanging over the row for the length of the fade-out and then for as long as
+    // the row sits there -- which is what the finished line in the device
+    // screenshots was wearing. Zeroing it here covers every exit path, including
+    // the fade-in retarget below, without each caller having to remember.
+    if (alpha <= 0.001) {
+        [self ytmu_clearGlow];
+    }
     if (fabs(from - alpha) < 0.001) {
         layer.opacity = (float)alpha;
         return;
@@ -904,6 +950,17 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     anim.removedOnCompletion = NO;
     layer.opacity = (float)alpha;
     [layer addAnimation:anim forKey:@"ytmuHighlightFade"];
+}
+
+// Drops the animated highlight glow and the moving feather edge, and nothing
+// else: the mask's own path stays, so a row that is fading out keeps the text it
+// has already revealed while the halo around it goes away.
+- (void)ytmu_clearGlow {
+    self.wipeLabel.layer.shadowRadius = 0.0;
+    self.wipeLabel.layer.shadowOpacity = 0.0;
+    for (CALayer *sub in self.wipeMask.sublayers) {
+        if ([sub.name isEqualToString:@"YTMULyricsWipeFeather"]) sub.hidden = YES;
+    }
 }
 
 // The mask that reveals everything, for a row whose highlight is not word-timed.
@@ -3295,12 +3352,19 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // pass after a rotation, before the first tick).
         [self ytmu_assertOnTop];
 
-        // Smaller bottom inset in landscape (less scroll space needed)
-        CGFloat bottomPad = MAX(120.0, H * 0.30f);
+        // Smaller bottom inset in landscape (less scroll space needed), PLUS the
+        // toolbar's own band. The toolbar floats INSIDE the table's frame, so
+        // without this a line can end up underneath it -- the device screenshots
+        // had a translation row drawn straight through the provider pill. The
+        // extra room also absorbs the table under-reporting its contentSize while
+        // self-sizing rows are still being measured, which lets the scroll run
+        // past where the clamp thinks the end is.
+        CGFloat bottomPad = MAX(120.0, H * 0.30f) + toolH + 12.0 + safeBottom;
         UIEdgeInsets current = self.tableView.contentInset;
-        if (fabs(current.bottom - bottomPad) > 1.0) {
-            self.tableView.contentInset = UIEdgeInsetsMake(current.top, 0, bottomPad, 0);
-            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, bottomPad, 0);
+        CGFloat topPad = MAX(16.0, safeTop + 6.0);
+        if (fabs(current.bottom - bottomPad) > 1.0 || fabs(current.top - topPad) > 1.0) {
+            self.tableView.contentInset = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
+            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
         }
         UIView *footer = self.tableView.tableFooterView;
         if (!footer || fabs(footer.frame.size.height - bottomPad) > 1.0) {
@@ -3328,10 +3392,19 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         CGFloat visibleHeight = H;
         CGFloat bottomPad = MAX(350.0, visibleHeight * 0.60);
 
+        // The sheet is a half-detent, so its own safe area is usually zero and
+        // the top inset has to come from the SCREEN's: without it the first row
+        // sits flush against the status bar, and a banner (or the grabber) draws
+        // straight over the top line.
+        CGFloat screenSafeTop = 0.0;
+        if (@available(iOS 11.0, *)) {
+            screenSafeTop = self.view.window.safeAreaInsets.top;
+        }
+        CGFloat topPad = MAX(24.0, screenSafeTop + 12.0);
         UIEdgeInsets current = self.tableView.contentInset;
-        if (fabs(current.bottom - bottomPad) > 1.0) {
-            self.tableView.contentInset = UIEdgeInsetsMake(current.top, 0, bottomPad, 0);
-            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(0, 0, bottomPad, 0);
+        if (fabs(current.bottom - bottomPad) > 1.0 || fabs(current.top - topPad) > 1.0) {
+            self.tableView.contentInset = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
+            self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
         }
         UIView *existingFooter = self.tableView.tableFooterView;
         if (!existingFooter || fabs(existingFooter.frame.size.height - bottomPad) > 1.0) {
@@ -4647,9 +4720,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         NSMutableArray *ranges = [NSMutableArray array];
         NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
         NSUInteger cursor = 0;
+        // ONE ENTRY PER PART, always. A part with no drawable text used to be
+        // skipped, which shifted every later range down by one: the wipe then
+        // painted word N's box over word N+1's glyphs and left a hole where the
+        // hole-less word should have been. The device screenshots showed
+        // exactly that -- white, then grey, then white again inside one line --
+        // because the caller indexes these by part position.
         for (NSDictionary *p in parts) {
             NSString *w = [((NSString *)(p[@"words"] ?: @"")) stringByTrimmingCharactersInSet:ws];
-            if (w.length == 0) continue;
+            if (w.length == 0) {
+                [ranges addObject:[NSValue valueWithRange:NSMakeRange(NSNotFound, 0)]];
+                continue;
+            }
             if (cursor > display.length) cursor = display.length;
             NSRange found = [display rangeOfString:w options:0 range:NSMakeRange(cursor, display.length - cursor)];
             if (found.location == NSNotFound) {
@@ -4670,6 +4752,47 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     CGRect b = [lm boundingRectForGlyphRange:glyphs inTextContainer:tc];
     if (frac < 1.0) b.size.width *= MAX(frac, 0.0);
     return [UIBezierPath bezierPathWithRect:CGRectInset(b, -1, -2)];
+}
+
+// Appends the boxes of every word already finished, in order, and returns the x
+// the reveal has reached (in mirrored space when `rtl`, so the caller's one
+// direction of travel covers both).
+//
+// Two rules this exists to enforce, both of them about the reveal being a
+// PREFIX of the line:
+//
+//   * a word whose text could not be located in the display string leaves a hole,
+//     and a hole in the middle of the sung region reads as the highlight having
+//     jumped backwards (the device screenshots showed white, grey, then white
+//     again inside one line). The gap is filled instead -- but only when it is
+//     narrow, because on a wrapped line the gap between the last word of one
+//     visual line and the first of the next is nearly the full width, and
+//     filling THAT would paint a block over the row in between;
+//   * a box that reaches back behind the previous one is trimmed to it, so two
+//     overlapping ranges can never light a later word early.
+static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInteger upTo,
+                                       BOOL rtl, CGFloat width) {
+    CGFloat edge = 0.0;
+    BOOL haveEdge = NO;
+    for (NSInteger i = 0; i < upTo && i < (NSInteger)[rects count]; i++) {
+        CGRect b = [[rects objectAtIndex:(NSUInteger)i] CGRectValue];
+        if (CGRectIsNull(b) || CGRectIsEmpty(b)) continue;
+        if (rtl) b = CGRectMake(width - CGRectGetMaxX(b), CGRectGetMinY(b), b.size.width, b.size.height);
+        if (!haveEdge) { edge = CGRectGetMinX(b); haveEdge = YES; }
+        CGFloat gap = CGRectGetMinX(b) - edge;
+        if (gap > 0.5 && gap <= CGRectGetWidth(b) * 3.0 && gap <= width * 0.5) {
+            [path appendPath:[UIBezierPath bezierPathWithRect:
+                CGRectMake(edge, CGRectGetMinY(b), gap, CGRectGetHeight(b))]];
+        }
+        CGFloat x0 = MAX(CGRectGetMinX(b), edge);
+        CGFloat x1 = CGRectGetMaxX(b);
+        if (x1 > x0) {
+            [path appendPath:[UIBezierPath bezierPathWithRect:
+                CGRectMake(x0, CGRectGetMinY(b), x1 - x0, CGRectGetHeight(b))]];
+            edge = x1;
+        }
+    }
+    return haveEdge ? edge : 0.0;
 }
 
 - (void)applyWordColorsToCell:(YTMULyricsCell *)cell lyric:(NSDictionary *)lyric index:(NSInteger)index currentTime:(double)currentTime force:(BOOL)force {
@@ -4791,11 +4914,10 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
     UIBezierPath *path = [UIBezierPath bezierPath];
     NSInteger rcount = MIN(partCount, (NSInteger)[cell.cachedWordRects count]);
-    for (NSInteger i = 0; i < curWord && i < rcount; i++) {
-        CGRect b = [cell.cachedWordRects[i] CGRectValue];
-        if (CGRectIsNull(b)) continue;
-        [path appendPath:[UIBezierPath bezierPathWithRect:b]];
-    }
+    BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    CGFloat wipeW = CGRectGetWidth(cell.wipeLabel.bounds);
+    NSInteger prefixCount = MIN(MAX(curWord, 0), rcount);
+    YTMUAppendRevealedWords(path, cell.cachedWordRects, prefixCount, rtl, wipeW);
 
     CAGradientLayer *wipeFeather = nil;
     for (CALayer *layer in cell.wipeMask.sublayers) {
@@ -4813,7 +4935,6 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         if (!CGRectIsNull(wordRect)) {
             curWordRect = wordRect;
             CGFloat fraction = MIN(1.0, MAX(0.0, curFrac));
-            BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
             // braccato's overshoot: the leading edge runs past the word and is
             // pulled back over the last fifth of it, so the highlight visibly
             // catches up instead of stopping dead at the last glyph.
@@ -4873,6 +4994,14 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         double glowMs = MAX(wordDur * YTMUHighlightGlowRatio, YTMUHighlightGlowMinDuration * 1000.0);
         double glowT = MIN(MAX((nowMs - wordStart) / glowMs, 0.0), 1.0);
         glow = YTMUHighlightGlowRadius * (1.0 - glowT) * (1.0 - glowT);
+        // Snap it to a coarse ladder. shadowRadius is part of how the layer draws
+        // itself, so every new value throws away the rasterized text+blur bitmap
+        // this label keeps (shouldRasterize) and the blur is re-rendered at 3x.
+        // The wipe's own geometry is quantized to 24 steps per word; four glow
+        // steps instead of twenty-four is the difference between rebuilding that
+        // bitmap sixty times a second and four times a word.
+        glow = floor(glow / YTMUHighlightGlowStep) * YTMUHighlightGlowStep;
+        if (glow < YTMUHighlightGlowStep * 0.5) glow = 0.0;
         if (glow > 0.5) {
             // Never past the midpoint of the gap on either side, so the next
             // word (and the one before, which is already lit) stay untouched.

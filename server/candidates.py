@@ -102,6 +102,29 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
             })
         if not slim:
             return False
+        # ONE ENTRY PER PROVIDER, last write wins.
+        #
+        # A probe can reach the same provider through more than one path -- the
+        # race runs providers in stages, the second Cubey pass re-probes, a
+        # rebase rewrites the winner -- and every one of those appended. The
+        # device's switcher is built straight from this list, so the song the
+        # screenshots came from offered `Unison 1/10 ... 4/10`: four identical
+        # entries, and picking any of them switched to the same lyrics. Dedupe
+        # on the provider key, keeping the LAST answer (a re-probe knows more
+        # than the run before it) at the position the provider first appeared.
+        deduped = []
+        slot = {}
+        for c in slim:
+            key = c.get('provider') or c.get('source') or ''
+            if key in slot:
+                deduped[slot[key]] = c
+            else:
+                slot[key] = len(deduped)
+                deduped.append(c)
+        if len(deduped) != len(slim):
+            print(f"  [CAND] collapsed {len(slim) - len(deduped)} duplicate provider entr"
+                  f"y(ies) for {video_id}")
+        slim = deduped
         # Prune: plain entries go when a line-or-better entry exists; line
         # entries always stay (wbw never deletes its fallback). Skipped
         # entirely under db.keep_all_providers -- "put all providers in the
