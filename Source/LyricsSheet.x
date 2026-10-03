@@ -267,6 +267,11 @@ static const NSTimeInterval YTMUWobbleDuration = 1.0;
 static const CGFloat YTMUWobblePeakOffset = 0.125;
 static const CGFloat YTMUWobbleSettleOffset = 0.75;
 static const CGFloat YTMUWobblePeakEm = 0.05;
+// Ladder step for the sway, in points. The whole move is 0.05em (1.4pt at the
+// default size) over a second, so sixteen steps is a 0.09pt increment: below the
+// threshold where anyone could see it stepping, and it turns a per-frame
+// transform write on two full-width labels into sixteen writes per word.
+static const CGFloat YTMUWobbleStep = 0.09;
 // Karaoke swipe overshoot: the leading edge runs past the word and is pulled
 // back over the last fifth of it, so the highlight visibly catches up.
 // variables.css:101-104 does the same thing with animated gradient stops
@@ -494,6 +499,35 @@ static YTMUDuetDisplay YTMUDuetDisplayMode(void) {
     return cached;
 }
 
+// Pinyin / romanization, off unless asked for.
+//
+// The payload key is `romanization` and it arrives from three places (TTML
+// x-roman, a <transliterations> block, an LRC-style provider), so a Mandarin or
+// Cantonese track gets a line of Latin letters under EVERY row whether the reader
+// wanted one or not -- and on a wbw line it is a fourth stacked line competing
+// with the lyric, the cue and the translation. It is data, not decoration: the
+// reading only helps if you are learning the line or cannot read the script, so
+// it is a switch, defaulting OFF like the duet marker was before the user asked
+// for it back.
+static BOOL YTMULyricsShowRomanization(void) {
+    static dispatch_once_t once;
+    static BOOL dirty = YES;
+    static BOOL cached = NO;
+    dispatch_once(&once, ^{
+        [[NSNotificationCenter defaultCenter]
+            addObserverForName:NSUserDefaultsDidChangeNotification
+                        object:nil
+                         queue:nil
+                    usingBlock:^(NSNotification *note) { dirty = YES; }];
+    });
+    if (dirty) {
+        id v = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"][@"lyricsShowRomanization"];
+        cached = (v != nil && v != NSNull.null) ? [v boolValue] : NO;
+        dirty = NO;
+    }
+    return cached;
+}
+
 // The voice a line is sung by, as a comparable key, or nil when the file said
 // nothing about it. `duet` is its own key rather than "singer 1 as well": both
 // voices on one line is a different fact from either of them singing it.
@@ -641,6 +675,10 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         wipeFeather.endPoint = CGPointMake(1.0, 0.5);
         wipeFeather.actions = @{@"position":[NSNull null], @"bounds":[NSNull null], @"frame":[NSNull null], @"hidden":[NSNull null]};
         [self.wipeMask addSublayer:wipeFeather];
+        // Held, not looked up. The tick used to walk wipeMask.sublayers comparing
+        // class names 120 times a second per active row to find this one layer;
+        // there is exactly one and it is created right here.
+        self.wipeFeather = wipeFeather;
         self.wipeLabel.layer.mask = self.wipeMask;
         _wipeProgress = 0.0;
 
@@ -4421,15 +4459,39 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 - (void)updatePlaybackTime {
     self.fpsTicks++;
     NSTimeInterval fpsNow = CACurrentMediaTime();
+    // The tick's own cost, accumulated into the same one-second window as the
+    // rate. A rate on its own says "it is slow" and nothing about why; this is
+    // the number that separates "the main thread is busy" (tick high, and the
+    // whole app stutters with it) from "the display link is being throttled"
+    // (tick near zero, rate low, nothing else wrong). `fpsTickMs` is a mean over
+    // the window, `fpsTickMaxMs` the worst single tick in it -- a per-tick cost
+    // that only bites on some frames is what a mean hides.
+    if (self.fpsWindowStart > 0.0) {
+        NSTimeInterval cost = (fpsNow - self.fpsLastTickAt) * 1000.0;
+        // The first tick after a window boundary includes the window's own work,
+        // so anything over a frame is clamped rather than reported as a spike.
+        if (cost >= 0.0 && cost < 200.0) {
+            self.fpsTickMsTotal += cost;
+            if (cost > self.fpsTickMsMax) self.fpsTickMsMax = cost;
+            self.fpsTickSamples++;
+        }
+    }
+    self.fpsLastTickAt = fpsNow;
     if (fpsNow - self.fpsWindowStart >= 1.0) {
         NSInteger fps = (NSInteger)(self.fpsTicks / MAX(fpsNow - self.fpsWindowStart, 0.001));
+        NSInteger maxFps = (NSInteger)[UIScreen mainScreen].maximumFramesPerSecond;
+        double meanMs = (self.fpsTickSamples > 0) ? (self.fpsTickMsTotal / self.fpsTickSamples) : 0.0;
+        NSString *cost = [NSString stringWithFormat:@" tick=%.2fms peak=%.2fms", meanMs, self.fpsTickMsMax];
         self.fpsTicks = 0;
         self.fpsWindowStart = fpsNow;
+        self.fpsTickMsTotal = 0.0;
+        self.fpsTickMsMax = 0.0;
+        self.fpsTickSamples = 0;
         if (self.fpsLabel && !self.fpsLabel.hidden) {
-            NSInteger maxFps = (NSInteger)[UIScreen mainScreen].maximumFramesPerSecond;
             self.fpsLabel.text = [NSString stringWithFormat:@"%ld/%ld fps", (long)fps, (long)maxFps];
-            sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps (panel max %ld)", (long)fps, (long)maxFps]);
         }
+        sendDebugLog([NSString stringWithFormat:@"[FPS] lyric render rate %ld fps (panel max %ld)%@",
+                      (long)fps, (long)maxFps, cost]);
     }
     // Self-healing z-order (~1/sec at the 120fps tick): YT reshuffles panel
     // subviews behind our back; the check itself is a pointer compare so
@@ -4957,6 +5019,14 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     // only written when the mask is rewritten can be stranded mid-sway on the
     // ticks where the mask is not, since a word's fraction stops changing once it
     // is fully sung.
+    //
+    // ...and QUANTIZED, because this is the one thing in the tick that ran at
+    // the display link's full rate: a 0.05em sway lasts a whole second per word,
+    // and writing a transform on two full-width labels sixty or hundred and
+    // twenty times a second throws away their rasterized bitmaps (a transformed
+    // layer cannot reuse the cache captured at its own bounds) and forces a
+    // re-render of a long CJK line with a text shadow every single frame. Sixteen
+    // steps over a 0.05em move is indistinguishable from 120.
     CGFloat shift = 0.0;
     if (curWord >= 0 && curWord < partCount && !UIAccessibilityIsReduceMotionEnabled()) {
         NSDictionary *cur = parts[curWord];
@@ -4973,14 +5043,19 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
                 double u = (t - YTMUWobblePeakOffset) / (YTMUWobbleSettleOffset - YTMUWobblePeakOffset);
                 shift = (CGFloat)(em * (1.0 - (u * u * (3.0 - 2.0 * u))));
             }
+            shift = floor(shift / YTMUWobbleStep) * YTMUWobbleStep;
         }
     }
     if (fabs(shift) > 0.01) {
-        cell.lyricLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
-        cell.wipeLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
+        if (fabs(shift - cell.wobbleShift) > 0.001) {
+            cell.wobbleShift = shift;
+            cell.lyricLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
+            cell.wipeLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
+        }
     } else if (!CGAffineTransformIsIdentity(cell.lyricLabel.transform)) {
         // Compared rather than assigned: writing an identity transform to a
         // label that already has one marks its layer for a layout pass.
+        cell.wobbleShift = 0.0;
         cell.lyricLabel.transform = CGAffineTransformIdentity;
         cell.wipeLabel.transform = CGAffineTransformIdentity;
     }
@@ -5040,14 +5115,7 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     NSInteger prefixCount = MIN(MAX(curWord, 0), rcount);
     YTMUAppendRevealedWords(path, cell.cachedWordRects, prefixCount, rtl, wipeW);
 
-    CAGradientLayer *wipeFeather = nil;
-    for (CALayer *layer in cell.wipeMask.sublayers) {
-        if ([layer.name isEqualToString:@"YTMULyricsWipeFeather"] &&
-            [layer isKindOfClass:CAGradientLayer.class]) {
-            wipeFeather = (CAGradientLayer *)layer;
-            break;
-        }
-    }
+    CAGradientLayer *wipeFeather = cell.wipeFeather;
     wipeFeather.hidden = YES;
 
     CGRect curWordRect = CGRectNull;
@@ -5470,7 +5538,8 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
     // same line. Both come straight off the payload dict and both are nil for
     // the overwhelming majority of rows, which is why they are pinned flat.
     [cell ytmu_setSubRowsWithBg:[self ytmu_subRowText:lyric key:@"bg"]
-                           roman:[self ytmu_subRowText:lyric key:@"romanization"]];
+                           roman:(YTMULyricsShowRomanization()
+                                   ? [self ytmu_subRowText:lyric key:@"romanization"] : nil)];
     // ...and the cue's OWN timings, so the backing vocal wipes on its own clock
     // instead of riding the lead's. nil for the rows that have none.
     id cueRaw = lyric[@"bg"];

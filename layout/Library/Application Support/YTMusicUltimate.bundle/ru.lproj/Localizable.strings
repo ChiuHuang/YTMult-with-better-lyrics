@@ -220,3 +220,5 @@
 "LYRICS_DUET_ALIGN" = "Выравнивать";
 
 "LYRICS_DUET_LABEL" = "Метка";
+"LYRICS_PINYIN" = "Pinyin";
+"LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";

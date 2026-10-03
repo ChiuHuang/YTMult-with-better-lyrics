@@ -217,6 +217,11 @@
         // -- so it is a segmented control, not an on/off. Source/LyricsSheet.x
         // reads the same key as YTMUDuetDisplayMode() and defaults to align.
         @{@"title": LOC(@"LYRICS_DUET"), @"desc": LOC(@"LYRICS_DUET_DESC"), @"icon": @"person.2.fill", @"key": @"", @"duetDisplay": @YES},
+        // Pinyin / romanization. Off by default and NOT defaultOn: the payload
+        // carries a reading for most CJK tracks, so leaving it on would print a
+        // fourth line under every row of a wbw line. Source/LyricsSheet.x reads
+        // the same key as YTMULyricsShowRomanization(), which defaults NO.
+        @{@"title": LOC(@"LYRICS_PINYIN"), @"desc": LOC(@"LYRICS_PINYIN_DESC"), @"icon": @"character.book.closed", @"key": @"lyricsShowRomanization"},
         @{@"title": LOC(@"TYPEWRITER"), @"desc": LOC(@"TYPEWRITER_DESC"), @"icon": @"keyboard", @"key": @""}
     ];
 }

@@ -53,10 +53,16 @@
 @property (nonatomic, strong) UILabel *transLabel;
 @property (nonatomic, strong) UILabel *wipeLabel;
 @property (nonatomic, strong) CAShapeLayer *wipeMask;
+// The moving alpha edge inside that mask, held rather than looked up: the tick
+// runs 120 times a second per active row and there is exactly one of these.
+@property (nonatomic, strong) CAGradientLayer *wipeFeather;
 @property (nonatomic, assign) CGFloat wipeProgress;
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, copy) NSString *lastColorKey;
+// The sway currently on the pair of vocal labels, so a quantized step is written
+// once instead of once per tick. Zero is also the resting value.
+@property (nonatomic, assign) CGFloat wobbleShift;
 // How bright this row is by its distance from the sung line. 1 for the sung
 // line itself, 0.0 five lines out. A multiplier on top of the inactive ink, so
 // the existing colour maths is untouched.
@@ -205,6 +211,12 @@
 @property (nonatomic, assign) BOOL landscapeIsPlaying;
 @property (nonatomic, assign) NSInteger fpsTicks;
 @property (nonatomic, assign) NSTimeInterval fpsWindowStart;
+// The tick's own main-thread cost, so `[FPS]` can say WHY a rate is low instead
+// of only what it is. See -updatePlaybackTime.
+@property (nonatomic, assign) NSTimeInterval fpsLastTickAt;
+@property (nonatomic, assign) double fpsTickMsTotal;
+@property (nonatomic, assign) double fpsTickMsMax;
+@property (nonatomic, assign) NSInteger fpsTickSamples;
 @property (nonatomic, assign) float lastVolume;
 // --- Streaming translation (Source/LyricsStream.x) ---
 @property (nonatomic, strong) id tstreamClient;

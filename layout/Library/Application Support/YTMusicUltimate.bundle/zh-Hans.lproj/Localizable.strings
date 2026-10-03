@@ -250,3 +250,5 @@
 "LYRICS_DUET_ALIGN" = "对齐";
 
 "LYRICS_DUET_LABEL" = "标签";
+"LYRICS_PINYIN" = "Pinyin";
+"LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";
