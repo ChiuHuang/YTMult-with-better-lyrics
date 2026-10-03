@@ -18,7 +18,7 @@ from .cache import (
 from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
 from .translate import (
-    cohere_key_list, get_cohere_key, rotate_cohere_key,
+    cohere_key_list, get_cohere_key, rotate_cohere_key, cohere_translate,
 )
 from .paths import (
     LYRICS_DIR, PROVIDER_FILE, RENAME_FILE, UNLYRICED_FILE,
@@ -178,6 +178,183 @@ def apply_saved_rename(video_id, info):
     if a:
         info['artist'] = a
     return info
+
+
+# ------------------------------------------------------------
+# Applying a lyrics payload to the cache
+# ------------------------------------------------------------
+# Two callers, one code path: the dashboard's "Refetch from URL" apply, and
+# POST /api/lyrics/contribute, where the better-lyrics browser extension pushes
+# the result of its OWN race when that beats what we served it. An operator
+# clicking apply and a browser upgrading us must land byte-identical entries,
+# or the extension's writes would quietly differ from ours in a way that only
+# shows up as "the phone shows something else for the same song".
+_PUSH_MAX_LINES = 2000
+
+
+def _push_ms(value):
+    """One time field out of an untrusted payload, in whole ms."""
+    try:
+        return max(0, int(round(float(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_push_lyrics(lyrics, lang=''):
+    """Our line shape out of somebody else's list.
+
+    The extension posts the braccato `Lyric[]` it just rendered, so this accepts
+    BOTH spellings rather than making the pusher reshape data it already has:
+    `words` (braccato) or `text` (ours) for the line, `translations[lang]`
+    (braccato) or `translated` (ours) for the target-language line.
+
+    Everything else is decided HERE, because this is the only place that says
+    what a browser is allowed to write: a non-dict is dropped, a missing time
+    becomes 0, a non-string text becomes ''. The line count is capped too --
+    this endpoint is authenticated by a key that gets pasted into a browser, so
+    it is treated as a remote caller.
+
+    Two braccato fields are deliberately NOT carried over:
+      * `isInstrumental` -- our server derives its own markers from the gaps
+        (cache._insert_instrumental_gaps), so a pushed one would double up.
+      * a part's `isBackground` -- ours is a NESTED line (`bg`), not a flag on
+        the part, so there is nothing here that means the same thing.
+    """
+    out = []
+    for raw in (lyrics or [])[:_PUSH_MAX_LINES]:
+        if not isinstance(raw, dict):
+            continue
+        text = raw.get('text')
+        if not isinstance(text, str):
+            text = raw.get('words')
+        line = {
+            'startTimeMs': _push_ms(raw.get('startTimeMs')),
+            'durationMs': _push_ms(raw.get('durationMs')),
+            'text': text if isinstance(text, str) else '',
+        }
+        translated = raw.get('translated')
+        if not isinstance(translated, str) or not translated:
+            translations = raw.get('translations')
+            if isinstance(translations, dict) and lang:
+                candidate = translations.get(lang)
+                if isinstance(candidate, str):
+                    translated = candidate
+        if isinstance(translated, str) and translated:
+            line['translated'] = translated
+        parts = raw.get('parts')
+        if isinstance(parts, list) and parts:
+            clean = []
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                words = part.get('words')
+                if not isinstance(words, str):
+                    words = part.get('text')
+                clean.append({
+                    'startTimeMs': _push_ms(part.get('startTimeMs')),
+                    'durationMs': _push_ms(part.get('durationMs')),
+                    'words': words if isinstance(words, str) else '',
+                })
+            # wordSynced is NOT the pusher's claim: sanitize_lyrics_parts drops
+            # the parts of any line that is not genuinely word-timed, and it
+            # reads this flag to decide. One part is not karaoke.
+            if len(clean) > 1:
+                line['parts'] = clean
+                line['wordSynced'] = True
+        out.append(line)
+    return out
+
+
+def apply_lyrics_payload(video_id, lang, source, data, title=None, artist=None,
+                         require_better=False, origin=''):
+    """Write one lyrics payload into the cache as '<video_id>:<lang>'.
+
+    Returns {'ok': True, tier, was_tier, lines, ...} when it wrote, and
+    {'ok': False, 'skipped': True, ...} when require_better refused it. With
+    require_better=False (the dashboard) it always writes, which is what an
+    explicit "apply this candidate" click means.
+
+    The tier gate is `strictly better`, never `different`: an extension push
+    happens on every song change, and a browser that keeps re-offering its
+    plain-lyrics fallback must not be able to walk a word-synced entry back
+    down to plain.
+    """
+    from .utils import _safe_cache_component
+
+    if not _safe_cache_component(video_id):
+        return {'ok': False, 'error': 'invalid video_id'}
+    if not _safe_cache_component(lang):
+        return {'ok': False, 'error': 'invalid lang'}
+
+    lines = _coerce_push_lyrics((data or {}).get('lyrics'), lang)
+    if not lines:
+        return {'ok': False, 'error': 'no lyrics'}
+
+    payload = dict(data or {})
+    payload['lyrics'] = lines
+    # sanitize_lyrics_parts is what turns a foreign line into ours: it splits an
+    # inline reading, and it DROPS parts on any line that is not genuinely
+    # word-timed (one part is not karaoke). So the tier has to be read AFTER it,
+    # never before, or a payload whose parts are about to be stripped would be
+    # accepted as word-synced and stored as plain.
+    sanitize_lyrics_parts(lines)
+    payload['wordSynced'] = any(l.get('wordSynced') for l in lines)
+    if payload['wordSynced']:
+        payload['synced'] = True
+
+    new_tier = _tier(payload)
+    full_key = f"{video_id}:{lang}"
+    existing = get_cached(full_key)
+    was_tier = _tier(existing) if existing else -1
+    if require_better and new_tier <= was_tier:
+        return {'ok': False, 'skipped': True, 'tier': _tier_name(new_tier),
+                'was_tier': _tier_name(was_tier), 'lines': len(lines)}
+
+    song = (title or payload.get('song') or '').strip()
+    artist_name = (artist or payload.get('artist') or '').strip()
+    merged = {'title': song, 'artist': artist_name}
+    apply_saved_rename(video_id, merged)
+    payload['song'] = merged['title']
+    payload['artist'] = merged['artist']
+    if source:
+        payload['source'] = source
+
+    # Only pay for a translation pass when the pusher did not bring one: the
+    # extension embeds the target-language line it is already displaying, and
+    # translating again would overwrite it with a different wording.
+    if lang and not any(l.get('translated') for l in lines):
+        print(f"  [CONTRIB] translating {len(lines)} lines for {lang}...")
+        texts = [l['text'] for l in lines if l.get('text')]
+        try:
+            translations = cohere_translate(texts, lang)
+        except Exception as e:
+            print(f"  [CONTRIB] [WARN] translate failed: {e}")
+            translations = []
+        for i, line in enumerate(lines):
+            if i < len(translations) and translations[i] and not line.get('translated'):
+                line['translated'] = translations[i]
+
+    set_cached(full_key, payload)
+    # A :fast sibling is what the device asks for in the first seconds of a
+    # play, so leaving the old tier there means the phone shows the pre-upgrade
+    # lyrics until the entry falls out of that window.
+    fast_key = f"{full_key}:fast"
+    if get_cached(fast_key) is not None:
+        set_cached(fast_key, payload)
+    remove_unlyriced(video_id)
+
+    print(f"  [CONTRIB] {origin or 'apply'} {video_id} "
+          f"{_tier_name(was_tier)}->{_tier_name(new_tier)} "
+          f"lines={len(lines)} source={payload.get('source', '')}")
+    return {'ok': True, 'video_id': video_id, 'lang': lang,
+            'tier': _tier_name(new_tier), 'was_tier': _tier_name(was_tier),
+            'lines': len(lines), 'song': payload['song'],
+            'artist': payload['artist'], 'source': payload.get('source', ''),
+            'data': payload}
+
+
+def _tier_name(tier_val):
+    return {2: 'wbw', 1: 'line', 0: 'plain'}.get(tier_val, 'none')
 
 
 # ------------------------------------------------------------

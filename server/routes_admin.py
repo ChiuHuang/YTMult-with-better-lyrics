@@ -29,12 +29,12 @@ from .app import (app, login_required, _admin_cfg, _save_admin_config,
 from .nodes import (_load_nodes, _mutate_nodes, _hash_node_key,
     connected_nodes, _connected_nodes_lock)
 from .jwt_pool import contribute_jwt, list_jwt, remove_jwt, check_all as jwt_check_all
-from .jwt_push import push as _jwt_push, ensure_key as _jwt_push_key
+from .jwt_push import push as _jwt_push, ensure_key as _jwt_push_key, key_ok as _push_key_ok
 from .self_update import SELF_UPDATE_REPO, SELF_UPDATE_BRANCH, SELF_UPDATE_REMOTE_PATH
 from .cache import clear_not_found_caches
 from .cache import _cache_key_from_filename
 from .paths import LYRICS_DIR, TRANSLATE_DIR
-from .library import get_rename
+from .library import get_rename, apply_lyrics_payload
 from .self_update import (_get_local_sha, _get_remote_sha, _fetch_remote_file,
     _perform_self_update, _get_main_file)
 from .logging_util import _log_crash
@@ -516,6 +516,60 @@ def api_jwt_push():
     if res.get('auth') is False:
         return resp, 401
     if not res.get('ok'):
+        return resp, 400
+    return resp
+
+
+@app.route('/api/lyrics/contribute', methods=['POST'])
+def api_lyrics_contribute():
+    """Key-authenticated lyrics upgrade from the better-lyrics browser
+    extension. Same trust level and the same key as /api/jwt/push: the caller
+    presents the push key, so this route sends no CORS headers and answers no
+    preflight.
+
+    The extension races MORE providers than we do and sometimes ends up with a
+    better result than the one we served it (a word-synced line where our pool
+    only had line-sync, a provider we do not carry at all). It posts that here
+    and we store it -- but only when it strictly beats the tier already on
+    disk, because this fires on every song change and a browser that keeps
+    re-offering its plain fallback must not walk a word-synced entry back down.
+
+    Body: {video_id, lang?, source?, data?, song?, artist?, node_id?}.
+    `data.lyrics` may be either our line shape or braccato's (`words`,
+    `translations[lang]`); see library._coerce_push_lyrics.
+    """
+    body = request.get_json(silent=True) or request.form.to_dict() or {}
+    key = request.headers.get('X-YTMU-Key') or body.get('key') or ''
+    if not _push_key_ok(key):
+        resp = jsonify({'ok': False, 'auth': False, 'error': 'bad key'})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, 401
+
+    video_id = (body.get('video_id') or body.get('v') or '').strip()
+    lang = (body.get('lang') or 'zh-TW').strip()
+    source = (body.get('source') or '').strip()[:64]
+    data = body.get('data')
+    node_id = (body.get('node_id') or '').strip()[:32]
+    if not video_id or not isinstance(data, dict):
+        resp = jsonify({'ok': False, 'error': 'missing video_id or data'})
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, 400
+
+    try:
+        res = apply_lyrics_payload(
+            video_id, lang, source, data,
+            title=(body.get('song') or body.get('title') or '').strip(),
+            artist=(body.get('artist') or '').strip(),
+            require_better=True,
+            origin=(f'ext {node_id}' if node_id else 'ext'),
+        )
+    except Exception as e:
+        print(f"  [CONTRIB] [FAIL] {video_id}: {e}")
+        res = {'ok': False, 'error': str(e)}
+
+    resp = jsonify(res)
+    resp.headers['Cache-Control'] = 'no-store'
+    if not res.get('ok') and not res.get('skipped'):
         return resp, 400
     return resp
 
