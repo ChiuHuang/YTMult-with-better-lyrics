@@ -13,7 +13,7 @@ from .app import app, login_required, _sse_broadcast
 from .library import (
     scan_cache, list_unlyriced, remove_unlyriced, rebase_cached,
     retitle_song, retitle_batch, retitle_cache_clear,
-    get_rename, save_rename, norm_title,
+    get_rename, save_rename, norm_title, apply_lyrics_payload,
 )
 from .rerace import _tier
 from .cache import get_cached, set_cached, _cache_filename, _cache_key_from_filename, sanitize_lyrics_parts, is_not_found_result
@@ -21,7 +21,6 @@ from .paths import LYRICS_DIR
 from .utils import _safe_cache_component
 from .pipeline import probe_providers
 from .providers_yt import get_song_info
-from .translate import cohere_translate
 
 # Module-level rebase job state
 _rebase_job = {
@@ -921,12 +920,7 @@ def _info_with_rename(video_id, info, custom_title=None, custom_artist=None):
     return info
 
 
-def _candidate_tier(cand):
-    if cand.get('wordSynced'):
-        return 'wbw'
-    if cand.get('synced'):
-        return 'line'
-    return 'plain'
+
 
 
 @app.route('/api/admin/library/refetch/start', methods=['POST'])
@@ -1151,37 +1145,18 @@ def api_probe_apply():
                              custom_title=(body.get('title') or '').strip(),
                              custom_artist=(body.get('artist') or '').strip())
 
-    out = dict(data)
-    out['song'] = base.get('title', out.get('song', ''))
-    out['artist'] = base.get('artist', out.get('artist', ''))
-    if source:
-        out['source'] = source
-    lyrics = out.get('lyrics') or []
-    sanitize_lyrics_parts(lyrics)
-
-    has_translated = any(l.get('translated') for l in lyrics)
-    if lang and lyrics and not has_translated:
-        print(f"  [APPLY] translating {len(lyrics)} lines for {lang}...")
-        texts = [l['text'] for l in lyrics if l.get('text')]
-        translations = cohere_translate(texts, lang)
-        for i, lyric in enumerate(lyrics):
-            if i < len(translations) and translations[i]:
-                lyric['translated'] = translations[i]
-
-    out['wordSynced'] = any(l.get('wordSynced') for l in lyrics)
-    set_cached(f"{video_id}:{lang}", out)
-    remove_unlyriced(video_id)
+    # The write itself is library.apply_lyrics_payload, which POST
+    # /api/lyrics/contribute also calls: an operator clicking apply and the
+    # browser extension pushing an upgrade must produce the same entry.
+    res = apply_lyrics_payload(
+        video_id, lang, source, data,
+        title=base.get('title', ''), artist=base.get('artist', ''),
+        origin='dashboard')
+    if not res.get('ok'):
+        return jsonify(res), 400
     _sse_broadcast('rebase', {'state': 'done', 'applied': video_id})
 
     return jsonify({
-        'ok': True,
-        'video_id': video_id,
-        'song': out['song'],
-        'artist': out['artist'],
-        'source': out.get('source', ''),
-        'tier': _candidate_tier(out),
-        'lines': len(lyrics),
-        'lang': lang,
+        **res,
         'renamed': bool((body.get('title') or '').strip() or (body.get('artist') or '').strip()),
-        'data': out,
     })
