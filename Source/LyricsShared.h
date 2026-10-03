@@ -73,11 +73,26 @@
 
 // The background voice / stage direction a line carries (`bg` in the payload,
 // from TTML ttm:role="x-bg" or an LRC [bg:] group). Its OWN line under the
-// lyric, dimmed, never wiped and never translated -- Better Lyrics renders it
-// exactly this way, and folding it into the lyric text is what made it sing
-// along with the lead. Pinned to zero height when the line has none, so a track
-// with no background voice lays out byte-identically to one without this.
+// lyric, dimmed, never translated -- folding it into the lyric text is what
+// made it sing along with the lead. Pinned to zero height when the line has
+// none, so a track with no background voice lays out byte-identically to one
+// without this.
 @property (nonatomic, strong) UILabel *bgLabel;
+// The cue's OWN word-by-word timeline. The payload already carries the cue's
+// `parts` with their own timings (6 of the 8 cue rows on Cubism do), and until
+// this existed the device threw them away and printed the cue as static text --
+// so the backing vocal lit up in step with the LEAD's wipe instead of its own.
+// Same shape as the vocal pair: a full copy of the text, dim, under a mask that
+// grows across it.
+@property (nonatomic, strong) UILabel *bgWipeLabel;
+@property (nonatomic, strong) CAShapeLayer *bgWipeMask;
+// The cue sub-dict as it arrived, kept for the tick. Nil is the normal case.
+@property (nonatomic, strong) NSDictionary *cueLyric;
+// The row this cue belongs to, so its layout cache cannot outlive the line whose
+// index produced it (cells are recycled across rows).
+@property (nonatomic, assign) NSInteger cueRowIndex;
+@property (nonatomic, copy) NSString *cachedCueLayoutKey;
+@property (nonatomic, strong) NSArray *cachedCueRects;
 
 // Romanization / transliteration for the row (`romanization`, from TTML
 // x-roman or a <transliterations> block). Same placement and same collapse rule
@@ -115,6 +130,10 @@
 // Either may be nil, and nil is the normal case; both must be safe on every
 // configure because cells are recycled.
 - (void)ytmu_setSubRowsWithBg:(NSString *)bgText roman:(NSString *)romanText;
+// Hand this row its cue sub-dict (`lyric[@"bg"]`) so the tick can run the cue's
+// own word timings, or nil on every configure that has none. Cells are recycled,
+// so this is called from -configureCell like everything else per-row.
+- (void)ytmu_setCueLyric:(NSDictionary *)cue row:(NSInteger)row;
 @end
 
 // (Typewriter) category for the cell -- see the note on the view controller's

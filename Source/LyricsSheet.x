@@ -714,6 +714,38 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.bgLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [self.contentView addSubview:self.bgLabel];
 
+        // The cue's reveal pair, over bgLabel exactly as wipeLabel sits over
+        // lyricLabel. The dim copy underneath is the resting state; this one is
+        // only visible where the cue's OWN mask has opened, which is what makes
+        // the backing vocal light up on its own timings instead of the lead's.
+        self.bgWipeLabel = [[UILabel alloc] init];
+        self.bgWipeLabel.numberOfLines = 0;
+        self.bgWipeLabel.font = [UIFont systemFontOfSize:YTMULyricCueFontSize() weight:UIFontWeightRegular];
+        self.bgWipeLabel.textColor = YTMULyricInk(0.5, 0.45, self.contentView);
+        self.bgWipeLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
+        self.bgWipeLabel.layer.shadowOffset = CGSizeMake(0, 1);
+        self.bgWipeLabel.layer.shadowRadius = 2.0;
+        self.bgWipeLabel.layer.shadowOpacity = 0.3;
+        self.bgWipeLabel.layer.masksToBounds = NO;
+        self.bgWipeLabel.layer.shouldRasterize = YES;
+        self.bgWipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        self.bgWipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+        // Never `hidden`: a hidden view is skipped by layout, so its bounds would
+        // stay zero and the cue's rects could never be measured. It is shown and
+        // hidden by its MASK instead -- an empty path hides the copy completely,
+        // and the layer costs one composite of nothing.
+        [self.contentView addSubview:self.bgWipeLabel];
+
+        self.bgWipeMask = [CAShapeLayer layer];
+        self.bgWipeMask.fillColor = [UIColor whiteColor].CGColor;
+        self.bgWipeMask.frame = CGRectZero;
+        // Not in the layer tree: a mask is drawn by the layer it masks, in that
+        // layer's own coordinates. Adding it to contentView would only give it a
+        // frame in the wrong space. No feather either -- the vocal line's moving
+        // edge is what the eye tracks, and a second one on a 13pt annotation
+        // competes with it.
+        self.bgWipeLabel.layer.mask = self.bgWipeMask;
+
         self.romanLabel = [[UILabel alloc] init];
         self.romanLabel.numberOfLines = 0;
         self.romanLabel.font = [UIFont systemFontOfSize:YTMULyricCueFontSize() weight:UIFontWeightRegular];
@@ -748,6 +780,11 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
 
             [self.bgLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
             [self.bgLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail],
+
+            [self.bgWipeLabel.topAnchor constraintEqualToAnchor:self.bgLabel.topAnchor],
+            [self.bgWipeLabel.leadingAnchor constraintEqualToAnchor:self.bgLabel.leadingAnchor],
+            [self.bgWipeLabel.trailingAnchor constraintEqualToAnchor:self.bgLabel.trailingAnchor],
+            [self.bgWipeLabel.bottomAnchor constraintEqualToAnchor:self.bgLabel.bottomAnchor],
 
             [self.romanLabel.leadingAnchor constraintEqualToAnchor:self.contentView.leadingAnchor constant:gutterLead],
             [self.romanLabel.trailingAnchor constraintEqualToAnchor:self.contentView.trailingAnchor constant:-gutterTrail]
@@ -936,6 +973,10 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     // the fade-in retarget below, without each caller having to remember.
     if (alpha <= 0.001) {
         [self ytmu_clearGlow];
+        // The cue goes back to its resting state with the line it belongs to: a
+        // half-lit backing vocal sitting under a finished line reads as a bug,
+        // and the cue's timings are about to be overwritten anyway.
+        self.bgWipeMask.path = nil;
     }
     if (fabs(from - alpha) < 0.001) {
         layer.opacity = (float)alpha;
@@ -955,6 +996,69 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
 // Drops the animated highlight glow and the moving feather edge, and nothing
 // else: the mask's own path stays, so a row that is fading out keeps the text it
 // has already revealed while the halo around it goes away.
+// Which word a `parts` array is on at `nowMs`, and how far through it.
+//
+// Extracted from the vocal line's own loop so the cue can run the identical rule
+// on its own timings: same 120ms floor, same last-word clamp against the average
+// of the words before it. A cue's parts are a real timing track, not a copy of
+// the lead's, so it gets its own cursor -- but it must not get a second, subtly
+// different definition of "where are we".
+static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
+    NSInteger n = (NSInteger)[parts count];
+    if (n <= 0) { *outFrac = 0.0; return -1; }
+    double priorDurSum = 0;
+    NSInteger priorDurCount = 0;
+    for (NSInteger i = 0; i < n; i++) {
+        NSDictionary *p = [parts objectAtIndex:(NSUInteger)i];
+        double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
+        double s = [p[@"startTimeMs"] doubleValue];
+        double d = MAX(rawDur, 120.0);
+        if (i == n - 1 && d > 1400.0) {
+            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+            d = MIN(d, MAX(avg * 1.5, 500.0));
+            d = MIN(d, 1400.0);
+        } else {
+            priorDurSum += d;
+            priorDurCount++;
+        }
+        if (nowMs < s) { *outFrac = 0.0; return i; }
+        if (nowMs < s + d) { *outFrac = (nowMs - s) / d; return i; }
+    }
+    *outFrac = 1.0;
+    return n;
+}
+
+// The average duration of the words BEFORE index `upTo`, with the same 120ms
+// floor the cursor uses. The glow clamps its last word against this, which is
+// how a file's fat final word stops smearing the highlight across the gap.
+static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
+    double sum = 0;
+    NSInteger n = 0;
+    for (NSInteger i = 0; i < upTo && i < (NSInteger)[parts count]; i++) {
+        sum += MAX([[parts objectAtIndex:(NSUInteger)i][@"durationMs"] doubleValue], 120.0);
+        n++;
+    }
+    return (n > 0) ? (sum / (double)n) : 400.0;
+}
+
+// Hand this row its cue, or nil. The display string is NOT recomputed here:
+// -ytmu_setSubRowsWithBg: has already put it on bgLabel, and the reveal copy is
+// the same string in the same font over the same frame, so copying it is both
+// cheaper and impossible to let drift.
+- (void)ytmu_setCueLyric:(NSDictionary *)cue row:(NSInteger)row {
+    NSArray *parts = [cue isKindOfClass:[NSDictionary class]] ? cue[@"parts"] : nil;
+    // One part is not a wipe: there is no word to move on to, and a hard-edged
+    // flash over a whole cue is worse than a static annotation.
+    BOOL wipeable = [parts isKindOfClass:[NSArray class]] && parts.count > 1;
+    _cueLyric = wipeable ? cue : nil;
+    _cueRowIndex = wipeable ? row : -1;
+    self.cachedCueLayoutKey = nil;
+    self.cachedCueRects = nil;
+    self.bgWipeLabel.text = wipeable ? self.bgLabel.text : nil;
+    self.bgWipeMask.path = nil;
+    [self.contentView setNeedsLayout];
+}
+
 - (void)ytmu_clearGlow {
     self.wipeLabel.layer.shadowRadius = 0.0;
     self.wipeLabel.layer.shadowOpacity = 0.0;
@@ -1004,6 +1108,7 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.wipeMask.frame = self.wipeLabel.bounds;
+    self.bgWipeMask.frame = self.bgWipeLabel.bounds;
     if (!self.waveActive) {
         if (!self.waveLayer.hidden) self.waveLayer.hidden = YES;
         return;
@@ -1075,6 +1180,10 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     self.wipeLabel.attributedText = nil;
     self.wipeMask.path = nil;
     self.lastColorKey = nil;
+    // The cue's reveal is per-row state for the same reason the wipe is.
+    self.bgWipeMask.path = nil;
+    self.cachedCueRects = nil;
+    self.cachedCueLayoutKey = nil;
     // A cell is reconfigured (not only recycled) on every activation change and
     // on reloadData, so the typewriter mask has to be dropped here too --
     // otherwise a half-revealed row survives a reconfigure of the same cell.
@@ -1104,6 +1213,13 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     self.wipeLabel.text = nil;
     self.wipeLabel.attributedText = nil;
     self.wipeMask.path = nil;
+    // ...and so is the cue's timeline, or the next row inherits a backing vocal
+    // that belongs to the row this cell used to be.
+    _cueLyric = nil;
+    self.bgWipeLabel.text = nil;
+    self.bgWipeMask.path = nil;
+    self.cachedCueRects = nil;
+    self.cachedCueLayoutKey = nil;
     self.lyricLabel.attributedText = nil;
     self.lastColorKey = nil;
     // A collapsed (zero-height) row must never be recycled as a normal line.
@@ -1257,6 +1373,15 @@ static char s_ytmuClosedByRotationKey;
 - (void)ytmu_refreshProviderSwitcher;
 - (void)ytmu_setProbing:(BOOL)probing;
 - (void)ytmu_scrollToRow:(NSInteger)row instant:(BOOL)instant;
+// The cue (`bg`) runs its own mask, its own rect cache and its own cursor, so it
+// is a separate method rather than more of the vocal line's.
+// -ytmu_tickCueForCell:nowMs: is the entry every caller uses; the second is its
+// body, and it takes the cursor the tick already resolved.
+- (void)ytmu_tickCueForCell:(YTMULyricsCell *)cell nowMs:(double)nowMs;
+- (void)ytmu_applyCueWipeToCell:(YTMULyricsCell *)cell
+                        nowMs:(double)nowMs
+                      cueWord:(NSInteger)cueWord
+                      cueFrac:(double)cueFrac;
 - (void)ytmu_retranslateTapped:(UIButton *)sender;
 - (void)ytmu_endRetranslate:(BOOL)ok;
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
@@ -4474,7 +4599,15 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             if (cell) {
                 NSDictionary *lyric = self.lyrics[i];
                 if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
+                    // The cue rides along on this call -- -applyWordColorsToCell
+                    // ticks it first, on the cue's own timings.
                     [self applyWordColorsToCell:cell lyric:lyric index:(NSInteger)i currentTime:currentTime force:NO];
+                } else if (cell.cueLyric) {
+                    // A LINE-synced row never reaches -applyWordColorsToCell, and
+                    // an LRC [bg:] cue has parts on exactly those rows: the
+                    // backing vocal was static there because the only thing that
+                    // ticked it was the lead's own wipe.
+                    [self ytmu_tickCueForCell:cell nowMs:nowMs];
                 }
             }
         }
@@ -4802,28 +4935,16 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     if (width <= 0) return;
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
-    NSInteger curWord = partCount;
     double curFrac = 1.0;
-    double priorDurSum = 0;
-    NSInteger priorDurCount = 0;
-    for (NSInteger i = 0; i < partCount; i++) {
-        NSDictionary *p = parts[i];
-        double rawDur = MAX([p[@"durationMs"] doubleValue], 1.0);
-        double s = [p[@"startTimeMs"] doubleValue];
-        double d = MAX(rawDur, 120.0);
-        if (i == partCount - 1 && d > 1400.0) {
-            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
-            d = MIN(d, MAX(avg * 1.5, 500.0));
-            d = MIN(d, 1400.0);
-        } else {
-            priorDurSum += d;
-            priorDurCount++;
-        }
-        if (nowMs < s) { curWord = i; curFrac = 0.0; break; }
-        if (nowMs < s + d) { curWord = i; curFrac = (nowMs - s) / d; break; }
-    }
+    NSInteger curWord = YTMUWordCursor(parts, nowMs, &curFrac);
+    if (curWord < 0) curWord = partCount;
+    // The cue goes FIRST and on its own clock, before anything the vocal line
+    // does. It cannot ride this method's cursor: an LRC [bg:] cue carries parts
+    // on a LINE-synced row, which never reaches the rest of this method at all.
+    [self ytmu_tickCueForCell:cell nowMs:nowMs];
     NSInteger fracQ = (NSInteger)(curFrac * 24.0);
-    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord, (long)fracQ, (double)width];
+    NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord,
+                     (long)fracQ, (double)width];
 
     // braccato's word wobble, as a whole-line sway on the pair of label copies
     // (they share a frame, so they move as one and the mask rides along).
@@ -4988,7 +5109,7 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         double wordStart = [cur[@"startTimeMs"] doubleValue];
         double wordDur = MAX([cur[@"durationMs"] doubleValue], 120.0);
         if (curWord == partCount - 1 && wordDur > 1400.0) {
-            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+            double avg = YTMUPriorAverageDuration(parts, curWord);
             wordDur = MIN(wordDur, MAX(avg * 1.5, 500.0));
         }
         double glowMs = MAX(wordDur * YTMUHighlightGlowRatio, YTMUHighlightGlowMinDuration * 1000.0);
@@ -5036,6 +5157,112 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     [CATransaction setDisableActions:YES];
     cell.wipeMask.frame = cell.wipeLabel.bounds;
     cell.wipeMask.path = path.CGPath;
+    [CATransaction commit];
+}
+
+// The cue's tick. One entry point for every caller, and a no-op for the rows
+// that have no cue -- which is the overwhelming majority, so the cost of asking
+// is a nil check.
+- (void)ytmu_tickCueForCell:(YTMULyricsCell *)cell nowMs:(double)nowMs {
+    if (!cell.cueLyric) {
+        // Also the recycle path: a cell that lost its cue must not keep drawing
+        // the previous row's backing vocal through a mask nobody clears.
+        if (cell.bgWipeMask.path || cell.bgWipeLabel.text) {
+            cell.bgWipeMask.path = nil;
+            cell.bgWipeLabel.text = nil;
+            cell.cachedCueRects = nil;
+            cell.cachedCueLayoutKey = nil;
+        }
+        return;
+    }
+    double cueFrac = 0.0;
+    NSInteger cueWord = YTMUWordCursor(cell.cueLyric[@"parts"], nowMs, &cueFrac);
+    [self ytmu_applyCueWipeToCell:cell nowMs:nowMs cueWord:cueWord cueFrac:cueFrac];
+}
+
+// The cue's own wipe. Separate from the vocal line's on purpose: it is a
+// different string in a different size with its own `parts`, so it gets its own
+// layout pass, its own rect cache and its own mask. Reuses the same prefix rule
+// (YTMUAppendRevealedWords), so a cue cannot light up out of order either.
+//
+// The partial word is drawn as a hard edge rather than a feather: the vocal
+// line's moving edge is what the eye follows, and a second one on a 13pt
+// annotation competes with it.
+- (void)ytmu_applyCueWipeToCell:(YTMULyricsCell *)cell
+                        nowMs:(double)nowMs
+                      cueWord:(NSInteger)cueWord
+                      cueFrac:(double)cueFrac {
+    if (!cell.cueLyric) return;
+    CGFloat width = CGRectGetWidth(cell.bgWipeLabel.bounds);
+    if (width <= 0) return;
+
+    NSArray *cueRanges = nil;
+    NSString *cueDisplay = [self wbwDisplayTextForLyric:cell.cueLyric ranges:&cueRanges];
+    // The alignment is in the key because the cue inherits the row's voice
+    // alignment, and a right-aligned duet row lays the same string out at a
+    // different x: rects cached under the old alignment would light the wrong
+    // words.
+    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%.1f|%ld|%@", (long)cell.cueRowIndex,
+                           (double)width, (long)cell.ytmu_textAlign, cueDisplay];
+    if (![layoutKey isEqualToString:cell.cachedCueLayoutKey]) {
+        UIFont *font = cell.bgWipeLabel.font ?: [UIFont systemFontOfSize:YTMULyricCueFontSize()];
+        cell.bgWipeLabel.attributedText = nil;
+        cell.bgWipeLabel.text = cueDisplay;
+        cell.bgWipeLabel.textColor = YTMULyricInk(0.5, 0.45, self.view);
+
+        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:cueDisplay attributes:@{NSFontAttributeName: font}];
+        NSLayoutManager *lm = [[NSLayoutManager alloc] init];
+        NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
+        tc.lineFragmentPadding = 0;
+        tc.maximumNumberOfLines = 0;
+        tc.lineBreakMode = NSLineBreakByWordWrapping;
+        [lm addTextContainer:tc];
+        [ts addLayoutManager:lm];
+        [lm ensureLayoutForTextContainer:tc];
+
+        NSMutableArray *rects = [NSMutableArray arrayWithCapacity:[cueRanges count]];
+        for (NSValue *v in cueRanges) {
+            NSRange r = [v rangeValue];
+            if (r.location == NSNotFound || r.length == 0) {
+                [rects addObject:[NSValue valueWithCGRect:CGRectNull]];
+                continue;
+            }
+            NSRange glyphs = [lm glyphRangeForCharacterRange:r actualCharacterRange:NULL];
+            CGRect b = [lm boundingRectForGlyphRange:glyphs inTextContainer:tc];
+            [rects addObject:[NSValue valueWithCGRect:CGRectInset(b, -1, -1)]];
+        }
+        cell.cachedCueRects = rects;
+        cell.cachedCueLayoutKey = layoutKey;
+    }
+
+    NSInteger cueCount = (NSInteger)[cell.cachedCueRects count];
+    if (cueCount <= 0) return;
+    BOOL rtl = cell.bgWipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    UIBezierPath *cuePath = [UIBezierPath bezierPath];
+    if (cueWord >= cueCount) {
+        // Past the last word: the backing vocal has sung the whole cue, so the
+        // bright copy stays. Same as the vocal line's end state.
+        [cuePath appendPath:[UIBezierPath bezierPathWithRect:cell.bgWipeLabel.bounds]];
+    } else {
+        if (cueWord > 0) {
+            YTMUAppendRevealedWords(cuePath, cell.cachedCueRects, cueWord, rtl, width);
+        }
+        CGRect wordRect = [cell.cachedCueRects[cueWord] CGRectValue];
+        if (!CGRectIsNull(wordRect)) {
+            CGFloat f = MIN(1.0, MAX(0.0, cueFrac));
+            CGRect solid = wordRect;
+            solid.size.width *= f;
+            if (rtl) solid.origin.x = CGRectGetMaxX(wordRect) - solid.size.width;
+            if (solid.size.width > 0.0) {
+                [cuePath appendPath:[UIBezierPath bezierPathWithRect:solid]];
+            }
+        }
+    }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    cell.bgWipeMask.frame = cell.bgWipeLabel.bounds;
+    cell.bgWipeMask.path = cuePath.CGPath;
     [CATransaction commit];
 }
 
@@ -5208,8 +5435,11 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         // marker -- and this row may be a recycled cell still holding the
         // previous row's marker.
         [cell ytmu_setSingerMarker:nil];
-        // Same for the cue / romanization rows.
+        // Same for the cue / romanization rows, and for the cue's own timeline:
+        // an instrumental gap is sung by nobody, and a recycled cell that kept
+        // the previous row's backing vocal would light it up against the wave.
         [cell ytmu_setSubRowsWithBg:nil roman:nil];
+        [cell ytmu_setCueLyric:nil row:-1];
         cell.waveActive = showNote;
         if (showNote) {
             // Flatten across the gap: 0 the instant it opens, 1 as it closes.
@@ -5241,7 +5471,13 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
     // the overwhelming majority of rows, which is why they are pinned flat.
     [cell ytmu_setSubRowsWithBg:[self ytmu_subRowText:lyric key:@"bg"]
                            roman:[self ytmu_subRowText:lyric key:@"romanization"]];
+    // ...and the cue's OWN timings, so the backing vocal wipes on its own clock
+    // instead of riding the lead's. nil for the rows that have none.
+    id cueRaw = lyric[@"bg"];
+    [cell ytmu_setCueLyric:[cueRaw isKindOfClass:[NSDictionary class]] ? cueRaw : nil
+                       row:index];
     cell.bgLabel.textAlignment = cell.ytmu_textAlign;
+    cell.bgWipeLabel.textAlignment = cell.ytmu_textAlign;
     cell.romanLabel.textAlignment = cell.ytmu_textAlign;
     cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     cell.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
