@@ -231,9 +231,10 @@ static CGFloat YTMUArtworkLuminance(UIImage *img) {
 // as in flight (see ytmu_scrollToRow:instant:).
 static const NSTimeInterval YTMUTransitionDuration = 0.28;
 // Restrained activation pop: the old 1.04 / alpha 0.3 / 0.5s read as a jump.
-// Applied to a LINE-SYNCED row only; a word-synced row's arrival motion is the
-// per-word sway below, which is what braccato's own themes do (its karaoke
-// preset sets line-scale off and leaves the wobble on).
+// A LINE-SYNCED row only. A word-synced row gets the highlight fade instead
+// (ytmu_beginHighlightArrivalWithDuration), because a pop under a moving wipe
+// fights the mask for 0.28s -- and it used to get a per-word sway on top of
+// that, which is gone (see the wobble note below).
 static const CGFloat YTMUPopScale = 1.018;
 static const CGFloat YTMUPopStartAlpha = 0.6;
 
@@ -257,21 +258,24 @@ static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
 // re-rendered at screen scale. Four steps over the radius is smooth enough to
 // read as a shrink and cheap enough to keep the bitmap between them.
 static const CGFloat YTMUHighlightGlowStep = 3.2;
-// Word wobble, applied per WORD as a whole-line sway. braccato's own keyframes
-// are translateX(0.05em) + scaleX(1.025) at 12.5%, settling at 75%, over 1s
-// (variables.css:111-120). Only the translate half survives here: our lyric
-// labels are full-width with Natural alignment, so a scaleX about the label
-// centre would drag the glyphs toward the middle instead of squashing the word
-// -- that needs one layer per word, which is not built.
-static const NSTimeInterval YTMUWobbleDuration = 1.0;
-static const CGFloat YTMUWobblePeakOffset = 0.125;
-static const CGFloat YTMUWobbleSettleOffset = 0.75;
-static const CGFloat YTMUWobblePeakEm = 0.05;
-// Ladder step for the sway, in points. The whole move is 0.05em (1.4pt at the
-// default size) over a second, so sixteen steps is a 0.09pt increment: below the
-// threshold where anyone could see it stepping, and it turns a per-frame
-// transform write on two full-width labels into sixteen writes per word.
-static const CGFloat YTMUWobbleStep = 0.09;
+// The word wobble is GONE, and this is the note so it does not come back.
+//
+// braccato's keyframes are translateX(0.05em) + scaleX(1.025) peaking at 12.5%
+// and settling at 75%, over 1s, per word (variables.css:111-120). Only the
+// translate half ever worked here: a scaleX about a full-width label's centre
+// drags the glyphs toward the middle instead of squashing the word, which needs
+// one layer per word. So what we shipped was half a decoration.
+//
+// The half that shipped cost the most expensive thing in the tick. A transform
+// on a view makes the layer give up the bitmap it captured at its own bounds,
+// so a 1.4pt sway was re-rasterizing two full-width CJK labels -- text plus
+// shadow, at screen scale -- sixty or 120 times a second, for a whole second
+// per word. Quantizing it to sixteen steps only made it sixteen instead of 120.
+// On a CSS engine that transform is free on the compositor; here it is not free
+// at all, and nothing about the line reads better for it. The wipe's own moving
+// edge is the motion worth having.
+// A line-synced row still gets an arrival (ytmu_beginHighlightArrivalWithDuration:
+// a fade). It is the sway that was removed, not the arrival.
 // Karaoke swipe overshoot: the leading edge runs past the word and is pulled
 // back over the last fifth of it, so the highlight visibly catches up.
 // variables.css:101-104 does the same thing with animated gradient stops
@@ -1160,9 +1164,8 @@ static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
     }
     self.waveLayer.hidden = NO;
 
-    // Laid out from the label's CENTRE, never its frame: the arrival pop and the
-    // word wobble both put a transform on this label, and a transformed view's
-    // frame is undefined.
+    // Laid out from the label's CENTRE, never its frame: the arrival pop puts a
+    // transform on this label, and a transformed view's frame is undefined.
     CGPoint lc = self.lyricLabel.center;
     CGFloat x = lc.x - width * 0.5;
     if (self.ytmu_textAlign == NSTextAlignmentRight) x = lc.x + width * 0.5 - width;
@@ -5008,57 +5011,12 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     NSString *key = [NSString stringWithFormat:@"%ld:%ld:%ld:%.0f", (long)index, (long)curWord,
                      (long)fracQ, (double)width];
 
-    // braccato's word wobble, as a whole-line sway on the pair of label copies
-    // (they share a frame, so they move as one and the mask rides along).
-    // translateX(0.05em) peaking a twelfth of the way into the word, easing back
-    // to rest by three quarters of it. The scaleX half of braccato's keyframe is
-    // deliberately absent: our labels are full-width, so a scaleX about their
-    // centre would slide the glyphs rather than squash the word.
-    //
-    // Deliberately BEFORE the quantization early-out below: a transform that is
-    // only written when the mask is rewritten can be stranded mid-sway on the
-    // ticks where the mask is not, since a word's fraction stops changing once it
-    // is fully sung.
-    //
-    // ...and QUANTIZED, because this is the one thing in the tick that ran at
-    // the display link's full rate: a 0.05em sway lasts a whole second per word,
-    // and writing a transform on two full-width labels sixty or hundred and
-    // twenty times a second throws away their rasterized bitmaps (a transformed
-    // layer cannot reuse the cache captured at its own bounds) and forces a
-    // re-render of a long CJK line with a text shadow every single frame. Sixteen
-    // steps over a 0.05em move is indistinguishable from 120.
-    CGFloat shift = 0.0;
-    if (curWord >= 0 && curWord < partCount && !UIAccessibilityIsReduceMotionEnabled()) {
-        NSDictionary *cur = parts[curWord];
-        double wordStart = [cur[@"startTimeMs"] doubleValue];
-        double wordDur = MAX([cur[@"durationMs"] doubleValue], 1.0);
-        double span = MIN(wordDur, YTMUWobbleDuration * 1000.0);
-        if (span > 0.0) {
-            double t = (nowMs - wordStart) / span;
-            CGFloat em = (cell.wipeLabel.font ? cell.wipeLabel.font.pointSize : 22.0) * YTMUWobblePeakEm;
-            if (t >= 0.0 && t < YTMUWobblePeakOffset) {
-                double s = t / YTMUWobblePeakOffset;
-                shift = (CGFloat)(em * (s * s * (3.0 - 2.0 * s)));
-            } else if (t < YTMUWobbleSettleOffset) {
-                double u = (t - YTMUWobblePeakOffset) / (YTMUWobbleSettleOffset - YTMUWobblePeakOffset);
-                shift = (CGFloat)(em * (1.0 - (u * u * (3.0 - 2.0 * u))));
-            }
-            shift = floor(shift / YTMUWobbleStep) * YTMUWobbleStep;
-        }
-    }
-    if (fabs(shift) > 0.01) {
-        if (fabs(shift - cell.wobbleShift) > 0.001) {
-            cell.wobbleShift = shift;
-            cell.lyricLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
-            cell.wipeLabel.transform = CGAffineTransformMakeTranslation(shift, 0.0);
-        }
-    } else if (!CGAffineTransformIsIdentity(cell.lyricLabel.transform)) {
-        // Compared rather than assigned: writing an identity transform to a
-        // label that already has one marks its layer for a layout pass.
-        cell.wobbleShift = 0.0;
-        cell.lyricLabel.transform = CGAffineTransformIdentity;
-        cell.wipeLabel.transform = CGAffineTransformIdentity;
-    }
+    // No wobble here any more. It was braccato's translateX(0.05em) with the
+    // scaleX half dropped (a full-width label cannot squash one word), and a
+    // transform on these two labels costs more than the whole rest of the tick:
+    // the layer gives up its rasterized bitmap, so a 1.4pt sway meant
+    // re-rendering a long CJK line with a shadow every frame, for a second per
+    // word. See the note by the constants. What is left here is the wipe.
 
     if (!force && [key isEqualToString:cell.lastColorKey]) return;
 
