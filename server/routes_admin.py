@@ -550,6 +550,11 @@ def api_lyrics_contribute():
     source = (body.get('source') or '').strip()[:64]
     data = body.get('data')
     node_id = (body.get('node_id') or '').strip()[:32]
+    # force is the extension's "send what is on screen" BUTTON: an explicit press
+    # replaces the entry instead of being measured against it. It is logged as a
+    # force so it is never mistaken for an automatic upgrade, and the automatic
+    # path can never set it.
+    force = body.get('force') in (True, 'true', '1', 1)
     if not video_id or not isinstance(data, dict):
         resp = jsonify({'ok': False, 'error': 'missing video_id or data'})
         resp.headers['Cache-Control'] = 'no-store'
@@ -560,8 +565,8 @@ def api_lyrics_contribute():
             video_id, lang, source, data,
             title=(body.get('song') or body.get('title') or '').strip(),
             artist=(body.get('artist') or '').strip(),
-            require_better=True,
-            origin=(f'ext {node_id}' if node_id else 'ext'),
+            require_better=not force,
+            origin=(f'ext {node_id}' + (' FORCE' if force else '')) if node_id else ('ext FORCE' if force else 'ext'),
         )
     except Exception as e:
         print(f"  [CONTRIB] [FAIL] {video_id}: {e}")
