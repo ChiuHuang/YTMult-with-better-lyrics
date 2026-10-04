@@ -130,24 +130,6 @@ static UIColor *YTMULyricShadow(UIView *refView) {
         return [[UIColor darkGrayColor] colorWithAlphaComponent:0.35];
     return [[UIColor blackColor] colorWithAlphaComponent:0.8];
 }
-// The highlight glow's colour, and deliberately NOT YTMULyricShadow.
-//
-// The wipe mask is widened by the glow radius on purpose, so the blur can escape
-// the word it belongs to -- but a mask CLIPS the shadow drawn under it, so a dark
-// shadow clipped to that widened rect is not a halo: it is a hard-edged dark
-// rectangle sitting on the artwork around the word being sung. That is exactly
-// what the device screenshots showed, on the active line AND on the line just
-// finished (the fade-out kept the mask and the radius alive for its 0.5s).
-//
-// A glow cannot be dark and unclipped at the same time, so it is the bright ink's
-// own colour instead: on a dark backdrop a white halo, on a light one a black
-// one, and neither can be mistaken for a box because it fades to nothing at the
-// rectangle's edge the same way a real blur does.
-static UIColor *YTMULyricGlow(UIView *refView) {
-    if (YTMUBgIsLight(refView))
-        return [[UIColor blackColor] colorWithAlphaComponent:0.5];
-    return [[UIColor whiteColor] colorWithAlphaComponent:0.8];
-}
 // Same idea as YTMULyricInk for pill/track fills.
 static UIColor *YTMULyricFill(UIView *refView) {
     BOOL light = YTMUBgIsLight(refView);
@@ -246,22 +228,24 @@ static const NSTimeInterval YTMUHighlightFadeOutDuration = 0.50;  // variables.c
 // braccato rests the sung line at 37% of the viewport, not the middle, so the
 // lines still to come have somewhere to go. engine.ts:125.
 static const CGFloat YTMUScrollTargetRatio = 0.37;
-// Highlight glow: a drop-shadow that starts fat around the word being sung and
-// shrinks away over 1.2x that word's own time, never under 1.2s.
-// variables.css:105-108.
-static const CGFloat YTMUHighlightGlowRadius = 12.8;
-static const CGFloat YTMUHighlightGlowRatio = 1.2;
-static const NSTimeInterval YTMUHighlightGlowMinDuration = 1.2;
-// Ladder step for the glow radius. It is a layer shadow, and a layer shadow is
-// drawn as part of the layer, so a new radius invalidates the raster cache this
-// label relies on (see shouldRasterize in the cell init) and the blur is
-// re-rendered at screen scale. Four steps over the radius is smooth enough to
-// read as a shrink and cheap enough to keep the bitmap between them.
-// The highlight glow: a blur of FIXED radius, whose visible extent is the mask
-// opening around the word being sung and closing again. The radius is written
-// once in the cell init and never touched, because a layer shadow is drawn as
-// part of the layer and a new radius discards the rasterized bitmap.
-static const CGFloat YTMUHighlightGlowOpacity = 0.5;
+// THE HIGHLIGHT GLOW IS GONE, and this is why, because it cannot be done here.
+//
+// braccato has one: a drop-shadow that starts fat around the word being sung and
+// shrinks over 1.2x that word's time (variables.css:105-108). On a CSS engine a
+// shadow is drawn as a blurred copy of the glyphs and nothing clips it, so it
+// reads as a halo. Here the reveal layer sits behind a CAShapeLayer MASK, and a
+// mask has no falloff -- it is opaque or it is not. So the shadow can only ever
+// appear as: mask widened around the word -> the blur fills that rectangle ->
+// the mask cuts it at the rectangle's edge -> a box with crisp vertical sides
+// that extends past the glyphs into empty space. That is exactly what the
+// device screenshot showed, and it is not a tuning problem. Animating the radius
+// (what ac9ca4e did) made it worse rather than better, because it also threw
+// the rasterized bitmap away 24 times a word.
+//
+// Doing it properly needs a per-pixel mask -- a mask whose ALPHA falls off, not
+// a binary path -- which is a different renderer, not a constant. Until that
+// exists the honest answer is no glow. The reveal itself (a solid prefix with a
+// gradient edge on the word being sung) is the feature, and it is unaffected.
 // How often the wipe mask may be rewritten, in milliseconds. Below the 8.3ms of
 // a 120Hz frame, so it never costs the wipe a visible step, and above zero so a
 // paused player (or a cursor that has not moved) writes nothing at all.
@@ -655,16 +639,14 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
-        // YTMULyricGlow, not YTMULyricShadow: see its comment. The constant downward
-        // drop that keeps the bright text readable over artwork lives in the
-        // attributed string's NSShadow, so this one is free to be the highlight
-        // glow -- which means the RADIUS is written ONCE, HERE, and never again:
-        // animating it re-rendered the whole line every tick (see
-        // -applyWordColorsToCell, where the motion now lives in the mask).
-        self.wipeLabel.layer.shadowColor = YTMULyricGlow(self.contentView).CGColor;
-        self.wipeLabel.layer.shadowOffset = CGSizeZero;
-        self.wipeLabel.layer.shadowRadius = YTMUHighlightGlowRadius;
-        self.wipeLabel.layer.shadowOpacity = YTMUHighlightGlowOpacity;
+        // No layer shadow on the reveal layer. There WAS a highlight glow here (see the
+        // note by the constants) and it had to go: a mask clips a shadow to its
+        // own shape, so a blurred "halo" could only ever render as a hard-edged
+        // rectangle, and animating its radius re-rendered the line every tick.
+        // The downward drop that keeps the bright text readable over artwork
+        // lives in the attributed string's NSShadow, where it belongs.
+        self.wipeLabel.layer.shadowRadius = 0.0;
+        self.wipeLabel.layer.shadowOpacity = 0.0;
         self.wipeLabel.layer.masksToBounds = NO;
         self.wipeLabel.layer.shouldRasterize = YES;
         self.wipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
@@ -693,6 +675,7 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         wipeFeather.locations = @[@0.0, @0.25, @0.55, @0.82, @1.0];
         wipeFeather.startPoint = CGPointMake(0.0, 0.5);
         wipeFeather.endPoint = CGPointMake(1.0, 0.5);
+        _wipeFeatherRTL = 0;   // matches the axes set just above
         wipeFeather.actions = @{@"position":[NSNull null], @"bounds":[NSNull null], @"frame":[NSNull null], @"hidden":[NSNull null]};
         [self.wipeMask addSublayer:wipeFeather];
         // Held, not looked up. The tick used to walk wipeMask.sublayers comparing
@@ -1084,19 +1067,6 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     }
     *outFrac = 1.0;
     return n;
-}
-
-// The average duration of the words BEFORE index `upTo`, with the same 120ms
-// floor the cursor uses. The glow clamps its last word against this, which is
-// how a file's fat final word stops smearing the highlight across the gap.
-static double YTMUPriorAverageDuration(NSArray *parts, NSInteger upTo) {
-    double sum = 0;
-    NSInteger n = 0;
-    for (NSInteger i = 0; i < upTo && i < (NSInteger)[parts count]; i++) {
-        sum += MAX([[parts objectAtIndex:(NSUInteger)i][@"durationMs"] doubleValue], 120.0);
-        n++;
-    }
-    return (n > 0) ? (sum / (double)n) : 400.0;
 }
 
 // Hand this row its cue, or nil. The display string is NOT recomputed here:
@@ -5148,12 +5118,19 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
                 feather.size.width = visibleFeather;
                 if (rtl) {
                     feather.origin.x = CGRectGetMaxX(wordRect) - revealedWidth;
-                    wipeFeather.startPoint = CGPointMake(1.0, 0.5);
-                    wipeFeather.endPoint = CGPointMake(0.0, 0.5);
                 } else {
                     feather.origin.x += revealedWidth - visibleFeather;
-                    wipeFeather.startPoint = CGPointMake(0.0, 0.5);
-                    wipeFeather.endPoint = CGPointMake(1.0, 0.5);
+                }
+                // The gradient's AXES are written once per cell, not per tick.
+                // startPoint/endPoint rebuild the layer's colour map, and the
+                // direction only depends on the row's layout direction -- which
+                // cannot change under a live cell. The frame below is what
+                // actually moves.
+                NSInteger wantRTL = rtl ? 1 : 0;
+                if (wantRTL != cell.wipeFeatherRTL) {
+                    wipeFeather.startPoint = rtl ? CGPointMake(1.0, 0.5) : CGPointMake(0.0, 0.5);
+                    wipeFeather.endPoint = rtl ? CGPointMake(0.0, 0.5) : CGPointMake(1.0, 0.5);
+                    cell.wipeFeatherRTL = wantRTL;
                 }
                 wipeFeather.frame = CGRectIntegral(feather);
                 wipeFeather.hidden = NO;
@@ -5161,63 +5138,6 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         }
     } else if (curWord >= rcount && display.length > 0) {
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
-    }
-
-    // braccato's highlight glow: something fat around the word being sung that
-    // shrinks away over 1.2x that word's own time, never under 1.2s.
-    //
-    // The SHADOW is written once, in the cell init, and never touched again: a
-    // layer shadow is part of how the layer draws itself, so every new radius
-    // threw away the rasterized text+blur bitmap the label keeps and re-rendered
-    // a long CJK line with a shadow at screen scale -- twenty-four times a word
-    // when this ran per tick. Animating the radius was the single most expensive
-    // thing in the tick, and it was introduced in ac9ca4e, the day AFTER the
-    // feather (8a9fb21) that it gets blamed for.
-    //
-    // So the motion moved to the MASK, where it costs nothing: the shadow keeps
-    // one fixed blur for the life of the cell, and what shrinks is how far the
-    // mask is widened around the current word. The glow is that widening, seen
-    // through a constant blur -- visually the same "starts fat, recedes" read,
-    // with the raster cache left alone.
-    //
-    // Widened CAREFULLY, because an unclamped widening is also a widening of the
-    // reveal and would light the next word early.
-    CGFloat glow = 0.0;
-    if (curWord >= 0 && curWord < partCount && !CGRectIsNull(curWordRect)) {
-        NSDictionary *cur = parts[curWord];
-        double wordStart = [cur[@"startTimeMs"] doubleValue];
-        double wordDur = MAX([cur[@"durationMs"] doubleValue], 120.0);
-        if (curWord == partCount - 1 && wordDur > 1400.0) {
-            double avg = YTMUPriorAverageDuration(parts, curWord);
-            wordDur = MIN(wordDur, MAX(avg * 1.5, 500.0));
-        }
-        double glowMs = MAX(wordDur * YTMUHighlightGlowRatio, YTMUHighlightGlowMinDuration * 1000.0);
-        double glowT = MIN(MAX((nowMs - wordStart) / glowMs, 0.0), 1.0);
-        glow = YTMUHighlightGlowRadius * (1.0 - glowT) * (1.0 - glowT);
-        if (glow > 0.5) {
-            // Never past the midpoint of the gap on either side, so the next
-            // word (and the one before, which is already lit) stay untouched.
-            CGFloat growL = glow, growR = glow;
-            if (curWord + 1 < rcount) {
-                CGRect nextRect = [cell.cachedWordRects[curWord + 1] CGRectValue];
-                if (!CGRectIsNull(nextRect)) {
-                    growL = MIN(glow, MAX(0.0, (CGRectGetMinX(curWordRect) - CGRectGetMaxX(nextRect)) * 0.5));
-                }
-            }
-            if (curWord > 0 && curWord - 1 < rcount) {
-                CGRect prevRect = [cell.cachedWordRects[curWord - 1] CGRectValue];
-                if (!CGRectIsNull(prevRect)) {
-                    growR = MIN(glow, MAX(0.0, (CGRectGetMinX(prevRect) - CGRectGetMaxX(curWordRect)) * 0.5));
-                }
-            }
-            // And never more than half the word's own height vertically, which
-            // is what keeps a wrapped line's next fragment out of it.
-            CGFloat growV = MIN(glow, CGRectGetHeight(curWordRect) * 0.5);
-            CGRect glowRect = CGRectMake(CGRectGetMinX(curWordRect) - growL, CGRectGetMinY(curWordRect) - growV,
-                                         CGRectGetWidth(curWordRect) + growL + growR,
-                                         CGRectGetHeight(curWordRect) + growV * 2.0);
-            [path appendPath:[UIBezierPath bezierPathWithRect:glowRect]];
-        }
     }
 
     [CATransaction begin];
