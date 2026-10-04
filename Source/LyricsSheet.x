@@ -5085,11 +5085,9 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     CAGradientLayer *wipeFeather = cell.wipeFeather;
     wipeFeather.hidden = YES;
 
-    CGRect curWordRect = CGRectNull;
     if (curWord >= 0 && curWord < rcount) {
         CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
         if (!CGRectIsNull(wordRect)) {
-            curWordRect = wordRect;
             CGFloat fraction = MIN(1.0, MAX(0.0, curFrac));
             // braccato's overshoot: the leading edge runs past the word and is
             // pulled back over the last fifth of it, so the highlight visibly
