@@ -179,6 +179,15 @@ Current:
   silently killed all JWT fetching; restored in `dee2c0a`. Never stub this.
 
 ## Debugging workflow that works here
+- **`logs/server.log` is the LOCAL instance only, and it is NOT synced with the
+  deployed server.** The better-lyrics extension points at
+  `https://ytmtranslate.chiuhuang.dev` (its own host permission + CSP
+  `connect-src`), so nothing the browser does shows up in this file — this file
+  has the phone, the nodes and the local device traffic only. To read what the
+  extension actually asked for, open the DEPLOYED dashboard's log view (that
+  host's own `/api/admin/logs`), not this repo. Two `server.log`s, two
+  `database/lyrics/` stores, two caches: a fix measured here is not evidence
+  about what the browser is served.
 - Device: screenshot triggers UI dump POST to `/log`; server saves
   `logs/UI_DUMP_*.txt` + prints analysis (video, `has9999`, `hasEngagement`).
 - Dashboard (password-gated): live logs, crash logs, file download, server
