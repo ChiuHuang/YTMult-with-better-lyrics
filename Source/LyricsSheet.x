@@ -1629,6 +1629,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     self.tableView.showsVerticalScrollIndicator = NO;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
     self.tableView.estimatedRowHeight = 85.0;
+    // "Tap again to follow": the reader's way back after scrolling away from the
+    // sung line. On the table and not on the cells so it fires anywhere, and with
+    // cancelsTouchesInView off so a word tap still seeks underneath it.
+    UITapGestureRecognizer *refocus = [[UITapGestureRecognizer alloc]
+        initWithTarget:self action:@selector(ytmu_endUserScrollLock)];
+    refocus.cancelsTouchesInView = NO;
+    [self.tableView addGestureRecognizer:refocus];
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
     self.tableView.contentInset = UIEdgeInsetsMake(20, 0, 350, 0);
     [self.tableView registerClass:[YTMULyricsCell class] forCellReuseIdentifier:@"YTMULyricsCell"];
@@ -3414,10 +3421,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             [self ytmu_probeArtworkBrightness:self.artworkImageView.image];
         }
 
-        CGFloat safeTop = 0, safeBottom = 0;
+        CGFloat safeTop = 0, safeBottom = 0, safeLeft = 0;
         if (@available(iOS 11.0, *)) {
             safeTop = self.view.safeAreaInsets.top;
             safeBottom = self.view.safeAreaInsets.bottom;
+            safeLeft = self.view.safeAreaInsets.left;
         }
         // Narrow left column like the reference: ~30%, clamped.
         CGFloat leftW = roundf(MIN(MAX(W * 0.30f, 260.0f), 360.0f));
@@ -3425,8 +3433,14 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.landscapeArtPanel.frame = CGRectMake(0, 0, leftW, H);
 
         // Album card: square, rounded, floating with shadow.
-        CGFloat colX = 16.0;
-        CGFloat colW = leftW - colX * 2.0;
+        //
+        // The gutter follows the safe area, because the left column is not always
+        // the safe side. In landscape the notch is on the LEFT on a phone whose
+        // home button is on the right, and a fixed 16pt put the artwork straight
+        // under it. safeAreaInsets.left is 0 when the notch is on the other side,
+        // so this costs nothing in the usual case and insets only when it has to.
+        CGFloat colX = MAX(16.0, safeLeft + 10.0);
+        CGFloat colW = leftW - colX - 16.0;
         CGFloat artS = colW;
         CGFloat colH = artS + 10.0 + 20.0 + 2.0 + 16.0 + 8.0 + 12.0 + 4.0 + 8.0 + 48.0;
         CGFloat artY = floor((H - colH) / 2.0);
@@ -4697,7 +4711,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 if (UIAccessibilityIsReduceMotionEnabled()) {
                     [newCell ytmu_fadeHighlightTo:1.0 duration:0.0];
                 } else if (wordSynced) {
-                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
+                    // NO arrival fade on a word-synced row, and this is the fix for
+                    // the flash on every line change.
+                    //
+                    // -ytmu_beginHighlightArrivalWithDuration primes the reveal
+                    // layer to opacity ZERO and fades it up over 0.33s. On a
+                    // line-synced row that reads as an arrival, because nothing
+                    // else moves. On a word-synced row the MASK is already empty
+                    // at the line's start and opens across the line as it is sung,
+                    // so fading the bright copy in from nothing on top of it just
+                    // made the whole line pulse once per line -- twice a second on
+                    // a fast song. The reveal IS the arrival here.
+                    [newCell ytmu_fadeHighlightTo:1.0 duration:0.0];
                 } else {
                     newCell.lyricLabel.alpha = YTMUPopStartAlpha;
                     newCell.lyricLabel.transform = CGAffineTransformMakeScale(YTMUPopScale, YTMUPopScale);
@@ -4716,7 +4741,15 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         }
 
         if (newIndex >= 0 && newIndex < self.lyrics.count) {
-            if (!self.tableView.isDragging && !self.tableView.isDecelerating && !self.tableView.isTracking) {
+            // Auto-focus is OFF once the reader has scrolled, and stays off until
+            // they tap. It used to be guarded only by isDragging/decelerating,
+            // which is true for the length of a flick and false the moment it ends
+            // -- so the next line change yanked the view back to the sung line and
+            // whatever they had scrolled to was gone. There was no scroll delegate
+            // at all, which is why there was nothing to remember the gesture.
+            if (!self.userScrolledLyrics &&
+                !self.tableView.isDragging && !self.tableView.isDecelerating &&
+                !self.tableView.isTracking) {
                 // Near: smooth-scroll with the song. Far (tap-jump / seek):
                 // jump instantly instead of stacking competing animated
                 // scrolls, which reads as jank on old phones. Same rule for
@@ -5016,6 +5049,27 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     return self.lyrics.count;
+}
+
+// There was no scroll delegate here at all, so a flick had no effect the moment it
+// ended. `dragging`/`tracking` is what separates a finger from our own
+// programmatic scroll, and a deceleration on its own is never enough -- momentum
+// from a programmatic setContentOffset can look exactly like a finger's.
+//
+// Once the reader has scrolled, the panel stops following the song until they tap
+// (see -ytmu_endUserScrollLock). The tap is a recogniser on the TABLE with
+// cancelsTouchesInView off, so a tap on a word still seeks AND hands focus back --
+// both are deliberate actions and the reader asked for "tap again and it follows".
+- (void)ytmu_endUserScrollLock {
+    if (!self.userScrolledLyrics) return;
+    self.userScrolledLyrics = NO;
+    // Snap back to the sung line now, not on the next change, so the tap reads as
+    // "take me back" rather than "start following again somewhere else".
+    [self ytmu_scrollToRow:self.currentIndex instant:YES];
+}
+- (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
+    if (scrollView != self.tableView) return;
+    self.userScrolledLyrics = YES;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -5819,11 +5873,15 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
             if (newCell) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:g_currentPlaybackTime];
                 // Same arrival as the tick's, so a tap-to-seek lights the line it
-                // lands on rather than snapping it. Reduced motion skips it.
-                if (!UIAccessibilityIsReduceMotionEnabled()) {
-                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
-                } else {
+                // lands on rather than snapping it -- and, as in the tick, a
+                // word-synced row gets NO arrival fade at all (see the note there).
+                NSDictionary *target = self.lyrics[indexPath.row];
+                BOOL targetWbw = [target[@"wordSynced"] boolValue] &&
+                                 [(NSArray *)target[@"parts"] count] > 0;
+                if (targetWbw || UIAccessibilityIsReduceMotionEnabled()) {
                     [newCell ytmu_fadeHighlightTo:1.0 duration:0.0];
+                } else {
+                    [newCell ytmu_beginHighlightArrivalWithDuration:YTMUHighlightFadeInDuration];
                 }
             }
         }

@@ -235,6 +235,11 @@
 // has to be redone when the row changes width (a rotation) and NOT on every
 // layout pass -- this is what tells the two apart.
 @property (nonatomic, assign) CGFloat fittedRowWidth;
+// Set when the reader scrolls the lyrics by hand. Auto-focus (following the sung
+// line) stays off until they tap. The guard used to be isDragging, which is true
+// for the length of a flick and false the moment it ends -- so the next line
+// change pulled them back to the song.
+@property (nonatomic, assign) BOOL userScrolledLyrics;
 @property (nonatomic, assign) double fpsTickMsTotal;
 @property (nonatomic, assign) double fpsTickMsMax;
 @property (nonatomic, assign) NSInteger fpsTickSamples;
