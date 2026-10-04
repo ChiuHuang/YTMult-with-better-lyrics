@@ -46,6 +46,34 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
     return v.traitCollection.userInterfaceStyle == UIUserInterfaceStyleLight;
 }
 
+// The lyric size range, and how many visual lines a row may occupy.
+//
+// The floor is well under the old 24pt on purpose. 24pt could not stop a long
+// English line from wrapping to three, and since nothing was truncating, the
+// floor was only delaying the wrap. Two lines, so a line and its translation sit
+// on screen together without pushing the next line off the panel. Below the
+// floor the text is too small to read, and the row wraps rather than shrinking
+// further.
+static const CGFloat YTMULyricFontSizeMax = 28.0;
+static const CGFloat YTMULyricFontSizeMin = 18.0;
+static const NSInteger YTMULyricMaxLinesPerRow = 2;
+
+// How many visual lines `text` occupies in `width` at `font`. Real TextKit, a
+// real font and a real width, because the number of lines is a property of the
+// LAYOUT and not of the character count -- the old rule scaled from the count and
+// so could not see it. round(), not ceil(): TextKit's line-fragment rect carries
+// rounding on the last baseline, so a one-line string measures about 1.02 lines.
+static NSInteger YTMUVisualLineCount(NSString *text, UIFont *font, CGFloat width) {
+    if (text.length == 0 || width <= 0.0) return 1;
+    CGRect r = [text boundingRectWithSize:CGSizeMake(width, CGFLOAT_MAX)
+                                  options:NSStringDrawingUsesLineFragmentOrigin
+                               attributes:@{NSFontAttributeName: font}
+                                  context:nil];
+    CGFloat lh = font.lineHeight;
+    if (lh <= 0.0) return 1;
+    return MAX((NSInteger)round(CGRectGetHeight(r) / lh), 1);
+}
+
 // Dynamic lyric type scale: one size per song from the longest line, so
 // long lines fit without wrapping and rows never resize mid-song (no jump).
 // Shadows stay absolute (never scaled) so they can't jump either.
@@ -1414,6 +1442,11 @@ static char s_ytmuClosedByRotationKey;
                         nowMs:(double)nowMs
                       cueWord:(NSInteger)cueWord
                       cueFrac:(double)cueFrac;
+// The measured type-size fit. Declared here because -viewDidLayoutSubviews calls
+// the re-fit, and -updateLyrics: calls the fit itself.
+- (CGFloat)ytmu_fitFontSizeForLines:(NSArray *)lyrics rowWidth:(CGFloat)rowWidth;
+- (CGFloat)ytmu_lyricRowWidth;
+- (void)ytmu_refitFontSizeForCurrentWidth;
 - (void)ytmu_retranslateTapped:(UIButton *)sender;
 - (void)ytmu_endRetranslate:(BOOL)ok;
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
@@ -3499,6 +3532,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // screen edge (the cell adds its own gutter on top of this one).
         CGFloat lyricsGap = kLyricsGap;
         self.tableView.frame = CGRectMake(leftW + lyricsGap, 0, MAX(80.0, rightW - lyricsGap * 2.0), H);
+        // The row is narrower here than in portrait, so the fitted size has to be
+        // re-fitted or a line that needed two rows there needs three here.
+        [self ytmu_refitFontSizeForCurrentWidth];
         [self.view bringSubviewToFront:self.landscapeArtPanel];
         [self.view bringSubviewToFront:self.tableView];
         [self.view bringSubviewToFront:self.fpsLabel];
@@ -3548,6 +3584,8 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
         // Restore tableView to full bounds
         self.tableView.frame = self.view.bounds;
+        // Back to the wide row: the size fitted for landscape is now too small.
+        [self ytmu_refitFontSizeForCurrentWidth];
 
         CGFloat visibleHeight = H;
         CGFloat bottomPad = MAX(350.0, visibleHeight * 0.60);
@@ -4807,33 +4845,27 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     // (a cleared table must not leave the previous song's windows behind).
     [self ytmu_rebuildTimingTable];
 
-    // One type size per song from the longest line, so rows never resize
-    // mid-song. Deliberately narrow: the old 20..28pt span made every song
-    // change jump the type by up to 8pt. The knee now sits at 28 chars and
-    // the floor is 24pt, so the worst-case swing is 4pt and only very long
-    // lines shrink at all. Set before reloadData.
-    NSUInteger maxLen = 0;
-    for (NSDictionary *l in newLyrics) {
-        if (![l isKindOfClass:[NSDictionary class]]) continue;
-        NSString *t = [self normalizedLyricText:l[@"text"]];
-        if (t.length > maxLen) maxLen = t.length;
-        // The translation wraps too, but at ~0.68x the size, so compare it on
-        // the scale it will actually be drawn at. Measuring the raw character
-        // count let a long translation overflow a full-width main line and
-        // wrap under an already-shrunken one.
-        NSString *tr = l[@"translated"];
-        if ([tr isKindOfClass:[NSString class]] && tr.length) {
-            NSUInteger effective = (NSUInteger)ceil((double)tr.length * YTMULyricTransFontSize() / 28.0);
-            if (effective > maxLen) maxLen = effective;
-        }
+    // One type size per song, so rows never resize mid-song, chosen as the largest
+    // size at which the LONGEST line fits in YTMULyricMaxLinesPerRow rows at the
+    // width this panel actually has. Set before reloadData.
+    //
+    // This used to scale from a CHARACTER count, which is not the same question
+    // and got both directions wrong: 28 CJK glyphs at 28pt fill the row and wrap
+    // while 28 Latin characters do not, so one count meant two different widths.
+    // And nothing in it ever asked how many lines the text came out as -- which is
+    // exactly why a long line still wrapped to three. It is measured now: real
+    // font, real width, line count read back from TextKit.
+    CGFloat fitWidth = [self ytmu_lyricRowWidth];
+    if (fitWidth > 0.0) {
+        s_lyricFontSize = [self ytmu_fitFontSizeForLines:newLyrics rowWidth:fitWidth];
+        self.fittedRowWidth = fitWidth;
+    } else {
+        // No layout yet (a payload arriving before the first pass). The maximum
+        // is the safe answer -- it is what every short line wants -- and the first
+        // layout pass re-fits via -ytmu_refitFontSizeForCurrentWidth.
+        s_lyricFontSize = YTMULyricFontSizeMax;
+        self.fittedRowWidth = 0.0;
     }
-    CGFloat size = 28.0;
-    if (maxLen > 28) {
-        CGFloat over = (CGFloat)MIN(maxLen, (NSUInteger)56) - 28.0;
-        size = 28.0 - 4.0 * (over / 28.0);
-    }
-    size = MAX(24.0, MIN(28.0, floor(size * 2.0) / 2.0));
-    s_lyricFontSize = size;
 
     BOOL hasTimestamp = NO;
     for (NSDictionary *l in newLyrics) {
@@ -4903,6 +4935,83 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.view.hidden = NO;
         [self ytmu_assertOnTop];
     }
+}
+
+// The song's type size: the largest size in [min, max] at which no line of the
+// lyric needs more than YTMULyricMaxLinesPerRow rows.
+//
+// Only the lines that WRAP are candidates, and only the ones still too tall are
+// re-measured on each step down. Two consequences worth keeping:
+//   * "longest" here means longest once laid out, not longest string -- a 40-char
+//     Latin line and a 16-char CJK line can measure alike, and fitting by string
+//     length shrinks a whole song for nothing;
+//   * wrapping is not linear in the size, so the candidate set is carried down
+//     rather than recomputed: a line that wrapped at 24pt can stop wrapping at
+//     23.5, and then a DIFFERENT line is the worst case.
+- (CGFloat)ytmu_fitFontSizeForLines:(NSArray *)lyrics rowWidth:(CGFloat)rowWidth {
+    UIFont *big = [UIFont boldSystemFontOfSize:YTMULyricFontSizeMax];
+    NSMutableArray<NSString *> *still = [NSMutableArray array];
+    for (id l in lyrics) {
+        if (![l isKindOfClass:[NSDictionary class]]) continue;
+        // The DISPLAY string, not `text`: a word-synced row is drawn rebuilt from
+        // its parts, and that is what has to fit.
+        NSString *display = nil;
+        if ([l[@"wordSynced"] boolValue] && [(NSArray *)l[@"parts"] count] > 0) {
+            display = [self wbwDisplayTextForLyric:l ranges:NULL];
+        } else {
+            display = [self normalizedLyricText:l[@"text"]];
+        }
+        if (!display.length) continue;
+        // A string that already fits at the largest size can never become the
+        // worst case -- shrinking only makes it narrower -- so it is not a
+        // candidate at all.
+        if ([display sizeWithAttributes:@{NSFontAttributeName: big}].width > rowWidth) {
+            [still addObject:display];
+        }
+    }
+    if (still.count == 0) return YTMULyricFontSizeMax;
+
+    for (CGFloat size = YTMULyricFontSizeMax; size >= YTMULyricFontSizeMin - 0.001; size -= 0.5) {
+        CGFloat step = floor(size * 2.0) / 2.0;
+        UIFont *font = [UIFont boldSystemFontOfSize:step];
+        NSMutableArray<NSString *> *next = [NSMutableArray array];
+        for (NSString *t in still) {
+            if (YTMUVisualLineCount(t, font, rowWidth) > YTMULyricMaxLinesPerRow) {
+                [next addObject:t];
+            }
+        }
+        if (next.count == 0) return step;
+        still = next;
+    }
+    // The floor did not fit it. Three lines is then unavoidable without
+    // truncating the text, and a wrap is the lesser evil.
+    return YTMULyricFontSizeMin;
+}
+
+// The width a lyric row draws into: the table's width less the cell's gutters.
+// Zero before the first layout pass, and the caller falls back to the maximum
+// size rather than guessing at one.
+- (CGFloat)ytmu_lyricRowWidth {
+    CGFloat w = CGRectGetWidth(self.tableView.bounds);
+    if (w <= 0.0) return 0.0;
+    return MAX(80.0, w - YTMULyricGutterLeading() - YTMULyricGutterTrailing());
+}
+
+// Re-fit after the row's WIDTH changed -- a rotation, or the first pass -- and
+// only then. The fit is measured, so re-measuring every line of a long song on
+// every layout pass would be its own kind of waste; `fittedRowWidth` is what
+// tells the two apart.
+- (void)ytmu_refitFontSizeForCurrentWidth {
+    if (self.lyrics.count == 0) return;
+    CGFloat w = [self ytmu_lyricRowWidth];
+    if (w <= 0.0) return;
+    if (fabs(w - self.fittedRowWidth) < 0.5) return;
+    self.fittedRowWidth = w;
+    CGFloat size = [self ytmu_fitFontSizeForLines:self.lyrics rowWidth:w];
+    // Compared rather than assigned: an unchanged size must not mark the cells.
+    if (fabs(size - s_lyricFontSize) < 0.01) return;
+    s_lyricFontSize = size;
+    [self.tableView reloadData];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {

@@ -231,6 +231,10 @@
 // and doing that per line per tick cost the frame rate.
 @property (nonatomic, strong) NSMutableData *timingTable;
 @property (nonatomic, assign) NSUInteger timingCount;
+// The row width the current lyric size was fitted for. The fit is measured, so it
+// has to be redone when the row changes width (a rotation) and NOT on every
+// layout pass -- this is what tells the two apart.
+@property (nonatomic, assign) CGFloat fittedRowWidth;
 @property (nonatomic, assign) double fpsTickMsTotal;
 @property (nonatomic, assign) double fpsTickMsMax;
 @property (nonatomic, assign) NSInteger fpsTickSamples;
