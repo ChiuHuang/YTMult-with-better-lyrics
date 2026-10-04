@@ -308,9 +308,13 @@ def api_app_release_hook():
 
 @app.route('/api/app/altstore', methods=['GET'])
 def api_app_altstore():
-    """AltStore source JSON, always pointing at the newest build-N release
-    (download via the worker proxy for Asia). Submit this URL on
-    altdirect.app to get direct-install links."""
+    """AltStore source JSON, always pointing at the newest build-N release.
+    Two entries when the Asia file-CDN mirror is known: the mirror first (a
+    direct file host, no GitHub round trip) and the Cloudflare-proxied GitHub
+    URL second as the fallback. Same bundle ID and version on both, which is
+    what makes the second one a mirror rather than a second app to install.
+    One entry otherwise. Submit this URL on altdirect.app for
+    direct-install links."""
     from .release_info import ALTSTORE_ICON, latest_release, worker_url
     rel = latest_release()
     if not rel or not rel.get('download_url'):
@@ -319,23 +323,36 @@ def api_app_altstore():
     version = tag[6:] if tag.startswith('build-') else tag
     icon_url = (rel.get('icon_url') or ALTSTORE_ICON or
                 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
-    # Asia file CDN is the fastest direct link; worker-proxied GitHub second.
-    dl = rel.get('asia_url') or worker_url(rel['download_url'])
-    return jsonify({
-        'name': 'YTMusicUltimate',
-        'identifier': 'dev.chiuhuang.ytmult',
-        'apps': [{
-            'name': 'YouTube Music',
+    asia = (rel.get('asia_url') or '').strip()
+    cloudflare = worker_url(rel['download_url'])
+
+    def _app(name, dl, desc):
+        return {
+            'name': name,
             'bundleIdentifier': 'com.google.ios.youtubemusic',
             'developerName': 'ChiuHuang',
             'version': version,
             'versionDate': rel.get('published_at') or '',
-            'versionDescription': f'YTMusicUltimate ({tag})',
+            'versionDescription': desc,
             'downloadURL': dl,
             'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
             'iconURL': icon_url,
             'size': rel.get('size') or 0,
-        }],
+        }
+
+    if asia and asia != cloudflare:
+        # Mirror first: a direct file host beats a proxied GitHub asset.
+        apps = [
+            _app('YouTube Music', asia, f'YTMusicUltimate ({tag}) -- Asia CDN'),
+            _app('YouTube Music (Cloudflare CDN)', cloudflare,
+                 f'YTMusicUltimate ({tag}) -- GitHub via Cloudflare proxy'),
+        ]
+    else:
+        apps = [_app('YouTube Music', cloudflare, f'YTMusicUltimate ({tag})')]
+    return jsonify({
+        'name': 'YTMusicUltimate',
+        'identifier': 'dev.chiuhuang.ytmult',
+        'apps': apps,
     })
 
 def _dump_screen_name(dump_content):

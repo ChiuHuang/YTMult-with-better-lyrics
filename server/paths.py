@@ -33,6 +33,13 @@ USAGE_STATS_FILE = os.path.join(DATA_DIR, 'usage_stats.json')
 LATENCY_STATS_FILE = os.path.join(DATA_DIR, 'latency_stats.json')
 BADGE_STATS_FILE = os.path.join(DATA_DIR, 'badge_stats.json')
 RENAME_FILE = os.path.join(DATA_DIR, 'rename.json')
+# Asia file-CDN URL of the current build. The mirror exists only at release
+# time (the workflow uploads the IPA and posts the URL to the release-hook),
+# and the GitHub API never mentions it, so in memory it died with the process.
+# This is the durable copy so the AltStore source still offers the mirror
+# after a restart. Deliberately NOT in _MIGRATE_FILES: it is new state, there
+# is no legacy `cache/` copy to rescue.
+MIRROR_FILE = os.path.join(DATA_DIR, 'release_mirror.json')
 PROVIDER_FILE = os.path.join(DATA_DIR, 'provider.json')
 UNLYRICED_FILE = os.path.join(DATA_DIR, 'library_unlyriced.jsonl')
 

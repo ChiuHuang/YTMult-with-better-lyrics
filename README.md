@@ -32,6 +32,9 @@ Open source — forks and pull requests welcome.
 
 - **AltStore / SideStore / Feather:** add this source URL (or paste it on altdirect.app):
   `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
+  The source lists the build twice — the Asia file CDN first, the
+  Cloudflare-proxied GitHub link second — so the second one is a fallback if a
+  host is slow, not a second app to install (same bundle ID, same version).
 - **Jailbreak (.deb):** build locally with Theos (below).
 
 You need a **decrypted** YouTube Music IPA as the base (cannot be provided

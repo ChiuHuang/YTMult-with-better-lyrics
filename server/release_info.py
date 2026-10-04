@@ -4,11 +4,14 @@
 # limit on shared IPs) or instant webhook push from Actions after release
 # (POST /api/app/release-hook, secret-gated). Every failure degrades to
 # the last known value so endpoints stay up.
+import json
 import os
 import re
 import time as time_module
 
 import requests
+
+from .paths import MIRROR_FILE
 
 GH_REPO = os.environ.get('YTMU_GH_REPO', 'ChiuHuang/YTMult-with-better-lyrics')
 # Stable AltStore icon (Asia file CDN). Release-asset icon.png is preferred
@@ -23,6 +26,61 @@ WORKER_PREFIX = os.environ.get(
 
 _CACHE = {'at': 0.0, 'release': None}
 _TTL = 600
+
+# The Asia file-CDN URL of a build is not derivable: the workflow uploads the
+# IPA, gets an opaque /dl/pub/<uuid>/<hash> path back and hands it to us. It
+# used to live only in the webhook payload, so the first restart sent every
+# AltStore user the Cloudflare link and /api/update reported asia_url null.
+# Two ways to get it back, both cheap:
+#   1. the release body already carries it ("- **Asia Mirror** (<url>)"), and
+#      that link belongs to exactly the release we just fetched, so it is the
+#      one source that cannot go stale;
+#   2. the webhook persists it to database/release_mirror.json, which also
+#      covers a build whose body format ever changes.
+# A stored mirror is only honoured for the tag it was stored with -- handing
+# last build's URL to today's build is a 404, not a mirror.
+_ASIA_URL_RE = re.compile(r'https://file\.chiuhuang\.dev/dl/[^\s)>\]]+')
+
+
+def _asia_from_body(body):
+    """Asia mirror URL out of a raw release body, or ''."""
+    m = _ASIA_URL_RE.search(body or '')
+    return m.group(0) if m else ''
+
+
+def _read_mirror():
+    try:
+        with open(MIRROR_FILE, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            return d
+    except Exception:
+        pass
+    return {}
+
+
+def _write_mirror(tag, url):
+    """Durable copy of the webhook's Asia URL. Never raises."""
+    try:
+        os.makedirs(os.path.dirname(MIRROR_FILE) or '.', exist_ok=True)
+        tmp = MIRROR_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'tag': tag or '', 'asia_url': url}, f)
+        os.replace(tmp, MIRROR_FILE)
+    except Exception as e:
+        print(f"[Release] [WARN] Asia mirror not persisted: {e}")
+
+
+def asia_url_for(tag, body=''):
+    """Asia file-CDN URL for `tag`, or None. Release body first, then the
+    persisted webhook value for the same tag."""
+    url = _asia_from_body(body)
+    if url:
+        return url
+    m = _read_mirror()
+    if tag and m.get('tag') == tag and m.get('asia_url'):
+        return m['asia_url']
+    return None
 
 def _clean_notes(body):
     """Release body readable in the plain-text in-app alert: drop markdown
@@ -71,14 +129,17 @@ def latest_release():
         if not asset:
             return None
 
+        tag = j.get('tag_name') or ''
         rel = {
-            'tag': j.get('tag_name') or '',
+            'tag': tag,
             'published_at': j.get('published_at') or '',
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
             'icon_url': (icon_asset or {}).get('browser_download_url'),
             'notes': _clean_notes(j.get('body') or ''),
-            'asia_url': None, # Webhook will inject this!
+            # From the body, not the webhook: this is the path that runs on
+            # every restart, and it is the only one that is on disk forever.
+            'asia_url': asia_url_for(tag, j.get('body') or ''),
         }
         _CACHE.update(at=now, release=rel)
         return rel
@@ -101,6 +162,12 @@ def update_cache(payload=None):
             'asia_url': payload.get('asia_url'),
         }
         _CACHE['at'] = time_module.time()
+        # The Asia URL is the one field the GitHub API cannot give back, so it
+        # is the one field worth putting on disk. Without this the mirror is
+        # gone on the next restart and /api/update answers asia_url null.
+        asia = (payload.get('asia_url') or '').strip()
+        if asia:
+            _write_mirror(payload['tag'], asia)
         return True
     _CACHE['at'] = 0.0
     return False
