@@ -80,10 +80,6 @@
             btn = btn.superview;
         }
 
-        if ([self ytmu_replaceLyricsChip:btn]) {
-            return;
-        }
-
         objc_setAssociatedObject(btn, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         btn.userInteractionEnabled = YES;
         btn.alpha = 1.0;
@@ -126,63 +122,16 @@
     }
 }
 
-%new
-- (BOOL)ytmu_replaceLyricsChip:(UIView *)official {
-    UIView *parent = official.superview;
-    if (!parent) return NO;
-    if ([official isKindOfClass:[UIButton class]] && official.tag == 9777) return YES;
-    if (official.bounds.size.width >= 250 || official.bounds.size.width <= 0) return NO;
-
-    objc_setAssociatedObject(official, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    for (UIView *child in official.subviews) {
-        objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    // Don't hide the official button: ours sits exactly on top of it, so it
-    // stays invisible while ours works, and remains as a fallback entry point
-    // if ours ever fails to show.
-    official.hidden = NO;
-    official.alpha = 1.0;
-    if ([official isKindOfClass:[UIControl class]]) [(UIControl *)official setEnabled:YES];
-
-    NSString *chipTitle = @"歌詞";
-    if ([official isKindOfClass:[UILabel class]] && ((UILabel *)official).text.length) {
-        chipTitle = ((UILabel *)official).text;
-    } else {
-        for (UIView *child in official.subviews) {
-            if ([child isKindOfClass:[UILabel class]] && ((UILabel *)child).text.length) {
-                chipTitle = ((UILabel *)child).text;
-                break;
-            }
-        }
-    }
-
-    UIButton *own = (UIButton *)[parent viewWithTag:9777];
-    if (![own isKindOfClass:[UIButton class]]) {
-        own = g_ytmuOwnLyricsButton;
-    }
-    if (![own isKindOfClass:[UIButton class]]) {
-        own = [UIButton buttonWithType:UIButtonTypeSystem];
-        own.tag = 9777;
-        [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
-        own.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-        own.backgroundColor = YTMUAdaptiveFill();
-        own.layer.masksToBounds = YES;
-        [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
-        g_ytmuOwnLyricsButton = own;
-    }
-    objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (own.superview != parent) {
-        [parent addSubview:own];
-    }
-    [own setTitle:chipTitle forState:UIControlStateNormal];
-    own.frame = official.frame;
-    own.autoresizingMask = official.autoresizingMask;
-    own.layer.cornerRadius = MAX(official.bounds.size.height / 2.0, 8.0);
-    own.hidden = NO;
-    own.userInteractionEnabled = YES;
-    own.alpha = 1.0;
-    return YES;
-}
+// OUR OWN LYRICS CHIP IS GONE, and this is why, because it was not a fallback.
+//
+// It used to be built and parked exactly on top of the official button, with the
+// official one left visible underneath as a "fallback". In practice that is two
+// chips in one spot, and the one a tap lands on is whichever view UIKit hit --
+// which is how the screenshots came to show a chip that looked slightly doubled
+// and behaved slightly wrong. Our panel opened from either, so the duplicate
+// bought nothing: -ytmu_makeLyricsViewClickable already un-disables the official
+// button, un-hides it, and wires our target to it. The button the reader can see
+// is now the only button, and it is the one that works.
 
 %new
 - (void)ytmu_didTapLyricsButtonAction:(id)sender {
