@@ -92,7 +92,75 @@ _CACHE_FORMAT_VERSION = 4
 #    `ruby` / `inlineReading`. Replayable offline, but bumped anyway: the epoch
 #    is what makes every stored entry refetch, and a stale entry is exactly what
 #    the device was drawing.
-_PARSER_EPOCH = 4
+# 5: every part's `words` now carries its own trailing separator when the source
+#    had one there. The `space: false` glue flag was the only record of that gap,
+#    and exactly ONE consumer read it -- the iOS app's wbwDisplayTextForLyric.
+#    Anything that concatenates parts verbatim (the better-lyrics extension, whose
+#    toLyricPart does not even copy the flag) printed
+#    `Blurthelineingold,andpearl,androse`, because a payload that only says "glue
+#    these" says nothing to a consumer that concatenates. Baking the separator
+#    into the text makes the payload self-describing; the device trims each part
+#    and re-joins on its own rule, so it is unaffected either way.
+_PARSER_EPOCH = 5
+
+# A part whose words must not be followed by a space: the source glued this word
+# to the previous one (Apple's mid-word splits, CJK runs). Everything else gets a
+# trailing space when the next part exists, because that is what the source had.
+def _bake_part_separators(line):
+    """Put the word gap INTO `words`, so a consumer that only concatenates still
+    prints the line correctly.
+
+    Why this and not "tell every consumer about `space`": the flag is already in
+    the payload and one client honoured it, which is the worst possible outcome --
+    the data was right and the reader was wrong, so the bug showed up as a
+    rendering fault in someone else's app. A payload that reads correctly when
+    concatenated, and when rebuilt with the flag, cannot have that failure.
+
+    Rules, all deliberate:
+      * the LAST part never gets a trailing space (nothing follows it);
+      * the gap between two parts is decided by the NEXT part's `space` flag,
+        because `space` describes the gap in FRONT of a word. Reading it off the
+        wrong part glued `foll`+`ow` into `foll ow` while leaving `Blur`+`the`
+        as `Blurthe` -- both in one line, which is how this rule shipped broken
+        the first time;
+      * no space where this part ends in CJK and the next begins with CJK, the
+        same rule the device's join uses, so the two can never disagree;
+      * a part whose own text already ends in whitespace is left alone;
+      * a part that is only whitespace stays exactly as it is -- those are real
+        pause parts in some providers and rewriting them would invent words.
+    """
+    parts = line.get('parts')
+    if not parts or len(parts) < 2:
+        return
+
+    def _is_cjk(ch):
+        o = ord(ch)
+        return (0x3040 <= o <= 0x30FF or 0x3400 <= o <= 0x9FFF
+                or 0xF900 <= o <= 0xFAFF or 0xFF00 <= o <= 0xFFEF)
+
+    # The gap BETWEEN part i and part i+1 belongs to part i+1: `space` is the
+    # flag for the gap in FRONT of a word. Reading it off the wrong part glues
+    # `foll`+`ow` into `foll ow` while leaving `Blur`+`the` as `Blurthe`.
+    for i in range(len(parts) - 1):
+        p = parts[i]
+        nxt = parts[i + 1]
+        words = p.get('words')
+        nxt_words = nxt.get('words')
+        if not isinstance(words, str) or not words.strip():
+            continue
+        if not isinstance(nxt_words, str) or not nxt_words.strip():
+            continue
+        if nxt.get('space') is False:
+            continue
+        if words != words.rstrip():
+            continue
+        # Same rule the device's own join uses, so the two can never disagree:
+        # no space when this part ends in CJK and the next begins with CJK. A
+        # Japanese line is not "お ない" -- and Apple splits kanji into one timed
+        # span EACH, so those runs stay glued while `生き`+`る` keeps its space.
+        if _is_cjk(words[-1]) and _is_cjk(nxt_words.strip()[0]):
+            continue
+        p['words'] = words + ' '
 
 # ---------------------------------------------------------------------------
 # A reading written inline, in parentheses: ぎゅって抱いた空（ぎゅたて抱いた空）
@@ -234,6 +302,8 @@ def sanitize_lyrics_parts(lyrics):
             l['wordSynced'] = False
             continue
         l['parts'] = parts
+        # ...and the gap between words travels WITH the text, not only as a flag.
+        _bake_part_separators(l)
         # Preserve real provider durations; only synthesize missing ones
         # or clamp bloated last-word durations that stretch into the inter-line gap.
         for pi in range(len(parts)):
