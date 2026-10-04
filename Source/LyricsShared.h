@@ -56,6 +56,10 @@
 // The moving alpha edge inside that mask, held rather than looked up: the tick
 // runs 120 times a second per active row and there is exactly one of these.
 @property (nonatomic, strong) CAGradientLayer *wipeFeather;
+// 0 = the feather's axes run left to right, 1 = right to left. Recorded so the
+// tick only rewrites them when a cell's layout direction actually differs from
+// what they were set to in the init.
+@property (nonatomic, assign) NSInteger wipeFeatherRTL;
 @property (nonatomic, assign) CGFloat wipeProgress;
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
