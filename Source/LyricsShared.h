@@ -60,9 +60,6 @@
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
 @property (nonatomic, copy) NSString *lastColorKey;
-// The sway currently on the pair of vocal labels, so a quantized step is written
-// once instead of once per tick. Zero is also the resting value.
-@property (nonatomic, assign) CGFloat wobbleShift;
 // How bright this row is by its distance from the sung line. 1 for the sung
 // line itself, 0.0 five lines out. A multiplier on top of the inactive ink, so
 // the existing colour maths is untouched.
