@@ -1922,6 +1922,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(ytmu_volumeChanged:) name:@"AVSystemController_SystemVolumeDidChangeNotification" object:nil];
 
     self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleSongChange:) name:@"YTMUSongDidChange" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLyricsDidLoad:) name:@"YTMULyricsDidLoad" object:nil];
@@ -3739,6 +3742,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
                 statusLabel.text = @"";
                 self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
                 [self.tableView reloadData];
                 // Art + background state, unconditional inside the change: the
                 // new song claims the display intent first, then the old cover
@@ -4085,12 +4091,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                     statusLabel.text = @"[WARN] 找不到歌詞 / No lyrics found";
                     if (self.isModal) self.view.hidden = NO;
                     self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
                     [self.tableView reloadData];
                 }
             } else if (self.lyrics.count == 0) {
                 statusLabel.text = @"[WARN] 網路錯誤 / Network error";
                 if (self.isModal) self.view.hidden = NO;
                 self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
                 [self.tableView reloadData];
             }
         });
@@ -4203,6 +4215,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.currentIndex = -1;
         self.activeIndexes = nil;
         self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
         [self.tableView reloadData];
         if (self.isModal) self.view.hidden = NO;
     }
@@ -4388,15 +4403,53 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
 - (NSIndexSet *)ytmu_activeIndexesAtMs:(double)nowMs {
     NSMutableIndexSet *set = [NSMutableIndexSet indexSet];
-    for (NSInteger i = 0; i < self.lyrics.count; i++) {
-        NSDictionary *lyric = self.lyrics[i];
-        if (![self ytmu_lyricAtIndexHasTiming:i]) continue;
-        double start = [self ytmu_startMsForLyric:lyric];
-        if (nowMs < start) continue;
-        double end = [self ytmu_endMsForLyricAtIndex:i];
-        if (end > start && nowMs < end) [set addIndex:i];
+    // Off the precomputed table, NOT by re-deriving it. The old loop called
+    // -ytmu_endMsForLyricAtIndex: per line per tick, and that walks EVERY WORD of
+    // the line to find the last word's end -- so a 58-line word-synced song did
+    // roughly 1,600 NSNumber reads per tick, 200,000 a second at 120Hz, to
+    // recompute numbers that cannot change between ticks. The line timings are
+    // static for the whole song; -ytmu_rebuildTimingTable is the only thing that
+    // should ever touch a part dictionary, and it runs when the payload changes.
+    const double *starts = (const double *)self.timingTable.bytes;
+    const double *ends = (const double *)self.timingTable.bytes + self.timingCount;
+    NSInteger n = MIN((NSInteger)self.timingCount, (NSInteger)self.lyrics.count);
+    for (NSInteger i = 0; i < n; i++) {
+        double start = starts[i];
+        // end <= start is how an untimed line is marked, so one compare covers
+        // both "never active" and "no window".
+        double end = ends[i];
+        if (end <= start) continue;
+        if (nowMs < start || nowMs >= end) continue;
+        [set addIndex:i];
     }
     return set;
+}
+
+// The per-line [start, end) table the tick scans. Rebuilt when the payload
+// changes and never otherwise: an end time comes from the line's own duration OR
+// from walking its parts for the last word, and a part's timing is immutable
+// once parsed. end <= start marks a line that can never be active.
+- (void)ytmu_rebuildTimingTable {
+    NSInteger n = (NSInteger)self.lyrics.count;
+    if (n <= 0) {
+        self.timingTable = [NSMutableData data];
+        self.timingCount = 0;
+        return;
+    }
+    NSMutableData *buf = [NSMutableData dataWithLength:(NSUInteger)(n * 2 * sizeof(double))];
+    double *v = (double *)buf.mutableBytes;
+    for (NSInteger i = 0; i < n; i++) {
+        double start = 0, end = 0;
+        if ([self ytmu_lyricAtIndexHasTiming:i]) {
+            start = [self ytmu_startMsForLyric:self.lyrics[i]];
+            end = [self ytmu_endMsForLyricAtIndex:i];
+            if (end <= start) end = 0;
+        }
+        v[i] = start;
+        v[n + i] = end;
+    }
+    self.timingTable = buf;
+    self.timingCount = (NSUInteger)n;
 }
 
 // Single entry point for every programmatic lyric scroll (line advance,
@@ -4453,29 +4506,27 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 - (void)updatePlaybackTime {
     self.fpsTicks++;
     NSTimeInterval fpsNow = CACurrentMediaTime();
-    // The tick's own cost, accumulated into the same one-second window as the
-    // rate. A rate on its own says "it is slow" and nothing about why; this is
-    // the number that separates "the main thread is busy" (tick high, and the
-    // whole app stutters with it) from "the display link is being throttled"
-    // (tick near zero, rate low, nothing else wrong). `fpsTickMs` is a mean over
-    // the window, `fpsTickMaxMs` the worst single tick in it -- a per-tick cost
-    // that only bites on some frames is what a mean hides.
-    if (self.fpsWindowStart > 0.0) {
-        NSTimeInterval cost = (fpsNow - self.fpsLastTickAt) * 1000.0;
-        // The first tick after a window boundary includes the window's own work,
-        // so anything over a frame is clamped rather than reported as a spike.
-        if (cost >= 0.0 && cost < 200.0) {
-            self.fpsTickMsTotal += cost;
-            if (cost > self.fpsTickMsMax) self.fpsTickMsMax = cost;
-            self.fpsTickSamples++;
-        }
-    }
     self.fpsLastTickAt = fpsNow;
+    // Start of the body, for the cost measurement that is stamped at the end.
+    self.fpsBodyStart = fpsNow;
+    // The frame GAP, reported next to the body cost because the two answer
+    // different questions and only together do they say anything:
+    //   gap   -- how long the link waited between callbacks. At a steady 60Hz
+    //            this is 16.66ms, and it is the reason the rate is 60.
+    //   body  -- how long THIS callback actually took (stamped at the end).
+    // A rate on its own cannot tell "the main thread is busy" from "the link is
+    // being throttled", and my first attempt at this metric got it exactly
+    // backwards: it timed the gap and called it the cost, so it printed
+    // `tick=16.66ms` on a 60fps reading and could not have distinguished a slow
+    // tick from a fast one.
+    NSTimeInterval gapMs = (fpsNow - self.fpsGapLastAt) * 1000.0;
+    self.fpsGapLastAt = fpsNow;
     if (fpsNow - self.fpsWindowStart >= 1.0) {
         NSInteger fps = (NSInteger)(self.fpsTicks / MAX(fpsNow - self.fpsWindowStart, 0.001));
         NSInteger maxFps = (NSInteger)[UIScreen mainScreen].maximumFramesPerSecond;
         double meanMs = (self.fpsTickSamples > 0) ? (self.fpsTickMsTotal / self.fpsTickSamples) : 0.0;
-        NSString *cost = [NSString stringWithFormat:@" tick=%.2fms peak=%.2fms", meanMs, self.fpsTickMsMax];
+        NSString *cost = [NSString stringWithFormat:@" body=%.2fms peak=%.2fms gap=%.2fms",
+                          meanMs, self.fpsTickMsMax, gapMs];
         self.fpsTicks = 0;
         self.fpsWindowStart = fpsNow;
         self.fpsTickMsTotal = 0.0;
@@ -4672,6 +4723,25 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     // became current in THIS tick starts moving in the same frame instead of
     // sitting invisible for one (configureCell above dropped its mask).
     [self ytmu_typeStep];
+    // The tick's own cost, stamped here so it covers the whole body.
+    //
+    // This is the SECOND measurement and the first one was wrong in a way worth
+    // remembering: it timed the gap between consecutive ticks, which on a steady
+    // 60Hz link is 16.66ms every time -- it re-derived the frame rate and could
+    // not tell a slow tick from a throttled one. The device proved it:
+    // `tick=16.66ms` on a 60fps reading is the interval, not the work.
+    //
+    // Only the full path is stamped. Every early return above is a CHEAP path
+    // (no lyrics, not synced), so leaving them unstamped cannot hide the cost
+    // that matters, and it keeps this out of five return sites.
+    if (self.fpsBodyStart > 0.0) {
+        double ms = (CACurrentMediaTime() - self.fpsBodyStart) * 1000.0;
+        if (ms >= 0.0 && ms < 200.0) {
+            self.fpsTickMsTotal += ms;
+            if (ms > self.fpsTickMsMax) self.fpsTickMsMax = ms;
+            self.fpsTickSamples++;
+        }
+    }
 }
 
 - (void)forceReloadLyrics {
@@ -4681,6 +4751,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         [g_lyricsCache removeObjectForKey:g_currentVideoID];
     }
     self.lyrics = @[];
+    // A cleared payload must not leave the previous song's windows in the
+    // table the tick scans.
+    [self ytmu_rebuildTimingTable];
     [self.tableView reloadData];
     // Reload invalidates anything the switcher knew: candidates, index,
     // and per-song metadata all refill from the fresh fetch.
@@ -4729,6 +4802,10 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 - (void)updateLyrics:(NSArray *)newLyrics {
     NSUInteger previousLineCount = self.lyrics.count;
     self.lyrics = newLyrics;
+    // The tick's scan reads this and nothing else, so it has to be rebuilt
+    // wherever the payload is replaced -- here, and at every `self.lyrics = @[]`
+    // (a cleared table must not leave the previous song's windows behind).
+    [self ytmu_rebuildTimingTable];
 
     // One type size per song from the longest line, so rows never resize
     // mid-song. Deliberately narrow: the old 20..28pt span made every song

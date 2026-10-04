@@ -219,6 +219,18 @@
 // The tick's own main-thread cost, so `[FPS]` can say WHY a rate is low instead
 // of only what it is. See -updatePlaybackTime.
 @property (nonatomic, assign) NSTimeInterval fpsLastTickAt;
+// When the body of -updatePlaybackTime started, so its cost can be measured at
+// the end. The frame GAP is a different number (fpsGapLastAt) and the two must
+// not be confused: a steady 60Hz link has a 16.66ms gap and a near-zero body.
+@property (nonatomic, assign) NSTimeInterval fpsBodyStart;
+@property (nonatomic, assign) NSTimeInterval fpsGapLastAt;
+// The per-line [start, end) windows, precomputed. `timingTable` is n pairs of
+// doubles: the first n are the starts, the next n the ends, and an end <= start
+// marks a line that can never be active. Rebuilt by -ytmu_rebuildTimingTable when
+// the payload changes, because deriving an end time walks the line's word parts
+// and doing that per line per tick cost the frame rate.
+@property (nonatomic, strong) NSMutableData *timingTable;
+@property (nonatomic, assign) NSUInteger timingCount;
 @property (nonatomic, assign) double fpsTickMsTotal;
 @property (nonatomic, assign) double fpsTickMsMax;
 @property (nonatomic, assign) NSInteger fpsTickSamples;
