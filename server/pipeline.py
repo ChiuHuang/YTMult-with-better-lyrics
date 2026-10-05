@@ -28,7 +28,8 @@ from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
 from .translate import google_translate_fast
 from .cache import is_not_found_result, sanitize_lyrics_parts
-from .candidates import save_candidates, graft_wbw_parts
+from .candidates import (save_candidates, graft_wbw_parts,
+                          snapshot_provider as _snapshot_provider)
 from .nodes import pick_node
 from .jwt_pool import pick_jwt
 from .latency_stats import record as _latency_record
@@ -162,35 +163,6 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     _outcomes = {}
     _fetch_lock = threading.Lock()
     _fetch_stages = []  # stage thunks; all run concurrently below
-
-    def _snapshot_provider(label, source):
-        """Map a fetch_all consider() label + candidate source onto the
-        provider key the switcher/select path understands (same vocabulary
-        as probe_providers: Cubey/<inner>, bLyrics, QQ, KuGou, BiniLyrics,
-        LRCLib, Unison, AMLL, YouTube)."""
-        for known in ('LRCLib', 'Unison', 'AMLL', 'bLyrics', 'QQ', 'KuGou', 'BiniLyrics'):
-            if source == known:
-                return known
-        if source == 'YouTube Music' or source == 'YouTube':
-            return 'YouTube'
-        if '/' in (source or ''):
-            origin = source.split('/', 1)[0]
-            if origin in ('Cubey',):
-                return source
-        low = (label or '').lower()
-        if 'lrclib' in low:
-            return 'LRCLib'
-        if 'unison' in low:
-            return 'Unison'
-        if 'amll' in low:
-            return 'AMLL'
-        if 'youtube' in low:
-            return 'YouTube'
-        if 'cubey' in low:
-            return source if '/' in (source or '') else 'Cubey'
-        if 'braccato' in low or 'direct' in low:
-            return source or 'bLyrics'
-        return source or label
 
     def consider(candidate, label):
         nonlocal result

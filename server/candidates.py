@@ -53,6 +53,43 @@ def _keep_all_providers():
         return True
 
 
+def snapshot_provider(label, source):
+    """Map a race/consider label + candidate source onto the provider key the
+    switcher and /providers/select understand.
+
+    One vocabulary, shared by probe_providers, fetch_all_lyrics and the SSE
+    race. It used to be a closure inside fetch_all_lyrics, so the race could not
+    snapshot anything at all: the mapping was not reachable from there.
+
+    Getting this wrong is not cosmetic. /providers/select looks the snapshot up
+    by this exact key, so a mismatch means "switch to this provider" refetches
+    from scratch instead of reading what the server already holds.
+    """
+    for known in ('LRCLib', 'Unison', 'AMLL', 'bLyrics', 'QQ', 'KuGou', 'BiniLyrics'):
+        if source == known:
+            return known
+    if source == 'YouTube Music' or source == 'YouTube':
+        return 'YouTube'
+    if '/' in (source or ''):
+        origin = source.split('/', 1)[0]
+        if origin in ('Cubey',):
+            return source
+    low = (label or '').lower()
+    if 'lrclib' in low:
+        return 'LRCLib'
+    if 'unison' in low:
+        return 'Unison'
+    if 'amll' in low:
+        return 'AMLL'
+    if 'youtube' in low:
+        return 'YouTube'
+    if 'cubey' in low:
+        return source if '/' in (source or '') else 'Cubey'
+    if 'braccato' in low or 'direct' in low:
+        return source or 'bLyrics'
+    return source or label
+
+
 def _cand_path(video_id):
     from .cache import _cache_filename
     return os.path.join(_CAND_DIR, _cache_filename(video_id) + '.json')

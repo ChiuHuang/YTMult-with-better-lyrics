@@ -253,6 +253,11 @@
 // a deterministic failure (400 from a bad lang, a dead endpoint) would re-enter
 // the stream path forever.
 @property (nonatomic, assign) BOOL tstreamFallbackUsed;
+// The in-flight `probe=1` reconciliation (the old /api/lyrics/check). Held in a
+// property because the client's -init resumes the task and nothing else retains
+// it; a probe that lands after the reader left the song is dropped by the
+// still-current check inside its handler, not by this being nil.
+@property (nonatomic, strong) id probeClient;
 // --- Typewriter reveal state, keyed by lyric row ---
 @property (nonatomic, strong) NSMutableDictionary *typeState;
 @property (nonatomic, strong) NSMutableSet *typeRows;
@@ -279,6 +284,11 @@
 - (BOOL)ytmuIsInstrumentalLyric:(NSDictionary *)lyric;
 - (void)ytmu_applyProviderMeta:(NSDictionary *)dict forVideoID:(NSString *)videoID;
 - (void)ytmu_updateLandscapeMetadata;
+// Declared here as well as in LyricsSheet.x because LyricsStream.x CALLS it and
+// Logos does not share the category interface across translation units: without
+// it the stream's own upgrade branch is an unknown selector at compile time,
+// which is the same trap as the VC's methods below.
+- (void)ytmu_startFullFetchForVideoID:(NSString *)videoID force:(BOOL)force from:(NSString *)from;
 - (void)fetchFullLyricsForVideo:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
 @end
 
@@ -296,6 +306,10 @@
 // declared in a category gets no synthesis at all.
 @interface YTMULyricsViewController (Typewriter)
 - (void)ytmu_openTranslateStream:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force;
+// probe=1 reconciliation. Implemented in LyricsStream.x, not LyricsSheet.x:
+// YTMULyricsSSEClient is defined there and Logos does not share classes across
+// translation units.
+- (void)ytmu_probeServerTierForVideoID:(NSString *)videoID;
 - (void)ytmu_cancelTranslateStream;
 - (void)ytmu_typeRow:(NSInteger)row activate:(BOOL)activate;
 - (void)ytmu_typeResetAll;

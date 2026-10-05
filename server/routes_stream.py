@@ -148,6 +148,23 @@ def _with_provider_meta(payload, video_id):
     return payload
 
 
+def _emit_pdata(video_id, translate_to):
+    """The `pdata` event: every provider's raw lyrics from the stored snapshot.
+
+    This is the body of the route that used to be /api/lyrics/providers/data,
+    factored into routes_lyrics so both spellings cannot drift. Emitted on the
+    cached path and on the live path so the device's provider switcher is warm
+    whichever one it got.
+    """
+    try:
+        from .routes_lyrics import build_provider_data
+        return _sse_event('pdata', build_provider_data(video_id, translate_to))
+    except Exception as e:
+        print(f"  [Stream] build_provider_data failed: {e}")
+        return _sse_event('pdata', {'ok': True, 'video_id': video_id,
+                                    'found': False, 'providers': []})
+
+
 @app.route('/api/lyrics/tstream', methods=['GET'])
 def api_lyrics_tstream():
     """SSE: the /api/lyrics pipeline with the translation streamed line by line.
@@ -388,18 +405,35 @@ def api_lyrics_stream():
     """SSE stream: parallel provider race with progressive upgrades.
 
     Event flow (client replaces lyrics when stage rank or score improves):
-      meta    -> {song, artist, duration, lookup_ms, art, art_maxres} once
-                 song_info resolves (art = hq thumbnail URL, art_maxres the
-                 404-prone 1280x720 variant; no network call)
-      status  -> per-provider finish {provider, ok, synced, elapsed_ms}
-      lyrics  -> {stage: raw|machine|final|cached, source, synced, lyrics, song, artist}
-                 raw = untranslated lines pushed FIRST (never blocked on Cohere)
+      meta    -> {song, artist, duration, lookup_ms, art, art_maxres} exactly
+                 once, and BEFORE the cache gate -- so a cache hit still
+                 carries the title and artist (art = hq thumbnail URL,
+                 art_maxres the 404-prone 1280x720 variant; both a pure string
+                 build, no network call)
+      status  -> per-provider finish {provider, ok, synced, wbw_lines, score,
+                 elapsed_ms}
+      lyrics  -> {stage: raw|machine|final|cached, cached, source, synced,
+                 lyrics, song, artist, providers}
+                 raw = untranslated lines pushed the moment a provider beats
+                       the current best, so the panel shows line-synced before
+                       word-synced and both long before the translation ends
                  machine = Google fast translation interim (tstream=0 only)
-                 final = complete payload (pro/JWT path: sync pushed as raw
-                         first, then re-pushed as final with translated)
+                 final = complete payload, the stage the device may cache
+                 cached = the disk/node answer, no translation ran
       tline   -> {i, row, text, done} one translated line, streamed as the
                  model writes it (tstream=1, the default)
+      pdata   -> {found, providers: [{provider, source, tier, lines, score,
+                 lyrics}]} every provider's RAW lyrics from the snapshot, so
+                 the source switcher is instant with no second request
+      check   -> only with probe=1: {found, tier, upgrade, formatVersion,
+                 providers, song, artist} and nothing else. Cache-only, no
+                 race, no translate. This is the old /api/lyrics/check.
       done    -> {ok, source, synced, stages} terminal event
+
+    ONE ROUTE. The device used to make five requests per song (stream, /song,
+    /check, /providers/candidates, /providers/data); two of those existed only
+    because this route omitted things it already had elsewhere, and the rest are
+    modes on it now.
     """
     _req_start = time_module.time()
     video_id = request.args.get('v')
@@ -413,6 +447,13 @@ def api_lyrics_stream():
         _pool_contribute(jwt_token, node_id='device')
     force_mode = request.args.get('force', '0') == '1'
     auto_zh = request.args.get('az', '0') == '1'
+    # probe=1 is the old /api/lyrics/check: cache-only reconciliation, no race,
+    # no translate. A MODE on this route rather than a second route, so there is
+    # one place that knows what the tiers mean.
+    probe_mode = request.args.get('probe', '0') == '1'
+    # pdata=1: emit only the provider snapshot. For a track that has not started,
+    # so no live stream exists to carry the `pdata` event on.
+    pdata_only = request.args.get('pdata', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)
     client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-IP') or request.remote_addr
@@ -443,6 +484,51 @@ def api_lyrics_stream():
         return int((time_module.time() - _req_start) * 1000)
 
     def generate():
+        # --- probe=1: cache-only reconciliation. NO race, NO translate. ---
+        #
+        # This is what /api/lyrics/check was. The device holds lyrics in its own
+        # cache and wants to know only "do you hold something better?": one cheap
+        # disk read, never provider traffic. The property that made /check safe
+        # to call on every local cache hit is that it CANNOT fall through into a
+        # fetch, so that is preserved exactly -- this returns before the cache
+        # gate and before any provider job exists.
+        if probe_mode:
+            from .routes_lyrics import build_check_payload
+            payload = build_check_payload(video_id, translate_to,
+                                          request.args.get('ct', ''),
+                                          request.args.get('cv', '0'))
+            yield _sse_event('check', payload)
+            yield _sse_event('done', {'ok': bool(payload.get('found')),
+                                      'source': payload.get('source'),
+                                      'synced': payload.get('synced'),
+                                      'stages': ['probe']})
+            return
+
+        # --- pdata=1: the snapshot alone, for a song that is NOT playing yet ---
+        #
+        # The device prefetches the next track's provider lyrics so its switcher
+        # is warm before the song starts. There is no stream open for a track
+        # that has not begun, so it cannot wait for the `pdata` event on the live
+        # stream -- but it still should not need its own route for it. Same
+        # property as probe=1: a pure disk read, no provider traffic, and it
+        # returns before the cache gate.
+        if pdata_only:
+            yield _emit_pdata(video_id, translate_to)
+            yield _sse_event('done', {'ok': True, 'stages': ['pdata']})
+            return
+
+        # `meta` goes out BEFORE the cache gate. It used to be emitted after the
+        # song lookup, so a cache hit returned with no song and no artist -- and
+        # that is exactly why a separate /api/lyrics/song call existed. The art
+        # URLs are a pure string build, so sending them first costs nothing.
+        def emit_meta(song='', artist='', duration=0, lookup_ms=0):
+            return _sse_event('meta', {
+                'song': song or '', 'artist': artist or '',
+                'duration': duration or 0, 'lookup_ms': lookup_ms,
+                'art': yt_cover_url(video_id, 'hq'),
+                'art_maxres': yt_cover_url(video_id, 'max'),
+            })
+
         # --- Fast path: full cache hit closes the stream immediately ---
         if not force_mode:
             cached = get_cached(full_cache_key)
@@ -456,6 +542,8 @@ def api_lyrics_stream():
             if cached:
                 print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
                 _record_serve(cached, video_id, translate_to, client_ip)
+                yield emit_meta(cached.get('song', ''), cached.get('artist', ''),
+                                cached.get('duration', 0), 0)
                 payload = stream_payload(cached)
                 payload['stage'] = 'cached'
                 # The client's "nothing was translated on this request" signal, sent
@@ -465,6 +553,7 @@ def api_lyrics_stream():
                 payload['cached'] = True
                 payload['elapsed_ms'] = elapsed_ms()
                 yield _sse_event('lyrics', payload)
+                yield _emit_pdata(video_id, translate_to)
                 yield _sse_event('done', {'ok': True, 'source': cached.get('source'), 'synced': cached.get('synced'), 'stages': ['cached'], 'translated': True})
                 return
 
@@ -482,10 +571,8 @@ def api_lyrics_stream():
         duration = song_info.get('duration', 0)
         album = song_info.get('album', '')
         print(f"[MUSIC] [REQ {req_id}] [Stream] {title} - {artist} ({duration}s) lookup={(time_module.time()-t_song)*1000:.0f}ms")
-        yield _sse_event('meta', {'song': title, 'artist': artist, 'duration': duration,
-                                  'lookup_ms': int((time_module.time()-t_song)*1000),
-                                  'art': yt_cover_url(video_id, 'hq'),
-                                  'art_maxres': yt_cover_url(video_id, 'max')})
+        yield emit_meta(title, artist, duration,
+                        int((time_module.time() - t_song) * 1000))
 
         queries = get_search_queries(title, artist, song_info.get('ja_title', ''), song_info.get('ja_artist', ''))
 
@@ -517,6 +604,13 @@ def api_lyrics_stream():
             best = None
             best_score = -1
             stages = []
+            # Every provider this race touched, hit or miss. The snapshot is
+            # written from this list, which is the whole reason the switcher,
+            # /providers/data and the re-race "known misses" work at all on this
+            # route. Before this, only the blocking pipeline saved one, so every
+            # song fetched over SSE left an empty snapshot behind.
+            seen = []
+            outcomes = {}
             deadline = time_module.time() + 15
             pending = set(jobs.keys())
             while pending:
@@ -535,6 +629,17 @@ def api_lyrics_stream():
                         res = None
                     elapsed = int((time_module.time()-_req_start)*1000)
                     score = _lyrics_score(res)
+                    seen.append((name, res))
+                    if res is not None:
+                        outcomes[name] = {
+                            'status': 'found',
+                            'tier': ('wbw' if _wbw_line_count(res) else
+                                     ('line' if res.get('synced') else 'plain')),
+                            'ts': datetime.now().isoformat(),
+                        }
+                    else:
+                        outcomes[name] = {'status': 'missed',
+                                          'ts': datetime.now().isoformat()}
                     yield _sse_event('status', {'provider': name, 'ok': res is not None,
                                                 'synced': bool(res and res.get('synced')),
                                                 'wbw_lines': _wbw_line_count(res) if res else 0,
@@ -561,8 +666,50 @@ def api_lyrics_stream():
                         fut.cancel()
                     break
 
+            # Snapshot every provider this race saw, before anything reads it.
+            # Saved PRE-TRANSLATION (raw lyrics), same as the blocking pipeline
+            # and probe_providers: /providers/select re-translates into whatever
+            # lang the client asks for, so storing translated text here would
+            # pin the switcher to one language.
+            _snap_saved = 0
+            try:
+                from .candidates import save_candidates, snapshot_provider
+                _snap = []
+                for _label, _res in seen:
+                    if not isinstance(_res, dict):
+                        continue
+                    _ly = _res.get('lyrics') or []
+                    if not _ly:
+                        continue
+                    _src = _res.get('source', '') or ''
+                    _is_wbw = _wbw_line_count(_res) > 0
+                    _snap.append({
+                        'provider': snapshot_provider(_label, _src),
+                        'source': _src,
+                        'synced': bool(_res.get('synced')),
+                        'wordSynced': _is_wbw,
+                        'tier': 'wbw' if _is_wbw else ('line' if _res.get('synced') else 'plain'),
+                        'lines': len(_ly),
+                        'score': round(_lyrics_score(_res), 3),
+                        'data': {'lyrics': _ly, 'source': _src,
+                                 'synced': bool(_res.get('synced')),
+                                 'wordSynced': _is_wbw,
+                                 'song': title, 'artist': artist},
+                    })
+                if _snap:
+                    _snap.sort(key=lambda c: c['score'], reverse=True)
+                    # All providers go in, including the losers: the switcher
+                    # offers every one of them, and save_candidates prunes
+                    # plain-tier entries itself when keep_all_providers is off.
+                    _snap_saved = len(_snap) if save_candidates(
+                        video_id, {'title': title, 'artist': artist},
+                        _snap, outcomes=outcomes) else 0
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Stream] snapshot save failed: {e}")
+
             if best is None:
-                print(f"[FAIL] [REQ {req_id}] [Stream] no provider hit")
+                print(f"[FAIL] [REQ {req_id}] [Stream] no provider hit "
+                      f"snapshot={_snap_saved}")
                 try:
                     from .library import record_unlyriced
                     record_unlyriced(video_id, title, artist, translate_to)
@@ -570,6 +717,7 @@ def api_lyrics_stream():
                     print(f"  [REQ {req_id}] [Stream] record_unlyriced failed: {e}")
                 yield _sse_event('lyrics', {'stage': 'raw', 'cached': False, 'source': 'none', 'synced': False, 'song': title,
                                             'artist': artist, 'lyrics': [{'time': 0, 'startTimeMs': 0, 'text': 'No lyrics found', 'translated': f'找不到歌詞: {title}', 'durationMs': 0, 'duration': 0}]})
+                yield _emit_pdata(video_id, translate_to)
                 yield _sse_event('done', {'ok': True, 'source': 'none', 'synced': False, 'stages': stages})
                 return
 
@@ -668,10 +816,16 @@ def api_lyrics_stream():
                 _record_serve(best, video_id, translate_to, client_ip)
             except Exception as e:
                 print(f"  [REQ {req_id}] [Stream] _record_serve failed: {e}")
+            # The snapshot was just written by the race, so this carries real
+            # data rather than an empty answer. Emitted LAST on purpose: it is
+            # the switcher's warm-up, not the lyrics, and the device applies it
+            # to RAM without touching the on-screen payload.
+            yield _emit_pdata(video_id, translate_to)
             yield _sse_event('done', {'ok': True, 'source': best.get('source'), 'synced': best.get('synced'), 'stages': stages})
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
-        print(f"  [REQ {req_id}] [Stream] closed elapsed={(time_module.time()-_req_start)*1000:.0f}ms")
+        print(f"  [REQ {req_id}] [Stream] closed elapsed={(time_module.time()-_req_start)*1000:.0f}ms "
+              f"snapshot_providers={len(seen)}")
         print("=" * 60)
 
     return Response(stream_with_context(generate()), mimetype='text/event-stream',

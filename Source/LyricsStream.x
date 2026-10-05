@@ -400,6 +400,65 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     [client cancel];
 }
 
+// probe=1: "do you hold something better than this?" -- one disk read, no
+// provider traffic, then the stream closes. This is what /api/lyrics/check was.
+//
+// It lives here rather than in LyricsSheet.x because YTMULyricsSSEClient is
+// defined in this file and Logos does not share classes across translation units.
+//
+// Two guards, both about answering a question nobody is asking any more:
+//   - the song must still be the one playing, or the verdict is for a song the
+//     reader already left;
+//   - if the LIVE stream is already open for this video, it is by definition
+//     already answering it (its cache gate returns the same entry), so starting
+//     a second fetch on its verdict would race the first.
+- (void)ytmu_probeServerTierForVideoID:(NSString *)videoID {
+    if (!videoID.length) return;
+    NSArray *tierLyrics = g_lyricsCache[videoID] ?: YTMULyricsCacheLoad(videoID);
+    if (!tierLyrics) return;
+
+    NSString *tier = YTMULyricsTier(tierLyrics);
+    NSInteger cacheVersion = YTMULyricsCacheVersionForVideoID(videoID);
+    NSString *url = [NSString stringWithFormat:
+                     @"%@/api/lyrics/stream?v=%@&lang=%@&probe=1&ct=%@&cv=%ld%@",
+                     YTMUApiBase(), YTMUUrlEncode(videoID), YTMUUrlEncode(YTMUTargetLang()),
+                     tier, (long)cacheVersion, YTMUAutoZhParam()];
+
+    // Held in a property, not a local: the client's -init resumes the task and
+    // nothing else would retain it.
+    __weak YTMULyricsViewController *weakSelf = self;
+    self.probeClient = [[YTMULyricsSSEClient alloc]
+        initWithURL:[NSURL URLWithString:url]
+        onEvent:^(NSString *name, NSDictionary *json) {
+            // probe=1 emits `check` and `done` and nothing else.
+            if (![name isEqualToString:@"check"]) return;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // Named vc, not self: assigning to `self` inside the block shadows the
+                // method's receiver, and clang is right to complain.
+                YTMULyricsViewController *vc = weakSelf;
+                if (!vc) return;
+                if (![videoID isEqualToString:YTMUResolveCurrentVideoID()]) return;
+                if ([vc.loadingVideoID isEqualToString:videoID] && vc.tstreamClient) {
+                    return;
+                }
+                // The payload still carries the metadata and the provider list,
+                // which is why this can also fill those in on a path where no
+                // lyrics fetch runs.
+                id cs = json[@"song"], ca = json[@"artist"];
+                if ([cs isKindOfClass:[NSString class]] && ((NSString *)cs).length) vc.lastSongTitle = cs;
+                if ([ca isKindOfClass:[NSString class]] && ((NSString *)ca).length) vc.lastSongArtist = ca;
+                [vc ytmu_applyProviderMeta:json forVideoID:videoID];
+                [vc ytmu_updateLandscapeMetadata];
+                if ([json[@"upgrade"] boolValue]) {
+                    sendDebugLog(@"[MUSIC] Server has a better lyrics tier, upgrading");
+                    [vc ytmu_startFullFetchForVideoID:videoID force:NO from:@"upgrade"];
+                }
+            });
+        }
+        onError:^{}
+        onClose:^{}];
+}
+
 - (void)ytmu_openTranslateStream:(NSString *)videoID jwt:(NSString *)jwt force:(BOOL)force {
     if (!videoID.length) return;
     [self ytmu_cancelTranslateStream];
@@ -477,10 +536,44 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     YTMUStatusBump(@"events");
     if (!json || ![self.loadingVideoID isEqualToString:videoID]) return;
     if ([name isEqualToString:@"meta"]) {
+        // Replaces the separate /api/lyrics/song read. The server emits this
+        // BEFORE its cache gate now, so the title and artist arrive on every
+        // path -- the cache hit that used to come back with nothing is exactly
+        // the case that needed the second request.
         id fs = json[@"song"], fa = json[@"artist"];
-        if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
-        if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
-        [self ytmu_updateLandscapeMetadata];
+        BOOL changed = NO;
+        if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length &&
+            ![fs isEqualToString:self.lastSongTitle]) {
+            self.lastSongTitle = fs;
+            changed = YES;
+        }
+        if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length &&
+            ![fa isEqualToString:self.lastSongArtist]) {
+            self.lastSongArtist = fa;
+            changed = YES;
+        }
+        if (changed) {
+            // The latch the old separate call maintained, so re-entering the
+            // panel for the same song does not re-apply this.
+            self.songMetaVideoID = videoID;
+            [self ytmu_updateLandscapeMetadata];
+        }
+        return;
+    }
+    if ([name isEqualToString:@"pdata"]) {
+        // Every provider's raw lyrics, straight into the switcher's RAM. This
+        // replaces /api/lyrics/providers/data. Applied to RAM only: the on-disk
+        // cache and the on-screen payload are untouched, because these are raw
+        // (untranslated) and belong to providers the reader has not chosen.
+        NSArray *entries = json[@"providers"];
+        if (![json[@"found"] boolValue] || ![entries isKindOfClass:[NSArray class]] ||
+            entries.count == 0) {
+            return;
+        }
+        YTMUProviderLyricsStore(videoID, entries);
+        self.providerDataVideoID = videoID;
+        sendDebugLog([NSString stringWithFormat:@"[MUSIC] %lu provider(s) for %@ held in RAM",
+                      (unsigned long)YTMUProviderLyricsCount(videoID), videoID]);
         return;
     }
     if ([name isEqualToString:@"lyrics"]) {
