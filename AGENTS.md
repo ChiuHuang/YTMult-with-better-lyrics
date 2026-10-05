@@ -168,7 +168,20 @@ Current:
   finished, so it streamed the translation with nothing to stream from.
   `?fast=1` on `/api/lyrics` is no longer sent by the device (it is a reduced
   pipeline writing the `:fast` key nothing else reads); the blocking route
-  survives only as the stream-died fallback. TRAPS: moving the phone onto the
+  survives only as the stream-died fallback. **FIVE device reads are now ONE
+  endpoint**: `/lyrics/song` was redundant because `meta` went out AFTER the
+  song lookup (so a cache hit carried no title — it now goes BEFORE the cache
+  gate), `/providers/candidates` because the payload lacked provider meta, and
+  `/check` + `/providers/data` are modes (`probe=1`, `pdata=1`, both cache-only
+  with no provider traffic) whose bodies are `routes_lyrics.build_check_payload`
+  and `build_provider_data` — the legacy JSON routes call the same helpers, so
+  the tier vocabulary and the provider caps have one definition. TRAPS: the race
+  route saved NO provider snapshot at all (`save_candidates` was reachable only
+  from `fetch_all_lyrics`, and `_snapshot_provider` was a closure inside it), so
+  the switcher, `/providers/data` and the re-race known-misses were all silently
+  dead on it — invisible until the phone moved off the blocking route; and
+  `client_ver < FORMAT_VERSION` must stay `<`, not `!=`, or a client NEWER than
+  the server refetches forever with no way to converge. TRAPS: moving the phone onto the
   race route was not a URL change — the race was missing five things tstream
   had, each a live defect (Cubey skipped with no `jwt` and no pool fallback,
   `song_lang` never passed to the translator, no missing-line repair so
