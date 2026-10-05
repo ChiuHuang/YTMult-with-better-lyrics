@@ -2,11 +2,20 @@
 //
 // Two halves of the same feature:
 //
-//  1. YTMULyricsSSEClient reads the server's GET /api/lyrics/tstream SSE feed
-//     and turns it into callbacks. The server pushes the ranked (untranslated)
-//     winner as soon as the provider race is done and then every translated
-//     line as the model writes it, so the panel shows lyrics first and the
-//     translation fills in live instead of popping in after ~7s.
+//  1. YTMULyricsSSEClient reads the server's GET /api/lyrics/stream SSE feed
+//     and turns it into callbacks. This is the ONE lyrics route the phone uses:
+//     the server races every provider concurrently and pushes `lyrics` each time
+//     one beats the current best score (line-synced can land before word-synced,
+//     and both land long before the translation finishes), then pushes every
+//     translated line as the model writes it. So the panel shows lyrics first,
+//     upgrades them while the reader is already looking at them, and fills the
+//     translation in live instead of popping it in after ~7s.
+//
+//     The old route was /api/lyrics/tstream, and the difference is the whole
+//     point: tstream ran the provider pipeline to completion and pushed `lyrics`
+//     ONCE afterwards. It streamed the translation but had nothing to stream
+//     FROM until the race was already over. It and the blocking `?fast=1` probe
+//     are both gone from this path.
 //
 //  2. The typewriter reveal paints the translated row (the line under the
 //     lyric) letter by letter at YTMUTypewriterCPS() characters per second.
@@ -14,10 +23,19 @@
 //     it, so the row height never changes mid-reveal -- swapping the string
 //     itself would resize rows under the reader's thumb on every frame.
 //
-// Server contract (server/routes_stream.py):
-//   meta   -> {song, artist, duration}
-//   status -> {providers: [...]}
-//   lyrics -> {stage: raw|cached|final, lyrics: [...], source, synced, ...}
+// Server contract (server/routes_stream.py, api_lyrics_stream):
+//   meta   -> {song, artist, duration, lookup_ms, art, art_maxres}
+//   status -> {provider, ok, synced, wbw_lines, score, elapsed_ms} one per
+//              provider as it finishes. NOT read here; the Debug page counts
+//              events instead. Note this is the race route's shape, not
+//              tstream's `{providers: [...]}` -- the race reports each provider
+//              the moment it lands because that is the whole point of it.
+//   lyrics -> {stage: raw|machine|cached|final, cached: true|false, lyrics,
+//              source, synced, providers, ...}
+//              `raw` is untranslated and may be replaced by a better provider.
+//              `machine` (tstream=0 only) is the Google interim over the same
+//              rows. `final`/`cached` are stable and are the only stages the
+//              device writes to its on-disk cache or animates.
 //   tline  -> {i, row, text, done}   `text` is CUMULATIVE for that row:
 //                                      overwrite, never append. done=true
 //                                      means the model finished that line.
@@ -389,12 +407,30 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     self.tstreamGotLyrics = NO;
     self.tstreamGotFinal = NO;
 
-    NSMutableString *url = [NSMutableString stringWithFormat:@"%@/api/lyrics/tstream?v=%@&lang=%@%@",
+    // /api/lyrics/stream, and it is now the ONLY lyrics route the phone uses.
+    //
+    // It used to be /api/lyrics/tstream, which is a different endpoint with one
+    // crucial difference: tstream runs the whole provider pipeline to completion
+    // and pushes `lyrics` ONCE, after it, so the translation streamed but the
+    // lyrics did not -- there was nothing to stream FROM until the race was
+    // already over. This route races the providers concurrently and pushes every
+    // improvement as it lands, which is the ladder the panel actually wants.
+    //
+    // `tstream` here is the translation style, not the endpoint: 1 (default) is
+    // Cohere's own token stream, one `tline` per line as it is written; 0 is the
+    // Google interim plus one blocking Cohere pass. That is the user's "streamed
+    // translation" setting expressed as a query param, so turning the setting off
+    // no longer means taking a different route -- it means a different answer on
+    // the same one.
+    BOOL streamTranslate = YTMULyricsStreamTranslateEnabled();
+    NSMutableString *url = [NSMutableString stringWithFormat:@"%@/api/lyrics/stream?v=%@&lang=%@%@&tstream=%d",
                             YTMUApiBase(), YTMUUrlEncode(videoID),
-                            YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
+                            YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam(),
+                            streamTranslate ? 1 : 0];
     if (force) [url appendString:@"&force=1"];
     if (jwt.length) [url appendFormat:@"&jwt=%@", YTMUUrlEncode(jwt)];
-    sendDebugLog([NSString stringWithFormat:@"[MUSIC] Streaming translation for %@", videoID]);
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] Streaming %@ for %@",
+                  streamTranslate ? @"lyrics + translation" : @"lyrics", videoID]);
     YTMUStatusSet(@"video", videoID);
     YTMUStatusSet(@"state", @"opening");
     YTMUStatusSet(@"url", url);
@@ -461,7 +497,17 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
         id cachedFlag = json[@"cached"];
         BOOL fromCache = (cachedFlag != nil) ? [cachedFlag boolValue]
                                              : [stage isEqualToString:@"cached"];
-        if (!fromCache) self.typewriterLive = YES;
+        // The stage matters now, and not only the cached flag. On tstream=0 the
+        // server pushes `machine` (the Google interim) and then re-pushes the
+        // same rows as `final` once Cohere answers -- two fills of the same
+        // cells, about a second apart. Animating the reveal onto the interim
+        // types a line out and then types the real one over it, which is exactly
+        // the flicker the streamed path avoids by not sending an interim at all.
+        // So the reveal runs only where the text is not about to be replaced.
+        BOOL stable = isFinal || [stage isEqualToString:@"cached"];
+        if (!fromCache && stable && YTMULyricsStreamTranslateEnabled()) {
+            self.typewriterLive = YES;
+        }
         if (!self.tstreamGotLyrics) {
             UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
             statusLabel.text = @"";
@@ -475,12 +521,19 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
         [self ytmu_applyProviderMeta:json forVideoID:videoID];
         [self ytmu_updateLandscapeMetadata];
         // A `raw` payload is untranslated and will be replaced by the streaming
-        // tline updates, so only a final payload (or the very first one, so a
-        // second VC has something to show) is promoted to the caches.
+        // tline updates, so only a stable payload (final or cached) is written
+        // to the on-disk cache -- otherwise the next play of this song reads
+        // back a half-translated file. The RAM cache takes the first payload of
+        // any stage so a second VC has something to show.
+        //
+        // `machine` and `final` are the same rows with the same line count, so
+        // promoting either of them into the RAM cache is harmless; only the disk
+        // write has to wait for the stage that will not be replaced.
+        BOOL promotable = stable;
         if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
-        if (isFinal || !g_lyricsCache[videoID]) {
+        if (promotable || !g_lyricsCache[videoID]) {
             g_lyricsCache[videoID] = lyrics;
-            if (isFinal) YTMULyricsCacheSave(videoID, lyrics);
+            if (promotable) YTMULyricsCacheSave(videoID, lyrics);
         }
         BOOL firstPaint = (self.lyrics.count == 0);
         [self updateLyrics:lyrics];
@@ -496,8 +549,11 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
         id text = json[@"text"];
         if (![text isKindOfClass:[NSString class]]) return;
         // A translated line landing in real time: nothing about this request
-        // came out of a cache, so the reveal may run.
-        self.typewriterLive = YES;
+        // came out of a cache, so the reveal may run. Gated on the setting for
+        // the same reason as the `lyrics` push above -- with streamed
+        // translation turned off there is nothing to reveal character by
+        // character, the rows simply arrive.
+        if (YTMULyricsStreamTranslateEnabled()) self.typewriterLive = YES;
         if ([json[@"done"] boolValue]) YTMUStatusBump(@"lines");
         YTMUStatusSet(@"lastRow", @(row));
         YTMUStatusSet(@"lastText", text);
