@@ -27,6 +27,27 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | FIVE device reads are ONE endpoint, and
+  the race route turned out never to save a provider snapshot AT ALL | files:
+  server/{routes_stream,routes_lyrics,candidates,pipeline}.py,
+  Source/{LyricsSheet,LyricsStream,LyricsCore}.x, Source/LyricsShared.h | next:
+  rebuild and look at the provider switcher FIRST — it has been silently empty
+  on this route since it existed | does: `/lyrics/song` was redundant because
+  `meta` was emitted AFTER the song lookup, so a cache hit came back with no
+  title at all (it now goes BEFORE the cache gate, art URLs being a free string
+  build); `/providers/candidates` was redundant because the payload lacked
+  provider meta; `/check` and `/providers/data` are now `probe=1` and `pdata=1`,
+  both cache-only with NO provider traffic, sharing `build_check_payload` /
+  `build_provider_data` with the legacy JSON routes. THE BUG: `save_candidates`
+  was reachable only from `fetch_all_lyrics` and `_snapshot_provider` was a
+  CLOSURE inside it, so the race saved nothing — switcher empty, /providers/data
+  found=0, re-race had no known misses; invisible until the phone left the
+  blocking route, and my previous commit's "provider meta fixed" claim was
+  attaching an empty one. TRAPS: Logos shares no classes across TUs, so the
+  probe had to move to LyricsStream.x (where YTMULyricsSSEClient lives) and
+  `ytmu_startFullFetchForVideoID:force:from:` had to be declared in
+  LyricsShared.h next to the VC methods LyricsStream.x already calls; and a
+  block-local `self` from `weakSelf` trips -Wshadow under -Werror (name it `vc`).`
 - `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | ONE SSE endpoint carries the whole
   song; the device stopped sending \`?fast=1\` and stopped using \`/tstream\` |
   files: server/routes_stream.py, Source/LyricsSheet.x, Source/LyricsStream.x |
@@ -181,8 +202,9 @@ Current:
   the switcher, `/providers/data` and the re-race known-misses were all silently
   dead on it — invisible until the phone moved off the blocking route; and
   `client_ver < FORMAT_VERSION` must stay `<`, not `!=`, or a client NEWER than
-  the server refetches forever with no way to converge. TRAPS: moving the phone onto the
-  race route was not a URL change — the race was missing five things tstream
+  the server refetches forever with no way to converge.
+  Moving the phone onto the race route was also not a URL change — the race was
+  missing five things tstream
   had, each a live defect (Cubey skipped with no `jwt` and no pool fallback,
   `song_lang` never passed to the translator, no missing-line repair so
   `final` could be written to disk half-translated, `_record_serve` and
