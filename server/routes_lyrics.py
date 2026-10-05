@@ -500,10 +500,14 @@ def api_cache_list():
 def api_lyrics_song():
     """Title/artist for a video id, straight from YT Music metadata.
 
-    The full screen panel needs the track name on every song change, and the
-    on-device player objects are not a dependable source (playerResponse is
-    often nil and the now-playing labels are hidden behind our own view).
-    This is one cached metadata lookup -- no lyric providers involved."""
+    SUPERSEDED. This existed because /api/lyrics/stream emitted its `meta` event
+    only AFTER the song lookup, so a cache hit came back with no title at all --
+    and the full screen panel needs the track name on every song change. `meta`
+    now goes out before the cache gate, so the stream carries it on every path
+    and this call is redundant. Kept for builds predating that, and because it
+    is the only way to ask for the metadata of a song that has NO lyrics entry
+    (the stream needs a video to be playing before it is asked).
+    """
     from .providers_yt import get_song_info_cached
     video_id = (request.args.get('v') or '').strip()
     if not _safe_cache_component(video_id):
@@ -542,27 +546,30 @@ def api_providers_candidates():
                     'saved': meta.get('saved', '')})
 
 
-@app.route('/api/lyrics/providers/data', methods=['GET'])
-def api_providers_data():
-    """Every provider's raw lyrics for a video, from the stored probe/fetch
-    snapshot. The device pulls this once per song and keeps it in RAM, so
-    flipping the source is instant and never re-races the providers. Nothing
-    here is cached: the snapshots are pre-translation, the device renders
-    them raw until it asks /providers/select for the one it wants (that is
-    the only provider whose lyrics ever get cached)."""
-    video_id = (request.args.get('v') or '').strip()
+def build_provider_data(video_id, lang=None):
+    """Every provider's raw lyrics for a video, from the stored snapshot.
+
+    The device keeps this in RAM so flipping the source is instant and never
+    re-races the providers. Nothing here is translated: the snapshots are
+    pre-translation by construction, and the device renders them raw until it
+    asks /providers/select for the one it wants (that is the only provider whose
+    lyrics ever get cached).
+
+    Shared by the SSE route's `pdata` event and the legacy
+    /api/lyrics/providers/data route, so the caps and the shape live in one
+    place.
+    """
     if not _safe_cache_component(video_id):
-        return jsonify({'ok': False, 'error': 'Invalid video ID'}), 400
-    lang = (request.args.get('lang') or 'zh-TW').strip()
-    if not _safe_cache_component(lang):
-        return jsonify({'ok': False, 'error': 'Invalid lang'}), 400
+        return {'ok': False, 'error': 'Invalid video ID'}
+    if lang is not None and not _safe_cache_component(lang):
+        return {'ok': False, 'error': 'Invalid lang'}
     try:
         from .candidates import load_candidates
         cands = load_candidates(video_id)
     except Exception:
         cands = None
     if not cands:
-        return jsonify({'ok': True, 'video_id': video_id, 'found': False, 'providers': []})
+        return {'ok': True, 'video_id': video_id, 'found': False, 'providers': []}
 
     out = []
     budget = _PROVIDER_DATA_MAX_BYTES
@@ -588,28 +595,47 @@ def api_providers_data():
             'score': c.get('score', 0),
             'lyrics': lyrics,  # raw: no translations (device fills them in later)
         })
-    return jsonify({'ok': True, 'video_id': video_id, 'found': bool(out),
-                    'providers': out})
+    return {'ok': True, 'video_id': video_id, 'found': bool(out),
+            'providers': out}
+
+
+@app.route('/api/lyrics/providers/data', methods=['GET'])
+def api_providers_data():
+    """Every provider's raw lyrics for a video (see build_provider_data).
+
+    Superseded on the device by the `pdata` event on /api/lyrics/stream, which
+    carries the identical body. Kept because a build predating that switch
+    calls it, and because it is a convenient curl target.
+    """
+    video_id = (request.args.get('v') or '').strip()
+    lang = (request.args.get('lang') or 'zh-TW').strip()
+    out = build_provider_data(video_id, lang)
+    if not out.get('ok'):
+        return jsonify(out), 400
+    return jsonify(out)
 
 
 _TIER_RANK = {'raw': 0, 'line': 1, 'wbw': 2}
 
 
-@app.route('/api/lyrics/check', methods=['GET'])
-def api_lyrics_check():
-    """Cheap version reconciliation. The client pings this even on a cache
-    hit (it costs one tiny cache read, no provider calls) and compares the
-    server's best tier against its own via `ct`: raw < line < wbw. Same tier
-    -> upgrade=0 and the client ignores; strictly better -> upgrade=1 and the
-    client does a normal (non-force) full fetch that serves the upgraded
-    entry straight from the server cache -- which is how a background node
-    re-race reaches a device whose lyrics were already shown."""
-    video_id = request.args.get('v', '')
-    translate_to = request.args.get('lang', '') or 'zh-TW'
-    client_tier = request.args.get('ct', '')
-    client_ver = request.args.get('cv', '0')
+def build_check_payload(video_id, translate_to, client_tier, client_ver):
+    """Cheap version reconciliation, as a dict. No provider calls, ever.
+
+    The client asks this even when it already has lyrics on screen and only
+    wants to know whether the server holds something better: `ct` is the
+    client's own tier (raw < line < wbw), and upgrade=1 means strictly better.
+    This is how a background node's re-race reaches a device whose lyrics were
+    already shown.
+
+    MUST stay a pure cache read. It is called on every local cache hit, so
+    anything that could fall through into a fetch would turn a cheap
+    reconciliation into a full provider race.
+
+    Shared by the SSE route's `probe=1` mode and the legacy /api/lyrics/check
+    route, so the tier vocabulary has exactly one definition.
+    """
     if not _safe_cache_component(video_id) or not _safe_cache_component(translate_to):
-        return jsonify({'error': 'Invalid video ID or lang'}), 400
+        return {'error': 'Invalid video ID or lang'}
     try:
         client_ver = max(int(client_ver), 0)
     except (TypeError, ValueError):
@@ -617,14 +643,19 @@ def api_lyrics_check():
     # A client cache stored under an older format (no real word durations /
     # last-word timing) is stale regardless of tier -- tell the client to
     # refetch so old on-device caches self-heal after the format bump.
+    #
+    # `<`, not `!=`. A client NEWER than this server build is not stale: it
+    # understands at least everything this build writes. Telling it to refetch
+    # would make it discard a perfectly good cache on every probe with no way to
+    # converge, because this server can never catch up to it.
     format_stale = client_ver < _CACHE_FORMAT_VERSION
 
     from .race import _lyrics_score, _wbw_line_count
     data = get_cached(f"{video_id}:{translate_to}") or get_cached(f"{video_id}:{translate_to}:fast")
     if not data:
         print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=0 cv_stale={format_stale}")
-        return jsonify({'found': False, 'upgrade': format_stale, 'formatVersion': _CACHE_FORMAT_VERSION,
-                        'providers': (_provider_meta(video_id) or {}).get('providers') or []})
+        return {'found': False, 'upgrade': format_stale, 'formatVersion': _CACHE_FORMAT_VERSION,
+                'providers': (_provider_meta(video_id) or {}).get('providers') or []}
 
     if _wbw_line_count(data) > 0:
         srv_tier = 'wbw'
@@ -637,7 +668,7 @@ def api_lyrics_check():
     upgrade = (_TIER_RANK[srv_tier] > _TIER_RANK[client_tier]) or format_stale
     print(f"[CHECK] v={video_id} lang={translate_to} ct={client_tier} cv={client_ver} -> found=1 tier={srv_tier} upgrade={int(upgrade)}")
     _pmeta = _provider_meta(video_id) or {}
-    return jsonify({
+    return {
         'found': True,
         'tier': srv_tier,
         'source': data.get('source', ''),
@@ -654,7 +685,24 @@ def api_lyrics_check():
         'artist': data.get('artist', ''),
         'providers': _pmeta.get('providers') or [],
         'saved': _pmeta.get('saved', ''),
-    })
+    }
+
+
+@app.route('/api/lyrics/check', methods=['GET'])
+def api_lyrics_check():
+    """Legacy JSON wrapper around build_check_payload.
+
+    Superseded on the device by GET /api/lyrics/stream?probe=1, which emits the
+    identical dict as a `check` event. Kept for builds predating that switch.
+    """
+    payload = build_check_payload(
+        request.args.get('v', ''),
+        request.args.get('lang', '') or 'zh-TW',
+        request.args.get('ct', ''),
+        request.args.get('cv', '0'))
+    if payload.get('error'):
+        return jsonify(payload), 400
+    return jsonify(payload)
 
 
 @app.route('/api/lyrics/precache', methods=['POST'])

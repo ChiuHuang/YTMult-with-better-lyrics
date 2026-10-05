@@ -784,21 +784,53 @@ void YTMUPrefetchProviderLyrics(NSArray *videoIDs, NSString *lang) {
     // moment to land the snapshot before asking for it.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
                    dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        // /api/lyrics/stream?pdata=1 emits ONLY the provider snapshot: no
+        // provider traffic, no lyrics, no translation. It has to be this rather
+        // than the live stream because the track has not started, so there is no
+        // stream open to carry the `pdata` event -- but it is still one endpoint.
         for (NSString *vid in todo) {
-            NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/providers/data?v=%@&lang=%@",
+            NSString *urlStr = [NSString stringWithFormat:@"%@/api/lyrics/stream?v=%@&lang=%@&pdata=1",
                                 YTMUApiBase(), vid, target];
             NSURL *url = [NSURL URLWithString:urlStr];
             if (!url) continue;
-            [[[NSURLSession sharedSession] dataTaskWithURL:url
-                completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
-                if (err || !data) return;
-                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+            // Raw SSE read, because this runs before any panel exists: there is
+            // no YTMULyricsViewController to hand the event to, and this function
+            // is a C entry point called from the queue walk. The completion-handler
+            // task form accumulates the WHOLE body before calling back, so `data`
+            // is the complete stream, not a chunk.
+            NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+                dataTaskWithURL:url
+              completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
+                if (err || !data.length) return;
+                NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                if (!text.length) return;
+                // pdata=1 is one shot (pdata then done), so the first frame is
+                // the whole answer.
+                NSRange want = [text rangeOfString:@"event: pdata"];
+                if (want.location == NSNotFound) return;
+                NSRange tail = NSMakeRange(want.location + want.length, text.length - (want.location + want.length));
+                NSRange dataLine = [text rangeOfString:@"data: "
+                                                options:0
+                                                  range:tail];
+                if (dataLine.location == NSNotFound) return;
+                NSUInteger start = dataLine.location + dataLine.length;
+                NSUInteger end = start;
+                while (end < text.length) {
+                    unichar c = [text characterAtIndex:end];
+                    if (c == '\n' || c == '\r') break;
+                    end++;
+                }
+                NSString *body = [text substringWithRange:NSMakeRange(start, end - start)];
+                NSData *jsonData = [body dataUsingEncoding:NSUTF8StringEncoding];
+                if (!jsonData) return;
+                NSDictionary *json = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
                 NSArray *entries = json[@"providers"];
                 if (![json[@"found"] boolValue] || ![entries isKindOfClass:[NSArray class]]) return;
                 YTMUProviderLyricsStore(vid, entries);
                 sendDebugLog([NSString stringWithFormat:@"[MUSIC] prefetch %lu provider(s) into RAM for %@",
                               (unsigned long)YTMUProviderLyricsCount(vid), vid]);
-            }] resume];
+            }];
+            [task resume];
         }
     });
 }
