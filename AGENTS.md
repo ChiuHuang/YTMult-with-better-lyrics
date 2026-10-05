@@ -27,6 +27,27 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | ONE SSE endpoint carries the whole
+  song; the device stopped sending \`?fast=1\` and stopped using \`/tstream\` |
+  files: server/routes_stream.py, Source/LyricsSheet.x, Source/LyricsStream.x |
+  next: rebuild on a device and watch a cold song — plain/line must paint first
+  (Unison usually lands ~150ms), then upgrade to wbw in place, then translations
+  stream in | does: there were THREE ways to get lyrics and the phone used all
+  three. \`?fast=1\` was a deliberately reduced pipeline writing the \`:fast\` key
+  nothing else reads, sent FIRST on every song — on a song it missed, pure added
+  latency. \`/tstream\` is SSE but runs the pipeline to completion and pushes
+  \`lyrics\` ONCE afterwards: it streamed the translation with nothing to stream
+  FROM. \`/api/lyrics/stream\` already raced the providers concurrently and
+  pushed every improvement as it landed — measured raw/Unison 55 lines 0 wbw →
+  raw/AMLL 58 lines 58 wbw → final — and only the BROWSER used it. TRAPS: the
+  switch was not a URL change, the race was missing five things tstream had
+  (Cubey skipped outright with no \`jwt\` and no pool fallback, \`song_lang\`
+  never passed to the translator, no missing-line repair so \`final\` could be
+  cached half-translated, \`_record_serve\`+provider meta never attached so usage
+  counts and the switcher were empty, no node-cache lookup); and \`tstream=0\`
+  pushes \`machine\` then re-pushes the same rows as \`final\`, so the reveal
+  and the DISK cache write must both be gated on a stage that will not be
+  replaced. tstream kept, marked DEPRECATED, for pre-switch builds only.`
 - `[ACTIVE] ses_f033796faffeC32ISpNDwW0STV | UNCOMMITTED work in the tree (Source/LyricsSheet.x, Source/LyricsShared.h): the per-song lyric type size is now FITTED with real TextKit (YTMUVisualLineCount) instead of a character count, the floor dropped 24->18pt, 2 lines max per row, and a rotation re-fits (fittedRowWidth) | files: Source/LyricsSheet.x, Source/LyricsShared.h | next: re-verify that diff, then commit it as its own commit — it is NOT in 9a3d724. TRAPS: only the LONGEST-LAID-OUT line may be fitted (a 40-char Latin line and a 16-char CJK line measure alike, so fitting by string length shrinks a whole song for nothing), wrapping is not linear in the size so the candidate set must be carried down (a line that wrapped at 24pt can stop at 23.5 and then a DIFFERENT line is the worst case), and round() not ceil() on the measured height because TextKit's line-fragment rect carries rounding and a one-line string measures 1.02 lines`
 - `[ACTIVE] ses_eff28f66affdILC3ZVe9BGTjCE | extension ported to upstream 3.0.0.4 on branch ytmU-3.0 (+ manual push button); needs a real browser, then a PR | files: better-lyrics src/modules/lyrics/providers/{ytmu,ytmuUpgrade}.ts, src/options/{background,options}.ts, manifest.json; server/routes_admin.py | next: build the extension from ytmU-3.0 and confirm (a) the Sources page shows the key field + toggle + Send current lyrics, (b) a cold song no longer sits on "still searching" for 46s — the provider now resolves empty at 2.5s and the server finishes in the background, (c) a song the server lacks gets pushed back. TRAPS: a provider timeout must record tier -1, not nothing — "never asked" and "the server has nothing" are different states and only the second is fillable; the 2.4.0 ordering put ytmu-PLAIN at priority 2 where it beat every richsynced provider, so the three keys sit inside their own tier now; and 2 of the 54 upstream self-checks (bundle-sizes, ui-guards) fail on a CLEAN 3.0.0.4 tree here, so they are baseline`
 - `[DONE] ses_eff28f66affdILC3ZVe9BGTjCE | the extension is a two-way street now: same endpoint as the iOS app, its race upgrades OUR cache, our [instrumental] flag renders | files: server/library.py, server/routes_admin.py, server/routes_library.py, C:/Users/chiuhuang/better-lyrics/src/modules/lyrics/providers/{ytmu,ytmuUpgrade}.ts | next: none — open items: the extension half is committed on better-lyrics `master` (f7229df, still ahead of myfork/master by 2), untested in a real browser; the server half is 5c28795, also unpushed | does: `fast=1` was the whole complaint — it is LRCLib+YouTube+fast Google, no JWT, writes the :fast key while the phone reads the full one, so the browser could be served line/plain for a song we had wbw for. library.apply_lyrics_payload is now the ONE write path for both the dashboard apply and POST /api/lyrics/contribute (key auth, same key as the JWT push, no CORS). require_better=True + tier read AFTER sanitize is the whole safety argument; :fast sibling upgraded too or the phone shows pre-upgrade lyrics for the first seconds. TRAPS: an ABSENT tier record is not -1 (never asked != had nothing, and reading it as empty makes every provider an upgrade); a 401 clears the pushed mark but a refusal does not; and `npm run lint` here reformats 15 unrelated files, so stage only what you touched`
@@ -134,10 +155,29 @@ Current:
   gitignored (it holds every node's `key_hash`) and every writer goes through
   `_mutate_nodes(mutator)` — one lock, a fresh read, atomic `tmp`+`os.replace`;
   never load-edit-save by hand.
-  Streaming translation: `translate.translate_stream` is the generator,
-  `routes_stream._stream_translate` runs it on a worker thread and drains it
-  into SSE, the device reads `GET /api/lyrics/tstream`. `/api/lyrics/stream` is
-  the older provider-race endpoint and shares the helper. SSE bodies without a
+  Streaming translation: ONE SSE route carries the whole song.
+  `/api/lyrics/stream` (`routes_stream.api_lyrics_stream`) is the only lyrics
+  route the device uses: it races every provider concurrently and pushes
+  `lyrics` **every time one beats the current best score**, so
+  line-synced -> word-synced -> `final` is one request, not a ladder of calls.
+  Measured on `Lixpftlm0Eo`: raw/Unison 55 lines 0 wbw -> raw/AMLL 58 lines
+  58 wbw -> final. `tstream=1|0` is the streamed-translation SETTING expressed
+  as a query param (Cohere token stream vs Google interim + blocking pass), not
+  a second endpoint. `/api/lyrics/tstream` is DEPRECATED and kept only for
+  builds predating the switch; it pushed `lyrics` ONCE after the pipeline
+  finished, so it streamed the translation with nothing to stream from.
+  `?fast=1` on `/api/lyrics` is no longer sent by the device (it is a reduced
+  pipeline writing the `:fast` key nothing else reads); the blocking route
+  survives only as the stream-died fallback. TRAPS: moving the phone onto the
+  race route was not a URL change — the race was missing five things tstream
+  had, each a live defect (Cubey skipped with no `jwt` and no pool fallback,
+  `song_lang` never passed to the translator, no missing-line repair so
+  `final` could be written to disk half-translated, `_record_serve` and
+  provider meta never attached so usage counts and the provider switcher were
+  empty, no node-cache lookup); and with `tstream=0` the server pushes
+  `machine` then re-pushes the same rows as `final`, so the device gates
+  `typewriterLive` AND the on-disk cache write on a stage that will not be
+  replaced. SSE bodies without a
   charset decode as ISO-8859-1 — force `resp.encoding = 'utf-8'` before
   parsing, and treat `data: [DONE]` as non-JSON.
   Dashboard refetch-from-URL: `pipeline.probe_providers()` fetches EVERY
@@ -158,8 +198,8 @@ Current:
   (fallback sheet + engagement-panel embed tag 9999), sliding wipe highlight,
   client file cache (`YTMU_LyricsCache`), ELM tap hijack, `YTIButtonRenderer`
   unlock, JWT pre-warm hooks.
-- `Source/LyricsStream.x`: SSE client for `GET /api/lyrics/tstream`
-  (`YTMULyricsSSEClient`), the typewriter reveal (per-row state in
+- `Source/LyricsStream.x`: SSE client for `GET /api/lyrics/stream` (the ONE
+  route; `YTMULyricsSSEClient`), the typewriter reveal (per-row state in
   `typeState`/`typeRows`, `CAGradientLayer` mask on `transLabel`, driven from
   `updatePlaybackTime`), the stream event handlers and `YTMUDebugStreamStatus()`.
   The VC's stream/type methods are declared in `LyricsShared.h` (Logos does not
