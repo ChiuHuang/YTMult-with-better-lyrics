@@ -24,7 +24,7 @@ from flask import Flask, request, jsonify, render_template, session, redirect, u
 from .app import app
 from .utils import _safe_cache_component
 from .cache import get_cached, set_cached, sanitize_lyrics_parts, is_not_found_result
-from .jwt_pool import contribute_jwt as _pool_contribute
+from .jwt_pool import contribute_jwt as _pool_contribute, pick_jwt
 from .nodes import ask_nodes_for_cache
 from .providers_yt import get_song_info, yt_cover_url
 from .metadata import get_search_queries
@@ -152,6 +152,26 @@ def _with_provider_meta(payload, video_id):
 def api_lyrics_tstream():
     """SSE: the /api/lyrics pipeline with the translation streamed line by line.
 
+    ============================ DEPRECATED ============================
+    Kept only so an older build still in the wild keeps working. The device
+    moved to /api/lyrics/stream (see api_lyrics_stream) because THIS route
+    cannot do the thing the panel needs: it runs `fetch_all_lyrics` to
+    completion and pushes `lyrics` exactly ONCE, afterwards. It streams the
+    translation and had nothing to stream FROM until the race was already
+    over, so the panel sat empty for the whole provider phase and then painted
+    one finished payload.
+
+    /api/lyrics/stream races the same providers concurrently and pushes every
+    improvement as it lands, so the ladder the reader sees IS the race. Each
+    piece this route had and the race lacked (node cache, song_lang into the
+    translator, the missing-line repair, usage stats, provider meta,
+    record_unlyriced, the explicit `cached` flag) has been ported across.
+
+    Delete this route once no build predating that switch is in the wild. It
+    has no other caller in this repo: not the browser extension, not the
+    dashboard, not the device.
+    -------------------------------------------------------------------
+
     Same work as the blocking route -- full cache gate, node cache,
     fetch_all_lyrics (which snapshots every provider it tried), disk cache,
     unlyriced record, provider meta, usage stats -- except nothing waits for
@@ -161,10 +181,12 @@ def api_lyrics_tstream():
     the complete payload the device caches (identical to what /api/lyrics
     would have returned).
 
-    Deliberately NOT registered in the in-flight gate: the device's fast
-    request shares that gate with the blocking full request, so waiting on it
-    would stall this stream behind a fast-grade result. Duplicate work is
-    covered by the cache gate below.
+    Deliberately NOT registered in the in-flight gate: the device's
+    `?fast=1` request used to share that gate with the blocking full request,
+    so waiting on it would have stalled this stream behind a fast-grade result.
+    The device no longer sends `fast=1` at all; the note is kept because the
+    gate is shared with the blocking route, which is still called as the
+    stream-died fallback.
 
     Events:
       meta    -> {song, artist, duration, lookup_ms, art, art_maxres}
@@ -393,32 +415,57 @@ def api_lyrics_stream():
     auto_zh = request.args.get('az', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)
+    client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-IP') or request.remote_addr
 
     import copy as _copy
 
     def stream_payload(data):
         """Deep-copied payload with per-display transforms applied, so the
-        canonical `best`/cached object is never mutated by the transform."""
+        canonical `best`/cached object is never mutated by the transform.
+
+        Also carries the provider meta (candidates snapshot), which is what
+        fills the device's provider switcher and the dashboard's candidate
+        list. tstream had this and the race did not, so on the race route the
+        switcher was always empty -- another reason the phone could not be
+        moved onto it as-is.
+        """
         payload = dict(data)
         if isinstance(payload.get('lyrics'), list):
             payload['lyrics'] = _copy.deepcopy(payload['lyrics'])
             apply_display_transforms(payload['lyrics'], translate_to, auto_zh)
-        return payload
+        return _with_provider_meta(payload, video_id)
 
     print("=" * 60)
     print(f"[REQ] [REQ {req_id}] Lyrics STREAM: {video_id} [{'JWT' if jwt_token else 'Normal'}] lang={translate_to}")
     print("=" * 60)
 
+    def elapsed_ms():
+        return int((time_module.time() - _req_start) * 1000)
+
     def generate():
         # --- Fast path: full cache hit closes the stream immediately ---
         if not force_mode:
             cached = get_cached(full_cache_key)
+            # Node cache, same as tstream. Without it the race is the only route
+            # that re-fetches a song another node already holds.
+            if not cached:
+                cached = ask_nodes_for_cache(full_cache_key, timeout=2.0)
+                if cached:
+                    set_cached(full_cache_key, cached)
+                    print(f"[OK] [REQ {req_id}] [Stream] node cache hit")
             if cached:
                 print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
+                _record_serve(cached, video_id, translate_to, client_ip)
                 payload = stream_payload(cached)
                 payload['stage'] = 'cached'
+                # The client's "nothing was translated on this request" signal, sent
+                # explicitly rather than left to be inferred from `stage`. It was
+                # tstream that sent both, so a client written against tstream sees
+                # the same contract here.
+                payload['cached'] = True
+                payload['elapsed_ms'] = elapsed_ms()
                 yield _sse_event('lyrics', payload)
-                yield _sse_event('done', {'ok': True, 'source': cached.get('source'), 'synced': cached.get('synced'), 'stages': ['cached']})
+                yield _sse_event('done', {'ok': True, 'source': cached.get('source'), 'synced': cached.get('synced'), 'stages': ['cached'], 'translated': True})
                 return
 
         # --- Song lookup (required by all providers) ---
@@ -446,8 +493,20 @@ def api_lyrics_stream():
         jobs = {}
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
         try:
-            if jwt_token:
-                jobs[pool.submit(_race_cubey, queries, video_id, duration, jwt_token, req_id)] = 'Cubey'
+            # A request that carries no `jwt` must still get Cubey.
+            #
+            # The race used to run Cubey only `if jwt_token`, while the blocking
+            # pipeline falls back to the shared pool (pipeline.py:
+            # `if not jwt_token: jwt_token = pick_jwt()`). The device usually has
+            # no device-side token on the very first play of a song -- the
+            # Turnstile challenge is still in flight -- so the race, the route
+            # that was about to become the only route, silently dropped Cubey
+            # exactly when it was needed most. pick_jwt only reads RAM and
+            # returns None on an empty pool, so the worst case is the old
+            # behaviour, never an exception.
+            cubey_jwt = jwt_token or pick_jwt()
+            if cubey_jwt:
+                jobs[pool.submit(_race_cubey, queries, video_id, duration, cubey_jwt, req_id)] = 'Cubey'
             jobs[pool.submit(_race_lrclib, queries, album, duration, req_id)] = 'LRCLIB'
             jobs[pool.submit(_race_boidu, queries, album, duration, req_id)] = 'boidu'
             jobs[pool.submit(_race_binimum, queries, album, duration, req_id)] = 'Binimum'
@@ -489,6 +548,10 @@ def api_lyrics_stream():
                         best['wordSynced'] = best['wbw_lines'] > 0
                         payload = stream_payload(best)
                         payload['stage'] = 'raw'
+                        # The device's own "nothing was translated on this
+                        # request" signal. Without it the phone falls back to
+                        # inferring the answer from `stage`, which is a guess.
+                        payload['cached'] = False
                         payload['elapsed_ms'] = elapsed
                         stages.append(f"raw:{best.get('source')}")
                         print(f"[SEND] [REQ {req_id}] [Stream] push RAW {best.get('source')} synced={best.get('synced')} lines={len(best.get('lyrics', []))} elapsed={elapsed}ms")
@@ -500,7 +563,12 @@ def api_lyrics_stream():
 
             if best is None:
                 print(f"[FAIL] [REQ {req_id}] [Stream] no provider hit")
-                yield _sse_event('lyrics', {'stage': 'raw', 'source': 'none', 'synced': False, 'song': title,
+                try:
+                    from .library import record_unlyriced
+                    record_unlyriced(video_id, title, artist, translate_to)
+                except Exception as e:
+                    print(f"  [REQ {req_id}] [Stream] record_unlyriced failed: {e}")
+                yield _sse_event('lyrics', {'stage': 'raw', 'cached': False, 'source': 'none', 'synced': False, 'song': title,
                                             'artist': artist, 'lyrics': [{'time': 0, 'startTimeMs': 0, 'text': 'No lyrics found', 'translated': f'找不到歌詞: {title}', 'durationMs': 0, 'duration': 0}]})
                 yield _sse_event('done', {'ok': True, 'source': 'none', 'synced': False, 'stages': stages})
                 return
@@ -511,10 +579,27 @@ def api_lyrics_stream():
             # Google interim first, then one blocking Cohere pass -- which is
             # also why the interim is skipped while streaming: two overlapping
             # fills of the same rows read as a flicker, not a speed-up.
-            if translate_to and best.get('lyrics'):
+            # is_not_found_result is a REAL answer ("we looked, there is nothing"), not an
+            # empty one. Translating "No lyrics found" produces a second line of
+            # noise under a placeholder, so it is skipped here exactly as tstream
+            # skips it.
+            is_nf = is_not_found_result(best)
+            if is_nf:
+                try:
+                    from .library import record_unlyriced
+                    record_unlyriced(video_id, title, artist, translate_to)
+                except Exception as e:
+                    print(f"  [REQ {req_id}] [Stream] record_unlyriced failed: {e}")
+
+            if translate_to and best.get('lyrics') and not is_nf:
                 tstream = request.args.get('tstream', '1') == '1'
                 rows = _text_rows(best['lyrics'])
                 texts = [best['lyrics'][r]['text'] for r in rows]
+                # The race never passed the song's own language to the
+                # translator, so every request was translated blind. tstream did
+                # pass it. It is what makes a zh/ja/en mix come out as a
+                # transliteration instead of a translation.
+                song_lang = _detect_song_lang(song_info)
                 if not tstream:
                     # Interim: Google fast (~1s) so UI shows translation before Cohere finishes
                     try:
@@ -525,6 +610,7 @@ def api_lyrics_stream():
                                     best['lyrics'][row]['translated'] = machine[i]
                             payload = stream_payload(best)
                             payload['stage'] = 'machine'
+                            payload['cached'] = False
                             payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
                             stages.append('machine:google')
                             print(f"[SEND] [REQ {req_id}] [Stream] push MACHINE google elapsed={payload['elapsed_ms']}ms")
@@ -535,7 +621,7 @@ def api_lyrics_stream():
                 print(f"  [TRANS] [REQ {req_id}] [Stream] {'streaming' if tstream else 'blocking'} "
                       f"translate for {len(texts)} lines...")
                 stop = threading.Event()
-                for ev in _stream_translate(texts, translate_to, streaming=tstream, stop=stop):
+                for ev in _stream_translate(texts, translate_to, song_lang, streaming=tstream, stop=stop):
                     if ev['kind'] == 'ping':
                         yield ": ping\n\n"
                         continue
@@ -544,15 +630,44 @@ def api_lyrics_stream():
                         best['lyrics'][rows[idx]]['translated'] = ev.get('text', '')
                     yield _sse_event('tline', _tline_payload(
                         best['lyrics'], ev, rows, int((time_module.time()-_req_start)*1000)))
+                # Repair: a line the stream never delivered (the model died
+                # between lines) gets one blocking call. Without it the `final`
+                # payload -- which the device writes to its on-disk cache and
+                # every later play reads back -- is permanently missing a
+                # translation for that row. "Never delivered" means no text at
+                # all; a line that came back identical to its source is a real
+                # answer (Chinese lines are only script-converted).
+                missing = [i for i in range(len(texts))
+                           if not best['lyrics'][rows[i]].get('translated')]
+                if missing:
+                    print(f"  [TRANS] [REQ {req_id}] [Stream] repairing {len(missing)} line(s)")
+                    try:
+                        repair = cohere_translate([texts[i] for i in missing], translate_to, song_lang)
+                        for j, i in enumerate(missing):
+                            if j < len(repair) and repair[j]:
+                                best['lyrics'][rows[i]]['translated'] = repair[j]
+                                yield _sse_event('tline', _tline_payload(
+                                    best['lyrics'],
+                                    {'i': i, 'text': repair[j], 'done': True},
+                                    rows, int((time_module.time()-_req_start)*1000)))
+                    except Exception as e:
+                        print(f"  [REQ] [REQ {req_id}] [Stream] repair failed: {e}")
                 sanitize_lyrics_parts(best['lyrics'])
                 payload = stream_payload(best)
                 payload['stage'] = 'final'
+                payload['cached'] = False
                 payload['elapsed_ms'] = int((time_module.time()-_req_start)*1000)
                 stages.append(('stream:' if tstream else 'final:') + 'translate')
                 print(f"[SEND] [REQ {req_id}] [Stream] push FINAL lines={len(best.get('lyrics', []))} elapsed={payload['elapsed_ms']}ms")
                 yield _sse_event('lyrics', payload)
 
             set_cached(full_cache_key, best)
+            # Usage stats. The race never recorded a serve, so every song the
+            # phone played through it was invisible to the dashboard's counters.
+            try:
+                _record_serve(best, video_id, translate_to, client_ip)
+            except Exception as e:
+                print(f"  [REQ {req_id}] [Stream] _record_serve failed: {e}")
             yield _sse_event('done', {'ok': True, 'source': best.get('source'), 'synced': best.get('synced'), 'stages': stages})
         finally:
             pool.shutdown(wait=False, cancel_futures=True)

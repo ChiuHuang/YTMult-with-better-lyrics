@@ -4088,11 +4088,25 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         return;
     }
 
-    // Streamed translation: the same server-side work, but the ranked lyrics
-    // land first and every translated line arrives as the model writes it (see
-    // Source/LyricsStream.x). Falls back to the blocking JSON fetch if the
-    // stream dies before delivering anything.
-    if (YTMULyricsStreamTranslateEnabled() && !self.tstreamFallbackUsed) {
+    // ONE endpoint carries the lyrics now, and it is an SSE one.
+    //
+    // This used to be two requests for the same song in sequence: a blocking
+    // `?fast=1` that hoped to paint something quickly, and then this. `fast=1`
+    // existed because the old pipeline had no way to say "give me whatever you
+    // have first" -- so the phone asked for a deliberately lesser thing and then
+    // asked again for the real one. The race route can do that natively: it
+    // pushes `lyrics` every time a provider beats the current best score, so
+    // line-synced lands before word-synced and both land before the translation
+    // finishes. Measured on Lixpftlm0Eo: raw/Unison (55 lines, 0 wbw) -> raw/AMLL
+    // (58 lines, 58 wbw) -> final, three pushes, none of them waiting on the
+    // others.
+    //
+    // So the ladder is not a fast tier plus a full tier, it is one stream that
+    // improves while you watch. `fast=1` on this path is gone; the blocking
+    // `/api/lyrics` below survives ONLY as the stream-died fallback, reached
+    // through ytmu_streamFallbackForVideoID (which latches tstreamFallbackUsed
+    // first, so this branch cannot recurse back into the stream).
+    if (!self.tstreamFallbackUsed) {
         [self ytmu_openTranslateStream:videoID jwt:jwt force:force];
         return;
     }
@@ -4300,67 +4314,21 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
     [self ytmu_requestArtworkOnce:videoID];
 
-    NSString *fastURL = [NSString stringWithFormat:@"%@/api/lyrics?v=%@&fast=1&lang=%@%@", YTMUApiBase(), videoID, YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam()];
-    [[[NSURLSession sharedSession] dataTaskWithURL:[NSURL URLWithString:fastURL] completionHandler:^(NSData *data, NSURLResponse *res, NSError *err) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (![self.loadingVideoID isEqualToString:videoID]) {
-                // Stale response for a previous video: release the slots it
-                // claimed instead of wedging later fetches until reclaim.
-                self.isLoading = NO;
-                self.loadingSince = nil;
-                if ([g_globalLoadingVideoID isEqualToString:videoID]) {
-                    YTMUReleaseGlobalFetch();
-                }
-                return;
-            }
-            if (data && !err) {
-                NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                if (YTMULyricsIsUsable(dict[@"lyrics"], dict)) {
-                    statusLabel.text = @"";
-                    // Server says cached:1 -> the lines came off disk (full key,
-                    // fast key or a node), so there is nothing being written and
-                    // nothing to reveal. cached:0 -> a live pipeline ran and the
-                    // translation arrived with the response, which is the one
-                    // case a reveal is still honest about.
-                    id cf = dict[@"cached"];
-                    self.typewriterLive = (cf != nil) && ![cf boolValue];
-                    id fs = dict[@"song"], fa = dict[@"artist"];
-                    if ([fs isKindOfClass:[NSString class]] && ((NSString *)fs).length) self.lastSongTitle = fs;
-                    if ([fa isKindOfClass:[NSString class]] && ((NSString *)fa).length) self.lastSongArtist = fa;
-                    [self ytmu_applyProviderMeta:dict forVideoID:videoID];
-                    [self ytmu_updateLandscapeMetadata];
-                    [self updateLyrics:dict[@"lyrics"]];
-                    [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMULyricsDidLoad"
-                                                                        object:videoID
-                                                                      userInfo:@{@"lyrics": dict[@"lyrics"]}];
-                    if ([dict[@"pro"] boolValue]) {
-                        // Server served the full cached result for this fast
-                        // request: treat it as final, skip the full fetch.
-                        // Same bookkeeping as the full path (provider + song
-                        // feed the switcher index and the title fallback).
-                        if (!g_lyricsCache) g_lyricsCache = [[NSMutableDictionary alloc] init];
-                        g_lyricsCache[videoID] = dict[@"lyrics"];
-                        YTMULyricsCacheSave(videoID, dict[@"lyrics"]);
-                        id fp = dict[@"source"];
-                        if ([fp isKindOfClass:[NSString class]] && ((NSString *)fp).length) self.lastProvider = fp;
-                        self.isLoading = NO;
-                        self.loadingSince = nil;
-                        if ([g_globalLoadingVideoID isEqualToString:videoID]) {
-                            YTMUReleaseGlobalFetch();
-                        }
-                        return;
-                    }
-                }
-            }
-
-            // Upgrade needed. Go straight at it: no Turnstile gate, no 10s
-            // wait for a local challenge. fetchFullLyricsForVideo: re-checks
-            // loadingVideoID on its own (and releases the slots it claimed if
-            // the song moved on), so the guard the old timeout branch did is
-            // still covered.
-            [self ytmu_startFullFetchForVideoID:videoID force:NO from:@"fast"];
-        });
-    }] resume];
+    // No `?fast=1` probe here any more.
+    //
+    // It was here to buy a fast first paint, and it bought two round-trips for one
+    // song: the probe went out, came back with whatever the deliberately reduced
+    // pipeline had (often nothing, since the fast key is only written by the fast
+    // pipeline and the phone is the only thing that asks for it), and then the
+    // real fetch went out anyway. Worst case the panel waited on BOTH. Best case
+    // it painted twice and threw the first paint away.
+    //
+    // The SSE route pushes every provider improvement as it lands, so the first
+    // paint is the first line of the ladder rather than the end of a smaller one.
+    // Same call ytmu_startFullFetchForVideoID makes for every other trigger; the
+    // slot bookkeeping above (global + instance loading) is unchanged and is
+    // released by whichever branch ends up finishing.
+    [self ytmu_startFullFetchForVideoID:videoID force:NO from:@"open"];
 }
 
 - (void)ytmu_assertOnTop {
