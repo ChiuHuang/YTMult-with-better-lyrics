@@ -56,7 +56,9 @@ static void Screen(UIViewController *c, NSString *k) {
     c.view.backgroundColor = UIColor.clearColor;
     ClearTree(c.view, 0);
     if ([k isEqualToString:@"searchV2Enabled"]) {
-        BOOL resultsPage = [NSStringFromClass(c.class) containsString:@"Results"];
+        NSString *controllerName = NSStringFromClass(c.class);
+        BOOL resultsPage = [controllerName containsString:@"Results"] ||
+                           [controllerName containsString:@"SearchResponse"];
         YTMUStyleSearchPage(c.view, resultsPage);
     }
 }
