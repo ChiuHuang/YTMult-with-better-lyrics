@@ -27,7 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[DONE] ses_uiport_20261010 | search landing and submitted-results styling matched to spoti.pw's dark/red visual language | files: Source/BrowseEntityDownloadsV2.xm | device visual check remains pending`
+- `[DONE] ses_ci_fix_20261010 | fixed the shared artwork declaration compile error and made mirror-host rejection non-fatal; Build 291 released successfully | files: Source/YTMUVisualStyle.h, .github/workflows/main.yml | Asia mirror unavailable on 413; GitHub CDN release is live`
 - `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | FIVE device reads are ONE endpoint, and
   the race route turned out never to save a provider snapshot AT ALL | files:
   server/{routes_stream,routes_lyrics,candidates,pipeline}.py,
@@ -287,6 +287,11 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `acb9d8a` + `8e1a6eb` — the shared visual header now imports the C-linkage
+  artwork API declarations; the build completes when the 110 MB IPA passes
+  compile/injection, and a Cloudflare 413 from the optional Asia mirror no
+  longer blocks the GitHub CDN release (Build 291). Trap: dynamic mirror URLs
+  must use the step output in release expressions, not `env` written later.
 - `8e263d8` — the search field now uses the YTM red-accented glass capsule;
   observed search/response controllers get dark text, transparent surfaces,
   rounded image content, and restrained table separators. Trap: the search
@@ -347,37 +352,6 @@ Current:
   verbatim, so the tag list parsed as one field and 184 tags became 0 with no
   error) — use `%00`. Second trap: the `unknown` sha sentinel is a word, so
   prefix-matching let a target for the sha `unk` capture every such device.
-- `c19d3bd`/`216b512` — the lyrics parsers learn what the format actually
-  defines: TTML `ttm:role` (`x-bg` becomes its own row instead of a karaoke
-  word of the vocal line), `x-roman`, `tts:ruby`, `amll:obscene`/`empty-beat`,
-  both sidecar dialects, agent NAMES, a `<p>` with no `begin`, and spacing read
-  from the real text nodes; LRC `[bg:]`; QRC `Name:` singer prefixes (the duet
-  feature had zero data), the `LyricContent=` envelope and the title-echo drop;
-  `server/parsers_credits.py` (CJK credit roles, shared). Epoch 1 -> 3. Trap: the
-  device rebuilds the display string from `parts`, so unwrapping only the
-  parser's `text` leaves the source's brackets on screen.
-- `7dac3ed` — latency percentiles (`server/latency_stats.py`): p50/p95/p99 for
-  time per song, time to line-sync and time to wbw, as three cards on the
-  Overview page. Samples are recorded in `fetch_all_lyrics` (so every caller
-  counts, not just one route), nearest-rank (never interpolated), misses are
-  their own population and stay OUT of `song`, and a wbw hit never stamps
-  `ttf_line` — otherwise the line-sync number inherits the slow path. Trap the
-  widget test caught: the server sends a metric with no samples as `null` and the
-  table read `m.n` straight off it.
-- `fba8e3e`/`b4a9238`/`b3158d8` — five source files had NEVER compiled (CI
-  reports only the first fatal error, so each fix revealed the next). The WSL
-  logos.pl + `clang -fsyntax-only` pass finds them all at once: 39/39 clean.
-- `443843d` — a song with no word-by-word lyrics now gets a real second Cubey
-  pass on EVERY Cubey caller (`_maybe_cubey_second_pass`), 0.8s apart and with a
-  rotated token. A repeat of the same JWT in the same millisecond is not a retry.
-- `f4d758c` — the auto-sync push had not compiled since `9ce4a26`.
-- `11bb42e`/`9ce4a26` — parser epoch split from format version, and the node
-  mesh no longer defeats the version gate.
-- `ac9ca4e` — duet lines get a setting (align / label / off).
-- `ef25ad8`/`a31e8c8` — `tools/jwt-uploader/`: Chrome extension + silent
-  userscript + key-authed `POST /api/jwt/push` (no CORS headers on purpose, so
-  a random page cannot make a browser send it).
-
 ## Open / pending
 - **The parser audit: TTML + LRC + QRC + credits are DONE (`216b512`,
   `c19d3bd`); SRT and the device's ruby/obscene are open.**
