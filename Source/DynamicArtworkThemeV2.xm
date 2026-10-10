@@ -2,17 +2,23 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
+#import "YTMUVisualStyle.h"
 
 static NSString *const YTMUThemeChanged = @"YTMUThemeChanged";
 static UIColor *YTMUPrimaryColor;
 static UIColor *YTMUSecondaryColor;
-static const void *kThemeGradient = &kThemeGradient;
+static UIColor *YTMURawArtworkAverage;
+static char kThemeGradientKey;
+static const void *kThemeGradient = &kThemeGradientKey;
 // Dedupe/throttle for the setImage: hook below. Both are written from whatever
 // thread set the image and read only to decide whether to skip work, so a torn
 // read can at worst publish once more or once less -- no invariant depends on
 // them. The image is one retained artwork, not a cache.
 static UIImage *YTMULastThemeImage;
 static CFTimeInterval YTMULastThemeAt;
+
+extern "C" UIImage *YTMULGCurrentArtwork(void) { return YTMULastThemeImage; }
+extern "C" UIColor *YTMULGCurrentArtworkMean(void) { return YTMURawArtworkAverage; }
 
 // wholeAppSongThemeEnabled / playerSongThemeEnabled, both ANDed with the
 // tweak master and the iOS 13 material gate by the shared helper.
@@ -64,11 +70,13 @@ static void YTMUPublishTheme(UIImage *image) {
     YTMULastThemeImage = image; YTMULastThemeAt = now;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIColor *average = YTMUAverage(image); if (!average) return;
-        UIColor *primary = YTMUColor(average,.18,.90), *secondary = YTMUColor(average,.02,.48);
+        UIColor *primary = YTMULGBlendColor(YTMUColor(average,.18,.90), YTMULGSage(), .22);
+        UIColor *secondary = YTMULGBlendColor(YTMUColor(average,.02,.48), YTMULGOlive(), .30);
         dispatch_async(dispatch_get_main_queue(), ^{
             // Only announce an actual change: the notification has no observer
             // in the tweak today, and a repaint on an identical colour is pure
             // layout churn on a song change.
+            YTMURawArtworkAverage = average;
             if ([YTMUPrimaryColor isEqual:primary]) return;
             YTMUPrimaryColor=primary; YTMUSecondaryColor=secondary;
             [[NSNotificationCenter defaultCenter] postNotificationName:YTMUThemeChanged object:nil]; });
@@ -90,17 +98,22 @@ static void YTMUApplyTheme(UIView *host, BOOL wholeApp) {
     gradient.frame=host.bounds; gradient.startPoint=CGPointMake(.15,0); gradient.endPoint=CGPointMake(.85,1);
     gradient.colors=@[(id)[p colorWithAlphaComponent:(wholeApp?.52:.82)].CGColor,(id)[s colorWithAlphaComponent:.96].CGColor,(id)UIColor.blackColor.CGColor];
     gradient.locations=wholeApp?@[@0,@.46,@1]:@[@0,@.62,@1]; host.backgroundColor=UIColor.blackColor;
+    CGFloat r = 0, g = 0, b = 0;
+    [YTMURawArtworkAverage getRed:&r green:&g blue:&b alpha:NULL];
+    BOOL light = YTMURawArtworkAverage && (0.299 * r + 0.587 * g + 0.114 * b) > .55;
+    YTMULGApplyArtworkBackdrop(host, light ? .22 : .40,
+        light ? UIBlurEffectStyleLight : UIBlurEffectStyleDark);
 }
 
 static void YTMUStyleLyricsEntries(UIView *root) {
     for (UIView *view in root.subviews) {
         BOOL marked = view.tag == 9777 || view.tag == 9778 || objc_getAssociatedObject(view, @selector(ytmu_isLyricsButton));
         if (marked && !view.hidden && !CGRectIsEmpty(view.bounds)) {
-            view.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.08];
+            view.backgroundColor = YTMULGGlassFill();
             view.layer.cornerRadius = MIN(18.0, CGRectGetHeight(view.bounds) * 0.5);
             view.layer.cornerCurve = kCACornerCurveContinuous;
             view.layer.borderWidth = 0.75;
-            view.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.20].CGColor;
+            view.layer.borderColor = YTMULGGlassBorder(.34).CGColor;
         }
         YTMUStyleLyricsEntries(view);
     }

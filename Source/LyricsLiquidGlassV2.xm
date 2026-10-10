@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
+#import "YTMUVisualStyle.h"
 @interface YTMULyricsViewController:UIViewController@property(nonatomic,strong)UITableView*tableView;@property(nonatomic,strong)UIImageView*artworkImageView;@property(nonatomic,strong)UIVisualEffectView*blurView;@property(nonatomic,strong)UIView*darkOverlay;@end
 // What this key controls now, and only this: the ambient artwork backdrop
 // (how much of the blurred cover reads through the wash) plus the table
@@ -26,5 +27,5 @@ static BOOL YTMULyricsV2(void){return YTMULGFeatureEnabled(@"lyricsV2Enabled");}
 // So the backdrop strength and the table chrome stay here, and the four values
 // LyricsSheet owns are left to LyricsSheet.
 %hook YTMULyricsViewController
-- (void)viewDidLayoutSubviews{%orig;if(!YTMULyricsV2())return;if(self.artworkImageView){self.artworkImageView.frame=self.view.bounds;self.artworkImageView.contentMode=UIViewContentModeScaleAspectFill;}self.blurView.frame=self.view.bounds;self.blurView.alpha=.82;self.darkOverlay.frame=self.view.bounds;self.tableView.backgroundColor=UIColor.clearColor;self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.showsVerticalScrollIndicator=NO;}
+- (void)viewDidLayoutSubviews{%orig;if(!YTMULyricsV2())return;if(self.artworkImageView){self.artworkImageView.frame=self.view.bounds;self.artworkImageView.contentMode=UIViewContentModeScaleAspectFill;}self.blurView.frame=self.view.bounds;self.blurView.alpha=.82;self.darkOverlay.frame=self.view.bounds;YTMULGApplyDither(self.view,self.darkOverlay,.48);self.tableView.backgroundColor=UIColor.clearColor;self.tableView.separatorStyle=UITableViewCellSeparatorStyleNone;self.tableView.showsVerticalScrollIndicator=NO;}
 %end

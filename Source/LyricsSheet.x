@@ -3,6 +3,7 @@
 // (Source/Utils/NSBundle+YTMU.m), NOT the main bundle -- plain NSLocalizedString
 // would miss every key here and return the key name itself.
 #import "Headers/Localization.h"
+#import "YTMUVisualStyle.h"
 
 static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     return ((c >= 0x3040 && c <= 0x309F) ||
@@ -161,8 +162,8 @@ static UIColor *YTMULyricShadow(UIView *refView) {
 // Same idea as YTMULyricInk for pill/track fills.
 static UIColor *YTMULyricFill(UIView *refView) {
     BOOL light = YTMUBgIsLight(refView);
-    return [(light ? [UIColor blackColor] : [UIColor whiteColor])
-            colorWithAlphaComponent:(light ? 0.10 : 0.15)];
+    return [(light ? YTMULGSage() : YTMULGOlive())
+            colorWithAlphaComponent:(light ? 0.22 : 0.48)];
 }
 // Base wash + blur style, also keyed on background brightness (not the OS
 // theme). Snapshots: re-resolve via ytmu_refreshBgDerivedInk when the probe
@@ -182,7 +183,8 @@ static CGFloat YTMUBgOverlayAlpha(UIView *refView) {
     return YTMUBgIsLight(refView) ? 0.22 : 0.40;
 }
 static UIColor *YTMUBgOverlayColor(UIView *refView) {
-    return [[UIColor blackColor] colorWithAlphaComponent:YTMUBgOverlayAlpha(refView)];
+    UIColor *shade = YTMULGBlendColor([UIColor blackColor], YTMULGOlive(), .36);
+    return [shade colorWithAlphaComponent:YTMUBgOverlayAlpha(refView)];
 }
 // Mean artwork color for the song-tinted background wash.
 static UIColor *YTMUArtworkAverageColor(UIImage *img) {
@@ -666,7 +668,7 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.wipeLabel = [[UILabel alloc] init];
         self.wipeLabel.numberOfLines = 0;
         self.wipeLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
-        self.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.contentView);
+        self.wipeLabel.textColor = YTMULGLyricAccent(YTMUBgIsLight(self.contentView));
         // No layer shadow on the reveal layer. There WAS a highlight glow here (see the
         // note by the constants) and it had to go: a mask clips a shadow to its
         // own shape, so a blurred "halo" could only ever render as a hard-edged
@@ -3993,7 +3995,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.songTintView = t;
     }
     [UIView animateWithDuration:0.6 animations:^{
-        self.songTintView.backgroundColor = [avg colorWithAlphaComponent:0.28];
+        self.songTintView.backgroundColor = [YTMULGBlendColor(avg, YTMULGOlive(), .28) colorWithAlphaComponent:0.34];
     }];
 }
 
@@ -5675,7 +5677,7 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
             cell.lyricLabel.textColor = YTMULyricInk(0.45, 0.45, self.view);
             cell.wipeLabel.attributedText = nil;
             cell.wipeLabel.text = displayText;
-            cell.wipeLabel.textColor = YTMULyricInk(1.0, 1.0, self.view);
+            cell.wipeLabel.textColor = YTMULGLyricAccent(YTMUBgIsLight(self.view));
             [cell ytmu_showFullWipe];
             cell.lastColorKey = nil;
         }

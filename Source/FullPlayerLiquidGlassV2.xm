@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
+#import "YTMUVisualStyle.h"
 
 static BOOL PlayerV2(void){return YTMULGFeatureEnabled(@"fullPlayerV2Enabled");}
 // The associated-object keys. They must be the ADDRESS of something with static
@@ -29,13 +30,13 @@ static const void *kAnimated = &kAnimatedKey;
 
 static UIVisualEffectView*Glass(UIView*h,UIBlurEffectStyle style){
     UIVisualEffectView*g=objc_getAssociatedObject(h,kGlass);
-    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=UIColor.clearColor;g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
+    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=YTMULGGlassFill();g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
     return g;
 }
 static void ApplyGlass(UIView*h,CGRect f,CGFloat r,CGFloat border){
-    UIVisualEffectView*g=Glass(h,UIBlurEffectStyleSystemUltraThinMaterialDark);
+    UIVisualEffectView*g=Glass(h,UIBlurEffectStyleSystemChromeMaterialDark);
     g.hidden=NO;g.frame=f;g.layer.cornerRadius=r;g.layer.cornerCurve=kCACornerCurveContinuous;
-    g.layer.borderWidth=.7;g.layer.borderColor=[UIColor colorWithWhite:1 alpha:border].CGColor;
+    g.layer.borderWidth=.7;g.layer.borderColor=YTMULGGlassBorder(border).CGColor;
     [h sendSubviewToBack:g];h.backgroundColor=UIColor.clearColor;h.layer.backgroundColor=UIColor.clearColor.CGColor;
 }
 // A real circle, tap target untouched. The header icons are NOT all square --
@@ -57,7 +58,7 @@ static BOOL IsButton(UIView*v){return [v isKindOfClass:UIButton.class]||[NSStrin
 static BOOL IsPlay(UIView*v){NSString*s=[NSString stringWithFormat:@"%@ %@",v.accessibilityLabel?:@"",v.accessibilityIdentifier?:@""].lowercaseString;return [s containsString:@"play"]||[s containsString:@"pause"];}
 static BOOL IsArtwork(UIView*v){Class c=NSClassFromString(@"YTImageView");return (c&&[v isKindOfClass:c])||([v isKindOfClass:UIImageView.class]&&((UIImageView*)v).image);}
 static BOOL KeepBg(NSString*n){return [n hasPrefix:@"YTMGradientScrim"]||[n hasPrefix:@"YTPlayerView"]||[n hasPrefix:@"MLHAMIO"]||[n hasPrefix:@"YTMVideoOverlay"]||[n hasPrefix:@"MPV"]||[n hasPrefix:@"YTVolumeBar"]||[n hasPrefix:@"YTVRCaptionOverlay"];}
-static void ClearRoot(UIView*r,NSInteger d){if(!r||d>7)return;for(UIView*v in r.subviews){NSString*n=NSStringFromClass(v.class);if(KeepBg(n))continue;if([v isKindOfClass:UIVisualEffectView.class])continue;if(!IsArtwork(v)&&![v isKindOfClass:UILabel.class]&&!IsButton(v)&&![n containsString:@"Slider"]&&![n containsString:@"Scrubber"]){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}ClearRoot(v,d+1);}}
+static void ClearRoot(UIView*r,NSInteger d){if(!r||d>7)return;for(UIView*v in r.subviews){NSString*n=NSStringFromClass(v.class);if((v.tag>=7318&&v.tag<=7321)||KeepBg(n))continue;if([v isKindOfClass:UIVisualEffectView.class])continue;if(!IsArtwork(v)&&![v isKindOfClass:UILabel.class]&&!IsButton(v)&&![n containsString:@"Slider"]&&![n containsString:@"Scrubber"]){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}ClearRoot(v,d+1);}}
 static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])return;objc_setAssociatedObject(v,kAnimated,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);if(UIAccessibilityIsReduceMotionEnabled())return;v.alpha=0;v.transform=CGAffineTransformMakeScale(.975,.975);[UIView animateWithDuration:.38 delay:0 usingSpringWithDamping:.84 initialSpringVelocity:.22 options:0 animations:^{v.alpha=1;v.transform=CGAffineTransformIdentity;}completion:nil];}
 
 @interface YTMNowPlayingViewController:UIViewController@end
@@ -110,7 +111,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     // drop, not by size: the old 1.08x transform was rewritten on every layout
     // pass (YT animates this button itself, so it fought the tap animation) and
     // YT already draws it larger than its siblings.
-    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.34:.20);ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
+    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?[YTMULGAccentRed() colorWithAlphaComponent:.24]:YTMULGGlassFill();if(play)g.layer.borderColor=[YTMULGAccentRed() colorWithAlphaComponent:.56].CGColor;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
 }
 %end
 
@@ -123,7 +124,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 %hook YTMPlayerTabView
 - (void)layoutSubviews{
     %orig;if(!PlayerV2()||CGRectIsEmpty(self.bounds))return;ApplyGlass(self,CGRectInset(self.bounds,8,4),26,.20);
-    for(UIView*v in self.subviews){if(IsButton(v)&&!v.hidden){BOOL selected=(v.accessibilityTraits&UIAccessibilityTraitSelected)!=0;if(selected){ApplyGlass(v,CGRectInset(v.bounds,2,2),MIN(22,CGRectGetHeight(v.bounds)/2),.40);}else{UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.hidden=YES;v.backgroundColor=UIColor.clearColor;}}}
+    for(UIView*v in self.subviews){if(IsButton(v)&&!v.hidden){BOOL selected=(v.accessibilityTraits&UIAccessibilityTraitSelected)!=0;if(selected){ApplyGlass(v,CGRectInset(v.bounds,2,2),MIN(22,CGRectGetHeight(v.bounds)/2),.56);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=[YTMULGAccentRed() colorWithAlphaComponent:.20];g.layer.borderColor=[YTMULGAccentRed() colorWithAlphaComponent:.58].CGColor;}else{UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.hidden=YES;v.backgroundColor=UIColor.clearColor;}}}
 }
 %end
 
