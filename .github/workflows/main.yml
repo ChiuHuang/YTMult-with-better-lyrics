@@ -119,16 +119,17 @@ jobs:
         run: |
           UPLOAD_ARGS=(-F "file=@YTMusicUltimate.ipa;type=application/octet-stream")
           if [ -n "$FILE_FOLDER_ID" ]; then UPLOAD_ARGS+=(-F "folder=$FILE_FOLDER_ID"); fi
-          RESP=$(curl -sL -X POST https://file.chiuhuang.dev/api/public/upload "${UPLOAD_ARGS[@]}" --max-time 900)
-          echo "$RESP"
-          MIRROR_URL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('download_url',''))")
-          if [ -z "$MIRROR_URL" ]; then
-            echo "::error::File host upload failed (no download_url in response)"
-            exit 1
+          HTTP_STATUS=$(curl -sSL -X POST https://file.chiuhuang.dev/api/public/upload "${UPLOAD_ARGS[@]}" \
+            --max-time 900 --output mirror-response.txt --write-out '%{http_code}' || true)
+          MIRROR_URL=$(python3 -c "import json; print(json.load(open('mirror-response.txt')).get('download_url',''))" 2>/dev/null || true)
+          if [[ "$HTTP_STATUS" != 2?? || -z "$MIRROR_URL" ]]; then
+            echo "::warning::Asia mirror unavailable (HTTP ${HTTP_STATUS:-request error}); continuing with the GitHub release download"
+            MIRROR_URL=""
+          else
+            echo "::notice::Asia mirror: $MIRROR_URL"
           fi
-          # Save the URL to GITHUB_ENV so the release step can use it! :3
+          echo "url=$MIRROR_URL" >> "$GITHUB_OUTPUT"
           echo "MIRROR_URL=$MIRROR_URL" >> $GITHUB_ENV
-          echo "::notice::Asia mirror: $MIRROR_URL"
 
       - name: Fetch server stats
         env:
@@ -167,7 +168,7 @@ jobs:
 
             ### 📦 Downloads
             - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
-            - **[Asia Mirror](${{ env.MIRROR_URL }})** 
+            ${{ steps.mirror.outputs.url != '' && format('- **[Asia Mirror]({0})**', steps.mirror.outputs.url) || '' }}
 
             ${{ env.STATS_SECTION }}
 
@@ -175,7 +176,7 @@ jobs:
             <h3 align="center">
             <a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200"></a>
             &nbsp;
-            <a href="${{ env.MIRROR_URL }}"><img src="https://altdirect.app/assets/png/Download_Blue.png" width="200"></a>
+            ${{ steps.mirror.outputs.url != '' && format('<a href="{0}"><img src="https://altdirect.app/assets/png/Download_Blue.png" width="200"></a>', steps.mirror.outputs.url) || '' }}
             </h3>
 
             ---
@@ -185,16 +186,17 @@ jobs:
         env:
           SERVER_HOOK_URL: ${{ secrets.SERVER_HOOK_URL }}
           HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
+          MIRROR_URL: ${{ steps.mirror.outputs.url }}
         run: |
           if [ -z "$SERVER_HOOK_URL" ] || [ -z "$HOOK_SECRET" ]; then
             echo "::warning::SERVER_HOOK_URL/HOOK_SECRET not set, skipping webhook (server falls back to GitHub API polling)"
             exit 0
           fi
           IPA_SIZE=$(stat -f%z YTMusicUltimate.ipa 2>/dev/null || stat -c%s YTMusicUltimate.ipa)
-          python3 -c "import json; print(json.dumps({
+          python3 -c "import json,os; print(json.dumps({
             'tag': 'build-${{ github.run_number }}',
             'download_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa',
-            'asia_url': '${{ env.MIRROR_URL }}' or None,
+            'asia_url': os.environ.get('MIRROR_URL') or None,
             'size': int('$IPA_SIZE'),
             'icon_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png',
           }))" > hook.json
