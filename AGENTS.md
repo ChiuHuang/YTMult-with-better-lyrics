@@ -344,14 +344,6 @@ Current:
   only fired when a song finished (a stuck job looked dead for 10 minutes), and
   the translate queue's blocking `get()` meant a lowered worker count only took
   effect after the next song.
-- `5ecf199` — the kill switch targets a build, not every device: selector
-  `sha | tag | from_sha..to_sha | blanket`, action `lg | tweak | surface`,
-  resolved server-side from the `?sha=` the device already sends, plus a census
-  of devices per build taken from that same poll. New remote key `ui.tweak`.
-  Trap: `git for-each-ref` does NOT expand `%x1f` (it emits the six characters
-  verbatim, so the tag list parsed as one field and 184 tags became 0 with no
-  error) — use `%00`. Second trap: the `unknown` sha sentinel is a word, so
-  prefix-matching let a target for the sha `unk` capture every such device.
 ## Open / pending
 - **The parser audit: TTML + LRC + QRC + credits are DONE (`216b512`,
   `c19d3bd`); SRT and the device's ruby/obscene are open.**
