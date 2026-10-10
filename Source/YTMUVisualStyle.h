@@ -5,6 +5,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import <dispatch/dispatch.h>
+#import "YTMULiquidGlassPreferences.h"
 
 // Shared visual tokens for the menu, player, and lyrics surfaces.
 static inline UIColor *YTMULGSage(void) {
