@@ -27,6 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_uiport_20261010 | search landing and submitted-results styling matched to spoti.pw's dark/red visual language | files: Source/BrowseEntityDownloadsV2.xm | device visual check remains pending`
 - `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | FIVE device reads are ONE endpoint, and
   the race route turned out never to save a provider snapshot AT ALL | files:
   server/{routes_stream,routes_lyrics,candidates,pipeline}.py,
@@ -286,6 +287,11 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `8e263d8` — the search field now uses the YTM red-accented glass capsule;
+  observed search/response controllers get dark text, transparent surfaces,
+  rounded image content, and restrained table separators. Trap: the search
+  dump shows suggestions but not submitted results, so collection-cell
+  separators/cards are intentionally omitted until that hierarchy is logged.
 - `9a3d724` — the AltStore source lists the build TWICE (Asia file CDN first,
   Cloudflare-proxied GitHub second; same bundle ID + version, so the second is
   a fallback, not a second app), and the mirror URL survives a restart: the
