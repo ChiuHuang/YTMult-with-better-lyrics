@@ -11,9 +11,15 @@
 // LyricsShared.h (where the same function is declared inside its own
 // extern "C" block) -- two declarations of one name with different language
 // linkage in a single scope is ill-formed, so both must agree.
+@class UIImage;
+@class UIColor;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+UIImage *YTMULGCurrentArtwork(void);
+UIColor *YTMULGCurrentArtworkMean(void);
 
 // Declared flush (no leading whitespace) so the C-linkage guard and the
 // declaration can be read -- and grepped -- as one block.
