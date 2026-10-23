@@ -349,11 +349,48 @@ def api_app_altstore():
         ]
     else:
         apps = [_app('YouTube Music', cloudflare, f'YTMusicUltimate ({tag})')]
-    return jsonify({
+    payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',
         'apps': apps,
-    })
+    }
+    # ETag so AltStore/SideStore/Feather (and any client that sends
+    # If-None-Match) can skip re-downloading an unchanged source. The body
+    # only changes when the release identity changes, so hash the canonical
+    # payload -- stable across requests as long as latest_release() is cached.
+    etag = '"' + hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    ).hexdigest()[:24] + '"'
+    inm = (request.headers.get('If-None-Match') or '').strip()
+    # Tolerate weak validators ("W/...") and comma-separated lists, which some
+    # clients send. A match means "I already have this exact body".
+    if inm and inm != '*':
+        tokens = [t.strip() for t in inm.split(',')]
+        if any(t.lstrip('W/').strip() == etag for t in tokens):
+            r = Response(status=304)
+            r.headers['ETag'] = etag
+            # Short, revalidating: a client may serve from cache for a minute
+            # (truly instant repeat opens) and then revalidate cheaply.
+            r.headers['Cache-Control'] = 'public, max-age=60, must-revalidate'
+            return r
+    resp = jsonify(payload)
+    resp.headers['ETag'] = etag
+    resp.headers['Cache-Control'] = 'public, max-age=60, must-revalidate'
+    # RFC 7232: a 200 with an ETag should also carry Last-Modified where we
+    # have a real date, so clients that prefer it over ETag still win.
+    published = (rel.get('published_at') or '').strip()
+    if published:
+        try:
+            from datetime import datetime, timezone
+            from email.utils import format_datetime
+            s = published.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            resp.headers['Last-Modified'] = format_datetime(dt, usegmt=True)
+        except Exception:
+            pass
+    return resp
 
 def _dump_screen_name(dump_content):
     """Topmost screen from the VC hierarchy section (presented wins, else deepest child)."""
