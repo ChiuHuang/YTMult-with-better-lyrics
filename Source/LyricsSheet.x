@@ -305,12 +305,9 @@ static const double YTMUMaskWriteFloorMs = 4.0;
 // edge is the motion worth having.
 // A line-synced row still gets an arrival (ytmu_beginHighlightArrivalWithDuration:
 // a fade). It is the sway that was removed, not the arrival.
-// Karaoke swipe overshoot: the leading edge runs past the word and is pulled
-// back over the last fifth of it, so the highlight visibly catches up.
-// variables.css:101-104 does the same thing with animated gradient stops
-// (-0.2/-0.1 -> 1.4/1.5).
-static const CGFloat YTMUSwipeOvershoot = 0.28;
-static const CGFloat YTMUSwipeOvershootTail = 0.22;
+// The old karaoke overshoot (leading edge past the word, pulled back over its
+// last fifth) is gone with the fractional sweep: word-level timing has no
+// sub-word position to overshoot into. Only the word edges move now.
 static const NSTimeInterval YTMUWaveOscillationDuration = 1.25;  // variables.css:139
 // Distance ladder: opacity by how far a row sits from the sung line. braccato's
 // Sustain theme pairs each step with a blur; the blur needs an effect view per
@@ -718,7 +715,7 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.transLabel = [[UILabel alloc] init];
         self.transLabel.numberOfLines = 0;
         self.transLabel.font = [UIFont systemFontOfSize:YTMULyricTransFontSize() weight:UIFontWeightMedium];
-        self.transLabel.textColor = YTMULyricInk(0.35, 0.5, self.contentView);
+        self.transLabel.textColor = YTMULyricInk(0.28, 0.42, self.contentView);
         self.transLabel.layer.shadowColor = YTMULyricShadow(self.contentView).CGColor;
         self.transLabel.layer.shadowOffset = CGSizeMake(0, 1);
         self.transLabel.layer.shadowRadius = 2.0;
@@ -1623,6 +1620,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     [self.view insertSubview:self.darkOverlay aboveSubview:self.blurView];
 
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStylePlain];
+    self.tableView.clipsToBounds = YES;
     self.tableView.delegate = self;
     self.tableView.dataSource = self;
     self.tableView.backgroundColor = [UIColor clearColor];
@@ -1639,7 +1637,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     refocus.cancelsTouchesInView = NO;
     [self.tableView addGestureRecognizer:refocus];
     self.tableView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-    self.tableView.contentInset = UIEdgeInsetsMake(20, 0, 350, 0);
+    self.tableView.contentInset = UIEdgeInsetsMake(40, 0, 350, 0);
     [self.tableView registerClass:[YTMULyricsCell class] forCellReuseIdentifier:@"YTMULyricsCell"];
 
     UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 54)];
@@ -3551,7 +3549,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // past where the clamp thinks the end is.
         CGFloat bottomPad = MAX(120.0, H * 0.30f) + toolH + 12.0 + safeBottom;
         UIEdgeInsets current = self.tableView.contentInset;
-        CGFloat topPad = MAX(16.0, safeTop + 6.0);
+        CGFloat topPad = MAX(28.0, safeTop + 12.0);
         if (fabs(current.bottom - bottomPad) > 1.0 || fabs(current.top - topPad) > 1.0) {
             self.tableView.contentInset = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
             self.tableView.scrollIndicatorInsets = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
@@ -3592,7 +3590,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         if (@available(iOS 11.0, *)) {
             screenSafeTop = self.view.window.safeAreaInsets.top;
         }
-        CGFloat topPad = MAX(24.0, screenSafeTop + 12.0);
+        CGFloat topPad = MAX(40.0, screenSafeTop + 24.0);
         UIEdgeInsets current = self.tableView.contentInset;
         if (fabs(current.bottom - bottomPad) > 1.0 || fabs(current.top - topPad) > 1.0) {
             self.tableView.contentInset = UIEdgeInsetsMake(topPad, 0, bottomPad, 0);
@@ -5256,50 +5254,14 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     if (curWord >= 0 && curWord < rcount) {
         CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
         if (!CGRectIsNull(wordRect)) {
-            CGFloat fraction = MIN(1.0, MAX(0.0, curFrac));
-            // braccato's overshoot: the leading edge runs past the word and is
-            // pulled back over the last fifth of it, so the highlight visibly
-            // catches up instead of stopping dead at the last glyph.
-            CGFloat overshoot = 0.0;
-            if (fraction >= 1.0 - YTMUSwipeOvershootTail && fraction <= 1.0) {
-                CGFloat t = (fraction - (1.0 - YTMUSwipeOvershootTail)) / YTMUSwipeOvershootTail;
-                overshoot = YTMUSwipeOvershoot * wordRect.size.width * (1.0 - t);
-            }
-            CGFloat revealedWidth = wordRect.size.width * fraction + overshoot;
-            // The SOLID run is still capped at the word: only the feather is
-            // allowed past the end, so the glow in the gap after the word never
-            // doubles as a premature reveal of the next one.
-            CGFloat solidWidth = MIN(wordRect.size.width, MAX(0.0, revealedWidth - MIN(22.0, MAX(8.0, wordRect.size.width * 0.38))));
-
-            if (solidWidth > 0.0) {
-                CGRect solid = wordRect;
-                solid.size.width = solidWidth;
-                if (rtl) solid.origin.x = CGRectGetMaxX(wordRect) - solidWidth;
-                [path appendPath:[UIBezierPath bezierPathWithRect:solid]];
-            }
-            if (revealedWidth > 0.0 && wipeFeather) {
-                CGFloat featherWidth = MIN(22.0, MAX(8.0, wordRect.size.width * 0.38));
-                CGFloat visibleFeather = MIN(featherWidth, revealedWidth);
-                CGRect feather = wordRect;
-                feather.size.width = visibleFeather;
-                if (rtl) {
-                    feather.origin.x = CGRectGetMaxX(wordRect) - revealedWidth;
-                } else {
-                    feather.origin.x += revealedWidth - visibleFeather;
-                }
-                // The gradient's AXES are written once per cell, not per tick.
-                // startPoint/endPoint rebuild the layer's colour map, and the
-                // direction only depends on the row's layout direction -- which
-                // cannot change under a live cell. The frame below is what
-                // actually moves.
-                NSInteger wantRTL = rtl ? 1 : 0;
-                if (wantRTL != cell.wipeFeatherRTL) {
-                    wipeFeather.startPoint = rtl ? CGPointMake(1.0, 0.5) : CGPointMake(0.0, 0.5);
-                    wipeFeather.endPoint = rtl ? CGPointMake(0.0, 0.5) : CGPointMake(1.0, 0.5);
-                    cell.wipeFeatherRTL = wantRTL;
-                }
-                wipeFeather.frame = CGRectIntegral(feather);
-                wipeFeather.hidden = NO;
+            // Word-level timing only tells us WHEN a word starts, not how its
+            // glyphs are distributed inside it. The old fractional sweep made
+            // one word read as two brightness states ("some" bright, "thing"
+            // dim) and left a faded tail on a word that had already finished.
+            // The word is the unit: reveal it whole when its start time lands,
+            // and keep the moving solid edge at the previous word's boundary.
+            if (curFrac > 0.0) {
+                [path appendPath:[UIBezierPath bezierPathWithRect:wordRect]];
             }
         }
     } else if (curWord >= rcount && display.length > 0) {
@@ -5663,7 +5625,7 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         cell.lyricLabel.layer.masksToBounds = NO;
         [cell clearWipe];
 
-        cell.transLabel.textColor = YTMULyricInk(0.75, 0.75, self.view);
+        cell.transLabel.textColor = YTMULyricInk(0.6, 0.6, self.view);
     } else if (isActive) {
         if (hasWords) {
             [self applyWordColorsToCell:cell lyric:lyric index:index currentTime:currentTime force:YES];
@@ -5688,7 +5650,7 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         cell.lyricLabel.layer.shadowOpacity = 0.75;
         cell.lyricLabel.layer.masksToBounds = NO;
 
-        cell.transLabel.textColor = YTMULyricInk(0.85, 0.85, self.view);
+        cell.transLabel.textColor = YTMULyricInk(0.65, 0.65, self.view);
     } else {
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = displayText;
@@ -5705,7 +5667,7 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
             [cell clearWipe];
         }
 
-        cell.transLabel.textColor = YTMULyricInk(0.35, 0.35, self.view);
+        cell.transLabel.textColor = YTMULyricInk(0.3, 0.3, self.view);
     }
 
     NSString *translated = lyric[@"translated"];

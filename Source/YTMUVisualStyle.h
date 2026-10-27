@@ -34,7 +34,11 @@ static inline UIColor *YTMULGBlendColor(UIColor *base, UIColor *tint, CGFloat am
                            alpha:ba];
 }
 static inline UIColor *YTMULGLyricAccent(BOOL lightBackdrop) {
-    return lightBackdrop ? [UIColor colorWithRed:0.64 green:0.06 blue:0.12 alpha:1.0] : YTMULGAccentRed();
+    // The word-by-word wipe is the SUNG text, so it reads as the brightest ink
+    // on the panel. It is deliberately not the brand red: a red wipe turns a
+    // normal lyric sheet into an error state and fights the artwork.
+    return lightBackdrop ? [UIColor colorWithWhite:0.08 alpha:1.0]
+                         : [UIColor colorWithRed:0.98 green:0.97 blue:0.94 alpha:1.0];
 }
 
 static inline UIImage *YTMULGDitherPattern(void) {

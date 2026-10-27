@@ -74,7 +74,7 @@ static BOOL isLowContrast() {
 - (UIColor *)expandedTabsBackgroundColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
 - (UIColor *)miniPlayerColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
 - (UIColor *)expandedTabViewColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
-- (UIColor *)overlayButtonColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
+- (UIColor *)overlayButtonColor { return %orig; }
 - (UIColor *)overlayErrorBackgroundColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
 - (UIColor *)AVSwitchBackgroundColor { return isOLEDTheme() ? [UIColor blackColor] : %orig; }
 - (UIColor *)AVSwitchActiveModeColor { return isOLEDTheme() ? [[UIColor whiteColor] colorWithAlphaComponent:0.1] : %orig; }
