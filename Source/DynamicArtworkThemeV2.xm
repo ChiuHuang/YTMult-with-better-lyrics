@@ -112,8 +112,7 @@ static void YTMUStyleLyricsEntries(UIView *root) {
             view.backgroundColor = YTMULGGlassFill();
             view.layer.cornerRadius = MIN(18.0, CGRectGetHeight(view.bounds) * 0.5);
             view.layer.cornerCurve = kCACornerCurveContinuous;
-            view.layer.borderWidth = 0.75;
-            view.layer.borderColor = YTMULGGlassBorder(.34).CGColor;
+            view.layer.borderWidth = 0.0;
         }
         YTMUStyleLyricsEntries(view);
     }

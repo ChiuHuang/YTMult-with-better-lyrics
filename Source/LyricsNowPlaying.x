@@ -207,75 +207,11 @@
             if (threeDot) break;
         }
     }
-    if (!threeDot) {
-        // Fallback: place the button top-right when 3-dot is not found.
-        // Log the subview tree once so we can see what IS there.
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            NSMutableString *tree = [NSMutableString stringWithFormat:@"[3DOT] NOT FOUND — top subviews of %@:", NSStringFromClass([self class])];
-            for (UIView *sub in self.view.subviews) {
-                [tree appendFormat:@"\n  %@ frame=(%.0f,%.0f;%.0f,%.0f) accLabel=\"%@\" accId=\"%@\"",
-                    NSStringFromClass([sub class]),
-                    sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height,
-                    [sub accessibilityLabel] ?: @"", [sub accessibilityIdentifier] ?: @""];
-            }
-            sendDebugLog(tree);
-        });
-        // Place button at fixed top-right position (below status bar / nav bar)
-        UIButton *own = (UIButton *)[self.view viewWithTag:9778];
-        if (![own isKindOfClass:[UIButton class]]) {
-            own = [UIButton buttonWithType:UIButtonTypeSystem];
-            own.tag = 9778;
-            [own setTitle:@"歌詞" forState:UIControlStateNormal];
-            [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
-            own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-            own.backgroundColor = YTMUAdaptiveFill();
-            own.layer.masksToBounds = YES;
-            objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
-            [self.view addSubview:own];
-        }
-        CGFloat btnW = 56.0, btnH = 32.0;
-        CGFloat safeTop = 0;
-        if (@available(iOS 11.0, *)) {
-            safeTop = self.view.safeAreaInsets.top;
-        }
-        CGFloat topPad = (safeTop > 0 ? safeTop + 6.0 : 46.0);
-        own.frame = CGRectMake(self.view.bounds.size.width - btnW - 12.0, topPad, btnW, btnH);
-        own.layer.cornerRadius = btnH / 2.0;
-        own.hidden = NO;
-        own.alpha = 1.0;
-        own.userInteractionEnabled = YES;
-        [self.view bringSubviewToFront:own];
-        return;
-    }
+    if (!threeDot) return;
     if (!threeDot.superview || !self.view) return;
-
-    // Add the button to the same container as the 3-dot, so z-ordering is correct.
-    UIView *btnContainer = threeDot.superview;
-    UIButton *own = (UIButton *)[btnContainer viewWithTag:9778];
-    if (![own isKindOfClass:[UIButton class]]) {
-        own = [UIButton buttonWithType:UIButtonTypeSystem];
-        own.tag = 9778;
-        [own setTitle:@"歌詞" forState:UIControlStateNormal];
-        [own setTitleColor:YTMUAdaptiveInk(1.0, 1.0) forState:UIControlStateNormal];
-        own.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-        own.backgroundColor = YTMUAdaptiveFill();
-        own.layer.masksToBounds = YES;
-        objc_setAssociatedObject(own, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [own addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
-        [btnContainer addSubview:own];
-    }
-    CGRect threeFrame = [threeDot.superview convertRect:threeDot.frame toView:btnContainer];
-    CGFloat btnW = 56.0, btnH = 32.0;
-    own.frame = CGRectMake(threeFrame.origin.x - btnW - 8.0,
-                           threeFrame.origin.y + (threeFrame.size.height - btnH) / 2.0 - 8.0,
-                           btnW, btnH);
-    own.layer.cornerRadius = btnH / 2.0;
-    own.hidden = NO;
-    own.alpha = 1.0;
-    own.userInteractionEnabled = YES;
-    [btnContainer bringSubviewToFront:own];
+    // Our own lyrics chip is no longer drawn here: the native lyrics button is
+    // already un-hidden and wired by -ytmu_makeLyricsViewClickable, so a second
+    // chip only duplicated the entry and pushed the action row off-screen.
 }
 
 %end
