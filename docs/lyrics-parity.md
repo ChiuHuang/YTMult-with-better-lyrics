@@ -54,7 +54,7 @@ Status vocabulary: **DONE** (same behavior exists), **PARTIAL** (exists, differs
 | 2.9 | Pronunciation under words, syllable-matched | layPair (:360-433) | MISSING — YTMU `romanLabel` is one string under the line (no per-syllable matching, no word timing) |
 | 2.10 | Text-size ORDER: first shown text = full size, others 0.67/0.54 by PLACE not identity | SGRKaraokeStyle (:216-236) | PARTIAL — YTMU sizes are fixed ratios of the fitted size: main 1.0, trans 19/28, cue/roman 13/28; no user-orderable sizes |
 | 2.11 | Font 30pt, margin 24, lineGap 24, rowTighten 2; pitch = ceil(lineHeight)−2 | (:19-20, 334-355) | DONE — YTMU fitted per-song size (max 34, floor 20, 2 lines/row, b752d44), row padding 9/7/9, lineHeightMultiple 0.95 |
-| 2.12 | Instrumental break: ≥7s gap → three breathing dots, pre-sampled CAKeyframeAnimation on a layer clock, fill order follows next line's reading direction, Reduce-Motion variant | SGRKaraokeBreakView (:855-1019), kBreakMinMs=7000 | DELIBERATE — YTMU draws an oscillating wave ribbon instead (`waveLayer`). Porting the dots is mechanical (keyframes + layer clock) if wanted |
+| 2.12 | Instrumental break: >=7s gap becomes three breathing dots; fill order follows the next line's reading direction; Reduce-Motion variant | SGRKaraokeBreakView, kBreakMinMs=7000 | DONE - gaps >=7s render the reference dots (080d2b7); the timeline is evaluated procedurally from the media clock instead of CAKeyframes on a layer clock, so pause holds and seek re-lands for free, and Reduce Motion keeps fades+fill only. The wave ribbon stays for 5-7s gaps (DELIBERATE: a bar rest reads as a wave, a break reads as dots) |
 | 2.13 | Edge fade: 10% gradient mask top+bottom of the scroll view, re-aligned to presentation bounds | kEdgeFade (:1094-1097) | PARTIAL — YTMU sheet has no top/bottom fade; rows just scroll under the header |
 | 2.14 | Anchor 28% of height; lines below focus follow a beat later (delay min(0.3, n*0.04)) | kAnchor (:1448-1455) | PARTIAL — YTMU anchor 37% (`YTMUScrollTargetRatio`), single animated scroll, no per-line stagger |
 | 2.15 | View culling ±0.5 screens, ≤4 new views/frame; lit labels hidden when unsung | (:1494-1537, :149-151) | N/A — YTMU is a UITableView; UIKit owns recycling. Label count per row is fixed |
@@ -146,7 +146,7 @@ Port plan (server-side fits YTMU better than device-side):
 ## 8. Ordered implementation plan (value per effort)
 
 1. **Search crash fix** (blocking the app) — see the crash report in `tmp/search-crash-report.md`.
-2. **2.12 break dots** — self-contained, replaces nothing (wave ribbon stays for short gaps; dots for ≥7s gaps).
+2. **2.12 break dots** - LANDED in 080d2b7 (dots on >=7s gaps, procedural clock; wave keeps 5-7s).
 3. **2.7 blur by distance** — CAFilter gaussianBlur + 0.6s ease from presentation value; device A/B with `[FPS]` first.
 4. **5.9 lock-screen lyrics** — `MPNowPlayingInfoCenter` hook + `YTMULeadLine()` helper (port 1.5's overlap rule onto the timing table). Biggest new surface per line of code.
 5. **1.6 + 2.5 estimated word sweep** — port `timedLine` to the device (it needs only line starts + text), behind a settings switch; benefits every LRCLib-only song.
