@@ -77,7 +77,16 @@ static inline void YTMULGApplyDither(UIView *host, UIView *backgroundView, CGFlo
         if (backgroundView.superview == host) [host insertSubview:texture aboveSubview:backgroundView];
         else [host insertSubview:texture atIndex:0];
     } else if (backgroundView.superview == host) {
-        [host insertSubview:texture aboveSubview:backgroundView];
+        // Only reorder when the order is actually WRONG. An insert is a
+        // didChangeSubviewIndexPath + setNeedsLayout on the host; this helper
+        // runs from layoutSubviews (the search box calls it every pass), so an
+        // unconditional insert re-triggered layout every pass and made the
+        // host churn against its own hook.
+        NSUInteger ti = [host.subviews indexOfObject:texture];
+        NSUInteger bi = [host.subviews indexOfObject:backgroundView];
+        if (ti != NSNotFound && bi != NSNotFound && ti < bi) {
+            [host insertSubview:texture aboveSubview:backgroundView];
+        }
     }
 }
 

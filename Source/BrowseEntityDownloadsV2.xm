@@ -8,6 +8,7 @@
 static char kCardKey;
 static char kSearchSeparatorKey;
 static void YTMUStyleSearchPage(UIView *root, BOOL resultsPage);
+static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger depth);
 
 static void Card(UIView *h, CGFloat r) {
     UIVisualEffectView *b = objc_getAssociatedObject(h, &kCardKey);
@@ -52,6 +53,7 @@ static void ClearTree(UIView *r, NSInteger d) {
 // The feature key differs per controller, so it is recorded at hook time and
 // read back from `self` inside the one shared replacement.
 static void Screen(UIViewController *c, NSString *k) {
+    if (!k.length) return;
     if (!YTMULGFeatureEnabled(k) || !c.view.window) return;
     c.view.backgroundColor = UIColor.clearColor;
     ClearTree(c.view, 0);
@@ -122,7 +124,16 @@ static void YTMUStyleSearchResultsRow(UIView *row) {
 }
 
 static void YTMUStyleSearchPage(UIView *root, BOOL resultsPage) {
-    if (!root) return;
+    return YTMUStyleSearchPageDepth(root, resultsPage, 0);
+}
+
+// Depth-capped: this walks the WHOLE page on every layout pass of the search
+// controller, and a result page's tree is deep (collection cells carry their
+// own content hierarchies). Without a cap a pathological or very deep tree is
+// a stack overflow waiting for a layout storm; 24 covers every real YT page
+// with room to spare.
+static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger depth) {
+    if (!root || depth > 24) return;
     YTMUStyleSearchText(root);
     for (UIView *v in root.subviews) {
         if ([v isKindOfClass:UITableView.class]) {
@@ -139,7 +150,7 @@ static void YTMUStyleSearchPage(UIView *root, BOOL resultsPage) {
         if (resultsPage && ([v isKindOfClass:UITableViewCell.class] || [v isKindOfClass:UICollectionViewCell.class])) {
             YTMUStyleSearchResultsRow(v);
         }
-        YTMUStyleSearchPage(v, resultsPage);
+        YTMUStyleSearchPageDepth(v, resultsPage, depth + 1);
     }
 }
 
