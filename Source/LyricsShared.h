@@ -118,11 +118,32 @@
 // 0 at the start of the gap, 1 at its end; drives the flatten.
 @property (nonatomic, assign) CGFloat waveProgress;
 @property (nonatomic, assign) CGFloat waveWidth;
+// Break dots for LONG instrumental gaps (the reference's kBreakMinMs): the
+// wave ribbon covers a gap from five seconds up; at seven or more the row
+// renders three circles instead -- wait, fade in, breathe, fill in the next
+// line's reading order, then swell and collapse before the line returns. The
+// timeline is evaluated procedurally from the media clock
+// (-ytmu_tickBreakDotsAtMs:) rather than baked into CAKeyframeAnimations on a
+// layer clock, because the tick already visits the active row every frame and
+// a frozen player clock then holds the dots by itself.
+@property (nonatomic, strong) NSArray *breakDots;      // the 3 circle layers, created lazily
+@property (nonatomic, assign) BOOL breakDotsActive;
+@property (nonatomic, assign) BOOL breakDotsReversed;  // fill right-to-left (RTL line after the break)
+@property (nonatomic, assign) double breakDotsStartMs;
+@property (nonatomic, assign) double breakDotsLenMs;
 // Typewriter reveal mask (Source/LyricsStream.x drives it). The label keeps
 // its FULL text the whole time, so the row height never changes mid-reveal.
 @property (nonatomic, strong) CAGradientLayer *typeMask;
 - (void)setWipeProgress:(CGFloat)progress;
 - (void)clearWipe;
+// Take (or drop) the long-break dots. Everything the tick needs is handed in
+// here: the timeline's domain, the fill order and the resolved ink colour.
+// Safe on every configure, including on a recycled cell.
+- (void)ytmu_setBreakDotsActive:(BOOL)on startMs:(double)startMs lenMs:(double)lenMs
+                       reversed:(BOOL)reversed color:(UIColor *)color;
+// Advance the dots to `nowMs` (the song clock, ms). No-op on rows without
+// active dots.
+- (void)ytmu_tickBreakDotsAtMs:(double)nowMs;
 // Cross-fade the revealed layer to `alpha` over `duration`. Replaces both
 // halves of the arrival/departure fade so a reconfigure or a recycle can drop a
 // half-finished one through -clearWipe.

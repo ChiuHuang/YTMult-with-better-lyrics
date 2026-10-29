@@ -27,7 +27,10 @@ static void Card(UIView *h, CGFloat r) {
     b.clipsToBounds = YES;
     b.layer.borderWidth = .75;
     b.layer.borderColor = YTMULGGlassBorder(.38).CGColor;
-    [h sendSubviewToBack:b];
+    // Only when the order is actually wrong -- same rule as the dither layer
+    // below: a reorder is a setNeedsLayout on the host, and this runs from
+    // layoutSubviews of the search box every pass.
+    if (h.subviews.firstObject != b) [h sendSubviewToBack:b];
     h.backgroundColor = UIColor.clearColor;
     YTMULGApplyDither(h, b, .30);
 }
