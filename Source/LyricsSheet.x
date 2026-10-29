@@ -55,9 +55,19 @@ BOOL YTMUInterfaceIsLight(UIView *v) {
 // on screen together without pushing the next line off the panel. Below the
 // floor the text is too small to read, and the row wraps rather than shrinking
 // further.
-static const CGFloat YTMULyricFontSizeMax = 28.0;
-static const CGFloat YTMULyricFontSizeMin = 18.0;
+// The ceiling was raised from 28 to 34 at the user's ask ("text bigger"): the
+// fit loop still decides per song, so a short-lined song simply sits at 34 and
+// a long-lined one keeps the size the fit gives it.
+static const CGFloat YTMULyricFontSizeMax = 34.0;
+static const CGFloat YTMULyricFontSizeMin = 20.0;
 static const NSInteger YTMULyricMaxLinesPerRow = 2;
+
+// In-line tightening: a wrapped line's rows were drawn at the font's full line
+// height, which on boldSystemFont is generous. 0.95x pulls a two-line wrap
+// together without letting descenders collide. It lives in the paragraph style
+// so BOTH copies of the line (the dim base and the bright reveal) measure and
+// wrap identically -- see YTMULyricTextAttributes below.
+static const CGFloat YTMULineTighten = 0.95;
 
 // How many visual lines `text` occupies in `width` at `font`. Real TextKit, a
 // real font and a real width, because the number of lines is a property of the
@@ -94,6 +104,31 @@ static CGFloat YTMULyricTransFontSize(void) { return s_lyricFontSize * 19.0 / 28
 // the closest honest equivalent that keeps the data, and the ratio is a ratio so
 // it follows the font-size setting instead of drifting at one size.
 static CGFloat YTMULyricCueFontSize(void) { return s_lyricFontSize * 13.0 / 28.0; }
+
+// One attribute set for BOTH copies of a lyric line: the dim resting copy
+// (lyricLabel) and the bright reveal (wipeLabel). The wipe lights the line
+// through a mask whose rectangles are measured with TextKit against THIS
+// exact attribute set, so both copies must be laid out from it too. The two
+// historical mismatches, both visible on the device:
+//   * the reveal carried an NSKern the base copy did not, so the reveal
+//     wrapped a word earlier than the dim copy under it and the mask lit
+//     glyphs the base did not occupy;
+//   * the labels honoured textAlignment only at draw time, while the
+//     measuring layout manager laid every line out leading-aligned -- a
+//     right-aligned duet row lit the mirror of the words it was singing.
+// Kern is 0 on purpose: a nonzero kern must appear on BOTH copies or it is
+// the first bug again.
+static NSDictionary *YTMULyricTextAttributes(UIFont *font, NSTextAlignment align, UIColor *color) {
+    NSMutableParagraphStyle *p = [[NSMutableParagraphStyle alloc] init];
+    p.alignment = align;
+    p.lineBreakMode = NSLineBreakByWordWrapping;
+    p.lineSpacing = 0.0;
+    p.lineHeightMultiple = YTMULineTighten;
+    return @{NSFontAttributeName: font ?: [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()],
+             NSParagraphStyleAttributeName: p,
+             NSForegroundColorAttributeName: color ?: UIColor.whiteColor,
+             NSKernAttributeName: @0.0};
+}
 
 // Background-derived ink: the sheet sits on blurred artwork, which can be
 // bright white while the OS is in dark mode (or dark while in light mode),
@@ -455,25 +490,31 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 // recomputed per row or per payload): they therefore hold through a song
 // change, a raw -> final swap and a rotation with no jump. The landscape
 // album column butts against the table, which is why the left side is deeper.
-static CGFloat YTMULyricGutterLeading(void) { return 64.0; }
-static CGFloat YTMULyricGutterTrailing(void) { return 40.0; }
+// Eased from 64/40 to 56/34: more row width means the per-song fit lands on a
+// bigger type size before it has to wrap, which is the same ask as the ceiling
+// above. The left stays deeper than the right for the landscape album column.
+static CGFloat YTMULyricGutterLeading(void) { return 56.0; }
+static CGFloat YTMULyricGutterTrailing(void) { return 34.0; }
 
 // Row vertical padding, held in one place so -ytmu_setRowCollapsed: can take it
 // to zero. A hidden label still reports its intrinsic size through its
 // constraints, so an "empty" row keeps a full lyric line's height unless the
 // padding itself is collapsed.
-static const CGFloat YTMURowPadTop = 14.0;
+// Tightened from 14/10/14 at the user's ask ("line distance smaller"): lines
+// still separate visibly -- the translation needs its own band -- but a sheet
+// of 50 lines no longer reads as airy as a playlist.
+static const CGFloat YTMURowPadTop = 9.0;
 // Gap between a lyric line and its translation. 6pt read as a single glued
 // string at 0.68x scale -- "Every single morning ((Huh)" followed by
 // "（哈）每一個清晨" looked like one mangled line rather than two. The
 // translation is already visually distinct (smaller, dimmer), it just needed
 // room to be read as its own line.
-static const CGFloat YTMURowPadGap = 10.0;
-static const CGFloat YTMURowPadBottom = 14.0;
+static const CGFloat YTMURowPadGap = 7.0;
+static const CGFloat YTMURowPadBottom = 9.0;
 // Gap above a duet voice marker. Smaller than YTMURowPadTop on purpose: the
 // marker belongs to the row it introduces, so it sits closer to the content
 // edge and the lyric line below it keeps the same rhythm as every other line.
-static const CGFloat YTMUSingerPadTop = 8.0;
+static const CGFloat YTMUSingerPadTop = 6.0;
 // Gap between a lyric line and the background cue / romanization hanging off
 // it. Tighter than YTMURowPadGap: the cue belongs to the line above it the way
 // the voice marker does, while the translation is a separate thing and keeps
@@ -675,8 +716,14 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.wipeLabel.layer.shadowRadius = 0.0;
         self.wipeLabel.layer.shadowOpacity = 0.0;
         self.wipeLabel.layer.masksToBounds = NO;
-        self.wipeLabel.layer.shouldRasterize = YES;
-        self.wipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        // NOT rasterized. The mask under this label changes every frame of the
+        // wipe, and a rasterized cache is only regenerated when Core Animation
+        // considers the layer dirty -- a mask swap is exactly the case that
+        // historically does NOT mark it, so the highlight then lagged a word
+        // (or a whole line) behind and snapped late. The cost of drawing the
+        // attributed text + its shadow live is bounded to the rows in the
+        // active set, which is one or two.
+        self.wipeLabel.layer.shouldRasterize = NO;
         self.wipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         self.wipeLabel.userInteractionEnabled = YES;
         [self.contentView addSubview:self.wipeLabel];
@@ -795,8 +842,9 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         self.bgWipeLabel.layer.shadowRadius = 2.0;
         self.bgWipeLabel.layer.shadowOpacity = 0.3;
         self.bgWipeLabel.layer.masksToBounds = NO;
-        self.bgWipeLabel.layer.shouldRasterize = YES;
-        self.bgWipeLabel.layer.rasterizationScale = [UIScreen mainScreen].scale;
+        // Same rule as wipeLabel: the cue's mask moves every frame it is lit,
+        // so a rasterized cache would hand back stale highlight. Not rasterized.
+        self.bgWipeLabel.layer.shouldRasterize = NO;
         self.bgWipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
         // Never `hidden`: a hidden view is skipped by layout, so its bounds would
         // stay zero and the cue's rects could never be measured. It is shown and
@@ -1316,8 +1364,12 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     NSArray *ranges = nil;
     NSString *display = [vc wbwDisplayTextForLyric:lyric ranges:&ranges];
     if (ranges.count == 0) return;
-    
-    NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
+
+    // Same attribute set the wipe measures with (alignment included): the tap
+    // point maps through the same layout the labels drew, so a right-aligned
+    // duet row seeks the word under the finger and not its mirror.
+    NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display
+        attributes:YTMULyricTextAttributes(font, self.ytmu_textAlign, UIColor.blackColor)];
     NSLayoutManager *lm = [[NSLayoutManager alloc] init];
     NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:self.wipeLabel.bounds.size];
     tc.lineFragmentPadding = 0;
@@ -5125,19 +5177,31 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 //     filling THAT would paint a block over the row in between;
 //   * a box that reaches back behind the previous one is trimmed to it, so two
 //     overlapping ranges can never light a later word early.
+//
+// The third rule is the one the device screenshots exposed ("only the last
+// word lit"): the ladder is per VISUAL line. TextKit restarts each wrapped
+// line at x = 0, so the first rect of line 2 sits left of the edge line 1
+// ended on; the old trim (`x0 = MAX(minX, edge)`) then appended nothing for
+// it, and every word of the second visual line stayed dim until the cursor
+// passed the end and the whole row was force-revealed. A rect on a different
+// y restarts the ladder instead of being trimmed against the last one.
 static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInteger upTo,
                                        BOOL rtl, CGFloat width) {
     CGFloat edge = 0.0;
+    CGFloat lineY = 0.0;
     BOOL haveEdge = NO;
     for (NSInteger i = 0; i < upTo && i < (NSInteger)[rects count]; i++) {
         CGRect b = [[rects objectAtIndex:(NSUInteger)i] CGRectValue];
         if (CGRectIsNull(b) || CGRectIsEmpty(b)) continue;
         if (rtl) b = CGRectMake(width - CGRectGetMaxX(b), CGRectGetMinY(b), b.size.width, b.size.height);
+        if (haveEdge && fabs(CGRectGetMinY(b) - lineY) > 0.5) haveEdge = NO;
         if (!haveEdge) { edge = CGRectGetMinX(b); haveEdge = YES; }
-        CGFloat gap = CGRectGetMinX(b) - edge;
-        if (gap > 0.5 && gap <= CGRectGetWidth(b) * 3.0 && gap <= width * 0.5) {
-            [path appendPath:[UIBezierPath bezierPathWithRect:
-                CGRectMake(edge, CGRectGetMinY(b), gap, CGRectGetHeight(b))]];
+        else {
+            CGFloat gap = CGRectGetMinX(b) - edge;
+            if (gap > 0.5 && gap <= CGRectGetWidth(b) * 3.0 && gap <= width * 0.5) {
+                [path appendPath:[UIBezierPath bezierPathWithRect:
+                    CGRectMake(edge, CGRectGetMinY(b), gap, CGRectGetHeight(b))]];
+            }
         }
         CGFloat x0 = MAX(CGRectGetMinX(b), edge);
         CGFloat x1 = CGRectGetMaxX(b);
@@ -5146,6 +5210,7 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
                 CGRectMake(x0, CGRectGetMinY(b), x1 - x0, CGRectGetHeight(b))]];
             edge = x1;
         }
+        lineY = CGRectGetMinY(b);
     }
     return haveEdge ? edge : 0.0;
 }
@@ -5194,27 +5259,32 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     // (curWord past the end) lands here too, which is why the key carries the
     // word index: crossing into a new word must never be skipped by the floor.
 
-    UIFont *font = cell.wipeLabel.font;
-    if (!font) font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
+    UIFont *font = cell.wipeLabel.font ?: [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
     NSArray *ranges = nil;
     NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
-    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%.1f|%@", (long)index, (double)width, display];
+    NSTextAlignment align = cell.ytmu_textAlign;
+    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%ld|%.1f|%@", (long)index, (long)align,
+                           (double)width, display];
     if (![layoutKey isEqualToString:cell.cachedWordLayoutKey]) {
-        cell.lyricLabel.attributedText = nil;
-        cell.lyricLabel.text = display;
-        cell.lyricLabel.textColor = YTMULyricInk(0.40, 0.48, self.view);
+        // Both copies of the line are built from ONE attribute set, so they
+        // wrap identically and the mask measured against it lands on the
+        // glyphs both copies draw. See YTMULyricTextAttributes for the two
+        // mismatches this replaces (kern, alignment).
+        cell.lyricLabel.attributedText = [[NSAttributedString alloc]
+            initWithString:display
+                attributes:YTMULyricTextAttributes(font, align, YTMULyricInk(0.40, 0.48, self.view))];
 
         NSShadow *sh = [[NSShadow alloc] init];
         sh.shadowColor = YTMULyricShadow(self.view);
         sh.shadowOffset = CGSizeMake(0, 2);
         sh.shadowBlurRadius = 4;
-        cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display
-            attributes:@{NSFontAttributeName: font,
-                         NSForegroundColorAttributeName: YTMULyricInk(1.0, 1.0, self.view),
-                         NSShadowAttributeName: sh,
-                         NSKernAttributeName: @0.08}];
+        NSMutableDictionary *bright = [YTMULyricTextAttributes(font, align,
+            YTMULyricInk(1.0, 1.0, self.view)) mutableCopy];
+        bright[NSShadowAttributeName] = sh;
+        cell.wipeLabel.attributedText = [[NSAttributedString alloc] initWithString:display attributes:bright];
 
-        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display attributes:@{NSFontAttributeName: font}];
+        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:display
+            attributes:YTMULyricTextAttributes(font, align, UIColor.blackColor)];
         NSLayoutManager *lm = [[NSLayoutManager alloc] init];
         NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
         tc.lineFragmentPadding = 0;
@@ -5321,11 +5391,17 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
                            (double)width, (long)cell.ytmu_textAlign, cueDisplay];
     if (![layoutKey isEqualToString:cell.cachedCueLayoutKey]) {
         UIFont *font = cell.bgWipeLabel.font ?: [UIFont systemFontOfSize:YTMULyricCueFontSize()];
-        cell.bgWipeLabel.attributedText = nil;
-        cell.bgWipeLabel.text = cueDisplay;
-        cell.bgWipeLabel.textColor = YTMULyricInk(0.5, 0.45, self.view);
+        // Same rule as the lead line's copies (YTMULyricTextAttributes): the
+        // measuring stack and the label must lay the string out with the same
+        // attributes, alignment included, or a right-aligned duet row lights
+        // the mirror of the words its cue is singing.
+        cell.bgWipeLabel.attributedText = [[NSAttributedString alloc]
+            initWithString:cueDisplay
+                attributes:YTMULyricTextAttributes(font, cell.ytmu_textAlign,
+                                                   YTMULyricInk(0.5, 0.45, self.view))];
 
-        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:cueDisplay attributes:@{NSFontAttributeName: font}];
+        NSTextStorage *ts = [[NSTextStorage alloc] initWithString:cueDisplay
+            attributes:YTMULyricTextAttributes(font, cell.ytmu_textAlign, UIColor.blackColor)];
         NSLayoutManager *lm = [[NSLayoutManager alloc] init];
         NSTextContainer *tc = [[NSTextContainer alloc] initWithSize:CGSizeMake(width, CGFLOAT_MAX)];
         tc.lineFragmentPadding = 0;
@@ -5530,7 +5606,7 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         if ([cell ytmu_setRowCollapsed:!showNote]) [self.tableView setNeedsLayout];
         cell.lyricLabel.attributedText = nil;
         cell.lyricLabel.text = @"";
-        cell.lyricLabel.font = [UIFont boldSystemFontOfSize:28];
+        cell.lyricLabel.font = [UIFont boldSystemFontOfSize:YTMULyricMainFontSize()];
         cell.ytmu_textAlign = YTMUVoiceAlignment(lyric);
         cell.lyricLabel.textAlignment = cell.ytmu_textAlign;
         cell.wipeLabel.textAlignment = cell.ytmu_textAlign;
@@ -5660,8 +5736,11 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         // Leaving the active set FADES the highlight down instead of blanking
         // it, so a line dims rather than snaps. The revealed text is kept for
         // the length of the fade; the next reconfigure, a reload or a recycle
-        // drops it through -clearWipe.
-        if (cell.wipeLabel.text.length > 0) {
+        // drops it through -clearWipe. The reveal now carries an ATTRIBUTED
+        // string on word-synced rows, so the emptiness test reads both -- a
+        // nil .text on an attributed label would have blanked the fade path.
+        BOOL hasReveal = cell.wipeLabel.text.length > 0 || cell.wipeLabel.attributedText.length > 0;
+        if (hasReveal) {
             [cell ytmu_fadeHighlightTo:0.0 duration:YTMUHighlightFadeOutDuration];
         } else {
             [cell clearWipe];
