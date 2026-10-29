@@ -5315,6 +5315,12 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     NSInteger rcount = MIN(partCount, (NSInteger)[cell.cachedWordRects count]);
     BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     CGFloat wipeW = CGRectGetWidth(cell.wipeLabel.bounds);
+    // The prefix is the words BEFORE the one being sung. The current word
+    // belongs to the feather: it is the one place a moving edge still exists,
+    // and the gradient inside the word is what reads as a wipe rather than a
+    // strobe. Word-level timing has no sub-word glyph positions, so the ramp
+    // is driven by the part's own duration -- which is exactly how Apple
+    // Music sweeps a word it only has start/duration for.
     NSInteger prefixCount = MIN(MAX(curWord, 0), rcount);
     YTMUAppendRevealedWords(path, cell.cachedWordRects, prefixCount, rtl, wipeW);
 
@@ -5324,15 +5330,33 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     if (curWord >= 0 && curWord < rcount) {
         CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
         if (!CGRectIsNull(wordRect)) {
-            // Word-level timing only tells us WHEN a word starts, not how its
-            // glyphs are distributed inside it. The old fractional sweep made
-            // one word read as two brightness states ("some" bright, "thing"
-            // dim) and left a faded tail on a word that had already finished.
-            // The word is the unit: reveal it whole when its start time lands,
-            // and keep the moving solid edge at the previous word's boundary.
-            if (curFrac > 0.0) {
-                [path appendPath:[UIBezierPath bezierPathWithRect:wordRect]];
-            }
+            // The solid run ends at the previous word's boundary; the feather
+            // covers ONLY the current word, so the reveal can never run past a
+            // word that has not started (the old line-wide feather did, and
+            // that was the premature-glow bug). Completed words stay solid
+            // because the prefix path already carries them.
+            CGFloat frac = MIN(1.0, MAX(0.0, curFrac));
+            CGFloat lead = frac * 0.85;      // solid up to here
+            CGFloat ramp = frac;             // ramp edge lands here
+            // Written INSIDE the disabled transaction below: a locations or
+            // frame change outside it takes Core Animation's default 0.25s
+            // implicit animation, and the ramp would then trail the word by a
+            // quarter second -- the "jump then catch up" the device showed.
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            // start/end rebuild the gradient's colour map; this branch already
+            // rewrites locations every tick, so the axes are just set with
+            // them -- no extra pass, and no RTL cache to keep in step.
+            wipeFeather.startPoint = rtl ? CGPointMake(1.0, 0.5) : CGPointMake(0.0, 0.5);
+            wipeFeather.endPoint = rtl ? CGPointMake(0.0, 0.5) : CGPointMake(1.0, 0.5);
+            wipeFeather.colors = @[(id)[UIColor whiteColor].CGColor,
+                                   (id)[UIColor whiteColor].CGColor,
+                                   (id)[UIColor clearColor].CGColor,
+                                   (id)[UIColor clearColor].CGColor];
+            wipeFeather.locations = @[@0.0, @(lead), @(ramp), @1.0];
+            wipeFeather.frame = CGRectIntegral(wordRect);
+            wipeFeather.hidden = NO;
+            [CATransaction commit];
         }
     } else if (curWord >= rcount && display.length > 0) {
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
