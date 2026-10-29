@@ -669,6 +669,63 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
     return p;
 }
 
+// --- Break dots (instrumental gaps of seven seconds or more) --------------
+// Ported from the spoti.pw reference (SGRKaraokeBreakView): three circles that
+// wait, fade in, breathe, fill in the next line's reading order, then swell
+// and collapse before the next line takes the anchor back. Constants are the
+// reference's, converted to ms. YTMU evaluates the timeline procedurally from
+// the extrapolated media clock instead of baking CAKeyframeAnimation pairs
+// onto a layer clock: the tick already visits the active row every frame, the
+// cost is three tiny layers' worth of property writes, and the reference's two
+// clock behaviours fall out for free -- a paused player freezes the clock, so
+// the dots hold; a seek moves the clock, so the dots re-land instantly.
+static const double YTMUBreakDotsMinMs = 7000.0;   // kBreakMinMs
+static const double YTMUBreakWaitMs = 250.0;       // silence before anything moves
+static const double YTMUBreakFadeInMs = 160.0;     // group alpha 0 -> base
+static const double YTMUBreakScaleInMs = 400.0;    // easeOutExpo up into the breath
+static const double YTMUBreakBreathLow = 0.85;
+static const double YTMUBreakBreathHigh = 1.12;
+static const double YTMUBreakBreathHalfMs = 4000.0;  // half of the 8s cosine
+static const double YTMUBreakOutMs = 350.0;        // swell + shrink
+static const double YTMUBreakSwellShare = 0.35;    // of the exit spent swelling
+static const double YTMUBreakCollapseMs = 500.0;   // gone this long before the next line
+static const double YTMUBreakDotAlpha = 0.30;      // resting ink (the reference's kDimAlpha)
+static const double YTMUBreakSwellScale = 1.20;
+
+// The breathing scale: a cosine between kLow and kHigh with the phase chosen
+// so the cycle sits at its SMALL end exactly when the exit begins -- the swell
+// then launches from the bottom, which is what makes breath and swell read as
+// one motion (the reference's "phase-shifted so a cycle ends small").
+static CGFloat YTMUBreakBreathScale(double exitStartMs, double tMs) {
+    double mid = (YTMUBreakBreathLow + YTMUBreakBreathHigh) * 0.5;
+    double amp = (YTMUBreakBreathHigh - YTMUBreakBreathLow) * 0.5;
+    double x = (tMs - (exitStartMs - YTMUBreakBreathHalfMs)) / YTMUBreakBreathHalfMs * M_PI;
+    return (CGFloat)(mid + amp * cos(x));
+}
+
+// First strong character decides, the way the reference's readsRightToLeft
+// does: Hebrew/Arabic and friends point right, Latin/Greek/Cyrillic/CJK point
+// left; digits, punctuation and spaces are neutral and skipped. Used only for
+// the dots' fill order, so a coarse scan bounded to the first 64 chars is all
+// the question needs.
+static BOOL YTMUTextReadsRightToLeft(NSString *text) {
+    if (text.length == 0) return NO;
+    NSUInteger n = MIN((NSUInteger)64, text.length);
+    for (NSUInteger i = 0; i < n; i++) {
+        unichar c = [text characterAtIndex:i];
+        if ((c >= 0x0590 && c <= 0x08FF) ||   // Hebrew .. Arabic, Thaana, N'Ko
+            (c >= 0xFB50 && c <= 0xFDFF) ||   // Arabic presentation forms
+            (c >= 0xFE70 && c <= 0xFEFF)) return YES;
+        if ((c >= 0x0041 && c <= 0x007A) ||   // Latin
+            (c >= 0x00C0 && c <= 0x024F) ||   // Latin extended
+            (c >= 0x0370 && c <= 0x058F) ||   // Greek .. Armenian
+            (c >= 0x0400 && c <= 0x04FF) ||   // Cyrillic
+            (c >= 0x2E80 && c <= 0x9FFF) ||   // CJK radicals, kana, ideographs
+            (c >= 0xAC00 && c <= 0xD7AF)) return NO;  // hangul
+    }
+    return NO;
+}
+
 @interface YTMULyricsCell (SheetRows)
 // Returns YES when the row's height state actually changed, so the caller can
 // ask the table to re-measure the self-sizing row.
@@ -677,6 +734,11 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
 // which calls it, and declared here so that call is not an implicit method
 // lookup.
 - (void)ytmu_armWaveOscillation;
+// The break dots' layers, created on first use, and their static placement
+// (size/position only -- the tick owns opacity and scale). Same reason as
+// -ytmu_armWaveOscillation above.
+- (void)ytmu_ensureBreakDots;
+- (void)ytmu_layoutBreakDots;
 @end
 
 @implementation YTMULyricsCell
@@ -792,6 +854,14 @@ static UIBezierPath *YTMUWavePath(CGFloat width, CGFloat amp, BOOL high) {
         // from the sung one, until something else touched it.
         _distanceAlpha = 1.0;
         [self.contentView.layer addSublayer:self.waveLayer];
+        // Break dots (long instrumental gaps) start empty and lazy: the layers
+        // exist only for the one row of a song that sits in a seven-second-plus
+        // gap, and every key the tick writes is action-nulled so no per-frame
+        // write can pick up an implicit animation (the wipeFeather's rule).
+        _breakDotsActive = NO;
+        _breakDotsReversed = NO;
+        _breakDotsStartMs = 0.0;
+        _breakDotsLenMs = 0.0;
 
         // Voice marker for the kYTMUDuetLabel mode. Pinned to zero height unless
         // a duet actually changes singer on this row, so a solo track -- or a
@@ -1214,6 +1284,14 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     [super layoutSubviews];
     self.wipeMask.frame = self.wipeLabel.bounds;
     self.bgWipeMask.frame = self.bgWipeLabel.bounds;
+    if (self.breakDotsActive) {
+        if (!self.waveLayer.hidden) self.waveLayer.hidden = YES;
+        [self ytmu_layoutBreakDots];
+        return;
+    }
+    for (CALayer *dot in self.breakDots) {
+        if (!dot.hidden) dot.hidden = YES;
+    }
     if (!self.waveActive) {
         if (!self.waveLayer.hidden) self.waveLayer.hidden = YES;
         return;
@@ -1278,6 +1356,146 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     [self.waveLayer addAnimation:osc forKey:@"ytmuWaveOscillation"];
 }
 
+// The dots' three layers, created on first use. A song usually has one such
+// row at most, and the layers are empty, square-less and invisible until the
+// layout pass sizes them -- so a cell that never sees a long break pays for
+// the ivars only.
+- (void)ytmu_ensureBreakDots {
+    if (self.breakDots.count == 3) return;
+    NSMutableArray *dots = [NSMutableArray arrayWithCapacity:3];
+    for (NSInteger i = 0; i < 3; i++) {
+        CALayer *dot = [CALayer layer];
+        dot.hidden = YES;
+        dot.actions = @{@"position": [NSNull null], @"bounds": [NSNull null],
+                        @"frame": [NSNull null], @"transform": [NSNull null],
+                        @"opacity": [NSNull null], @"hidden": [NSNull null]};
+        [dots addObject:dot];
+        [self.contentView.layer addSublayer:dot];
+    }
+    self.breakDots = dots;
+}
+
+// Size and place the dots. Geometry follows the reference's shares of the
+// point size: a dot is half the type size tall, the gap between dots a bit
+// over a quarter, the group centred on the row. The lyric label spans the
+// row's full width, so its centre IS the row's centre -- read from the label,
+// never the frame, because the arrival pop's transform makes frame reads
+// meaningless (the same rule the wave follows).
+- (void)ytmu_layoutBreakDots {
+    CGFloat fontSize = self.lyricLabel.font.pointSize;
+    if (fontSize <= 0.0) fontSize = YTMULyricMainFontSize();
+    CGFloat side = round(fontSize * 0.5);
+    if (side < 4.0) {
+        for (CALayer *dot in self.breakDots) dot.hidden = YES;
+        return;
+    }
+    CGFloat gap = round(fontSize * 0.27);
+    [self ytmu_ensureBreakDots];
+    CGPoint lc = self.lyricLabel.center;
+    CGFloat total = side * 3.0 + gap * 2.0;
+    CGFloat x = lc.x - total * 0.5;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CALayer *dot in self.breakDots) {
+        dot.frame = CGRectMake(x, lc.y - side * 0.5, side, side);
+        dot.cornerRadius = side * 0.5;
+        x += side + gap;
+    }
+    [CATransaction commit];
+}
+
+- (void)ytmu_setBreakDotsActive:(BOOL)on startMs:(double)startMs lenMs:(double)lenMs
+                       reversed:(BOOL)reversed color:(UIColor *)color {
+    _breakDotsReversed = reversed;
+    _breakDotsStartMs = startMs;
+    _breakDotsLenMs = lenMs;
+    if (on) {
+        [self ytmu_ensureBreakDots];
+        // The ink is resolved against the backdrop at configure time, where
+        // the light/dark question is answerable; the tick must not need it.
+        for (CALayer *dot in self.breakDots) dot.backgroundColor = color.CGColor;
+    }
+    if (_breakDotsActive == on) return;
+    _breakDotsActive = on;
+    if (!on) {
+        for (CALayer *dot in self.breakDots) dot.hidden = YES;
+    }
+}
+
+// Advance the dots to `nowMs` (the song clock, ms). The whole timeline is
+// evaluated here, every frame the row is active, instead of being baked into
+// CAKeyframeAnimation pairs on a layer clock: the tick already visits the
+// active row, and both of the reference's clock behaviours fall out for free
+// -- a paused player freezes the extrapolated clock, so the dots hold; a seek
+// moves the clock, so the dots land on the right phase of the break at once.
+- (void)ytmu_tickBreakDotsAtMs:(double)nowMs {
+    if (!self.breakDotsActive || self.breakDots.count != 3) return;
+    double len = self.breakDotsLenMs;
+    if (len <= 0.0) return;
+    double e = nowMs - self.breakDotsStartMs;   // elapsed, ms into the break
+    // The exit begins no earlier than once the entry has settled, and never
+    // less than kCollapse before the next line takes the anchor back.
+    double exitStart = MAX(YTMUBreakWaitMs + YTMUBreakFadeInMs,
+                           len - YTMUBreakCollapseMs - YTMUBreakOutMs);
+    double exitEnd = exitStart + YTMUBreakOutMs;
+    BOOL reduce = UIAccessibilityIsReduceMotionEnabled();
+
+    // Group alpha: silence, fade in, hold, fade out across the exit.
+    CGFloat groupA;
+    if (e < YTMUBreakWaitMs) groupA = 0.0;
+    else if (e < YTMUBreakWaitMs + YTMUBreakFadeInMs)
+        groupA = (CGFloat)((e - YTMUBreakWaitMs) / YTMUBreakFadeInMs);
+    else if (e < exitStart) groupA = 1.0;
+    else groupA = (CGFloat)MAX(0.0, 1.0 - (e - exitStart) / YTMUBreakOutMs);
+
+    // Scale: easeOutExpo into the breath, breathe, swell to 1.2x, collapse to
+    // nothing. Reduce Motion drops the breath and the swell and keeps the
+    // fades -- the reference's own reduce-motion shape.
+    CGFloat scale;
+    if (e < YTMUBreakWaitMs) {
+        scale = 0.0;
+    } else if (e < YTMUBreakWaitMs + YTMUBreakScaleInMs) {
+        double u = (e - YTMUBreakWaitMs) / YTMUBreakScaleInMs;
+        double target = reduce ? 1.0 : YTMUBreakBreathScale(exitStart, e);
+        scale = (CGFloat)(target * (1.0 - pow(2.0, -10.0 * u)));
+    } else if (e < exitStart) {
+        scale = reduce ? 1.0 : YTMUBreakBreathScale(exitStart, e);
+    } else {
+        double u = MIN(1.0, (e - exitStart) / YTMUBreakOutMs);
+        if (reduce) {
+            scale = 1.0;
+        } else if (u < YTMUBreakSwellShare) {
+            double v = u / YTMUBreakSwellShare;
+            scale = (CGFloat)(YTMUBreakBreathLow +
+                              (YTMUBreakSwellScale - YTMUBreakBreathLow) * (1.0 - (1.0 - v) * (1.0 - v)));
+        } else {
+            double v = (u - YTMUBreakSwellShare) / (1.0 - YTMUBreakSwellShare);
+            scale = (CGFloat)(YTMUBreakSwellScale * (1.0 - v * v));
+        }
+    }
+
+    // Per-dot fill: resting ink -> full over thirds of the pre-exit span, in
+    // the reading order of the line that returns after the break.
+    double step = exitStart / 3.0;
+    BOOL gone = e >= exitEnd;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (NSInteger i = 0; i < 3; i++) {
+        // The layers are laid out left to right, so the fill order is the
+        // index order for an LTR next line and the mirror for an RTL one.
+        NSInteger si = self.breakDotsReversed ? (2 - i) : i;
+        CALayer *dot = self.breakDots[i];
+        double from = (double)si * step;
+        double fill = step > 0.0 ? MIN(1.0, MAX(0.0, (e - from) / step)) : 0.0;
+        CGFloat a = groupA * (CGFloat)(YTMUBreakDotAlpha + (1.0 - YTMUBreakDotAlpha) * fill);
+        dot.opacity = a;
+        dot.transform = CATransform3DMakeScale(scale, scale, 1.0);
+        BOOL hidden = gone || scale <= 0.001 || a < 0.002;
+        if (dot.hidden != hidden) dot.hidden = hidden;
+    }
+    [CATransaction commit];
+}
+
 - (void)clearWipe {
     _wipeProgress = 0.0;
     self.wipeLabel.text = nil;
@@ -1307,6 +1525,10 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     [self ytmu_clearGlow];
     self.waveActive = NO;
     self.waveLayer.hidden = YES;
+    // The dots are per-row state like the ribbon: a reconfigure, a reload or a
+    // recycle must never carry a half-lit break into the next row.
+    self.breakDotsActive = NO;
+    for (CALayer *dot in self.breakDots) dot.hidden = YES;
 }
 
 - (void)prepareForReuse {
@@ -1348,6 +1570,13 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     self.waveWidth = 0.0;
     [self.waveLayer removeAnimationForKey:@"ytmuWaveOscillation"];
     self.waveLayer.hidden = YES;
+    // ...and the break dots' timeline: a recycled cell must not inherit
+    // another row's break phase (or its RTL fill order).
+    self.breakDotsActive = NO;
+    self.breakDotsReversed = NO;
+    self.breakDotsStartMs = 0.0;
+    self.breakDotsLenMs = 0.0;
+    for (CALayer *dot in self.breakDots) dot.hidden = YES;
 }
 
 - (void)ytmu_handleWordTap:(UITapGestureRecognizer *)gesture {
@@ -4754,7 +4983,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             YTMULyricsCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)i inSection:0]];
             if (cell) {
                 NSDictionary *lyric = self.lyrics[i];
-                if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
+                if ([self ytmuIsInstrumentalLyric:lyric]) {
+                    // A long break's dots breathe on the media clock: a paused
+                    // clock holds them, a seek re-lands them, both for free.
+                    [cell ytmu_tickBreakDotsAtMs:nowMs];
+                } else if ([lyric[@"wordSynced"] boolValue] && [(NSArray *)lyric[@"parts"] count] > 0) {
                     // The cue rides along on this call -- -applyWordColorsToCell
                     // ticks it first, on the cue's own timings.
                     [self applyWordColorsToCell:cell lyric:lyric index:(NSInteger)i currentTime:currentTime force:NO];
@@ -5655,11 +5888,43 @@ static NSTextAlignment YTMUVoiceAlignment(NSDictionary *lyric) {
         // the previous row's backing vocal would light it up against the wave.
         [cell ytmu_setSubRowsWithBg:nil roman:nil];
         [cell ytmu_setCueLyric:nil row:-1];
-        cell.waveActive = showNote;
-        if (showNote) {
+        // A gap the server marked instrumental shows EITHER the wave ribbon --
+        // five seconds up to seven is a bar rest, braccato's style -- or, at
+        // seven seconds and beyond, the break dots (the reference's
+        // kBreakMinMs): three circles that wait, fade in, breathe, fill in the
+        // next line's reading order, then swell and collapse before the line
+        // returns. The dots are ticked off the media clock in
+        // -updatePlaybackTime, which is also what makes a pause hold them and
+        // a seek land them. An untimed payload has no window worth breathing
+        // on, so it keeps the ribbon.
+        double startMs = [self ytmu_startMsForLyric:lyric];
+        double endMs = [self ytmu_endMsForLyricAtIndex:index];
+        double gapMs = MAX(0.0, endMs - startMs);
+        BOOL longBreak = showNote && self.isSynced && gapMs >= YTMUBreakDotsMinMs;
+        BOOL reversed = NO;
+        if (longBreak) {
+            // The dots fill in the READING order of the line that comes back
+            // after the break, so a Hebrew/Arabic return fills right to left.
+            // Bounded walk, like the singer marker's backward one.
+            NSInteger hi = MIN(index + 16, (NSInteger)self.lyrics.count);
+            for (NSInteger i = index + 1; i < hi; i++) {
+                NSDictionary *next = self.lyrics[i];
+                if (![self ytmuIsInstrumentalLyric:next]) {
+                    reversed = YTMUTextReadsRightToLeft(
+                        [next[@"text"] isKindOfClass:[NSString class]] ? next[@"text"] : @"");
+                    break;
+                }
+            }
+        }
+        cell.waveActive = showNote && !longBreak;
+        [cell ytmu_setBreakDotsActive:longBreak startMs:startMs lenMs:gapMs
+                             reversed:reversed color:YTMULyricInk(1.0, 1.0, self.view)];
+        if (longBreak) {
+            // First evaluation so the row is correct before the next tick.
+            [cell ytmu_tickBreakDotsAtMs:currentTime * 1000.0];
+            [cell setNeedsLayout];
+        } else if (showNote) {
             // Flatten across the gap: 0 the instant it opens, 1 as it closes.
-            double startMs = [self ytmu_startMsForLyric:lyric];
-            double endMs = [self ytmu_endMsForLyricAtIndex:index];
             CGFloat progress = 0.0;
             if (endMs > startMs) {
                 progress = (CGFloat)((currentTime * 1000.0 - startMs) / (endMs - startMs));
