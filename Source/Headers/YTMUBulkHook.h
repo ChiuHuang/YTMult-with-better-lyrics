@@ -51,13 +51,48 @@ static inline void YTMUBulkHook(NSArray<NSString *> *classNames, SEL sel, IMP re
         if (origs[[NSValue valueWithPointer:(__bridge const void *)cls]]) continue;
         Method m = class_getInstanceMethod(cls, sel);
         if (!m) continue;
+        IMP cur = method_getImplementation(m);
+        // THE SEARCH-PAGE CRASH. class_getInstanceMethod returns the
+        // SUPERCLASS's Method when cls does not implement the selector itself,
+        // so two listed classes that share one unoverridden selector hook the
+        // SAME Method twice: the second class's saved "orig" is the
+        // replacement already installed by the first, and its first layout
+        // pass calls orig -> replacement -> orig -> ... until the stack dies.
+        // (YTMSearchBarViewV2 was added next to YTMSearchBoxView for the
+        // search styling and both resolve layoutSubviews to one inherited
+        // Method.) Two guards, both required:
+        //   (a) the current IMP already IS this replacement -> the class is
+        //       covered by inheritance through the hooked ancestor; skip it,
+        //       and YTMUCallOrig will find the ancestor's entry by walking up;
+        //   (b) cls does not OWN the method -> install a private copy on cls
+        //       (class_addMethod) instead of swapping the shared superclass
+        //       IMP, so the ancestor and any other hooked subclass each keep
+        //       their own orig.
+        if (cur == (IMP)replacement) {
+            NSLog(@"[YTMU] bulk hook %@ %@: inherited from an already-hooked ancestor, skipped",
+                  name, selName);
+            continue;
+        }
+        // Does cls OWN the method, or inherit it? class_getInstanceMethod walks
+        // the hierarchy, so an inherited selector resolves to the SAME Method
+        // pointer from the superclass; a pointer compare answers ownership
+        // without method_getClass (which some SDKs here do not declare).
+        Class superCls = class_getSuperclass(cls);
+        Method superM = superCls ? class_getInstanceMethod(superCls, sel) : NULL;
+        BOOL owns = (m != superM);
+        if (!owns) NSLog(@"[YTMU] bulk hook %@ %@: method owned by %@, installing a copy",
+                         name, selName, NSStringFromClass(superCls));
         NSMutableDictionary *perClass = [NSMutableDictionary dictionary];
         // The cast to `const void *` is REQUIRED, not cosmetic. These files
         // are .xm, so they compile as Objective-C++ where an IMP (a function
         // pointer) will not implicitly convert to `const void *`.
-        perClass[selName] = [NSValue valueWithPointer:(const void *)method_getImplementation(m)];
+        perClass[selName] = [NSValue valueWithPointer:(const void *)cur];
         origs[[NSValue valueWithPointer:(__bridge const void *)cls]] = perClass;
-        method_setImplementation(m, replacement);
+        if (owns) {
+            method_setImplementation(m, replacement);
+        } else {
+            class_addMethod(cls, sel, replacement, method_getTypeEncoding(m));
+        }
     }
 }
 
