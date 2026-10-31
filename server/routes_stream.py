@@ -116,8 +116,15 @@ def _tline_payload(lyrics, ev, text_rows, elapsed_ms):
 
 def _text_rows(lyrics):
     """Positions of the text-bearing lines, in the order the translator sees
-    them (translate_result_in_place aligns over exactly these)."""
-    return [i for i, l in enumerate(lyrics) if l.get('text')]
+    them. Delegates to translate.translatable_rows -- the ONE definition
+    (has text AND that text is not blank). The old `l.get('text')` filter let
+    a whitespace-only spacer row through, and cohere_translate drops blank
+    texts before the model sees them, so the spacer consumed the NEXT line's
+    translation: every line showed the FOLLOWING line's translation under it
+    and the last text line got nothing (the "translate offsetted by one
+    line" report)."""
+    from .translate import translatable_rows
+    return [i for i, _t in translatable_rows(lyrics)]
 
 
 def _lyrics_sample(lyrics, cap=4000, rows=60):
@@ -128,23 +135,58 @@ def _lyrics_sample(lyrics, cap=4000, rows=60):
 
 
 def _repair_stale_han(data, video_id, cache_key, target_lang, req_id):
-    """Rewrite the Han rows an old skip-han pass left untranslated, then put
-    the entry back. Runs on the CACHED path: the skip bug wrote
-    translated==text (or the script conversion) into the on-disk entry, and no
-    fix to the live pipeline could reach those bytes. One Cohere call over the
-    poisoned rows only; a total API failure leaves the entry alone, which is
-    exactly what the device gets today. Returns the data to serve.
+    """Serve-time repair for CACHED entries the older, buggy passes wrote.
+
+    Two poisons, checked in this order:
+
+    1. Spacer shift. cohere_translate drops blank texts before the model sees
+       them, but the old callers built the text list on `l.get('text')` alone,
+       so a whitespace-only spacer row was SENT to the model and its slot
+       consumed the next line's translation. Signature: a spacer row (text
+       truthy, strip() empty) that carries a non-empty 'translated' -- only a
+       shifted fill can assign a translation to a blank row. Everything from
+       the first spacer on is wrong, so the whole payload is re-translated
+       over translatable_rows (translate_result_in_place, one Cohere call).
+       No translate-cache bust is needed: the repaired fill hashes the
+       FILTERED texts, the poison was written under the UNFILTERED md5, so
+       fresh requests miss the poison and Cohere writes a clean entry.
+
+    2. Stale Han. The old skip-han pass wrote translated==text (or the script
+       conversion) into ja songs' on-disk entries. Rewritten in place over the
+       poisoned rows only.
+
+    A total API failure leaves the entry alone, which is exactly what the
+    device gets today. Returns the data to serve.
     """
     if not target_lang:
         return data
     try:
-        from .translate import cohere_translate, find_stale_han_rows, _detect_song_lang
-        bad = find_stale_han_rows(data.get('lyrics'), target_lang,
-                                  _detect_song_lang(data, _lyrics_sample(data.get('lyrics'))))
+        from .translate import (cohere_translate, find_stale_han_rows,
+                                _detect_song_lang, translate_result_in_place)
+        lyrics = data.get('lyrics') or []
+        spacers = [i for i, l in enumerate(lyrics)
+                   if isinstance(l, dict) and l.get('text') and not l['text'].strip()
+                   and l.get('translated')]
+        if spacers:
+            print(f"  [REQ {req_id}] [SpacerFix] {len(spacers)} spacer row(s) carried a "
+                  f"shifted translation for {video_id}; re-translating the payload")
+            for i in spacers:
+                lyrics[i]['translated'] = ''
+            filled = translate_result_in_place(data, target_lang,
+                                               _detect_song_lang(data, _lyrics_sample(lyrics)))
+            if filled:
+                set_cached(cache_key, data)
+                print(f"  [REQ {req_id}] [SpacerFix] repaired entry rewritten to cache "
+                      f"({filled} line(s) filled)")
+            # The full re-translation also re-wrote any Han rows, so the
+            # skip-han sub-repair has nothing left to do here.
+            return data
+        bad = find_stale_han_rows(lyrics, target_lang,
+                                  _detect_song_lang(data, _lyrics_sample(lyrics)))
         if not bad:
             return data
         print(f"  [REQ {req_id}] [StaleHan] {len(bad)} skip-han row(s) to repair for {video_id}")
-        texts = [data['lyrics'][i].get('text') or '' for i in bad]
+        texts = [lyrics[i].get('text') or '' for i in bad]
         # song_lang='ja' on purpose: find_stale_han_rows only returned rows for
         # a song kana convicted, so the repair must translate the Han rows, not
         # skip them again.
@@ -154,15 +196,15 @@ def _repair_stale_han(data, video_id, cache_key, target_lang, req_id):
         changed = False
         for j, i in enumerate(bad):
             new = repaired[j] if j < len(repaired) else ''
-            if new and new != (data['lyrics'][i].get('translated') or ''):
-                data['lyrics'][i]['translated'] = new
+            if new and new != (lyrics[i].get('translated') or ''):
+                lyrics[i]['translated'] = new
                 changed = True
         if changed:
             set_cached(cache_key, data)
             print(f"  [REQ {req_id}] [StaleHan] repaired entry rewritten to cache")
         return data
     except Exception as e:
-        print(f"  [REQ {req_id}] [StaleHan] repair failed: {e}")
+        print(f"  [REQ {req_id}] [ServeRepair] repair failed: {e}")
         return data
 
 

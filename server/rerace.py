@@ -23,7 +23,7 @@ from .candidates import load_snapshot, graft_wbw_parts
 from .metadata import get_search_queries
 from .race import _lyrics_score, _wbw_line_count, _race_cubey
 from .providers_braccato import fetch_direct_best
-from .translate import google_translate_fast
+from .translate import google_translate_fast, translatable_rows
 from .nodes import pick_node
 from .paths import LYRICS_DIR
 
@@ -87,20 +87,18 @@ def _cache_candidates(limit, cooldown):
 
 def _translate_upgrade_in_place(up, lang):
     """Fill missing translated rows on an upgrade payload (fast Google pass,
-    same as the network path below). Index-aligned on text-bearing lines so
-    textless/gap rows never shift later translations. Never raises."""
+    same as the network path below). Aligned over translatable_rows() -- the
+    ONE definition of a translatable line (has text AND that text is not
+    blank) -- so a textless row or a whitespace spacer never shifts later
+    translations. Never raises."""
     if not lang or not up or not up.get('lyrics'):
         return
-    texts = [l['text'] for l in up['lyrics'] if l.get('text')]
+    rows = translatable_rows(up['lyrics'])
     try:
-        translations = google_translate_fast(texts, lang)
-        ti = 0
-        for l in up['lyrics']:
-            if not l.get('text'):
-                continue
-            if ti < len(translations) and translations[ti] and not l.get('translated'):
-                l['translated'] = translations[ti]
-            ti += 1
+        translations = google_translate_fast([t for _i, t in rows], lang)
+        for (i, _t), tr in zip(rows, translations):
+            if tr and not up['lyrics'][i].get('translated'):
+                up['lyrics'][i]['translated'] = tr
     except Exception as e:
         print(f"  [RERACE] inline translation skipped: {e}")
 

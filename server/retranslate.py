@@ -40,7 +40,7 @@ from .cache import read_entry, set_cached, _cache_key_from_filename
 from .translate import (
     _echoes_original, _is_chinese_target, _line_is_already_chinese,
     translate_result_in_place, translate_last_error,
-    delete_translate_cached, translate_cache_key,
+    delete_translate_cached, translate_cache_key, translatable_rows,
     _detect_song_lang, find_stale_han_rows, lyrics_sample,
 )
 
@@ -97,7 +97,15 @@ def _row_broken(row):
     tr = row.get('translated')
     if tr is None:
         return ''
-    return translation_defect(row.get('text') or '', tr)
+    txt = row.get('text') or ''
+    # A whitespace-only spacer row must never carry a translation. Only the
+    # old shifted fill could have written one: cohere_translate drops blank
+    # texts before the model sees them, so the blank slot consumed the NEXT
+    # line's translation and every later line showed the following line's.
+    # translation_defect cannot see this (it returns '' for blank originals).
+    if txt and not txt.strip() and (tr or '').strip():
+        return 'spacer_translated'
+    return translation_defect(txt, tr)
 
 
 def broken_rows(data):
@@ -119,7 +127,13 @@ def _should_check(row, lang, song_lang=''):
     checked."""
     if song_lang == 'ja':
         return True
-    if _is_chinese_target(lang or '') and _line_is_already_chinese(row.get('text') or ''):
+    txt = row.get('text') or ''
+    # A spacer's translation is the spacer_translated defect marker, not a
+    # by-design conversion; the already-Chinese waiver below is True on blank
+    # text and would waive the defect forever on zh targets.
+    if txt and not txt.strip():
+        return True
+    if _is_chinese_target(lang or '') and _line_is_already_chinese(txt):
         return False
     return True
 
@@ -170,15 +184,22 @@ def _one(key, lang, dry_run=False):
     for i, _d in defects:
         work['lyrics'][i].pop('translated', None)
 
-    # Bust the cache for THIS song only (see module docstring). The key is
-    # built by the same helper cohere_translate uses, over the same
-    # text-bearing lines -- dropping the broken rows first does not change
-    # that list, since a broken row still has its `text`. song_lang rides
-    # along: the regenerated entry is written under the key the skip decision
-    # reads, and a bust against a different song_lang would delete nothing
-    # while reporting the song as fixed.
-    bust = delete_translate_cached(translate_cache_key(
-        [l['text'] for l in work['lyrics'] if l.get('text')], lang, song_lang))
+    # Bust the cache for THIS song only (see module docstring). BOTH hashes
+    # when the song has spacer rows: the shifted poison was written under the
+    # UNFILTERED md5 (the old callers sent blank texts to the key builder),
+    # while the fresh run now reads and writes the FILTERED one
+    # (translatable_rows drops blanks -- the same list cohere_translate
+    # filters to). Deleting only the legacy key leaves the new-format entry
+    # live; deleting only the new one leaves the legacy poison. song_lang
+    # rides along: the regenerated entry is written under the key the skip
+    # decision reads, and a bust against a different song_lang would delete
+    # nothing while reporting the song as fixed.
+    _unfiltered = [l['text'] for l in work['lyrics'] if l.get('text')]
+    _filtered = [t for _i, t in translatable_rows(work['lyrics'])]
+    bust = delete_translate_cached(translate_cache_key(_unfiltered, lang, song_lang))
+    if _filtered != _unfiltered:
+        bust = delete_translate_cached(translate_cache_key(
+            _filtered, lang, song_lang)) or bust
 
     try:
         translate_result_in_place(work, lang, song_lang=song_lang)

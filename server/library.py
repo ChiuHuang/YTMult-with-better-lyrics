@@ -19,7 +19,7 @@ from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
 from .translate import (
     cohere_key_list, get_cohere_key, rotate_cohere_key, cohere_translate,
-    _detect_song_lang, lyrics_sample,
+    _detect_song_lang, lyrics_sample, translatable_rows,
 )
 from .paths import (
     LYRICS_DIR, PROVIDER_FILE, RENAME_FILE, UNLYRICED_FILE,
@@ -325,19 +325,23 @@ def apply_lyrics_payload(video_id, lang, source, data, title=None, artist=None,
     # translating again would overwrite it with a different wording.
     if lang and not any(l.get('translated') for l in lines):
         print(f"  [CONTRIB] translating {len(lines)} lines for {lang}...")
-        texts = [l['text'] for l in lines if l.get('text')]
+        # cohere_translate drops blank texts before the model sees them, so the
+        # fill must walk translatable_rows -- the ONE definition (has text AND
+        # that text is not blank). The old `l.get('text')` filter let a
+        # whitespace spacer consume the next line's translation.
+        rows = translatable_rows(lines)
         # song_lang rides along: a Japanese song pushed by the extension would
         # otherwise get its kanji rows skipped as already-Chinese, the same
         # poison the stream route grew out of.
         _song_lang = _detect_song_lang(merged, lyrics_sample(lines))
         try:
-            translations = cohere_translate(texts, lang, _song_lang)
+            translations = cohere_translate([t for _i, t in rows], lang, _song_lang)
         except Exception as e:
             print(f"  [CONTRIB] [WARN] translate failed: {e}")
             translations = []
-        for i, line in enumerate(lines):
-            if i < len(translations) and translations[i] and not line.get('translated'):
-                line['translated'] = translations[i]
+        for (i, _t), tr in zip(rows, translations):
+            if tr and not lines[i].get('translated'):
+                lines[i]['translated'] = tr
 
     set_cached(full_key, payload)
     # A :fast sibling is what the device asks for in the first seconds of a
