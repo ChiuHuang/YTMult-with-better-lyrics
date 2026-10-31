@@ -70,7 +70,7 @@ Current:
   pushes \`machine\` then re-pushes the same rows as \`final\`, so the reveal
   and the DISK cache write must both be gated on a stage that will not be
   replaced. tstream kept, marked DEPRECATED, for pre-switch builds only.`
-- `[ACTIVE] ses_now | lyrics parity roadmap (docs/lyrics-parity.md) — break dots LANDED (080d2b7); open: blur-by-distance, lock-screen lyrics, estimated word sweep, meanings, credit label | files: docs/lyrics-parity.md, Source/LyricsSheet.x | next: device-verify 1cd2cc0 + 0eac434 + 080d2b7 (search no longer crashes; wipe slides and matches the base text; >=7s gaps breathe as three dots), then port in the doc's order`
+- `[ACTIVE] ses_now | parity: continuous sweep + ladder-gap-vanish fix (305f60e) and the zh-TW script pass + ja kanji cache repair (aafad04) LANDED, unverified on a device; open: blur-by-distance, lock-screen lyrics, estimated word sweep, meanings, credit label | files: Source/LyricsSheet.x, Source/LyricsShared.h, server/{translate,routes_stream,routes_lyrics,library,retranslate,pipeline,self_update}.py, docs/lyrics-parity.md | next: device verify (spaces wipe smooth between words, no vanish during gaps, zh-TW stays Traditional, ja kanji lines translate + [StaleHan] repairs old cache, [FPS] unchanged), then blur-by-distance A/B`
 - `[DONE] ses_now | search crash + wipe mismatch + size/spacing + per-word slide + parity doc | files: Source/Headers/YTMUBulkHook.h, Source/BrowseEntityDownloadsV2.xm, Source/YTMUVisualStyle.h, Source/LyricsSheet.x, docs/lyrics-parity.md | next: none this turn | does: THE CRASH — YTMUBulkHook saved the same (inherited) Method twice when two listed classes share one unoverridden selector (YTMSearchBarViewV2 next to YTMSearchBoxView from 8e263d8), so the second class's orig WAS the replacement and its first layout pass recursed to death; fixed with an already-is-replacement skip plus class_addMethod copy for non-owner classes, ownership by pointer compare (method_getClass undeclared in this SDK). The WIPE MISMATCH was the reveal label carrying NSKern 0.08 the base copy lacked (different wrapping) AND alignment missing from the measuring layout manager (right-aligned duet rows lit their mirror) — both copies now build from ONE attribute set. "ONLY THE LAST WORD LIT" was YTMUAppendRevealedWords trimming the first rect of a wrapped line against the previous line's edge (TextKit restarts x per row) — ladder restarts per visual line now. Jumping was shouldRasterize on a mask that changes per frame (mask swaps do not dirty the raster cache). b752d44 + 1cd2cc0 + 0eac434. TRAPS: a locations/frame write outside a disabled CATransaction takes a 0.25s implicit animation and the feather trails the song; reading .text.length on an attributed label silently blanks the fade-out path.`
 - `[DONE] ses_f033796faffeC32ISpNDwW0STV | fitted lyric size + wipe word-level reveal + white ink landed | files: Source/LyricsSheet.x, Source/LyricsShared.h, Source/YTMUVisualStyle.h | next: device check | does: the fitted-size work (TextKit YTMUVisualLineCount, floor 18pt, rotation re-fit) rode into commit f92a0f5 TOGETHER with the wipe changes (they were one uncommitted tree), so it is NOT a separate commit as originally intended; the follow-up wipe/mismatch/size work is b752d44. TRAPS: see b752d44 message for the three wipe bugs (kern mismatch, wrapped-line ladder trim, rasterized mask staleness).`
 - `[ACTIVE] ses_eff28f66affdILC3ZVe9BGTjCE | extension ported to upstream 3.0.0.4 on branch ytmU-3.0 (+ manual push button); needs a real browser, then a PR | files: better-lyrics src/modules/lyrics/providers/{ytmu,ytmuUpgrade}.ts, src/options/{background,options}.ts, manifest.json; server/routes_admin.py | next: build the extension from ytmU-3.0 and confirm (a) the Sources page shows the key field + toggle + Send current lyrics, (b) a cold song no longer sits on "still searching" for 46s — the provider now resolves empty at 2.5s and the server finishes in the background, (c) a song the server lacks gets pushed back. TRAPS: a provider timeout must record tier -1, not nothing — "never asked" and "the server has nothing" are different states and only the second is fillable; the 2.4.0 ordering put ytmu-PLAIN at priority 2 where it beat every richsynced provider, so the three keys sit inside their own tier now; and 2 of the 54 upstream self-checks (bundle-sizes, ui-guards) fail on a CLEAN 3.0.0.4 tree here, so they are baseline`
@@ -289,6 +289,16 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `305f60e` + `aafad04` — the wipe is ONE continuous sweep (knots {ms,x,slope} per
+  VISUAL row, fixed-width feather strip, Fritsch-Carlson) and the distance ladder
+  keeps its anchor through inter-line gaps; server: opencc self-heals at import +
+  pip re-runs only when requirements.txt's sha256 changed, and ja kanji rows are
+  repaired out of the poisoned cache on serve ([StaleHan]). TRAPS: knot x values
+  are per VISUAL row because TextKit restarts x at each wrap (whole-line knots
+  run backwards); the translate cache key MUST carry song_lang or the SKIPPING
+  pass's entries keep hitting forever no matter how the skip logic is fixed; and
+  `YTMUBuildRowKnots` needs the GLOBAL part indices — starts/ends are
+  part-indexed, a row is only a subset.
 - `acb9d8a` + `8e1a6eb` — the shared visual header now imports the C-linkage
   artwork API declarations; the build completes when the 110 MB IPA passes
   compile/injection, and a Cloudflare 413 from the optional Asia mirror no
@@ -337,15 +347,6 @@ Current:
   `GROUPS_REMOTE`/`GROUPS_SERVER` and one renderer draws both. New keys:
   `fetch.wbw_retry_delay_s` (float — an int-typed 0.8s default rounds to 1s and
   nobody would notice) and `bulk.*` defaults for a new job.
-- `802614b` — the bulk refetch panel stopped answering only "a bulk refetch is
-  already running": it now adopts whatever job holds the slot (even one started
-  in another tab), shows its progress, and offers Take over. Work runs in
-  batches and fetch threads / CPU workers / translate workers / batch size /
-  the translate switch are all editable WHILE it runs; the job waits for the
-  translate queue to drain before it calls itself done. Traps: the heartbeat
-  only fired when a song finished (a stuck job looked dead for 10 minutes), and
-  the translate queue's blocking `get()` meant a lowered worker count only took
-  effect after the next song.
 ## Open / pending
 - **The parser audit: TTML + LRC + QRC + credits are DONE (`216b512`,
   `c19d3bd`); SRT and the device's ruby/obscene are open.**
