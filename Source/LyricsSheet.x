@@ -322,6 +322,15 @@ static const CGFloat YTMUScrollTargetRatio = 0.37;
 // smoothness and bought nothing: 24 steps across a 400ms word is a step every
 // 17ms, which reads as a crawl rather than a wipe.
 static const double YTMUMaskWriteFloorMs = 4.0;
+// The continuous sweep (spoti.pw's SGRKaraokeWordView): the feather is a
+// FIXED-width strip riding the cursor, not a ramp that restarts at every word,
+// and the cursor is a monotone cubic through (word start, word leading edge)
+// knots -- so the edge crosses word boundaries AND the spaces between them at
+// its own constant softness instead of jumping back and racing forward each
+// word. Its width scales with the fitted face the way spoti.pw's 22pt edge
+// sits on its 30pt face; a fixed pt value would smear an 18pt fitted row.
+static const CGFloat YTMUWipeFeatherFontShare = 0.6;
+static const CGFloat YTMUWipeFeatherMinPt = 10.0;
 // The word wobble is GONE, and this is the note so it does not come back.
 //
 // braccato's keyframes are translateX(0.05em) + scaleX(1.025) peaking at 12.5%
@@ -800,15 +809,16 @@ static BOOL YTMUTextReadsRightToLeft(NSString *text) {
         self.wipeMask.fillColor = [UIColor whiteColor].CGColor;
         self.wipeMask.frame = CGRectZero;
         // The highlight is not binary. Completed glyphs are fully opaque and
-        // the currently sung edge uses a moving alpha feather.
+        // the currently sung edge uses a moving alpha feather. The strip's
+        // colour map is CONSTANT: solid over its first half, one linear ramp
+        // over the second, so the perceived edge sits at its centre. The tick
+        // moves this strip; it never rebuilds the map.
         CAGradientLayer *wipeFeather = [CAGradientLayer layer];
         wipeFeather.name = @"YTMULyricsWipeFeather";
         wipeFeather.colors = @[(id)[UIColor whiteColor].CGColor,
-                               (id)[UIColor colorWithWhite:1 alpha:0.86].CGColor,
-                               (id)[UIColor colorWithWhite:1 alpha:0.52].CGColor,
-                               (id)[UIColor colorWithWhite:1 alpha:0.18].CGColor,
+                               (id)[UIColor whiteColor].CGColor,
                                (id)[UIColor clearColor].CGColor];
-        wipeFeather.locations = @[@0.0, @0.25, @0.55, @0.82, @1.0];
+        wipeFeather.locations = @[@0.0, @0.5, @1.0];
         wipeFeather.startPoint = CGPointMake(0.0, 0.5);
         wipeFeather.endPoint = CGPointMake(1.0, 0.5);
         _wipeFeatherRTL = 0;   // matches the axes set just above
@@ -1212,6 +1222,200 @@ static NSInteger YTMUWordCursor(NSArray *parts, double nowMs, double *outFrac) {
     }
     *outFrac = 1.0;
     return n;
+}
+
+#pragma mark - the vocal line's continuous sweep
+
+// One anchor of the sweep: at `ms` the feather's centre sits at `x`, moving at
+// `slope` (x per ms). x lives in label coordinates mirrored into reveal space
+// (distance from the reading edge) when the row runs right to left, so one
+// direction of travel covers both. Slopes are Fritsch-Carlson, so however
+// lumpy the word durations are the cursor never runs backwards and never
+// overshoots a word -- that monotonicity is what replaced the per-word ramp
+// that restarted (and visibly stepped backwards) at every word boundary.
+typedef struct { double ms, x, slope; } YTMUSweepKnot;
+
+static double YTMUSweepSecant(YTMUSweepKnot *k, NSUInteger i) {
+    double h = k[i + 1].ms - k[i].ms;
+    return (h > 0.0) ? (k[i + 1].x - k[i].x) / h : 0.0;
+}
+
+// The cursor for `nowMs`, clamped to the run's ends. Linear interval scan: a
+// visual row holds a couple of dozen words at most.
+static double YTMUSweepCursorAt(NSArray *knots, double nowMs) {
+    NSUInteger n = [knots count];
+    if (n == 0) return 0.0;
+    YTMUSweepKnot a;
+    [(NSValue *)[knots objectAtIndex:0] getValue:&a];
+    if (nowMs <= a.ms) return a.x;
+    [(NSValue *)[knots objectAtIndex:(NSUInteger)(n - 1)] getValue:&a];
+    if (nowMs >= a.ms) return a.x;
+    for (NSUInteger k = 0; k + 1 < n; k++) {
+        YTMUSweepKnot b;
+        [(NSValue *)[knots objectAtIndex:k] getValue:&a];
+        [(NSValue *)[knots objectAtIndex:(NSUInteger)(k + 1)] getValue:&b];
+        if (nowMs < b.ms) {
+            double h = b.ms - a.ms;
+            double u = (h > 0.0) ? (nowMs - a.ms) / h : 0.0;
+            double u2 = u * u, u3 = u2 * u;
+            return (2.0 * u3 - 3.0 * u2 + 1.0) * a.x
+                 + (u3 - 2.0 * u2 + u) * h * a.slope
+                 + (3.0 * u2 - 2.0 * u3) * b.x
+                 + (u3 - u2) * h * b.slope;
+        }
+    }
+    return a.x;
+}
+
+// Knots for one visual row, Fritsch-Carlson slopes included. The anchors put
+// the feather's centre on a word's leading edge as the word starts and past the
+// row's trailing edge as its last word ends; zero-duration words (parts that
+// share a start) collapse into the previous knot by overwriting its x, the way
+// spoti.pw's buildSweep does. `gidx` carries each row-local slot's GLOBAL part
+// index -- starts/ends are indexed by part, and a row is a subset of the parts.
+static NSArray *YTMUBuildRowKnots(const NSUInteger *gidx, NSArray *rowRects,
+                                  double *starts, double *ends, BOOL rtl, CGFloat width,
+                                  CGFloat feather) {
+    NSUInteger count = [rowRects count];
+    if (count == 0) return nil;
+    double halfFeather = (double)feather * 0.5;
+    YTMUSweepKnot *knots = (YTMUSweepKnot *)calloc(count + 1, sizeof(YTMUSweepKnot));
+    if (!knots) return nil;
+    NSUInteger kcount = 0;
+    for (NSUInteger j = 0; j < count; j++) {
+        CGRect r = [[rowRects objectAtIndex:j] CGRectValue];
+        double lead = rtl ? (double)(width - CGRectGetMaxX(r)) : (double)CGRectGetMinX(r);
+        double ms = starts[gidx[j]];
+        if (j == 0) {
+            // The first anchor sits half a feather BEFORE the first word's
+            // leading edge, so the line opens with the ramp still outside it.
+            knots[kcount++] = (YTMUSweepKnot){ms, lead - halfFeather, 0.0};
+            continue;
+        }
+        if (kcount && ms <= knots[kcount - 1].ms) {
+            knots[kcount - 1].x = lead;
+            continue;
+        }
+        knots[kcount++] = (YTMUSweepKnot){ms, lead, 0.0};
+    }
+    // The run ends half a feather past the last word's trailing edge, so the
+    // last word is fully lit exactly when its time runs out.
+    double endMs = ends[gidx[count - 1]];
+    CGRect lastRect = [[rowRects objectAtIndex:(NSUInteger)(count - 1)] CGRectValue];
+    double trail = rtl ? (double)(width - CGRectGetMinX(lastRect))
+                       : (double)CGRectGetMaxX(lastRect);
+    if (kcount && endMs <= knots[kcount - 1].ms) {
+        knots[kcount - 1].x = trail + halfFeather;
+    } else {
+        knots[kcount++] = (YTMUSweepKnot){endMs, trail + halfFeather, 0.0};
+    }
+    for (NSUInteger k = 0; k < kcount; k++) {
+        BOOL first = (k == 0), last = (k + 1 == kcount);
+        if (first && last) break;
+        if (first || last) {
+            knots[k].slope = YTMUSweepSecant(knots, first ? 0 : k - 1);
+            continue;
+        }
+        double before = YTMUSweepSecant(knots, k - 1), after = YTMUSweepSecant(knots, k);
+        double h0 = knots[k].ms - knots[k - 1].ms, h1 = knots[k + 1].ms - knots[k].ms;
+        knots[k].slope = MIN(MIN(2.0 * before, 2.0 * after),
+                             (before * h1 + after * h0) / (h0 + h1));
+    }
+    NSMutableArray *out = [NSMutableArray arrayWithCapacity:kcount];
+    for (NSUInteger k = 0; k < kcount; k++) {
+        [out addObject:[NSValue valueWithBytes:&knots[k] objCType:@encode(YTMUSweepKnot)]];
+    }
+    free(knots);
+    return out;
+}
+
+// Builds the sweep's per-row knot runs from the measured word rects. A wrapped
+// line knots PER VISUAL ROW because TextKit restarts x at every row: knotting
+// the whole line in label coordinates would run the cursor backwards at each
+// wrap. Rows above the sung one get a full-row fill instead of a word list, so
+// the caller needs each row's union rect too. Word spans carry exactly
+// YTMUWordCursor's clamps (the 120ms floor, the last word's stretch cap) -- the
+// cue still walks YTMUWordCursor for its own clock, and the two must stay in
+// step or the cue and the lead disagree about when a word is over.
+static void YTMUBuildSweepRows(NSArray *parts, NSArray *rects, BOOL rtl, CGFloat width,
+                               CGFloat feather, NSArray **outRowRects, NSArray **outRowKnots) {
+    *outRowRects = nil;
+    *outRowKnots = nil;
+    NSUInteger n = [parts count];
+    if (n == 0 || [rects count] != n) return;
+    double *starts = (double *)calloc(n, sizeof(double));
+    double *ends = (double *)calloc(n, sizeof(double));
+    if (!starts || !ends) {
+        free(starts);
+        free(ends);
+        return;
+    }
+    double priorDurSum = 0.0;
+    NSInteger priorDurCount = 0;
+    for (NSUInteger i = 0; i < n; i++) {
+        NSDictionary *p = [parts objectAtIndex:i];
+        double s = [p[@"startTimeMs"] doubleValue];
+        double d = MAX([p[@"durationMs"] doubleValue], 120.0);
+        if (i == n - 1 && d > 1400.0) {
+            double avg = (priorDurCount > 0) ? (priorDurSum / (double)priorDurCount) : 400.0;
+            d = MIN(d, MAX(avg * 1.5, 500.0));
+            d = MIN(d, 1400.0);
+        } else {
+            priorDurSum += d;
+            priorDurCount++;
+        }
+        starts[i] = s;
+        ends[i] = s + d;
+    }
+
+    NSMutableArray *rowRects = [NSMutableArray array];
+    NSMutableArray *rowKnots = [NSMutableArray array];
+    NSMutableArray *curRects = [NSMutableArray array];   // this visual row's word rects
+    NSMutableArray *curIdxs = [NSMutableArray array];    // their GLOBAL part indices
+    CGFloat rowMinY = 0.0, rowMaxY = 0.0;
+    for (NSUInteger i = 0; i <= n; i++) {
+        CGRect r = (i < n) ? [[rects objectAtIndex:i] CGRectValue] : CGRectNull;
+        BOOL startsNewRow = NO;
+        if (i < n && (CGRectIsNull(r) || CGRectIsEmpty(r))) continue;   // textless part
+        if ([curRects count] == 0) {
+            startsNewRow = YES;
+        } else if (i >= n || fabs(CGRectGetMinY(r) - rowMinY) > 0.5) {
+            startsNewRow = YES;
+        }
+        if (startsNewRow && [curRects count] > 0) {
+            // Flush the row just finished.
+            NSUInteger rc = [curRects count];
+            NSUInteger *gidx = (NSUInteger *)calloc(rc, sizeof(NSUInteger));
+            if (gidx) {
+                for (NSUInteger j = 0; j < rc; j++) {
+                    gidx[j] = (NSUInteger)[[curIdxs objectAtIndex:j] integerValue];
+                }
+                [rowRects addObject:[NSValue valueWithCGRect:
+                    CGRectMake(0, rowMinY, width, rowMaxY - rowMinY)]];
+                NSArray *knots = YTMUBuildRowKnots(gidx, curRects, starts, ends, rtl, width, feather);
+                [rowKnots addObject:knots ?: @[]];
+                free(gidx);
+            }
+            [curRects removeAllObjects];
+            [curIdxs removeAllObjects];
+        }
+        if (i >= n) break;
+        if ([curRects count] == 0) {
+            rowMinY = CGRectGetMinY(r);
+            rowMaxY = CGRectGetMaxY(r);
+        } else {
+            rowMinY = MIN(rowMinY, CGRectGetMinY(r));
+            rowMaxY = MAX(rowMaxY, CGRectGetMaxY(r));
+        }
+        [curRects addObject:[NSValue valueWithCGRect:r]];
+        [curIdxs addObject:@(i)];
+    }
+    free(starts);
+    free(ends);
+    if ([rowKnots count] > 0) {
+        *outRowRects = rowRects;
+        *outRowKnots = rowKnots;
+    }
 }
 
 // Hand this row its cue, or nil. The display string is NOT recomputed here:
@@ -4077,6 +4281,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 self.clockRawWall = 0;
                 self.activeIndexes = nil;
                 self.lastColorKey = nil;
+                self.ytmuLastSungRow = -1;
                 YTMUResetScrollTracking();
                 self.cachedWordLayoutKey = nil;
                 self.cachedWordRects = nil;
@@ -4878,6 +5083,14 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     NSIndexSet *newActive = [self ytmu_activeIndexesAtMs:nowMs];
     NSInteger newIndex = (NSInteger)newActive.lastIndex;
     if (newIndex == NSNotFound) newIndex = -1;
+    // The distance ladder's anchor when nothing is sung. An inter-line gap
+    // empties the active set, and anchoring the ladder on -1 there turned every
+    // row four or more past the finished line to alpha 0 -- the reader watched
+    // the not-yet-sung lines vanish until the next line lit. The finished line
+    // is the anchor instead: it holds the ladder's bright step while nothing
+    // sings, exactly where the eye just was.
+    if (newIndex >= 0) self.ytmuLastSungRow = newIndex;
+    NSInteger ladderAnchor = (newIndex >= 0) ? newIndex : self.ytmuLastSungRow;
     NSIndexSet *oldActive = self.activeIndexes ?: [NSIndexSet indexSet];
     NSInteger oldIndex = self.currentIndex;
 
@@ -4968,12 +5181,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // Distance ladder, over every visible row rather than a band around the
         // sung line: a seek moves the active line by twenty rows at once, and a
         // band would leave the rows in between holding whatever brightness the
-        // last pass through the band gave them.
+        // last pass through the band gave them. The anchor is the finished line
+        // when the active set is empty (see ladderAnchor above), never -1.
         for (UITableViewCell *visible in self.tableView.visibleCells) {
             if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
             NSIndexPath *ip = [self.tableView indexPathForCell:visible];
             if (!ip) continue;
-            NSInteger distance = labs((NSInteger)ip.row - newIndex);
+            NSInteger distance = labs((NSInteger)ip.row - ladderAnchor);
             NSInteger step = MIN(distance, YTMUDistanceLadderSteps);
             [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:YTMUDistanceLadder[step]];
         }
@@ -5124,6 +5338,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     }
     self.activeIndexes = nil;
     self.lastColorKey = nil;
+    // A stale anchor belongs to the previous song; the ladder must not dim the
+    // new song's rows against it before the first line lights.
+    self.ytmuLastSungRow = -1;
     // Every row back to full brightness. The distance ladder is only re-applied
     // on an activation CHANGE, so without this a song that follows a synced one
     // inherits the previous song's faded rows and shows nothing at all.
@@ -5455,6 +5672,8 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     if (width <= 0) return;
     double nowMs = currentTime * 1000.0;
     NSInteger partCount = [parts count];
+    // The word cursor now only gates the rebuild (the key below); the DRAW
+    // comes from the sweep's knots further down and never reads it.
     double curFrac = 1.0;
     NSInteger curWord = YTMUWordCursor(parts, nowMs, &curFrac);
     if (curWord < 0) curWord = partCount;
@@ -5496,8 +5715,13 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     NSArray *ranges = nil;
     NSString *display = [self wbwDisplayTextForLyric:lyric ranges:&ranges];
     NSTextAlignment align = cell.ytmu_textAlign;
-    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%ld|%.1f|%@", (long)index, (long)align,
-                           (double)width, display];
+    // The key carries the parts ARRAY's identity as well: the sweep's knots
+    // bake the parts' timings in, and a payload can swap for one with different
+    // timings while index, alignment, width and the display string all stay the
+    // same (a provider switch mid-song). A pointer compare is exact for that
+    // and free on the ticks that do not need a rebuild.
+    NSString *layoutKey = [NSString stringWithFormat:@"%ld|%ld|%.1f|%@|%p", (long)index, (long)align,
+                           (double)width, display, parts];
     if (![layoutKey isEqualToString:cell.cachedWordLayoutKey]) {
         // Both copies of the line are built from ONE attribute set, so they
         // wrap identically and the mask measured against it lands on the
@@ -5540,63 +5764,131 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         }
         cell.cachedWordRects = rects;
         cell.cachedWordLayoutKey = layoutKey;
+        // The continuous sweep's anchors, from the same measured rects. Rebuilt
+        // with the layout because a knot carries both a part's time and the row
+        // geometry, and the feather width is baked into every anchor's x.
+        BOOL sweepRTL = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+        CGFloat sweepFeather = MAX(YTMUWipeFeatherMinPt, YTMUWipeFeatherFontShare * font.pointSize);
+        NSArray *sweepRects = nil, *sweepKnots = nil;
+        YTMUBuildSweepRows(parts, rects, sweepRTL, width, sweepFeather, &sweepRects, &sweepKnots);
+        cell.cachedSweepRowRects = sweepRects;
+        cell.cachedSweepRowKnots = sweepKnots;
     }
     cell.lastColorKey = key;
     cell.lastMaskWriteMs = nowMs;
 
-    UIBezierPath *path = [UIBezierPath bezierPath];
-    NSInteger rcount = MIN(partCount, (NSInteger)[cell.cachedWordRects count]);
+    // ---- The continuous sweep ----
+    // The cursor is a monotone cubic through (word start, leading edge) knots,
+    // so it advances at the words' own pace across boundaries AND the spaces
+    // between them without ever restarting. The old per-word feather re-centred
+    // its ramp on every word -- the ramp edge jumped BACK by the ramp length at
+    // each boundary and then raced forward, which is the lag between words the
+    // device showed. Here the solid fill ends half a feather behind the cursor
+    // and the strip's ramp is centred ON it, so the eye-tracked edge is one
+    // continuous object from the first word to the last.
     BOOL rtl = cell.wipeLabel.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     CGFloat wipeW = CGRectGetWidth(cell.wipeLabel.bounds);
-    // The prefix is the words BEFORE the one being sung. The current word
-    // belongs to the feather: it is the one place a moving edge still exists,
-    // and the gradient inside the word is what reads as a wipe rather than a
-    // strobe. Word-level timing has no sub-word glyph positions, so the ramp
-    // is driven by the part's own duration -- which is exactly how Apple
-    // Music sweeps a word it only has start/duration for.
-    NSInteger prefixCount = MIN(MAX(curWord, 0), rcount);
-    YTMUAppendRevealedWords(path, cell.cachedWordRects, prefixCount, rtl, wipeW);
-
+    NSArray *rowRects = cell.cachedSweepRowRects;
+    NSArray *rowKnots = cell.cachedSweepRowKnots;
+    NSUInteger rowCount = [rowRects count];
     CAGradientLayer *wipeFeather = cell.wipeFeather;
-    wipeFeather.hidden = YES;
-
-    if (curWord >= 0 && curWord < rcount) {
-        CGRect wordRect = [cell.cachedWordRects[curWord] CGRectValue];
-        if (!CGRectIsNull(wordRect)) {
-            // The solid run ends at the previous word's boundary; the feather
-            // covers ONLY the current word, so the reveal can never run past a
-            // word that has not started (the old line-wide feather did, and
-            // that was the premature-glow bug). Completed words stay solid
-            // because the prefix path already carries them.
-            CGFloat frac = MIN(1.0, MAX(0.0, curFrac));
-            CGFloat lead = frac * 0.85;      // solid up to here
-            CGFloat ramp = frac;             // ramp edge lands here
-            // Written INSIDE the disabled transaction below: a locations or
-            // frame change outside it takes Core Animation's default 0.25s
-            // implicit animation, and the ramp would then trail the word by a
-            // quarter second -- the "jump then catch up" the device showed.
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            // start/end rebuild the gradient's colour map; this branch already
-            // rewrites locations every tick, so the axes are just set with
-            // them -- no extra pass, and no RTL cache to keep in step.
-            wipeFeather.startPoint = rtl ? CGPointMake(1.0, 0.5) : CGPointMake(0.0, 0.5);
-            wipeFeather.endPoint = rtl ? CGPointMake(0.0, 0.5) : CGPointMake(1.0, 0.5);
-            wipeFeather.colors = @[(id)[UIColor whiteColor].CGColor,
-                                   (id)[UIColor whiteColor].CGColor,
-                                   (id)[UIColor clearColor].CGColor,
-                                   (id)[UIColor clearColor].CGColor];
-            wipeFeather.locations = @[@0.0, @(lead), @(ramp), @1.0];
-            wipeFeather.frame = CGRectIntegral(wordRect);
-            wipeFeather.hidden = NO;
-            [CATransaction commit];
-        }
-    } else if (curWord >= rcount && display.length > 0) {
+    UIBezierPath *path = [UIBezierPath bezierPath];
+    if (rowCount == 0 || rowCount != [rowKnots count] || display.length == 0) {
+        // Nothing sweepable (measurement failed, or a parts-only payload with
+        // no glyphs): the old end state was the whole line lit, keep that.
         [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        wipeFeather.hidden = YES;
+        cell.wipeMask.frame = cell.wipeLabel.bounds;
+        cell.wipeMask.path = path.CGPath;
+        [CATransaction commit];
+        return;
+    }
+    double halfFeather = (double)MAX(YTMUWipeFeatherMinPt,
+                                     YTMUWipeFeatherFontShare * font.pointSize) * 0.5;
+    // Rows are sequential in time, so the last row whose first anchor the song
+    // has passed is the row being sung.
+    NSInteger activeRow = -1;
+    double cursor = 0.0;
+    for (NSUInteger r = 0; r < rowCount; r++) {
+        NSArray *rk = [rowKnots objectAtIndex:r];
+        if ([rk count] == 0) continue;
+        YTMUSweepKnot k0;
+        [(NSValue *)[rk objectAtIndex:0] getValue:&k0];
+        if (nowMs >= k0.ms) {
+            activeRow = (NSInteger)r;
+            cursor = YTMUSweepCursorAt(rk, nowMs);
+        }
+    }
+    // Past the last row's final anchor the whole line is sung.
+    BOOL lineDone = NO;
+    if (activeRow >= 0) {
+        NSArray *lrk = [rowKnots objectAtIndex:(NSUInteger)(rowCount - 1)];
+        YTMUSweepKnot kl;
+        if ([lrk count] > 0) {
+            [(NSValue *)[lrk objectAtIndex:(NSUInteger)([lrk count] - 1)] getValue:&kl];
+            lineDone = nowMs >= kl.ms;
+        } else {
+            lineDone = YES;
+        }
+    }
+    BOOL featherOn = NO;
+    double featherX = 0.0;
+    CGFloat featherY = 0.0, featherH = 0.0;
+    if (lineDone) {
+        [path appendPath:[UIBezierPath bezierPathWithRect:cell.wipeLabel.bounds]];
+    } else if (activeRow >= 0) {
+        // Rows the sweep has already passed light whole: the mask reads alpha,
+        // and a full-width rect over an empty stretch of row reveals nothing.
+        for (NSInteger r = 0; r < activeRow; r++) {
+            CGRect row = [[rowRects objectAtIndex:(NSUInteger)r] CGRectValue];
+            if (!CGRectIsEmpty(row)) {
+                [path appendPath:[UIBezierPath bezierPathWithRect:row]];
+            }
+        }
+        CGRect row = [[rowRects objectAtIndex:(NSUInteger)activeRow] CGRectValue];
+        double solid = cursor - halfFeather;
+        if (!CGRectIsEmpty(row) && solid > 0.0) {
+            [path appendPath:[UIBezierPath bezierPathWithRect:
+                rtl ? CGRectMake(wipeW - solid, CGRectGetMinY(row), solid, CGRectGetHeight(row))
+                    : CGRectMake(0, CGRectGetMinY(row), solid, CGRectGetHeight(row))]];
+        }
+        // The strip rides only while its ramp still touches this row; once the
+        // cursor passes the row's final anchor the fill covers everything and
+        // there is no edge left to soften.
+        NSArray *rk = [rowKnots objectAtIndex:(NSUInteger)activeRow];
+        YTMUSweepKnot finalKnot;
+        [(NSValue *)[rk objectAtIndex:(NSUInteger)([rk count] - 1)] getValue:&finalKnot];
+        if (!CGRectIsEmpty(row) && cursor < finalKnot.x) {
+            featherOn = YES;
+            featherX = rtl ? ((double)wipeW - cursor - halfFeather) : (cursor - halfFeather);
+            featherY = CGRectGetMinY(row);
+            featherH = CGRectGetHeight(row);
+        }
     }
 
+    // Written INSIDE the disabled transaction: a frame change outside it takes
+    // Core Animation's default 0.25s implicit animation, and the edge would
+    // trail the cursor by a quarter second -- the "jump then catch up" the
+    // device showed.
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    // The strip's colour map is CONSTANT now (one fixed-width ramp) and its
+    // axes flip only when the row's layout direction differs from what they
+    // were last set to -- the old tick rebuilt both every frame for nothing.
+    if (cell.wipeFeatherRTL != (NSInteger)rtl) {
+        wipeFeather.startPoint = rtl ? CGPointMake(1.0, 0.5) : CGPointMake(0.0, 0.5);
+        wipeFeather.endPoint = rtl ? CGPointMake(0.0, 0.5) : CGPointMake(1.0, 0.5);
+        cell.wipeFeatherRTL = (NSInteger)rtl;
+    }
+    if (featherOn) {
+        wipeFeather.frame = CGRectMake(featherX, featherY, MAX(YTMUWipeFeatherMinPt,
+            YTMUWipeFeatherFontShare * font.pointSize), featherH);
+        wipeFeather.hidden = NO;
+    } else {
+        wipeFeather.hidden = YES;
+    }
     cell.wipeMask.frame = cell.wipeLabel.bounds;
     cell.wipeMask.path = path.CGPath;
     [CATransaction commit];
