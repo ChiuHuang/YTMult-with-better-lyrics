@@ -96,7 +96,14 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     %orig;if(!PlayerV2()||CGRectGetWidth(self.bounds)<300)return;
     self.backgroundColor=UIColor.clearColor;self.contentView.backgroundColor=UIColor.clearColor;self.contentView.opaque=NO;self.clipsToBounds=NO;
     NSMutableArray*queue=[NSMutableArray arrayWithObject:self.contentView];
-    while(queue.count){UIView*v=queue.firstObject;[queue removeObjectAtIndex:0];[queue addObjectsFromArray:v.subviews];if(IsArtwork(v)&&CGRectGetWidth(v.bounds)>=240&&CGRectGetHeight(v.bounds)>=240){v.layer.cornerRadius=28;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;v.layer.borderWidth=.8;v.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;ApplyDrop(v.superview,.30,24,12);}}
+    while(queue.count){UIView*v=queue.firstObject;[queue removeObjectAtIndex:0];[queue addObjectsFromArray:v.subviews];if(IsArtwork(v)&&CGRectGetWidth(v.bounds)>=240&&CGRectGetHeight(v.bounds)>=240){v.layer.cornerRadius=28;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;v.layer.borderWidth=.8;v.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;ApplyDrop(v.superview,.30,24,12);
+        // The black base behind the card must wear the SAME radius, or its
+        // own corners peek out past the artwork's clip and the card reads
+        // as "image radius != base radius". cornerRadius rounds a layer's
+        // background paint WITHOUT masksToBounds, so this must not set
+        // clipping here -- the drop shadow lives on these views and a clip
+        // would amputate it.
+        for(UIView*base=v.superview;base&&base!=self.contentView&&base!=self;base=base.superview){base.layer.cornerRadius=28;base.layer.cornerCurve=kCACornerCurveContinuous;}}}
 }
 %end
 
@@ -119,7 +126,17 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     // drop, not by size: the old 1.08x transform was rewritten on every layout
     // pass (YT animates this button itself, so it fought the tap animation) and
     // YT already draws it larger than its siblings.
-    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?YTMUSongAccent(.26):YTMUSongGlassFill(.24);if(play)g.layer.borderColor=YTMUSongAccent(.56).CGColor;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
+    // The RED on next/prev/pause was never this hook's glass (only Play got
+    // the accent): it is YT's own icon tint -- the button tintColor inherits
+    // into the template glyphs and YT's accent is red. Set the glyph ink in
+    // the same pass: the song's vivid accent when there is a sampled colour,
+    // plain white when there is not. tintColor reaches template subimages
+    // through the normal inheritance, so one write per button covers the
+    // glyph whatever view actually draws it.
+    CGFloat hInk = 0, sInk = 0, bInk = 0;
+    UIColor *ink = YTMUSongHue(YTMULGArtworkTint(), &hInk, &sInk, &bInk)
+        ? YTMUSongAccent(1.0) : UIColor.whiteColor;
+    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?YTMUSongAccent(.26):YTMUSongGlassFill(.24);if(play)g.layer.borderColor=YTMUSongAccent(.56).CGColor;v.tintColor=ink;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
 }
 %end
 
