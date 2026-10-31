@@ -1293,7 +1293,13 @@ static NSArray *YTMUBuildRowKnots(const NSUInteger *gidx, NSArray *rowRects,
             continue;
         }
         if (kcount && ms <= knots[kcount - 1].ms) {
-            knots[kcount - 1].x = lead;
+            // Zero-duration parts share the previous knot's time and only move
+            // its x. The FIRST knot keeps its half-feather head start: it is the
+            // "ramp still outside the run" anchor, and a degenerate run of words
+            // at the line's opening is still the run's opening. Interior knots
+            // take the plain edge -- the ramp has been inside the line for a
+            // while there.
+            knots[kcount - 1].x = (kcount == 1) ? (lead - halfFeather) : lead;
             continue;
         }
         knots[kcount++] = (YTMUSweepKnot){ms, lead, 0.0};
