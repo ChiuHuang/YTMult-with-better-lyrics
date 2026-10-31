@@ -888,7 +888,7 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     from .jwt_pool import pick_jwt
     from .pipeline import probe_providers
     from .library import save_provider, remove_unlyriced
-    from .translate import cohere_translate
+    from .translate import cohere_translate, _detect_song_lang, lyrics_sample
     import copy as _copy
 
     # Instant path: a full probe already saved every provider for this video.
@@ -917,7 +917,12 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
                     sanitize_lyrics_parts(_lyrics)
                     if _lyrics and not all(l.get('translated') for l in _lyrics):
                         _texts = [l['text'] for l in _lyrics if l.get('text')]
-                        _translations = cohere_translate(_texts, _lang)
+                        # song_lang rides along: without it a Japanese song's
+                        # kanji rows are skipped as already-Chinese here too.
+                        _sl = _detect_song_lang({'title': _out.get('song', ''),
+                                                 'artist': _out.get('artist', '')},
+                                                lyrics_sample(_lyrics))
+                        _translations = cohere_translate(_texts, _lang, _sl)
                         _ti = 0
                         for _lyric in _lyrics:
                             if not _lyric.get('text'):
@@ -971,7 +976,8 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     sanitize_lyrics_parts(lyrics)
     if lang and lyrics and not all(l.get('translated') for l in lyrics):
         texts = [l['text'] for l in lyrics if l.get('text')]
-        translations = cohere_translate(texts, lang)
+        translations = cohere_translate(texts, lang,
+                                        _detect_song_lang(song_info, lyrics_sample(lyrics)))
         ti = 0
         for lyric in lyrics:
             if not lyric.get('text'):

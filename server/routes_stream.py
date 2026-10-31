@@ -120,6 +120,52 @@ def _text_rows(lyrics):
     return [i for i, l in enumerate(lyrics) if l.get('text')]
 
 
+def _lyrics_sample(lyrics, cap=4000, rows=60):
+    # Lives in translate.py (lyrics_sample) so pipeline can use it without
+    # importing routes (routes is a leaf: nothing may import it from below).
+    from .translate import lyrics_sample as _fn
+    return _fn(lyrics, cap, rows)
+
+
+def _repair_stale_han(data, video_id, cache_key, target_lang, req_id):
+    """Rewrite the Han rows an old skip-han pass left untranslated, then put
+    the entry back. Runs on the CACHED path: the skip bug wrote
+    translated==text (or the script conversion) into the on-disk entry, and no
+    fix to the live pipeline could reach those bytes. One Cohere call over the
+    poisoned rows only; a total API failure leaves the entry alone, which is
+    exactly what the device gets today. Returns the data to serve.
+    """
+    if not target_lang:
+        return data
+    try:
+        from .translate import cohere_translate, find_stale_han_rows, _detect_song_lang
+        bad = find_stale_han_rows(data.get('lyrics'), target_lang,
+                                  _detect_song_lang(data, _lyrics_sample(data.get('lyrics'))))
+        if not bad:
+            return data
+        print(f"  [REQ {req_id}] [StaleHan] {len(bad)} skip-han row(s) to repair for {video_id}")
+        texts = [data['lyrics'][i].get('text') or '' for i in bad]
+        # song_lang='ja' on purpose: find_stale_han_rows only returned rows for
+        # a song kana convicted, so the repair must translate the Han rows, not
+        # skip them again.
+        repaired = cohere_translate(texts, target_lang, 'ja')
+        if not repaired:
+            return data
+        changed = False
+        for j, i in enumerate(bad):
+            new = repaired[j] if j < len(repaired) else ''
+            if new and new != (data['lyrics'][i].get('translated') or ''):
+                data['lyrics'][i]['translated'] = new
+                changed = True
+        if changed:
+            set_cached(cache_key, data)
+            print(f"  [REQ {req_id}] [StaleHan] repaired entry rewritten to cache")
+        return data
+    except Exception as e:
+        print(f"  [REQ {req_id}] [StaleHan] repair failed: {e}")
+        return data
+
+
 def _record_serve(data, video_id, translate_to, client_ip):
     """Usage stats, same tier classification /api/lyrics uses."""
     try:
@@ -274,6 +320,7 @@ def api_lyrics_tstream():
             if cached:
                 print(f"[OK] [REQ {req_id}] [TStream] cache hit source={cached.get('source')} "
                       f"lines={len(cached.get('lyrics', []))}")
+                cached = _repair_stale_han(cached, video_id, full_cache_key, translate_to, req_id)
                 _record_serve(cached, video_id, translate_to, client_ip)
                 # cached=True is the device's "do not animate the translation"
                 # signal: nothing was translated on this request, the lines came
@@ -347,7 +394,7 @@ def api_lyrics_tstream():
         rows = _text_rows(result['lyrics'])
         if translate_to and rows and not is_nf:
             texts = [result['lyrics'][r]['text'] for r in rows]
-            song_lang = _detect_song_lang(song_info)
+            song_lang = _detect_song_lang(song_info, _lyrics_sample(result['lyrics']))
             print(f"  [TRANS] [REQ {req_id}] [TStream] streaming {len(texts)} lines "
                   f"-> {translate_to} (song_lang={song_lang or '?'})")
             stop = threading.Event()
@@ -541,6 +588,7 @@ def api_lyrics_stream():
                     print(f"[OK] [REQ {req_id}] [Stream] node cache hit")
             if cached:
                 print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
+                cached = _repair_stale_han(cached, video_id, full_cache_key, translate_to, req_id)
                 _record_serve(cached, video_id, translate_to, client_ip)
                 yield emit_meta(cached.get('song', ''), cached.get('artist', ''),
                                 cached.get('duration', 0), 0)
@@ -746,8 +794,10 @@ def api_lyrics_stream():
                 # The race never passed the song's own language to the
                 # translator, so every request was translated blind. tstream did
                 # pass it. It is what makes a zh/ja/en mix come out as a
-                # transliteration instead of a translation.
-                song_lang = _detect_song_lang(song_info)
+                # transliteration instead of a translation. The sample reads the
+                # words: a Japanese song behind English metadata detects as ''
+                # without it, and '' re-arms the skip-han pass on kanji.
+                song_lang = _detect_song_lang(song_info, _lyrics_sample(best['lyrics']))
                 if not tstream:
                     # Interim: Google fast (~1s) so UI shows translation before Cohere finishes
                     try:

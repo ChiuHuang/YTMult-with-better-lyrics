@@ -130,6 +130,40 @@ def _fetch_remote_file(sha=None):
         print(f"[SELF-UPDATE] fetch error: {e}")
     return None
 
+def _sync_requirements(root):
+    """Best-effort pip install of requirements.txt after the code moved.
+
+    A pulled commit that adds a dependency does nothing on its own: the process
+    is already running, nobody runs pip on the host, and the missing import
+    then degrades a feature silently (OpenCC was exactly this -- the zh script
+    pass became a no-op server-side while the code looked shipped). Hash the
+    file before and after the pull and only pay for pip when it changed, so an
+    ordinary code-only update does not spend seconds on a no-op install.
+    Failures are reported, never raised: a broken pip must not fail an update
+    that already succeeded.
+    """
+    req = os.path.join(root, 'requirements.txt')
+    if not os.path.isfile(req):
+        return None
+    try:
+        with open(req, 'rb') as f:
+            before = hashlib.sha256(f.read()).hexdigest()
+    except Exception:
+        return None
+    try:
+        r = subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', req,
+                            '--quiet', '--disable-pip-version-check'],
+                           capture_output=True, text=True, timeout=300)
+        ok = (r.returncode == 0)
+        tail = ((r.stderr or '').strip() or (r.stdout or '').strip())[-160:]
+        print(f"[SELF-UPDATE] pip install -r requirements.txt: "
+              f"{'ok' if ok else 'FAILED'}{(' — ' + tail) if tail and not ok else ''}")
+        return ok
+    except Exception as e:
+        print(f"[SELF-UPDATE] pip install failed: {e}")
+        return False
+
+
 def _perform_self_update():
     try:
         _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -137,6 +171,12 @@ def _perform_self_update():
             # PaaS/container eggs often reset --hard to origin/main without an
             # upstream branch, so a bare `git pull` says "no tracking info".
             # Try explicit ref first, then upstream, then plain pull.
+            req = os.path.join(_root, 'requirements.txt')
+            try:
+                with open(req, 'rb') as _f:
+                    _req_hash_before = hashlib.sha256(_f.read()).hexdigest()
+            except Exception:
+                _req_hash_before = None
             r = subprocess.run(['git', 'pull', '--ff-only', 'origin', 'main'],
                 cwd=_root, capture_output=True, text=True, timeout=60)
             if r.returncode != 0:
@@ -145,7 +185,16 @@ def _perform_self_update():
                 r = subprocess.run(['git', 'pull', '--ff-only'], cwd=_root,
                     capture_output=True, text=True, timeout=60)
             if r.returncode == 0:
-                return True, f"git pull: {(r.stdout or '').strip()[:200]}"
+                try:
+                    with open(req, 'rb') as _f:
+                        _req_hash_after = hashlib.sha256(_f.read()).hexdigest()
+                except Exception:
+                    _req_hash_after = None
+                _detail = f"git pull: {(r.stdout or '').strip()[:200]}"
+                if _req_hash_before != _req_hash_after:
+                    _sync_requirements(_root)
+                    _detail += "; requirements.txt changed, pip re-run"
+                return True, _detail
             # ff-only fails when history was rewritten upstream (force-push)
             # or the clone never shared history: fall back to fetch + reset.
             # Runtime files (cache/, logs/, config/*.json) are gitignored, so
@@ -164,6 +213,13 @@ def _perform_self_update():
                 g = subprocess.run(['git', 'reset', '--hard', 'origin/main'],
                     cwd=_root, capture_output=True, text=True, timeout=60)
                 if g.returncode == 0:
+                    try:
+                        with open(req, 'rb') as _f:
+                            _req_hash_after = hashlib.sha256(_f.read()).hexdigest()
+                    except Exception:
+                        _req_hash_after = None
+                    if _req_hash_before != _req_hash_after:
+                        _sync_requirements(_root)
                     return True, ("git reset --hard origin/main "
                                   "(history diverged, fast-forward impossible): "
                                   f"{(g.stdout or '').strip()[:200]}")
