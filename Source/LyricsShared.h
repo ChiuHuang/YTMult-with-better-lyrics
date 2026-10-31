@@ -63,6 +63,13 @@
 @property (nonatomic, assign) CGFloat wipeProgress;
 @property (nonatomic, copy) NSString *cachedWordLayoutKey;
 @property (nonatomic, strong) NSArray *cachedWordRects;
+// The continuous sweep (spoti.pw's karaoke fill), built with the layout cache:
+// per visual row of the wrapped line, the row's union rect and the row's knot
+// list -- one packed {ms, x, slope} anchor per word plus the row's end anchor,
+// Fritsch-Carlson slopes so the cursor never runs backwards. Parallel arrays,
+// index-aligned; a row whose knot list is empty contributes no sweep.
+@property (nonatomic, strong) NSArray *cachedSweepRowRects;   // NSValue CGRect
+@property (nonatomic, strong) NSArray *cachedSweepRowKnots;   // NSArray of NSValue-packed anchors
 @property (nonatomic, copy) NSString *lastColorKey;
 // Playback time of the last mask write, so the tick can floor how often the
 // wipe geometry is rebuilt (YTMUMaskWriteFloorMs) without quantizing the word
@@ -181,6 +188,11 @@
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, assign) NSInteger currentIndex;
 @property (nonatomic, strong) NSIndexSet *activeIndexes;
+// The last row that ever entered the active set this song. The distance
+// ladder anchors on it when the active set is EMPTY (an inter-line gap):
+// anchoring on -1 there made labs(row - (-1)) push every row four or more
+// past the finished line to alpha 0 -- the lines vanished between lines.
+@property (nonatomic, assign) NSInteger ytmuLastSungRow;
 @property (nonatomic, assign) BOOL isLoading;
 @property (nonatomic, copy) NSString *loadingVideoID;
 @property (nonatomic, strong) UIImageView *artworkImageView;
