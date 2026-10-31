@@ -19,6 +19,7 @@ from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
 from .translate import (
     cohere_key_list, get_cohere_key, rotate_cohere_key, cohere_translate,
+    _detect_song_lang, lyrics_sample,
 )
 from .paths import (
     LYRICS_DIR, PROVIDER_FILE, RENAME_FILE, UNLYRICED_FILE,
@@ -325,8 +326,12 @@ def apply_lyrics_payload(video_id, lang, source, data, title=None, artist=None,
     if lang and not any(l.get('translated') for l in lines):
         print(f"  [CONTRIB] translating {len(lines)} lines for {lang}...")
         texts = [l['text'] for l in lines if l.get('text')]
+        # song_lang rides along: a Japanese song pushed by the extension would
+        # otherwise get its kanji rows skipped as already-Chinese, the same
+        # poison the stream route grew out of.
+        _song_lang = _detect_song_lang(merged, lyrics_sample(lines))
         try:
-            translations = cohere_translate(texts, lang)
+            translations = cohere_translate(texts, lang, _song_lang)
         except Exception as e:
             print(f"  [CONTRIB] [WARN] translate failed: {e}")
             translations = []

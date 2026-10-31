@@ -41,6 +41,7 @@ from .translate import (
     _echoes_original, _is_chinese_target, _line_is_already_chinese,
     translate_result_in_place, translate_last_error,
     delete_translate_cached, translate_cache_key,
+    _detect_song_lang, find_stale_han_rows, lyrics_sample,
 )
 
 _WORKERS = 3
@@ -109,14 +110,27 @@ def broken_rows(data):
     return out
 
 
-def _should_check(row, lang):
+def _should_check(row, lang, song_lang=''):
     """Rows that are ALREADY in the target language by design never went
     through the API (translate.py's already-Chinese skip), so their
     `translated` is a script conversion, not a model output. Re-sending them
-    is pure cost."""
+    is pure cost. On a Japanese song that exemption does not exist: its Han
+    rows are kanji and were SUPPOSED to be translated, so every row is
+    checked."""
+    if song_lang == 'ja':
+        return True
     if _is_chinese_target(lang or '') and _line_is_already_chinese(row.get('text') or ''):
         return False
     return True
+
+
+def _payload_song_lang(data):
+    """The song language of a cached lyrics payload, from its own metadata
+    plus a bounded sample of the words (metadata alone misses the Japanese
+    songs uploaded with English titles -- the exact songs skip-han poisoned)."""
+    return _detect_song_lang({'title': (data or {}).get('song', ''),
+                              'artist': (data or {}).get('artist', '')},
+                             lyrics_sample((data or {}).get('lyrics')))
 
 
 def _one(key, lang, dry_run=False):
@@ -127,8 +141,18 @@ def _one(key, lang, dry_run=False):
     data = entry.get('data')
     if not isinstance(data, dict) or not data.get('lyrics'):
         return None
+    song_lang = _payload_song_lang(data)
     defects = [(i, d) for i, d, _t, _tr in broken_rows(data)
-               if _should_check(data['lyrics'][i], lang)]
+               if _should_check(data['lyrics'][i], lang, song_lang)]
+    # The skip-han poison, folded into the same defect list: Han rows whose
+    # 'translated' is the text itself or its script conversion on a song the
+    # kana convicted. Generic defect detection does not see those (nothing is
+    # "broken" about an echo of the original), and _should_check used to
+    # waive them as by-design.
+    _seen = {i for i, _d in defects}
+    for i in find_stale_han_rows(data.get('lyrics'), lang, song_lang):
+        if i not in _seen:
+            defects.append((i, 'skipped_han'))
     row = {'key': key, 'lang': lang, 'song': data.get('song', ''),
            'artist': data.get('artist', ''), 'source': data.get('source', ''),
            'status': 'ok', 'defects': len(defects),
@@ -149,12 +173,15 @@ def _one(key, lang, dry_run=False):
     # Bust the cache for THIS song only (see module docstring). The key is
     # built by the same helper cohere_translate uses, over the same
     # text-bearing lines -- dropping the broken rows first does not change
-    # that list, since a broken row still has its `text`.
+    # that list, since a broken row still has its `text`. song_lang rides
+    # along: the regenerated entry is written under the key the skip decision
+    # reads, and a bust against a different song_lang would delete nothing
+    # while reporting the song as fixed.
     bust = delete_translate_cached(translate_cache_key(
-        [l['text'] for l in work['lyrics'] if l.get('text')], lang))
+        [l['text'] for l in work['lyrics'] if l.get('text')], lang, song_lang))
 
     try:
-        translate_result_in_place(work, lang)
+        translate_result_in_place(work, lang, song_lang=song_lang)
     except Exception as e:
         row['status'] = 'error'
         row['detail'] = f'translate failed: {e}'
@@ -170,7 +197,7 @@ def _one(key, lang, dry_run=False):
         return row
 
     still = [i for i, _t, _d, _tr in broken_rows(work)
-             if _should_check(work['lyrics'][i], lang)]
+             if _should_check(work['lyrics'][i], lang, song_lang)]
     row['fixed'] = len(defects) - len(still)
     row['remaining'] = len(still)
     if still:

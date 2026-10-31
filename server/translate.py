@@ -199,15 +199,21 @@ def set_translate_cached(cache_key, data):
         pass
 
 
-def translate_cache_key(texts, target_lang):
+def translate_cache_key(texts, target_lang, song_lang=''):
     """The one definition of a translate-cache key.
 
     Shared with the retranslate job (retranslate.py), which has to delete the
     entry it is about to regenerate. Two copies of this string would drift and
     the job would delete nothing while reporting every song as fixed, so it is
     defined once and both callers build it here.
+
+    song_lang is part of the key on purpose: the skip-han decision reads it, so
+    a Japanese song whose detection ran late used to hit the cache entry the
+    SKIPPING pass wrote -- Han lines held the original text forever, and no
+    amount of fixing the skip logic could reach the poisoned entry.
     """
-    return f"cohere:{target_lang}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
+    sl = (song_lang or '').strip().lower() or 'any'
+    return f"cohere:{target_lang}:{sl}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
 
 
 def translate_cache_path(cache_key):
@@ -285,11 +291,26 @@ try:
     _opencc_s2t = opencc.OpenCC('s2t')  # Simplified -> Traditional
     _opencc_t2s = opencc.OpenCC('t2s')  # Traditional -> Simplified
 except Exception as _e:
-    opencc = None
-    _opencc_s2t = None
-    _opencc_t2s = None
-    print(f"  [OpenCC] not available ({_e}); install 'opencc-python-reimplemented' to enable "
-          f"Simplified<->Traditional conversion. Falling back to Cohere for all Chinese lines.")
+    # Self-heal once: the deployed host updates by git pull, and a requirements
+    # line pulled in does nothing on its own -- the process is already running
+    # and nobody runs pip on it. One best-effort install (120s cap, output
+    # discarded) and a re-import; if that fails too, carry on without OpenCC
+    # and say so, exactly as before.
+    import subprocess as _sp
+    try:
+        _sp.run([sys.executable, '-m', 'pip', 'install', '--quiet',
+                 'opencc-python-reimplemented'],
+                timeout=120, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        import opencc
+        _opencc_s2t = opencc.OpenCC('s2t')  # Simplified -> Traditional
+        _opencc_t2s = opencc.OpenCC('t2s')  # Traditional -> Simplified
+        print("  [OpenCC] was missing; installed 'opencc-python-reimplemented' at import time.")
+    except Exception as _e2:
+        opencc = None
+        _opencc_s2t = None
+        _opencc_t2s = None
+        print(f"  [OpenCC] not available ({_e2}); install 'opencc-python-reimplemented' to enable "
+              f"Simplified<->Traditional conversion. Falling back to Cohere for all Chinese lines.")
 
 _HIRAGANA_KATAKANA_RE = re.compile(r'[\u3040-\u30FF\uFF66-\uFF9F]')
 _HANGUL_RE = re.compile(r'[\uAC00-\uD7A3]')
@@ -338,10 +359,17 @@ def _apply_zh_script(texts, target_lang):
     return texts
 
 
-def _detect_song_lang(info):
+def _detect_song_lang(info, sample=''):
     """Best-effort song language from metadata: 'ja' when Japanese fields
     or kana are present, else '' (unknown). Used to decide whether
-    Han-script lines are really Chinese (skip) or Japanese kanji (translate)."""
+    Han-script lines are really Chinese (skip) or Japanese kanji (translate).
+
+    `sample` is a slice of the lyrics text itself. Metadata lies by omission:
+    a Japanese song uploaded with an English title and artist detects as '',
+    and a '' song gets its Han lines skipped as already-Chinese -- which is
+    how kanji rows ended up served untranslated. Kana in the words is
+    definitive; the title/artist kana check stays first because the sample
+    costs a scan over up to a screenful of text."""
     try:
         info = info or {}
         if info.get('ja_title') or info.get('ja_artist'):
@@ -349,9 +377,70 @@ def _detect_song_lang(info):
         text = f"{info.get('title', '')} {info.get('artist', '')}"
         if re.search(r'[\u3040-\u30FF\uFF66-\uFF9F]', text):
             return 'ja'
+        if sample and re.search(r'[\u3040-\u30FF\uFF66-\uFF9F]', sample):
+            return 'ja'
     except Exception:
         pass
     return ''
+
+
+def lyrics_sample(lyrics, cap=4000, rows=60):
+    """A bounded slice of the words themselves, so language detection can read
+    the lyrics and not just the metadata: kana in the text is what distinguishes
+    a Japanese song behind an English title from a Chinese one."""
+    out = []
+    n = 0
+    for line in (lyrics or [])[:rows]:
+        if isinstance(line, dict):
+            t = line.get('text') or ''
+            if t:
+                out.append(t)
+                n += len(t)
+                if n >= cap:
+                    break
+    return '\n'.join(out)[:cap]
+
+
+def find_stale_han_rows(lyrics, target_lang, song_lang=''):
+    """Rows the old skip-han pass poisoned, as indexes into `lyrics`.
+
+    A row is poisoned when its text is Han-script and its 'translated' is
+    either byte-identical to the text or exactly its script conversion --
+    that is a row the translator SKIPPED, not one it translated. Only a
+    Japanese song (or one whose kana gives it away) earns the repair: a
+    Chinese song's rows are SUPPOSED to come back script-only, and an
+    English song's Han rows were never skipped in the first place (their
+    translations that read through are proper nouns, and re-translating
+    those every serve would churn). Rows with no kana/hangul but no
+    translated field at all are the missing-lines repair's job, not this.
+    """
+    if not _is_chinese_target(target_lang):
+        return []
+    if song_lang not in ('ja', ''):
+        return []
+    if not isinstance(lyrics, list):
+        return []
+    texts = []
+    for line in lyrics:
+        texts.append((line.get('text') or '') if isinstance(line, dict) else '')
+    if song_lang != 'ja':
+        joined = '\n'.join(texts[:60])
+        if not re.search(r'[\u3040-\u30FF\uFF66-\uFF9F]', joined):
+            return []
+    norm = (target_lang or '').lower().replace('_', '-')
+    conv = _opencc_s2t if norm in ('zh-tw', 'zh-hant') else (
+        _opencc_t2s if norm in ('zh-cn', 'zh-hans') else None)
+    bad = []
+    for i, t in enumerate(texts):
+        if not t or not _line_is_already_chinese(t):
+            continue
+        line = lyrics[i]
+        tr = line.get('translated') if isinstance(line, dict) else None
+        if not tr:
+            continue
+        if tr == t or (conv and conv.convert(t) == tr):
+            bad.append(i)
+    return bad
 
 
 def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
@@ -366,7 +455,7 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
     if not non_empty:
         return texts
 
-    cache_key = translate_cache_key(texts, target_lang)
+    cache_key = translate_cache_key(texts, target_lang, song_lang)
     cached = get_translate_cached(cache_key)
     if cached is not None:
         # Sanitise on the way out. Entries poisoned before the echo guard was
@@ -908,7 +997,7 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
             yield {'i': i, 'text': t, 'done': True}
         return
 
-    cache_key = translate_cache_key(texts, target_lang)
+    cache_key = translate_cache_key(texts, target_lang, song_lang)
     cached = get_translate_cached(cache_key)
     if cached is not None:
         print(f"  [Cohere] Stream cache hit ({len(texts)} lines)")
@@ -1243,7 +1332,8 @@ def _translate_queue_worker(index=0):
             continue
         try:
             retries = item.get('retries', 0)
-            n = translate_result_in_place(item.get('data'), item.get('lang'))
+            n = translate_result_in_place(item.get('data'), item.get('lang'),
+                                          song_lang=item.get('song_lang', ''))
             err = translate_last_error()
             if err == 'rate_limited':
                 if retries >= _TQ_MAX_RETRIES:
@@ -1316,7 +1406,13 @@ def translate_queue_enqueue(cache_key, lang, data):
     if not any(l.get('text') and not l.get('translated') for l in data['lyrics']):
         return False
     _ensure_translate_queue()
-    _TQ_QUEUE.put({'key': cache_key, 'lang': lang, 'data': data})
+    # The song language rides on the item: the worker's skip-han decision reads
+    # it, and a Japanese song behind English metadata detected as '' would have
+    # its kanji rows "translated" with a script pass -- the same poison the
+    # blocking path grew out of.
+    sl = _detect_song_lang({'title': data.get('song', ''), 'artist': data.get('artist', '')},
+                           lyrics_sample(data.get('lyrics')))
+    _TQ_QUEUE.put({'key': cache_key, 'lang': lang, 'data': data, 'song_lang': sl})
     with _TQ_LOCK:
         _TQ_STATS['queued'] += 1
     return True
