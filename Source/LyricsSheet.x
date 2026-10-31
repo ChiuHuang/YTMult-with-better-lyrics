@@ -1487,7 +1487,14 @@ static void YTMUBuildSweepRows(NSArray *parts, NSArray *rects, BOOL rtl, CGFloat
     _distanceAlpha = alpha;
     // contentView, not the cell: the cell's own alpha would fight
     // UITableView's selection/highlight plumbing and the row separators.
+    // Disabled actions: a bare alpha write outside a transaction inherits the
+    // 0.25s implicit animation, and every spacer/gap row's activation
+    // re-writes every visible cell's alpha in one pass -- all of them easing
+    // over 0.25s is the "flash on lines with empty gaps between them".
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     self.contentView.alpha = alpha;
+    [CATransaction commit];
 }
 
 - (void)layoutSubviews {
@@ -5189,13 +5196,28 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // band would leave the rows in between holding whatever brightness the
         // last pass through the band gave them. The anchor is the finished line
         // when the active set is empty (see ladderAnchor above), never -1.
-        for (UITableViewCell *visible in self.tableView.visibleCells) {
-            if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
-            NSIndexPath *ip = [self.tableView indexPathForCell:visible];
-            if (!ip) continue;
-            NSInteger distance = labs((NSInteger)ip.row - ladderAnchor);
-            NSInteger step = MIN(distance, YTMUDistanceLadderSteps);
-            [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:YTMUDistanceLadder[step]];
+        //
+        // Free scroll is a READER state: while the user is touching the list
+        // the ladder stands down and every visible row sits at full ink. The
+        // old code kept applying it, and the alpha is measured against the
+        // SUNG line, so a row the reader scrolled to -- ten rows from the
+        // anchor -- sat at a distant step's alpha and read as "lines vanish
+        // while scrolling". The next tick after release re-applies the ladder.
+        if (self.tableView.isTracking || self.tableView.isDragging ||
+            self.tableView.isDecelerating) {
+            for (UITableViewCell *visible in self.tableView.visibleCells) {
+                if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
+                [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:1.0];
+            }
+        } else {
+            for (UITableViewCell *visible in self.tableView.visibleCells) {
+                if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
+                NSIndexPath *ip = [self.tableView indexPathForCell:visible];
+                if (!ip) continue;
+                NSInteger distance = labs((NSInteger)ip.row - ladderAnchor);
+                NSInteger step = MIN(distance, YTMUDistanceLadderSteps);
+                [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:YTMUDistanceLadder[step]];
+            }
         }
     } else if (newActive.count > 0) {
         // Same set: keep every active word-synced wipe advancing.
@@ -5504,6 +5526,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     if (scrollView != self.tableView) return;
     self.userScrolledLyrics = YES;
+    // The reader state starts at touch-down, not at the next tick: brighten
+    // what is on screen now, or the first frames of the drag still wear the
+    // ladder's dim (the tick only runs on playback-time updates).
+    for (UITableViewCell *visible in self.tableView.visibleCells) {
+        if (![visible isKindOfClass:[YTMULyricsCell class]]) continue;
+        [(YTMULyricsCell *)visible ytmu_setDistanceAlpha:1.0];
+    }
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {

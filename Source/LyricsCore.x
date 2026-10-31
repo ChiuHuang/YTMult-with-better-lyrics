@@ -1282,6 +1282,58 @@ static NSString *dumpVCHierarchy(UIViewController *vc, int indent) {
     return str;
 }
 
+// One lyrics cell's geometry, for the "highlight/base glyph offset" report.
+// Static analysis found the wipe pair pinned edge-to-edge by constraints and
+// every transform reset paired, so the offset needs the DEVICE's numbers:
+// per label the font, the untransformed geometry (bounds + center -- frame is
+// the transformed bounding box, which is exactly what shows the offset), the
+// transform itself, the alignment, and whether the two labels still carry the
+// SAME attributed text (the kern-mismatch class of bug shows up here).
+static void dumpLyricsCell(NSMutableString *dump, YTMULyricsCell *cell, NSInteger index) {
+    if (!cell) return;
+    UILabel *base = cell.lyricLabel;
+    UILabel *wipe = cell.wipeLabel;
+    [dump appendFormat:@"[CELL %ld] frame = (%.2f, %.2f; %.2f, %.2f) alpha = %.2f hidden = %@\n",
+        (long)index, cell.frame.origin.x, cell.frame.origin.y,
+        cell.frame.size.width, cell.frame.size.height, cell.alpha,
+        cell.hidden ? @"YES" : @"NO"];
+    [dump appendFormat:@"  distanceAlpha = %.3f\n", cell.distanceAlpha];
+    for (NSUInteger k = 0; k < 2; k++) {
+        UILabel *l = (k == 0) ? base : wipe;
+        if (!l) { [dump appendFormat:@"  %@ = (nil)\n", k == 0 ? @"lyricLabel" : @"wipeLabel"]; continue; }
+        CGAffineTransform t = l.transform;
+        BOOL identity = CGAffineTransformIsIdentity(t);
+        [dump appendFormat:@"  %@: font = %@ %.2f; bounds = (%.2f, %.2f) center = (%.2f, %.2f) frame = (%.2f, %.2f; %.2f, %.2f)\n",
+            k == 0 ? @"lyricLabel" : @"wipeLabel",
+            l.font.fontName ?: @"(nil)", l.font.pointSize,
+            l.bounds.size.width, l.bounds.size.height,
+            l.center.x, l.center.y,
+            l.frame.origin.x, l.frame.origin.y, l.frame.size.width, l.frame.size.height];
+        [dump appendFormat:@"    transform = %@ a=%.4f b=%.4f c=%.4f d=%.4f tx=%.2f ty=%.2f; align = %ld; text = \"%@\"\n",
+            identity ? @"identity" : @"YES",
+            t.a, t.b, t.c, t.d, t.tx, t.ty,
+            (long)l.textAlignment,
+            ([l.text length] > 40 ? [l.text substringToIndex:40] : (l.text ?: @""))];
+    }
+    if (base && wipe) {
+        [dump appendFormat:@"  framesEqual = %@ attributedEqual = %@ attributedLengths = base %lu wipe %lu\n",
+            CGRectEqualToRect(base.frame, wipe.frame) ? @"YES" : @"NO",
+            [base.attributedText isEqual:wipe.attributedText] ? @"YES" : @"NO",
+            (unsigned long)base.attributedText.length,
+            (unsigned long)wipe.attributedText.length];
+    }
+}
+
+// Cells never nest, so a hit ends the subtree walk.
+static void walkLyricsCells(NSMutableString *dump, UIView *view, NSInteger *index) {
+    if (!view) return;
+    if ([view isKindOfClass:[YTMULyricsCell class]]) {
+        dumpLyricsCell(dump, (YTMULyricsCell *)view, (*index)++);
+        return;
+    }
+    for (UIView *sub in view.subviews) walkLyricsCells(dump, sub, index);
+}
+
 static void sendUIDump(void) {
     if (!YTMUDebugUploadAllowed(@"info")) return;
     NSMutableString *dump = [NSMutableString string];
@@ -1322,6 +1374,13 @@ static void sendUIDump(void) {
             NSStringFromClass([w class]), w.frame.origin.x, w.frame.origin.y, w.frame.size.width, w.frame.size.height];
         [dump appendString:dumpViewHierarchy(w, 1)];
     }
+
+    [dump appendString:@"\n--- LYRICS ACTIVE CELLS ---\n"];
+    NSInteger cellCount = 0;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        walkLyricsCells(dump, w, &cellCount);
+    }
+    if (cellCount == 0) [dump appendString:@"(no YTMULyricsCell in any window)\n"];
 
     NSDictionary *payload = @{
         @"type": @"UI_DUMP",
