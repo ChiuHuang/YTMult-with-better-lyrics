@@ -5,6 +5,49 @@
 #import "Headers/Localization.h"
 #import "YTMUVisualStyle.h"
 
+// Provider candidates cache, keyed by video ID, PROCESS-lifetime, not
+// per-VC: the old per-instance property died with the lyrics window, so
+// closing and reopening the sheet for the same song re-probed every
+// provider on the first tap of the providers button. Entries are tiny
+// (names, line counts, scores, arrival times -- no lyrics), and a song
+// change still drops its own entry in the refresh path below.
+static NSMutableDictionary *g_ytmuProviderMenuCache = nil;
+
+static NSDictionary *YTMUProviderMenuHit(NSString *vid) __attribute__((unused));
+static NSDictionary *YTMUProviderMenuHit(NSString *vid) {
+    if (vid.length == 0 || !g_ytmuProviderMenuCache) return nil;
+    NSDictionary *hit = g_ytmuProviderMenuCache[vid];
+    return ([hit isKindOfClass:[NSDictionary class]]) ? hit : nil;
+}
+
+// Arrival-delay mark for a same-lines tie: "+Xs" relative to the FASTEST
+// candidate with the same line count, shown only when the group really has
+// two or more members and both arrivals are known (elapsed_ms > 0 -- absent
+// on pre-timing snapshots). Within 50ms of the fastest counts as a tie too:
+// the probe's groups fire in parallel and 30ms is not information.
+static NSString *YTMUProviderDelayText(NSArray *cands, NSInteger index) __attribute__((unused));
+static NSString *YTMUProviderDelayText(NSArray *cands, NSInteger index) {
+    if (![cands isKindOfClass:[NSArray class]] || index < 0 || index >= (NSInteger)cands.count) return @"";
+    NSDictionary *me = cands[index];
+    if (![me isKindOfClass:[NSDictionary class]]) return @"";
+    NSInteger lines = [me[@"lines"] integerValue];
+    double mine = [me[@"elapsed_ms"] doubleValue];
+    if (mine <= 0 || lines <= 0) return @"";
+    double base = -1;
+    NSInteger group = 0;
+    for (NSDictionary *c in cands) {
+        if (![c isKindOfClass:[NSDictionary class]]) continue;
+        if ([c[@"lines"] integerValue] != lines) continue;
+        group++;
+        double e = [c[@"elapsed_ms"] doubleValue];
+        if (e > 0 && (base < 0 || e < base)) base = e;
+    }
+    if (group < 2 || base <= 0) return @"";
+    double delta = (mine - base) / 1000.0;
+    if (delta < 0.05) return @"";
+    return [NSString stringWithFormat:@" · +%.1fs", delta];
+}
+
 static inline BOOL __attribute__((unused)) YTMUIsCJKChar(unichar c) {
     return ((c >= 0x3040 && c <= 0x309F) ||
             (c >= 0x30A0 && c <= 0x30FF) ||
@@ -2438,7 +2481,6 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     self.providerSwitcherLabel.userInteractionEnabled = NO;
     [self.landscapeToolbar addSubview:self.providerSwitcherLabel];
 
-    self.providerCache = [NSMutableDictionary dictionary];
     self.providerCandidates = nil;
     self.providerIndex = -1;
     // Typewriter reveal + streaming translation state (Source/LyricsStream.x).
@@ -3379,7 +3421,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     [self ytmu_loadProviderLyricsForVideo:vid];
     // Switch anytime: on iOS 14+ the armed UIMenu opens on tap with zero
     // re-probe, so this path only fires while unarmed (or iOS 13 fallback).
-    NSDictionary *hit = self.providerCache[vid];
+    // The menu cache is PROCESS-lifetime (see g_ytmuProviderMenuCache), so a
+    // sheet closed and reopened for the same song opens the menu straight
+    // from RAM -- the per-instance property used to die with the window and
+    // forced a full re-probe on the first tap.
+    NSDictionary *hit = YTMUProviderMenuHit(vid);
     NSArray *cached = hit[@"cands"];
     if ([cached isKindOfClass:[NSArray class]] && cached.count > 0) {
         self.providerCandidates = cached;
@@ -3465,8 +3511,8 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                     NSString *vid = self.providerProbeVideoID;
                     if (!vid.length) vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
                     if (vid.length && [cands isKindOfClass:[NSArray class]]) {
-                        if (!self.providerCache) self.providerCache = [NSMutableDictionary dictionary];
-                        self.providerCache[vid] = @{@"cands": cands, @"saved": savedName ?: @""};
+                        if (!g_ytmuProviderMenuCache) g_ytmuProviderMenuCache = [NSMutableDictionary dictionary];
+                        g_ytmuProviderMenuCache[vid] = @{@"cands": cands, @"saved": savedName ?: @""};
                     }
                     self.providerCandidates = cands;
                     [self ytmu_resolveProviderIndexSaved:savedName];
@@ -3500,10 +3546,10 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     if (!videoID.length || ![dict isKindOfClass:[NSDictionary class]]) return;
     NSArray *cands = dict[@"providers"];
     if (![cands isKindOfClass:[NSArray class]] || cands.count == 0) return;
-    if (!self.providerCache) self.providerCache = [NSMutableDictionary dictionary];
+    if (!g_ytmuProviderMenuCache) g_ytmuProviderMenuCache = [NSMutableDictionary dictionary];
     id savedRaw = dict[@"saved"];
     NSString *saved = ([savedRaw isKindOfClass:[NSString class]]) ? savedRaw : @"";
-    self.providerCache[videoID] = @{@"cands": cands, @"saved": saved};
+    g_ytmuProviderMenuCache[videoID] = @{@"cands": cands, @"saved": saved};
     NSString *cur = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
     if (!cur.length || ![cur isEqualToString:videoID]) return;  // prefetched track
     self.providerCandidates = cands;
@@ -3523,7 +3569,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 // panel can be re-entered for the same song.
 - (void)ytmu_loadProviderMetaForVideo:(NSString *)videoID {
     if (!videoID.length) return;
-    NSDictionary *hit = self.providerCache[videoID];
+    NSDictionary *hit = YTMUProviderMenuHit(videoID);
     if ([hit[@"cands"] count] > 0) {
         [self ytmu_applyProviderMeta:hit forVideoID:videoID];
         return;
@@ -3703,8 +3749,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         }];
         a.state = (i == self.providerIndex) ? UIMenuElementStateOn : UIMenuElementStateOff;
         if (@available(iOS 15.0, *)) {
-            a.subtitle = [NSString stringWithFormat:@"%ld/%lu · %@ · %ld lines",
-                (long)i + 1, (unsigned long)cands.count, tier.length ? tier : @"?", (long)lines];
+            a.subtitle = [NSString stringWithFormat:@"%ld/%lu · %@ · %ld lines%@",
+                (long)i + 1, (unsigned long)cands.count, tier.length ? tier : @"?", (long)lines,
+                YTMUProviderDelayText(cands, i)];
         }
         [rows addObject:a];
     }
@@ -3786,9 +3833,10 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         NSInteger lines = [c[@"lines"] integerValue];
         BOOL isCurrent = (i == self.providerIndex);
         BOOL isSaved = (saved.length > 0 && [prov isEqualToString:saved]);
-        NSString *title = [NSString stringWithFormat:@"%@%@%ld/%lu %@ — %@ · %ld lines",
+        NSString *title = [NSString stringWithFormat:@"%@%@%ld/%lu %@ — %@ · %ld lines%@",
             isCurrent ? @"[>] " : @"", isSaved ? @"[saved] " : @"",
-            (long)i + 1, (unsigned long)candidates.count, prov, tier, (long)lines];
+            (long)i + 1, (unsigned long)candidates.count, prov, tier, (long)lines,
+            YTMUProviderDelayText(candidates, i)];
         NSInteger rowIdx = i;
         [menu addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             [self ytmu_applyProviderAtIndex:rowIdx];
@@ -5283,7 +5331,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     // and per-song metadata all refill from the fresh fetch.
     self.providerCandidates = nil;
     self.providerIndex = -1;
-    [self.providerCache removeObjectForKey:g_currentVideoID];
+    [g_ytmuProviderMenuCache removeObjectForKey:g_currentVideoID];
     self.providerMetaVideoID = nil;
     self.providerDataVideoID = nil;
     YTMUProviderLyricsDrop(g_currentVideoID);

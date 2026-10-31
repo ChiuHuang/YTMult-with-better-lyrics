@@ -70,9 +70,13 @@ static inline UIColor *YTMUSongGlassBorder(CGFloat alpha) {
 }
 static inline UIColor *YTMUSongAccent(CGFloat alpha) {
     CGFloat h = 0, s = 0, b = 0;
-    if (!YTMUSongHue(YTMULGArtworkTint(), &h, &s, &b)) return [YTMULGAccentRed() colorWithAlphaComponent:alpha];
-    // Vivid: this is the play button / selected tab, the one loud spot the
-    // old red owned. Lifted above the glass band instead of pasted over it.
+    // White, not red: "no song colour" is a neutral state, and the red
+    // fallback was the one path a transport button could still wear the
+    // old accent after everything else followed the song.
+    if (!YTMUSongHue(YTMULGArtworkTint(), &h, &s, &b)) return [UIColor.whiteColor colorWithAlphaComponent:alpha];
+    // Vivid: this is the play button / selected tab / transport glyph, the
+    // one loud spot the old red owned. Lifted above the glass band instead
+    // of pasted over it.
     return [UIColor colorWithHue:h saturation:MIN(.92, MAX(.55, s * 1.20))
                        brightness:MIN(.92, MAX(.42, b * 1.40)) alpha:alpha];
 }

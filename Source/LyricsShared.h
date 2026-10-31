@@ -234,7 +234,6 @@
 @property (nonatomic, strong) NSTimer *providerPollTimer;
 @property (nonatomic, strong) NSArray *providerCandidates;
 @property (nonatomic, assign) NSInteger providerIndex;
-@property (nonatomic, strong) NSMutableDictionary *providerCache;
 @property (nonatomic, strong) UILabel *providerSwitcherLabel;
 @property (nonatomic, strong) UIButton *providerPrevButton;
 @property (nonatomic, strong) UIButton *providerNextButton;
