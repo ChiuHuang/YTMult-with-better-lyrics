@@ -68,6 +68,10 @@ def _provider_meta(video_id):
             continue
         row = {k: c.get(k) for k in
                ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines', 'score')}
+        # Arrival time since the probe start (see pipeline.probe_providers):
+        # the device's delay mark for same-lines ties reads this. 0/absent on
+        # old snapshots -- the device shows nothing rather than guessing.
+        row['elapsed_ms'] = int(c.get('elapsed_ms') or 0)
         if row.get('provider'):
             out.append(row)
     if not out:
@@ -593,6 +597,9 @@ def build_provider_data(video_id, lang=None):
             'tier': c.get('tier', ''),
             'lines': len(lyrics),
             'score': c.get('score', 0),
+            # Arrival time since the probe that produced this snapshot; 0 on
+            # pre-timing entries (the device hides the delay text then).
+            'elapsed_ms': int(c.get('elapsed_ms') or 0),
             'lyrics': lyrics,  # raw: no translations (device fills them in later)
         })
     return {'ok': True, 'video_id': video_id, 'found': bool(out),
@@ -1035,7 +1042,8 @@ def _run_provider_probe_job(job_id, video_id, lang, jwt_token):
 
     def on_candidate(entry):
         slim = {k: entry.get(k) for k in
-                ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines', 'score')}
+                ('provider', 'source', 'synced', 'wordSynced', 'tier', 'lines',
+                 'score', 'elapsed_ms')}
         with _provider_jobs_lock:
             j = _provider_jobs.get(job_id)
             if j is None:

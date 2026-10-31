@@ -642,6 +642,10 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
     candidates = []
     outcomes = {}
     _probe_lock = threading.Lock()
+    # Probe-start reference for per-provider arrival times: the device's
+    # switcher shows "+Xs" next to same-lines candidates so a tie is readable
+    # as "this one answered later", not "this one is worse".
+    _probe_t0 = time_module.monotonic()
     print(f"  [probe] {video_id} probing (parallel groups)")
 
     def emit(logical_provider, label, cand):
@@ -668,6 +672,11 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                 'tier': tier,
                 'lines': len(lyrics),
                 'score': round(score, 3),
+                # Arrival time since probe start, in ms. Parallel groups
+                # finish at different times; the switcher uses this to break
+                # same-lines ties visually. 0 (or absent) = unknown, and the
+                # device shows nothing rather than guessing.
+                'elapsed_ms': int((time_module.monotonic() - _probe_t0) * 1000),
                 'data': {
                     'lyrics': lyrics, 'source': cand.get('source') or label,
                     'synced': synced, 'wordSynced': wbw,
