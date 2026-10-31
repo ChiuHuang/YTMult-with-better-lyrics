@@ -33,6 +33,49 @@ static inline UIColor *YTMULGBlendColor(UIColor *base, UIColor *tint, CGFloat am
                             blue:bb * (1.0 - t) + tb * t
                            alpha:ba];
 }
+
+// SONG-DERIVED GLASS. Every player-page chrome colour reads the artwork mean
+// through YTMULGArtworkTint() and keeps the cover's HUE -- no sage, no olive.
+// The old surfaces blended 22-36% toward the fixed sage/olive palette, which
+// is a yellow cast no blue cover survives (the "why does a blue cover have
+// yellow glass" report), and the play/selected controls were a constant red
+// the song never asked for. Near-grey covers (saturation < .12) return the
+// OLD neutral so nothing is invented: a grey pixel's hue is meaningless, and
+// the old saturation floor would have turned Suki's grey-white red. No
+// artwork sampled yet means the same neutral, so the pre-first-frame look is
+// exactly what shipped before.
+static inline BOOL YTMUSongHue(UIColor *mean, CGFloat *hOut, CGFloat *sOut, CGFloat *bOut) {
+    if (!mean) return NO;
+    CGFloat h = 0, s = 0, b = 0, a = 0;
+    if (![mean getHue:&h saturation:&s brightness:&b alpha:&a]) return NO;
+    if (s < .12) return NO;
+    if (hOut) *hOut = h;
+    if (sOut) *sOut = s;
+    if (bOut) *bOut = b;
+    return YES;
+}
+static inline UIColor *YTMUSongGlassFill(CGFloat alpha) {
+    CGFloat h = 0, s = 0, b = 0;
+    if (!YTMUSongHue(YTMULGArtworkTint(), &h, &s, &b)) return YTMULGGlassFill();
+    // Glassy band: darker than the cover so the white ink above it keeps its
+    // contrast, saturation capped well below neon.
+    return [UIColor colorWithHue:h saturation:MIN(.58, MAX(.20, s * .85))
+                       brightness:MIN(.60, MAX(.14, b * .75)) alpha:alpha];
+}
+static inline UIColor *YTMUSongGlassBorder(CGFloat alpha) {
+    CGFloat h = 0, s = 0, b = 0;
+    if (!YTMUSongHue(YTMULGArtworkTint(), &h, &s, &b)) return YTMULGGlassBorder(alpha);
+    return [UIColor colorWithHue:h saturation:MIN(.62, MAX(.22, s * .90))
+                       brightness:MIN(.70, MAX(.24, b * .95)) alpha:alpha];
+}
+static inline UIColor *YTMUSongAccent(CGFloat alpha) {
+    CGFloat h = 0, s = 0, b = 0;
+    if (!YTMUSongHue(YTMULGArtworkTint(), &h, &s, &b)) return [YTMULGAccentRed() colorWithAlphaComponent:alpha];
+    // Vivid: this is the play button / selected tab, the one loud spot the
+    // old red owned. Lifted above the glass band instead of pasted over it.
+    return [UIColor colorWithHue:h saturation:MIN(.92, MAX(.55, s * 1.20))
+                       brightness:MIN(.92, MAX(.42, b * 1.40)) alpha:alpha];
+}
 static inline UIColor *YTMULGLyricAccent(BOOL lightBackdrop) {
     // The word-by-word wipe is the SUNG text, so it reads as the brightest ink
     // on the panel. It is deliberately not the brand red: a red wipe turns a
@@ -131,10 +174,14 @@ static inline void YTMULGApplyArtworkBackdrop(UIView *host, CGFloat overlayAlpha
         views[@"blurStyle"] = @(blurStyle);
     }
     tint.frame = host.bounds;
-    tint.backgroundColor = mean ? [YTMULGBlendColor(mean, YTMULGOlive(), .28) colorWithAlphaComponent:.34] : UIColor.clearColor;
+    // Both layers used to blend the sampled colour 28-36% toward olive --
+    // dark yellow-green -- which is how a blue cover's background acquired a
+    // yellow cast. The tint IS the song colour now (the blur already holds
+    // the artwork, so the tint only has to push its hue one step closer), and
+    // the wash is plain black: its job is contrast, not colour.
+    tint.backgroundColor = mean ? [mean colorWithAlphaComponent:.34] : UIColor.clearColor;
     wash.frame = host.bounds;
-    UIColor *shade = YTMULGBlendColor(UIColor.blackColor, YTMULGOlive(), .36);
-    wash.backgroundColor = [shade colorWithAlphaComponent:overlayAlpha];
+    wash.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:overlayAlpha];
     if (artwork.superview != host) [host insertSubview:artwork atIndex:0];
     [host insertSubview:blur aboveSubview:artwork];
     [host insertSubview:tint aboveSubview:blur];

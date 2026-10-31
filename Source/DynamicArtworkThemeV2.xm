@@ -19,6 +19,11 @@ static CFTimeInterval YTMULastThemeAt;
 
 extern "C" UIImage *YTMULGCurrentArtwork(void) { return YTMULastThemeImage; }
 extern "C" UIColor *YTMULGCurrentArtworkMean(void) { return YTMURawArtworkAverage; }
+// The CLEAN artwork colour: the same 1x1 sample YTMURawArtworkAverage holds,
+// exposed under a name that says "use this as the song tint". Kept separate
+// from YTMULGCurrentArtworkMean so every olive-blended reader is greppable --
+// the point of this accessor is that its readers DON'T blend.
+extern "C" UIColor *YTMULGArtworkTint(void) { return YTMURawArtworkAverage; }
 
 // wholeAppSongThemeEnabled / playerSongThemeEnabled, both ANDed with the
 // tweak master and the iOS 13 material gate by the shared helper.
@@ -70,8 +75,14 @@ static void YTMUPublishTheme(UIImage *image) {
     YTMULastThemeImage = image; YTMULastThemeAt = now;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIColor *average = YTMUAverage(image); if (!average) return;
-        UIColor *primary = YTMULGBlendColor(YTMUColor(average,.18,.90), YTMULGSage(), .22);
-        UIColor *secondary = YTMULGBlendColor(YTMUColor(average,.02,.48), YTMULGOlive(), .30);
+        // No sage/olive blend on the artwork-derived pair any more: 22-30% of
+        // those constants is the yellow cast a blue cover carried into the
+        // whole player gradient. YTMUColor's own clamps (sat .30-.82,
+        // brightness .20-.78) are the only shaping; a near-grey cover keeps
+        // its grey because YTMUSongHue's .12 floor gates the CHROME helpers,
+        // not this gradient.
+        UIColor *primary = YTMUColor(average, .18, .90);
+        UIColor *secondary = YTMUColor(average, .02, .48);
         dispatch_async(dispatch_get_main_queue(), ^{
             // Only announce an actual change: the notification has no observer
             // in the tweak today, and a repaint on an identical colour is pure
@@ -109,7 +120,10 @@ static void YTMUStyleLyricsEntries(UIView *root) {
     for (UIView *view in root.subviews) {
         BOOL marked = view.tag == 9777 || view.tag == 9778 || objc_getAssociatedObject(view, @selector(ytmu_isLyricsButton));
         if (marked && !view.hidden && !CGRectIsEmpty(view.bounds)) {
-            view.backgroundColor = YTMULGGlassFill();
+            // Song glass, not the olive constant: these chips sit on the
+            // player, where the yellow-green fill was the same "why does a
+            // blue cover have yellow glass" report the transport buttons were.
+            view.backgroundColor = YTMUSongGlassFill(.24);
             view.layer.cornerRadius = MIN(18.0, CGRectGetHeight(view.bounds) * 0.5);
             view.layer.cornerCurve = kCACornerCurveContinuous;
             view.layer.borderWidth = 0.0;

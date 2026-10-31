@@ -16,27 +16,35 @@ static char kAnimatedKey;
 static const void *kGlass = &kGlassKey;
 static const void *kAnimated = &kAnimatedKey;
 
-// NEUTRAL GLASS. This file used to hardcode a magenta border (1,.62,.94) and a
-// violet shadow (.54,.20,.78 / .72,.28,1) on the artwork card, every header
-// capsule, every transport button and the tab bar. A constant cannot match a
-// cover: it read as hot pink on Midnight Future's blue, as purple on Suki's
-// grey-white and as green on the Jack U collages, and that mismatch -- not the
-// blur -- is what made the player look broken. Nothing here derives a colour
-// from the artwork any more, because the decision (user, this session) is that
-// the chrome stays neutral and lets the cover be the only colour on screen:
-// border = white at a per-surface alpha, every shadow = black.
-// Source/QueueLiquidGlassV2.xm is the one place a song colour is wanted, and it
-// samples the row's own thumbnail instead of picking a constant.
+// SONG-GLASS, second attempt. The first attempt here was a constant (magenta
+// border, violet shadow) that read as hot pink on Midnight Future's blue and
+// as purple on Suki's grey-white. The second was "neutral chrome": the
+// constant moved into YTMULGGlassFill/YTMULGGlassBorder -- sage/olive, a
+// yellow-green the cover still cannot match -- and the play/selected controls
+// kept a hardcoded red. A blue cover got yellow glass and red buttons, which
+// is the same complaint one colour palette later. NOW every player chrome
+// colour derives from the sampled artwork through the YTMUSongGlass* helpers
+// in YTMUVisualStyle.h: the cover's hue, clamped into a glassy band for the
+// fills and lifted for the play/selected accents; the olive/sage/red
+// constants survive ONLY as the no-artwork or near-grey fallback. Shadows
+// stay black (a coloured shadow is the violet-magenta mistake again) and
+// YTMPlayerCarouselCell's artwork ring stays white for the same reason.
+// Source/QueueLiquidGlassV2.xm is the other place a song colour is wanted,
+// and it samples the row's own thumbnail instead of the published mean.
 
 static UIVisualEffectView*Glass(UIView*h,UIBlurEffectStyle style){
     UIVisualEffectView*g=objc_getAssociatedObject(h,kGlass);
-    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=YTMULGGlassFill();g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
+    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=YTMUSongGlassFill(.24);g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
     return g;
 }
 static void ApplyGlass(UIView*h,CGRect f,CGFloat r,CGFloat border){
     UIVisualEffectView*g=Glass(h,UIBlurEffectStyleSystemChromeMaterialDark);
     g.hidden=NO;g.frame=f;g.layer.cornerRadius=r;g.layer.cornerCurve=kCACornerCurveContinuous;
-    g.layer.borderWidth=.7;g.layer.borderColor=YTMULGGlassBorder(border).CGColor;
+    g.layer.borderWidth=.7;g.layer.borderColor=YTMUSongGlassBorder(border).CGColor;
+    // Re-tinted every pass, not only at creation: YT reuses these views
+    // across songs, so a fill written once at Glass() creation survived the
+    // song change and the next track wore the previous track's colour.
+    g.contentView.backgroundColor=YTMUSongGlassFill(.24);
     [h sendSubviewToBack:g];h.backgroundColor=UIColor.clearColor;h.layer.backgroundColor=UIColor.clearColor.CGColor;
 }
 // A real circle, tap target untouched. The header icons are NOT all square --
@@ -111,7 +119,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     // drop, not by size: the old 1.08x transform was rewritten on every layout
     // pass (YT animates this button itself, so it fought the tap animation) and
     // YT already draws it larger than its siblings.
-    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?[YTMULGAccentRed() colorWithAlphaComponent:.24]:YTMULGGlassFill();if(play)g.layer.borderColor=[YTMULGAccentRed() colorWithAlphaComponent:.56].CGColor;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
+    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?YTMUSongAccent(.26):YTMUSongGlassFill(.24);if(play)g.layer.borderColor=YTMUSongAccent(.56).CGColor;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
 }
 %end
 
@@ -124,7 +132,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 %hook YTMPlayerTabView
 - (void)layoutSubviews{
     %orig;if(!PlayerV2()||CGRectIsEmpty(self.bounds))return;ApplyGlass(self,CGRectInset(self.bounds,8,4),26,.20);
-    for(UIView*v in self.subviews){if(IsButton(v)&&!v.hidden){BOOL selected=(v.accessibilityTraits&UIAccessibilityTraitSelected)!=0;if(selected){ApplyGlass(v,CGRectInset(v.bounds,2,2),MIN(22,CGRectGetHeight(v.bounds)/2),.56);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=[YTMULGAccentRed() colorWithAlphaComponent:.20];g.layer.borderColor=[YTMULGAccentRed() colorWithAlphaComponent:.58].CGColor;}else{UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.hidden=YES;v.backgroundColor=UIColor.clearColor;}}}
+    for(UIView*v in self.subviews){if(IsButton(v)&&!v.hidden){BOOL selected=(v.accessibilityTraits&UIAccessibilityTraitSelected)!=0;if(selected){ApplyGlass(v,CGRectInset(v.bounds,2,2),MIN(22,CGRectGetHeight(v.bounds)/2),.56);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=YTMUSongAccent(.20);g.layer.borderColor=YTMUSongAccent(.58).CGColor;}else{UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.hidden=YES;v.backgroundColor=UIColor.clearColor;}}}
 }
 %end
 

@@ -21,6 +21,14 @@ extern "C" {
 UIImage *YTMULGCurrentArtwork(void);
 UIColor *YTMULGCurrentArtworkMean(void);
 
+// The sampled artwork MEAN, passed through with NO sage/olive blend. The old
+// artwork-derived surfaces (player gradient, backdrop tint/wash, glass fills)
+// blended every colour 22-36% toward the fixed sage/olive palette -- a yellow
+// cast that a blue cover cannot survive ("why does a blue cover have yellow
+// glass"). A surface wants the SONG colour here, and sage/olive only as the
+// no-artwork fallback.
+UIColor *YTMULGArtworkTint(void);
+
 // Declared flush (no leading whitespace) so the C-linkage guard and the
 // declaration can be read -- and grepped -- as one block.
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
