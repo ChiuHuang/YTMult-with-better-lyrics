@@ -128,6 +128,10 @@ def save_candidates(video_id, song_info, candidates, only_source=None, outcomes=
                 'tier': c.get('tier', ''),
                 'lines': len(clean_lyrics),
                 'score': c.get('score', 0),
+                # Arrival time since probe start (see pipeline.probe_providers).
+                # Absent on pre-timing snapshots; the device hides the delay
+                # text when it is 0/missing instead of guessing.
+                'elapsed_ms': int(c.get('elapsed_ms') or 0),
                 'data': {
                     'lyrics': clean_lyrics,
                     'source': data.get('source', ''),
