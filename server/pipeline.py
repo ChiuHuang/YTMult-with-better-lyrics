@@ -26,7 +26,7 @@ from .providers_cubey import fetch_cubey
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
-from .translate import google_translate_fast
+from .translate import google_translate_fast, translatable_rows
 from .cache import is_not_found_result, sanitize_lyrics_parts
 from .candidates import (save_candidates, graft_wbw_parts,
                           snapshot_provider as _snapshot_provider)
@@ -100,11 +100,17 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
     result['artist'] = song_info['artist']
 
     if translate_to and result.get('lyrics'):
-        texts = [l['text'] for l in result['lyrics'] if l.get('text')]
-        translations = google_translate_fast(texts, translate_to)
-        for i, lyric in enumerate(result['lyrics']):
-            if i < len(translations) and translations[i]:
-                lyric['translated'] = translations[i]
+        # google_translate_fast returns one output per input (it does NOT
+        # drop blanks), so the fill must walk the same translatable_rows the
+        # texts came from. The old pair of bugs: the text list filtered on
+        # `l.get('text')` (letting a whitespace spacer through) AND the fill
+        # enumerated ALL rows, so every textless row also consumed a
+        # translation -- both shift every later line by one.
+        rows = translatable_rows(result['lyrics'])
+        translations = google_translate_fast([t for _i, t in rows], translate_to)
+        for (i, _t), tr in zip(rows, translations):
+            if tr:
+                result['lyrics'][i]['translated'] = tr
 
     if result and result.get('lyrics'):
         sanitize_lyrics_parts(result['lyrics'])

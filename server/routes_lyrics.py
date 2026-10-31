@@ -888,7 +888,8 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
     from .jwt_pool import pick_jwt
     from .pipeline import probe_providers
     from .library import save_provider, remove_unlyriced
-    from .translate import cohere_translate, _detect_song_lang, lyrics_sample
+    from .translate import (cohere_translate, _detect_song_lang, lyrics_sample,
+                            translatable_rows)
     import copy as _copy
 
     # Instant path: a full probe already saved every provider for this video.
@@ -916,20 +917,21 @@ def _fetch_single_provider(video_id, lang, provider, jwt_token=None):
                     _lyrics = _out.get('lyrics') or []
                     sanitize_lyrics_parts(_lyrics)
                     if _lyrics and not all(l.get('translated') for l in _lyrics):
-                        _texts = [l['text'] for l in _lyrics if l.get('text')]
+                        # cohere_translate drops blank texts before the model
+                        # sees them, so the fill walks translatable_rows -- the
+                        # ONE definition. A `l.get('text')` filter lets a
+                        # whitespace spacer through and it consumes the next
+                        # line's translation (the off-by-one report).
+                        _rows = translatable_rows(_lyrics)
                         # song_lang rides along: without it a Japanese song's
                         # kanji rows are skipped as already-Chinese here too.
                         _sl = _detect_song_lang({'title': _out.get('song', ''),
                                                  'artist': _out.get('artist', '')},
                                                 lyrics_sample(_lyrics))
-                        _translations = cohere_translate(_texts, _lang, _sl)
-                        _ti = 0
-                        for _lyric in _lyrics:
-                            if not _lyric.get('text'):
-                                continue
-                            if _ti < len(_translations) and _translations[_ti]:
-                                _lyric['translated'] = _translations[_ti]
-                            _ti += 1
+                        _translations = cohere_translate([t for _i, t in _rows], _lang, _sl)
+                        for (_i, _t), _tr in zip(_rows, _translations):
+                            if _tr:
+                                _lyrics[_i]['translated'] = _tr
                     _out['wordSynced'] = any(l.get('wordSynced') for l in _lyrics)
                     set_cached(f"{video_id}:{_lang}", _out)
                     save_provider(video_id, (_c or {}).get('provider', provider), _lang)

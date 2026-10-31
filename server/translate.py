@@ -216,6 +216,28 @@ def translate_cache_key(texts, target_lang, song_lang=''):
     return f"cohere:{target_lang}:{sl}:{hashlib.md5('|'.join(texts).encode()).hexdigest()}"
 
 
+def translatable_rows(lyrics):
+    """[(index, text)] of the rows the translator aligns over -- THE ONE
+    definition of a translatable row: it has a 'text' AND that text is not
+    blank.
+
+    cohere_translate drops blank texts before the model sees them (a
+    whitespace-only row is a spacer line, not a lyric), so EVERY caller must
+    drop them too, and the fill must walk exactly this list. The old call
+    sites filtered on `l.get('text')` alone, so a payload with one
+    whitespace-only row shifted every later translation by one: the spacer
+    consumed the NEXT line's translation, each line showed the following
+    line's translation under it, and the last text line got nothing at all
+    (the "translate offsetted by one line" report)."""
+    rows = []
+    for i, l in enumerate(lyrics or []):
+        if isinstance(l, dict):
+            t = l.get('text')
+            if t and t.strip():
+                rows.append((i, t))
+    return rows
+
+
 def translate_cache_path(cache_key):
     """On-disk path for one translate-cache entry. Exposed so the retranslate
     job can delete exactly the entry it is about to regenerate instead of
@@ -1270,25 +1292,22 @@ def google_translate_fast(texts, target_lang='zh-TW'):
 def translate_result_in_place(result, target_lang, song_lang=''):
     """Fill lyric['translated'] for every text line of a fetched result.
 
-    Same index-aligned mapping the sequential pipeline uses, factored out so
-    the background translate queue behaves identically. Alignment runs over
-    text-bearing lines only, so textless/gap rows never shift later
-    translations. Returns the number of lines filled."""
+    Alignment runs over translatable_rows() -- text-bearing lines with
+    non-blank text, the same list cohere_translate itself filters to -- so a
+    textless row or a whitespace spacer never shifts later translations.
+    Returns the number of lines filled."""
     if not target_lang or not result or not result.get('lyrics'):
         return 0
-    texts = [l['text'] for l in result['lyrics'] if l.get('text')]
-    if not texts:
+    rows = translatable_rows(result['lyrics'])
+    if not rows:
         return 0
+    texts = [t for _i, t in rows]
     translations = cohere_translate(texts, target_lang, song_lang=song_lang)
     filled = 0
-    ti = 0
-    for lyric in result['lyrics']:
-        if not lyric.get('text'):
-            continue
-        if ti < len(translations) and translations[ti]:
-            lyric['translated'] = translations[ti]
+    for (i, _t), tr in zip(rows, translations):
+        if tr:
+            result['lyrics'][i]['translated'] = tr
             filled += 1
-        ti += 1
     return filled
 
 
