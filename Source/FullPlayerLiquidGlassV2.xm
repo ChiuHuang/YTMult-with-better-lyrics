@@ -97,6 +97,19 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     self.backgroundColor=UIColor.clearColor;self.contentView.backgroundColor=UIColor.clearColor;self.contentView.opaque=NO;self.clipsToBounds=NO;
     NSMutableArray*queue=[NSMutableArray arrayWithObject:self.contentView];
     while(queue.count){UIView*v=queue.firstObject;[queue removeObjectAtIndex:0];[queue addObjectsFromArray:v.subviews];if(IsArtwork(v)&&CGRectGetWidth(v.bounds)>=240&&CGRectGetHeight(v.bounds)>=240){v.layer.cornerRadius=28;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;v.layer.borderWidth=.8;v.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;ApplyDrop(v.superview,.30,24,12);
+        // LANDSCAPE CROP: in landscape the artwork mount is 16:9 while the
+        // album cover is 1:1, and YT letterboxes it -- black (or the ambient
+        // ambient-tint fill) bars stick out around the square art. AspectFill
+        // crops instead of fitting; when the aspects already match (every
+        // portrait square mount) fill and fit are identical, so this is a
+        // landscape-only difference and needs no orientation check.</think><tool_call>edit<arg_key>newString</arg_key><arg_value>    while(queue.count){UIView*v=queue.firstObject;[queue removeObjectAtIndex:0];[queue addObjectsFromArray:v.subviews];if(IsArtwork(v)&&CGRectGetWidth(v.bounds)>=240&&CGRectGetHeight(v.bounds)>=240){v.layer.cornerRadius=28;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;v.layer.borderWidth=.8;v.layer.borderColor=[UIColor colorWithWhite:1 alpha:.22].CGColor;ApplyDrop(v.superview,.30,24,12);
+        // LANDSCAPE CROP: in landscape the artwork mount is 16:9 while the
+        // album cover is 1:1, and YT letterboxes the fit -- black (or YT's
+        // ambient tint) bars stick out around the square art. AspectFill
+        // crops instead of fitting; when the aspects already match (a
+        // portrait square mount, or a real 16:9 MV still) fill and fit
+        // render identically, so no orientation check is needed.
+        ((UIImageView*)v).contentMode=UIViewContentModeScaleAspectFill;
         // The black base behind the card must wear the SAME radius, or its
         // own corners peek out past the artwork's clip and the card reads
         // as "image radius != base radius". cornerRadius rounds a layer's
