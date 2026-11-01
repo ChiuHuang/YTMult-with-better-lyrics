@@ -14,24 +14,33 @@ static UIVisualEffectView *YTMUMiniGlass(UIView *host) {
     if (!glass) {
         glass = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark]];
         glass.userInteractionEnabled = NO;
-        glass.contentView.backgroundColor = YTMULGGlassFill();
         glass.layer.cornerRadius = 18;
         glass.layer.cornerCurve = kCACornerCurveContinuous;
         glass.layer.borderWidth = .75;
-        glass.layer.borderColor = YTMULGGlassBorder(.38).CGColor;
         glass.clipsToBounds = YES;
         [host insertSubview:glass atIndex:0];
         objc_setAssociatedObject(host, &kMiniGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     glass.frame = CGRectInset(host.bounds, 1, 2);
+    // Song glass, re-tinted EVERY pass: the fill written once at creation
+    // survived the song change (the same reuse trap the full player hit) and
+    // the mini player is on screen on every page, so a stale colour followed
+    // the reader around the app. The song helpers fall back to the old
+    // olive/sage constants when no artwork is sampled, so the pre-first-frame
+    // look is unchanged.
+    glass.contentView.backgroundColor = YTMUSongGlassFill(.24);
+    glass.layer.borderColor = YTMUSongGlassBorder(.38).CGColor;
     [host sendSubviewToBack:glass];
     YTMULGApplyDither(host, glass, .48);
     return glass;
 }
 
 static UIImageView *YTMULoadedImage(UIView *root){NSMutableArray*q=[NSMutableArray arrayWithObject:root];while(q.count){UIView*v=q.firstObject;[q removeObjectAtIndex:0];[q addObjectsFromArray:v.subviews];if([v isKindOfClass:UIImageView.class]&&((UIImageView*)v).image)return(UIImageView*)v;}return nil;}
-// The mini player now shares the olive glass surface and dither detail used by
-// the pivot bar and full player. The artwork tint behind the page remains live.
+// The mini player shares the glass surface and dither detail used by the
+// pivot bar and full player, tinted by the SONG via YTMUSongGlassFill/Border
+// (the artwork it displays is itself a theme publisher through
+// DynamicArtworkThemeV2's mini-player path, and the song helpers fall back to
+// the olive constants before the first sample).
 static void YTMUMiniTree(UIView *root){Class image=NSClassFromString(@"YTImageView");for(UIView*v in root.subviews){if(image&&[v isKindOfClass:image]){CGFloat w=CGRectGetWidth(v.bounds),h=CGRectGetHeight(v.bounds);if(w>=38&&w<=56&&h>=38&&h<=56){UIImageView*loaded=YTMULoadedImage(v);if(loaded){v.hidden=NO;v.alpha=1;loaded.hidden=NO;loaded.alpha=1;CGFloat scale=MIN(1,40.0/MAX(1,w));v.transform=CGAffineTransformMakeScale(scale,scale);v.layer.cornerRadius=10.0/scale;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;}}}YTMUMiniTree(v);}}
 @interface YTMMiniPlayerView:UIView@end
 %hook YTMMiniPlayerView
