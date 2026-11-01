@@ -114,6 +114,33 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     for(UIView*v in self.subviews){
         if([v isKindOfClass:UILabel.class]){UILabel*l=(UILabel*)v;if(l.font.pointSize>=18)l.font=[UIFont systemFontOfSize:MAX(22,l.font.pointSize) weight:UIFontWeightBold];l.layer.shadowColor=UIColor.blackColor.CGColor;l.layer.shadowOpacity=.28;l.layer.shadowRadius=4;l.layer.shadowOffset=CGSizeMake(0,1);}
         if(IsButton(v)&&!v.hidden&&CGRectGetWidth(v.bounds)>=34){CGFloat r=MIN(20,CGRectGetHeight(v.bounds)/2);ApplyGlass(v,v.bounds,r,.24);}
+        // The ACTION CHIP row (like / dislike / lyrics / comments / queue):
+        // pill-shaped chips in this view get the song glass too -- the first
+        // screenshot's circle wrapped the whole row and the chips stayed
+        // stock dark grey while everything around them followed the cover.
+        // The pill predicate (height in range, corner radius ~half height)
+        // keeps plain icon buttons and labels out.
+        if(!v.hidden&&CGRectGetHeight(v.bounds)>=30&&CGRectGetHeight(v.bounds)<=50){
+            CGFloat cr=v.layer.cornerRadius; CGFloat h=CGRectGetHeight(v.bounds);
+            // Guard, not decoration: v may already BE a glass view (recursing
+            // into one would build glass-on-glass), and the LYRICS chip is
+            // styled by DynamicArtworkThemeV2's YTMUStyleLyricsEntries on this
+            // same view -- that hook sets the chip's backgroundColor itself,
+            // so glassing it here too only sets the two passes fighting over
+            // one background (clear vs song fill) every layout.
+            BOOL lyricChip=(v.tag==9777||v.tag==9778||objc_getAssociatedObject(v,@selector(ytmu_isLyricsButton))!=nil);
+            if(cr>=h*0.44&&![v isKindOfClass:UIVisualEffectView.class]&&!lyricChip){
+                UIVisualEffectView*g=Glass(v,UIBlurEffectStyleSystemChromeMaterialDark);
+                g.hidden=NO;g.frame=v.bounds;g.layer.cornerRadius=h/2;g.layer.cornerCurve=kCACornerCurveContinuous;
+                g.contentView.backgroundColor=YTMUSongGlassFill(.22);
+                g.layer.borderColor=YTMUSongGlassBorder(.24).CGColor;g.layer.borderWidth=.6;
+                // the glass sits AT index 0 (behind YT's own pill paint);
+                // behind an OPAQUE stock background it is invisible, so
+                // clear the host's own fill and let the glass carry it.
+                v.backgroundColor=UIColor.clearColor;v.layer.backgroundColor=UIColor.clearColor.CGColor;
+                [v sendSubviewToBack:g];
+            }
+        }
     }
 }
 %end
