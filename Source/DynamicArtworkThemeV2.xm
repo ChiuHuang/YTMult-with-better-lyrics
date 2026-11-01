@@ -37,6 +37,33 @@ static BOOL YTMUArtworkAncestor(UIView *view) {
     }
     return NO;
 }
+// The carousel publishes NEIGHBOUR pages too: every Up-next card is its own
+// YTMPlayerCarouselCell, its artwork is a related video's MV still, and its
+// -setImage: fires like the current page's. The last set wins, so the
+// whole player wore a RELATED video's palette -- Mad at Disney (blue cover)
+// ran its transport in the warm reds of the next-up MV still because a
+// neighbour's image was set after the real artwork. A cell counts as the
+// current page only when at least half of it sits inside its collection
+// view's bounds; an unlaid-out cell (frame zero) cannot be judged, so it
+// publishes -- refusing to publish on unknown would mean no theme at all on
+// the first layout pass. The mini player has no collection view and is
+// always the current song.
+static BOOL YTMUCarouselPageCurrent(UIView *view) {
+    UICollectionViewCell *cell = nil;
+    UICollectionView *cv = nil;
+    for (UIView *v = view; v; v = v.superview) {
+        if (!cv && [v isKindOfClass:[UICollectionView class]]) cv = (UICollectionView *)v;
+        if ([v isKindOfClass:[UICollectionViewCell class]]) { cell = (UICollectionViewCell *)v; break; }
+    }
+    if (!cell) return YES;
+    if (!cv) return YES;
+    CGSize cellSize = cell.frame.size;
+    if (CGRectIsEmpty(cell.frame) || cellSize.width < 1.0) return YES;
+    CGRect cellInCv = [cv convertRect:cell.frame fromView:cell.superview ?: cv];
+    CGRect cut = CGRectIntersection(cellInCv, cv.bounds);
+    CGFloat visible = MAX(0.0, cut.size.width) * MAX(0.0, cut.size.height);
+    return visible / (cellSize.width * cellSize.height) >= 0.5;
+}
 static UIColor *YTMUAverage(UIImage *image) {
     if (!image.CGImage) return nil;
     unsigned char pixel[4] = {0};
@@ -133,7 +160,15 @@ static void YTMUStyleLyricsEntries(UIView *root) {
 }
 
 %hook UIImageView
-- (void)setImage:(UIImage *)image { %orig; if (image && YTMUArtworkAncestor(self)) YTMUPublishTheme(image); }
+- (void)setImage:(UIImage *)image {
+    %orig;
+    if (!image || !YTMUArtworkAncestor(self)) return;
+    // Neighbour carousel pages do not get to publish: their artwork is a
+    // related video's still and it used to win the "last set" race against
+    // the song the reader is actually looking at.
+    if (!YTMUCarouselPageCurrent(self)) return;
+    YTMUPublishTheme(image);
+}
 %end
 @interface YTMNowPlayingView:UIView@end
 %hook YTMNowPlayingView
