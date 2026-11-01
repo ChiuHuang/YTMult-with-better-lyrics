@@ -40,6 +40,16 @@ static void ClearTree(UIView *r, NSInteger d) {
     Class c = NSClassFromString(@"YTImageView");
     for (UIView *v in r.subviews) {
         if ([v isKindOfClass:UIScrollView.class]) v.backgroundColor = UIColor.clearColor;
+        // The results page still painted WHITE below the glass field: some
+        // wrapper view carries an explicit systemBackground (white until
+        // dark mode is forced) and the scroll-view clear above never touches
+        // it. Pointer compare only -- YTM's own dark fills are REAL colours
+        // with distinct storage and must survive; nil-defaulted views never
+        // match and cost nothing.
+        if (v.backgroundColor == UIColor.whiteColor ||
+            [v.backgroundColor isEqual:[UIColor systemBackgroundColor]]) {
+            v.backgroundColor = UIColor.clearColor;
+        }
         if (c && [v isKindOfClass:c]) {
             CGFloat w = CGRectGetWidth(v.bounds), h = CGRectGetHeight(v.bounds);
             if (w >= 44 && h >= 44) {
@@ -78,7 +88,9 @@ static void YTMUStyleSearchText(UIView *root) {
     } else if ([root isKindOfClass:UITextField.class]) {
         UITextField *field = (UITextField *)root;
         field.textColor = UIColor.whiteColor;
-        field.tintColor = YTMULGAccentRed();
+        // White caret: it sits inside the green glass box, and the red caret
+        // was the same "unrelated accent" complaint as the ring around it.
+        field.tintColor = UIColor.whiteColor;
         if (field.placeholder.length) {
             field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:field.placeholder
                 attributes:@{NSForegroundColorAttributeName:[UIColor colorWithWhite:1 alpha:.58]}];
@@ -138,6 +150,12 @@ static void YTMUStyleSearchPage(UIView *root, BOOL resultsPage) {
 static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger depth) {
     if (!root || depth > 24) return;
     YTMUStyleSearchText(root);
+    // Same white-kill as ClearTree: the depth cap here is 24, so an
+    // explicitly-white wrapper DEEPER than ClearTree's 8 still gets caught.
+    if (root.backgroundColor == UIColor.whiteColor ||
+        [root.backgroundColor isEqual:[UIColor systemBackgroundColor]]) {
+        root.backgroundColor = UIColor.clearColor;
+    }
     for (UIView *v in root.subviews) {
         if ([v isKindOfClass:UITableView.class]) {
             UITableView *table = (UITableView *)v;
@@ -180,7 +198,10 @@ static void YTMUSearchBoxLayoutSubviews(id self, SEL _cmd) {
         searchBox.layer.cornerRadius = MIN(24, CGRectGetHeight(searchBox.bounds) / 2);
         searchBox.layer.cornerCurve = kCACornerCurveContinuous;
         searchBox.layer.borderWidth = .65;
-        searchBox.layer.borderColor = YTMULGAccentRed().CGColor;
+        // Glass border, not red: the green glass capsule was the one element
+        // the user called "pretty", and the red ring around it was the same
+        // accent as YT's own -- unrelated to anything the reader chose.
+        searchBox.layer.borderColor = YTMULGGlassBorder(.38).CGColor;
         searchBox.clipsToBounds = YES;
     }
 }
