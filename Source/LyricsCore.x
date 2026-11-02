@@ -34,7 +34,6 @@ BOOL YTMULGServerAllows(NSString *key);
 double g_currentPlaybackTime = 0.0;
 NSString *g_currentVideoID = nil;
 __weak YTPlayerViewController *g_activePlayer = nil;
-__weak UIButton *g_ytmuOwnLyricsButton = nil;
 __weak UIViewController *g_activeNowPlayingVC = nil;
 NSMutableDictionary *g_lyricsCache = nil;
 NSString *g_globalLoadingVideoID = nil;

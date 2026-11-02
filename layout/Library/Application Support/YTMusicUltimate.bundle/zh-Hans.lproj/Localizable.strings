@@ -208,8 +208,6 @@
 "LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制区、进度条和分栏标题栏。";
 "LG_LYRICS_V2" = "歌词 V2";
 "LG_LYRICS_V2_DESC" = "歌词背后模糊封面图营造的沉浸式背景。";
-"LG_LYRICS_BUTTON" = "歌词按钮";
-"LG_LYRICS_BUTTON_DESC" = "在 V1 和 V2 中保留一个可见的歌词入口。";
 "LG_QUEUE_V2" = "队列 V2";
 "LG_QUEUE_V2_DESC" = "玻璃质感的待播列表和队列标题栏。";
 "LG_HOME_V2" = "首页 V2";

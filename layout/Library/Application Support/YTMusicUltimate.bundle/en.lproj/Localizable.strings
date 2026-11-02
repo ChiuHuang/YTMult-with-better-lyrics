@@ -208,8 +208,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Artwork card, transport glass, scrubber and split header.";
 "LG_LYRICS_V2" = "Lyrics V2";
 "LG_LYRICS_V2_DESC" = "Immersive blurred-cover background behind the lyrics.";
-"LG_LYRICS_BUTTON" = "Lyrics button";
-"LG_LYRICS_BUTTON_DESC" = "Keep a visible lyrics entry in V1 and V2.";
 "LG_QUEUE_V2" = "Queue V2";
 "LG_QUEUE_V2_DESC" = "Glass Up Next list and queue header.";
 "LG_HOME_V2" = "Home V2";

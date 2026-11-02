@@ -178,8 +178,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Kapak kartı, camlı kumanda, çubuk ve bölünmüş başlık.";
 "LG_LYRICS_V2" = "Şarkı sözleri V2";
 "LG_LYRICS_V2_DESC" = "Dalmış arka plan arkasında bulanık kapak görseli.";
-"LG_LYRICS_BUTTON" = "Şarkı sözleri düğmesi";
-"LG_LYRICS_BUTTON_DESC" = "V1 ve V2'de görünür bir şarkı sözleri girişi korur.";
 "LG_QUEUE_V2" = "Sıra V2";
 "LG_QUEUE_V2_DESC" = "Camlı Sıradakiler listesi ve sıra başlığı.";
 "LG_HOME_V2" = "Ana Sayfa V2";

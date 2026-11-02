@@ -178,8 +178,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Tarjeta de portada, transporte de cristal, barra de posición y cabecera dividida.";
 "LG_LYRICS_V2" = "Letras V2";
 "LG_LYRICS_V2_DESC" = "Fondo inmersivo con la portada desenfocada tras la letra.";
-"LG_LYRICS_BUTTON" = "Botón de letras";
-"LG_LYRICS_BUTTON_DESC" = "Mantiene una entrada visible de letras en V1 y V2.";
 "LG_QUEUE_V2" = "Cola V2";
 "LG_QUEUE_V2_DESC" = "Lista de cristal de Siguiente y cabecera de la cola.";
 "LG_HOME_V2" = "Inicio V2";

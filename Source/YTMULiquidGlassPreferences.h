@@ -148,7 +148,6 @@ static inline NSDictionary<NSString *, NSNumber *> *YTMULGDefaultPreferences(voi
         @"sheetsV2Enabled": @YES,
         @"homeV2Enabled": @YES,
         @"pivotBarV2Enabled": @YES,
-        @"lyricsEntryButtonEnabled": @YES,
         @"playerSongThemeEnabled": @YES,
         @"wholeAppSongThemeEnabled": @YES,
         @"searchV2Enabled": @YES,
