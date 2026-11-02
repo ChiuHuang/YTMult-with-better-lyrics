@@ -173,9 +173,23 @@ static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger d
             table.separatorColor = [UIColor colorWithWhite:1 alpha:.12];
             table.separatorInset = UIEdgeInsetsMake(0, 16, 0, 16);
             table.showsVerticalScrollIndicator = NO;
+            // WHITE FIX, second round: the fill the dump showed is BACKDROP,
+            // not a background colour -- a UITableView can carry YT's own
+            // backgroundView too. Nil them.
+            table.backgroundView = nil;
         } else if ([v isKindOfClass:UICollectionView.class]) {
-            ((UICollectionView *)v).backgroundColor = UIColor.clearColor;
-            ((UICollectionView *)v).showsVerticalScrollIndicator = NO;
+            UICollectionView *collection = (UICollectionView *)v;
+            collection.backgroundColor = UIColor.clearColor;
+            collection.backgroundView = nil;
+            collection.showsVerticalScrollIndicator = NO;
+        } else if ([NSStringFromClass(v.class) containsString:@"BrowseBackground"]) {
+            // The search pages' backdrop: YTLightweightAsyncCollectionView ->
+            // YTLightweightBrowseBackgroundView -> a 428x428 decorative
+            // YTImageView. THE WHITE. It is an IMAGE BACKDROP, not a fill, so
+            // the earlier systemBackground kill and the trait force-dark
+            // never touched it -- hide the backdrop outright. Search pages
+            // only: album/playlist pages keep theirs.
+            v.hidden = YES;
         }
 
         if (resultsPage && ([v isKindOfClass:UITableViewCell.class] || [v isKindOfClass:UICollectionViewCell.class])) {
