@@ -2,6 +2,45 @@
 #import "../LyricsShared.h"
 #import "../Headers/Localization.h"
 
+// Translate-target language list. The device no longer TYPES a code; it
+// picks from this list in an action sheet (the old UITextField row accepted
+// anything, including typos the server then had to guess at). Stored value
+// is the server-side code ("zh-TW"); "auto" = follow the device language;
+// empty means the same as "auto" and is kept out of the dict entirely.
+// The table is code -> native name: a language's name in itself is the one
+// label every reader recognises regardless of the UI language.
+static NSArray<NSString *> *YTMULangOptionCodes(void) {
+    static NSArray<NSString *> *codes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        codes = @[@"auto", @"zh-TW", @"zh-CN", @"en", @"ja", @"ko",
+                  @"es", @"de", @"fr", @"pt", @"ru", @"vi", @"th"];
+    });
+    return codes;
+}
+
+static NSString *YTMULangNativeName(NSString *code) {
+    if (!code.length || [code isEqualToString:@"auto"]) return nil;
+    static NSDictionary<NSString *, NSString *> *names;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        names = @{ @"zh-TW": @"中文(台灣)",
+                   @"zh-CN": @"中文(简体)",
+                   @"en": @"English",
+                   @"ja": @"日本語",
+                   @"ko": @"한국어",
+                   @"es": @"Español",
+                   @"de": @"Deutsch",
+                   @"fr": @"Français",
+                   @"pt": @"Português",
+                   @"ru": @"Русский",
+                   @"vi": @"Tiếng Việt",
+                   @"th": @"ไทย" };
+    });
+    NSString *n = names[code];
+    return n ?: code;
+}
+
 // Lightweight progress overlay for the cache sync feature. UIAlertController
 // doesn't officially support adding a UIProgressView, so this is a small
 // dedicated card instead of hacking subviews into an alert.
@@ -31,7 +70,7 @@
         self.titleLabel.font = [UIFont boldSystemFontOfSize:16];
         self.titleLabel.textColor = [UIColor labelColor];
         self.titleLabel.textAlignment = NSTextAlignmentCenter;
-        self.titleLabel.text = @"Syncing lyrics cache";
+        self.titleLabel.text = LOC(@"SYNC_TITLE");
 
         self.itemLabel = [[UILabel alloc] init];
         self.itemLabel.font = [UIFont systemFontOfSize:13];
@@ -39,7 +78,7 @@
         self.itemLabel.textAlignment = NSTextAlignmentCenter;
         self.itemLabel.numberOfLines = 1;
         self.itemLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
-        self.itemLabel.text = @"Checking server cache…";
+        self.itemLabel.text = LOC(@"SYNC_CHECKING");
 
         self.progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
         self.progressView.progress = 0.0;
@@ -50,7 +89,7 @@
         self.countLabel.textAlignment = NSTextAlignmentCenter;
 
         UIButton *cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [cancelButton setTitle:@"Cancel" forState:UIControlStateNormal];
+        [cancelButton setTitle:LOC(@"CANCEL") forState:UIControlStateNormal];
         cancelButton.titleLabel.font = [UIFont systemFontOfSize:14];
         [cancelButton addTarget:self action:@selector(ytmu_cancelTapped) forControlEvents:UIControlEventTouchUpInside];
 
@@ -110,7 +149,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"Lyrics System";
+    self.title = LOC(@"LYRICS_PAGE_TITLE");
     self.view.backgroundColor = [UIColor systemGroupedBackgroundColor];
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -138,7 +177,9 @@
     if (!d[@"lyricsAutoSync"]) d[@"lyricsAutoSync"] = @YES;
     if (!d[@"lyricsStreamTranslate"]) d[@"lyricsStreamTranslate"] = @YES;
     if (!d[@"lyricsApiEndpoint"]) d[@"lyricsApiEndpoint"] = @"https://ytmtranslate.chiuhuang.dev";
-    if (!d[@"lyricsTargetLang"]) d[@"lyricsTargetLang"] = @"zh-TW";
+    // lyricsTargetLang deliberately NOT seeded: unset now means "auto" --
+    // follow the device language (YTMUTargetLang resolves it). The old
+    // zh-TW default pinned every language onto Chinese.
     if (!d[@"lyricsAutoZhConvert"]) d[@"lyricsAutoZhConvert"] = @YES;
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
     [self loadPreview];
@@ -148,7 +189,7 @@
     NSString *dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"YTMU_LyricsCache"];
     NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil];
     if (files.count == 0) {
-        self.previewLyrics = @[@{@"text": @"No cached lyrics yet", @"translated": @"Play a song to cache lyrics"}];
+        self.previewLyrics = @[@{@"text": LOC(@"PREVIEW_EMPTY_TITLE"), @"translated": LOC(@"PREVIEW_EMPTY_PLAY")}];
         return;
     }
     // pick most recent
@@ -169,7 +210,7 @@
         NSArray *ly = dict[@"lyrics"];
         if ([ly count] > 20) ly = [ly subarrayWithRange:NSMakeRange(0, 20)];
         self.previewLyrics = ly;
-        if (!self.previewLyrics.count) self.previewLyrics = @[@{@"text": @"Empty cache file"}];
+        if (!self.previewLyrics.count) self.previewLyrics = @[@{@"text": LOC(@"PREVIEW_EMPTY_FILE")}];
     }
 }
 
@@ -199,12 +240,12 @@
 // data) live on the Debug page now.
 - (NSArray *)displaySectionRows {
     return @[
-        @{@"title": @"Always show translated lyrics", @"desc": @"Auto-show custom panel when lyrics load", @"icon": @"quote.bubble", @"key": @"lyricsAlwaysOn"},
-        @{@"title": @"Enable client cache", @"desc": @"Store lyrics on device (recommended)", @"icon": @"internaldrive", @"key": @"lyricsCacheEnabled"},
-        @{@"title": @"Selectable lyrics", @"desc": @"Allow selecting / copying text inside the lyrics panel", @"icon": @"textformat.abc", @"key": @"selectableLyrics"},
-        @{@"title": @"FPS meter on volume down", @"desc": @"Volume-down toggles lyric render-rate readout (also lowers volume)", @"icon": @"speedometer", @"key": @"lyricsFpsMeter"},
-        @{@"title": @"Precache queue (next 5)", @"desc": @"Pre-fetch lyrics for upcoming songs when queue changes", @"icon": @"arrow.triangle.2.circlepath", @"key": @"lyricsPrecacheQueue"},
-        @{@"title": @"Auto update lyrics", @"desc": @"Check server for upgraded lyrics when cached lyrics are shown", @"icon": @"arrow.2.circlepath", @"key": @"lyricsAutoUpdate"},
+        @{@"title": LOC(@"LYRICS_ALWAYS_ON"), @"desc": LOC(@"LYRICS_ALWAYS_ON_DESC"), @"icon": @"quote.bubble", @"key": @"lyricsAlwaysOn"},
+        @{@"title": LOC(@"LYRICS_CLIENT_CACHE"), @"desc": LOC(@"LYRICS_CLIENT_CACHE_DESC"), @"icon": @"internaldrive", @"key": @"lyricsCacheEnabled"},
+        @{@"title": LOC(@"LYRICS_SELECTABLE"), @"desc": LOC(@"LYRICS_SELECTABLE_DESC"), @"icon": @"textformat.abc", @"key": @"selectableLyrics"},
+        @{@"title": LOC(@"LYRICS_FPS_METER"), @"desc": LOC(@"LYRICS_FPS_METER_DESC"), @"icon": @"speedometer", @"key": @"lyricsFpsMeter"},
+        @{@"title": LOC(@"LYRICS_PRECACHE"), @"desc": LOC(@"LYRICS_PRECACHE_DESC"), @"icon": @"arrow.triangle.2.circlepath", @"key": @"lyricsPrecacheQueue"},
+        @{@"title": LOC(@"LYRICS_AUTO_UPDATE"), @"desc": LOC(@"LYRICS_AUTO_UPDATE_DESC"), @"icon": @"arrow.2.circlepath", @"key": @"lyricsAutoUpdate"},
         @{@"title": LOC(@"AUTO_SYNC_TITLE"), @"desc": LOC(@"AUTO_SYNC_DESC"), @"icon": @"antenna.radiowaves.left.and.right", @"key": @"lyricsAutoSync"},
         // "iphone" is SF Symbols 1 (iOS 13), so the row never renders a blank
         // icon on the oldest supported device. defaultOn covers a user who has
@@ -237,22 +278,22 @@
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    if (section == 0) return @"Lyrics Display";
+    if (section == 0) return LOC(@"SEC_DISPLAY");
     if (section == 1) return LOC(@"LYRICS_ENGINE");
-    if (section == 2) return @"Client Cache";
-    if (section == 3) return @"Preview (most recent cached)";
-    if (section == 4) return @"Actions";
-    if (section == 5) return @"Timing Offset";
+    if (section == 2) return LOC(@"SEC_CACHE");
+    if (section == 3) return LOC(@"SEC_PREVIEW");
+    if (section == 4) return LOC(@"SEC_ACTIONS");
+    if (section == 5) return LOC(@"SEC_OFFSET");
     return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0) return @"Always show translated lyrics auto-opens the panel and storage is on-device.";
+    if (section == 0) return LOC(@"FOOTER_DISPLAY");
     if (section == 1) return LOC(@"LYRICS_ENGINE_FOOTER");
-    if (section == 2) return @"Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
-    if (section == 3) return @"Preview shows up to 20 lines from the newest cached file.";
-    if (section == 4) return @"Sync pulls songs already translated on the server straight into your local cache — it never re-runs translation, so it's fast and free even for a large backlog.";
-    if (section == 5) return @"Per-song timing offset in seconds. Positive = lyrics ahead of audio. Range: -30 to +30 seconds. Applies to current song only. A skipped non-music intro (SponsorBlock) adds its own shift on top, so the first line lands on the first second of the song.";
+    if (section == 2) return LOC(@"FOOTER_CACHE");
+    if (section == 3) return LOC(@"FOOTER_PREVIEW");
+    if (section == 4) return LOC(@"FOOTER_ACTIONS");
+    if (section == 5) return LOC(@"FOOTER_OFFSET");
     return nil;
 }
 
@@ -344,8 +385,8 @@
     }
     if (indexPath.section == 1) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"API endpoint";
-            cell.detailTextLabel.text = @"Server for fetching + translating lyrics";
+            cell.textLabel.text = LOC(@"LYRICS_API");
+            cell.detailTextLabel.text = LOC(@"LYRICS_API_DESC");
             UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 200, 32)];
             tf.text = dict[@"lyricsApiEndpoint"] ?: @"https://ytmtranslate.chiuhuang.dev";
             tf.borderStyle = UITextBorderStyleRoundedRect;
@@ -363,24 +404,23 @@
             return cell;
         }
         if (indexPath.row == 1) {
-            cell.textLabel.text = @"Translate to";
-            cell.detailTextLabel.text = @"Language code, e.g. zh-TW, zh-CN, en, ja, ko";
-            UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 100, 32)];
-            tf.text = dict[@"lyricsTargetLang"] ?: @"zh-TW";
-            tf.borderStyle = UITextBorderStyleRoundedRect;
-            tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-            tf.autocorrectionType = UITextAutocorrectionTypeNo;
-            tf.textAlignment = NSTextAlignmentRight;
-            tf.accessibilityIdentifier = @"lyricsTargetLang";
-            tf.delegate = self;
-            tf.inputAccessoryView = [self KBToolbar:tf];
-            cell.accessoryView = tf;
+            cell.textLabel.text = LOC(@"LYRICS_TRANSLATE_TO");
+            // Choice row, not a text field: tapping opens the language sheet
+            // (didSelectRowAtIndexPath). The stored value is a code, the
+            // display is the language's own name; "auto" resolves against
+            // the device so the row shows what is actually in use.
+            NSString *chosen = dict[@"lyricsTargetLang"] ?: @"auto";
+            cell.detailTextLabel.text = ([chosen isEqualToString:@"auto"])
+                ? [NSString stringWithFormat:@"%@ · %@",
+                   LOC(@"LANG_AUTO"), YTMUTargetLang()]
+                : YTMULangNativeName(chosen);
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             cell.imageView.image = [UIImage systemImageNamed:@"character.book.closed"];
             return cell;
         }
         if (indexPath.row == 2) {
-            cell.textLabel.text = @"Auto-convert zh-CN to zh-TW";
-            cell.detailTextLabel.text = @"Show Simplified lyrics as Traditional your language is already set to; no translate row";
+            cell.textLabel.text = LOC(@"LYRICS_ZH_AUTO");
+            cell.detailTextLabel.text = LOC(@"LYRICS_ZH_AUTO_DESC");
             cell.imageView.image = [UIImage systemImageNamed:@"textformat.alt"];
             UISwitch *sw = [[UISwitch alloc] init];
             sw.accessibilityIdentifier = @"lyricsAutoZhConvert";
@@ -406,8 +446,8 @@
     }
     if (indexPath.section == 2) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Max cached songs";
-            cell.detailTextLabel.text = @"Number of videoIDs to keep";
+            cell.textLabel.text = LOC(@"LYRICS_CACHE_MAX");
+            cell.detailTextLabel.text = LOC(@"LYRICS_CACHE_MAX_DESC");
             UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
             tf.text = [NSString stringWithFormat:@"%@", dict[@"lyricsCacheMaxCount"] ?: @200];
             tf.borderStyle = UITextBorderStyleRoundedRect;
@@ -421,8 +461,8 @@
             return cell;
         }
         if (indexPath.row == 1) {
-            cell.textLabel.text = @"Max size (MB)";
-            cell.detailTextLabel.text = @"Total cache size limit";
+            cell.textLabel.text = LOC(@"LYRICS_CACHE_SIZE");
+            cell.detailTextLabel.text = LOC(@"LYRICS_CACHE_SIZE_DESC");
             UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
             tf.text = [NSString stringWithFormat:@"%@", dict[@"lyricsCacheMaxSizeMB"] ?: @50];
             tf.borderStyle = UITextBorderStyleRoundedRect;
@@ -437,10 +477,10 @@
         }
         if (indexPath.row == 2) {
             NSDictionary *stats = [self cacheStats];
-            cell.textLabel.text = @"Current usage";
+            cell.textLabel.text = LOC(@"LYRICS_CACHE_USAGE");
             unsigned long long sz = [stats[@"size"] unsignedLongLongValue];
             NSString *szStr = [NSByteCountFormatter stringFromByteCount:sz countStyle:NSByteCountFormatterCountStyleFile];
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ files • %@", stats[@"count"], szStr];
+            cell.detailTextLabel.text = [NSString stringWithFormat:LOC(@"CACHE_USAGE_FMT"), stats[@"count"], szStr];
             cell.imageView.image = [UIImage systemImageNamed:@"chart.bar.doc.horizontal"];
             cell.accessoryType = UITableViewCellAccessoryNone;
             return cell;
@@ -448,7 +488,7 @@
     }
     if (indexPath.section == 3) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Refresh preview";
+            cell.textLabel.text = LOC(@"LYRICS_REFRESH_PREVIEW");
             cell.textLabel.textColor = [UIColor systemBlueColor];
             cell.imageView.image = [UIImage systemImageNamed:@"eye"];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -465,37 +505,37 @@
     }
     if (indexPath.section == 4) {
         if (indexPath.row == 0) {
-            cell.textLabel.text = @"Clear all cached lyrics";
+            cell.textLabel.text = LOC(@"LYRICS_CLEAR_CACHE");
             cell.textLabel.textColor = [UIColor systemRedColor];
             cell.imageView.image = [UIImage systemImageNamed:@"trash"];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
         if (indexPath.row == 1) {
-            cell.textLabel.text = @"Enforce limits now";
+            cell.textLabel.text = LOC(@"LYRICS_ENFORCE");
             cell.textLabel.textColor = [UIColor systemOrangeColor];
             cell.imageView.image = [UIImage systemImageNamed:@"hammer"];
             return cell;
         }
         if (indexPath.row == 2) {
-            cell.textLabel.text = @"Sync cache from server";
-            cell.detailTextLabel.text = @"Pull already-translated songs into local cache";
+            cell.textLabel.text = LOC(@"LYRICS_SYNC_SERVER");
+            cell.detailTextLabel.text = LOC(@"LYRICS_SYNC_SERVER_DESC");
             cell.textLabel.textColor = [UIColor systemBlueColor];
             cell.imageView.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
         if (indexPath.row == 3) {
-            cell.textLabel.text = @"Sync & download (batch)";
-            cell.detailTextLabel.text = @"Hash local cache, fetch missing/upgraded lyrics in one request";
+            cell.textLabel.text = LOC(@"LYRICS_SYNC_BATCH");
+            cell.detailTextLabel.text = LOC(@"LYRICS_SYNC_BATCH_DESC");
             cell.textLabel.textColor = [UIColor systemBlueColor];
             cell.imageView.image = [UIImage systemImageNamed:@"arrow.2.squarepath"];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return cell;
         }
         if (indexPath.row == 4) {
-            cell.textLabel.text = @"Sync a YouTube Music playlist";
-            cell.detailTextLabel.text = @"Fetch lyrics for all tracks in a playlist, tag unlyriced";
+            cell.textLabel.text = LOC(@"LYRICS_SYNC_PLAYLIST");
+            cell.detailTextLabel.text = LOC(@"LYRICS_SYNC_PLAYLIST_DESC");
             cell.textLabel.textColor = [UIColor systemPurpleColor];
             cell.imageView.image = [UIImage systemImageNamed:@"music.note.list"];
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
@@ -503,14 +543,14 @@
         }
     }
     if (indexPath.section == 5) {
-        cell.textLabel.text = @"Current song offset";
+        cell.textLabel.text = LOC(@"LYRICS_OFFSET_CURRENT");
         NSString *vid = g_currentVideoID ?: @"";
         double manual = YTMULyricsManualOffsetForVideoID(vid);
         double autoOffset = YTMULyricsSponsorOffsetForVideoID(vid);
         if (fabs(autoOffset) >= 0.05) {
-            cell.detailTextLabel.text = [NSString stringWithFormat:@"Skipped intro: %+.1fs (automatic, cleared when unskipped)", autoOffset];
+            cell.detailTextLabel.text = [NSString stringWithFormat:LOC(@"LYRICS_OFFSET_SKIPPED"), autoOffset];
         } else {
-            cell.detailTextLabel.text = @"Adjust lyrics timing for this song only";
+            cell.detailTextLabel.text = LOC(@"LYRICS_OFFSET_ADJUST");
         }
         cell.imageView.image = [UIImage systemImageNamed:@"clock.arrow.circlepath"];
         UITextField *tf = [[UITextField alloc] initWithFrame:CGRectMake(0, 0, 80, 32)];
@@ -529,15 +569,19 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 1 && indexPath.row == 1) {
+        [self showLanguageChooserAtIndexPath:indexPath];
+        return;
+    }
     if (indexPath.section == 3 && indexPath.row == 0) {
         [self loadPreview];
         [tableView reloadSections:[NSIndexSet indexSetWithIndex:3] withRowAnimation:UITableViewRowAnimationAutomatic];
         return;
     }
     if (indexPath.section == 4 && indexPath.row == 0) {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Clear cache" message:@"Remove all cached lyrics from device?" preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-        [a addAction:[UIAlertAction actionWithTitle:@"Clear" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act){
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"ALERT_CLEAR_TITLE") message:LOC(@"ALERT_CLEAR_MSG") preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:LOC(@"CANCEL") style:UIAlertActionStyleCancel handler:nil]];
+        [a addAction:[UIAlertAction actionWithTitle:LOC(@"ALERT_CLEAR_OK") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *act){
             NSString *dir = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"YTMU_LyricsCache"];
             [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
             [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -553,8 +597,8 @@
         NSArray *files = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dir error:nil] ?: @[];
         // trigger save logic by removing oldest until under limits
         NSDictionary *stats = [self cacheStats];
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Enforced" message:[NSString stringWithFormat:@"Checked %lu files, total %@", (unsigned long)files.count, [NSByteCountFormatter stringFromByteCount:[stats[@"size"] unsignedLongLongValue] countStyle:NSByteCountFormatterCountStyleFile]] preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"ALERT_ENFORCED_TITLE") message:[NSString stringWithFormat:LOC(@"ALERT_ENFORCED_MSG"), (unsigned long)files.count, [NSByteCountFormatter stringFromByteCount:[stats[@"size"] unsignedLongLongValue] countStyle:NSByteCountFormatterCountStyleFile]] preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:LOC(@"YES") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationNone];
     }
@@ -575,6 +619,41 @@
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
     d[key] = @(sender.isOn);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+}
+
+// Language chooser: an action sheet over the shared option list. Stored
+// value is the server code ("auto" travels as the literal string; YTMUTarget
+// Lang() treats "auto" and unset the same). Nothing is typed by hand, so a
+// bad value can no longer leave the sheet. The bullet marks the current
+// choice; the change lands on the next lyrics fetch (no live refetch from
+// here -- the sheet holds no handle for one and would only duplicate the
+// in-flight race).
+- (void)showLanguageChooserAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *current = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"][@"lyricsTargetLang"];
+    if (![current isKindOfClass:[NSString class]] || !current.length) current = @"auto";
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:LOC(@"LYRICS_TRANSLATE_TO")
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSString *code in YTMULangOptionCodes()) {
+        NSString *title = [code isEqualToString:@"auto"]
+            ? [NSString stringWithFormat:@"%@ · %@", LOC(@"LANG_AUTO"), YTMUTargetLang()]
+            : YTMULangNativeName(code);
+        if ([code isEqualToString:current]) title = [@"• " stringByAppendingString:title];
+        UIAlertAction *act = [UIAlertAction actionWithTitle:title
+                                                      style:UIAlertActionStyleDefault
+                                                    handler:^void(UIAlertAction *a){
+            NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
+            d[@"lyricsTargetLang"] = code;
+            [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+            // The engine section carries the language context rows
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1] withRowAnimation:UITableViewRowAnimationAutomatic];
+        }];
+        [sheet addAction:act];
+    }
+    [sheet addAction:[UIAlertAction actionWithTitle:LOC(@"CANCEL") style:UIAlertActionStyleCancel handler:nil]];
+    sheet.popoverPresentationController.sourceView = self.tableView;
+    sheet.popoverPresentationController.sourceRect = [self.tableView rectForRowAtIndexPath:indexPath];
+    [self presentViewController:sheet animated:YES completion:nil];
 }
 
 // Typewriter reveal speed. The lyric tick reads this every frame, so the
@@ -690,10 +769,10 @@
         if (![items isKindOfClass:[NSArray class]]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [overlay dismissAnimated];
-                UIAlertController *fail = [UIAlertController alertControllerWithTitle:@"Sync failed"
-                    message:error ? error.localizedDescription : @"Server did not return a valid cache list."
+                UIAlertController *fail = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_FAILED")
+                    message:error ? error.localizedDescription : LOC(@"SYNC_NO_LIST")
                     preferredStyle:UIAlertControllerStyleAlert];
-                [fail addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [fail addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:fail animated:YES completion:nil];
             });
             return;
@@ -718,10 +797,10 @@
         if (toFetch.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [overlay dismissAnimated];
-                UIAlertController *done = [UIAlertController alertControllerWithTitle:@"Already up to date"
-                    message:[NSString stringWithFormat:@"Server has %lu song(s) cached for %@ -- all already on this device.", (unsigned long)items.count, lang]
+                UIAlertController *done = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_UP_TO_DATE")
+                    message:[NSString stringWithFormat:LOC(@"SYNC_UP_TO_DATE_MSG"), (unsigned long)items.count, lang]
                     preferredStyle:UIAlertControllerStyleAlert];
-                [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [done addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:done animated:YES completion:nil];
             });
             return;
@@ -729,9 +808,9 @@
 
         NSInteger total = toFetch.count;
         dispatch_async(dispatch_get_main_queue(), ^{
-            overlay.itemLabel.text = @"Starting…";
+            overlay.itemLabel.text = LOC(@"SYNC_STARTING");
             overlay.progressView.progress = 0.0;
-            overlay.countLabel.text = [NSString stringWithFormat:@"0 of %ld", (long)total];
+            overlay.countLabel.text = [NSString stringWithFormat:LOC(@"SYNC_COUNT_FMT"), (long)0, (long)total];
         });
 
         __block NSInteger fetched = 0, failed = 0;
@@ -783,8 +862,10 @@
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (ok) fetched++; else failed++;
                     overlay.progressView.progress = (float)(fetched + failed) / (float)total;
-                    overlay.countLabel.text = [NSString stringWithFormat:@"%ld of %ld%@", (long)(fetched + failed), (long)total,
-                                                failed > 0 ? [NSString stringWithFormat:@" • %ld failed", (long)failed] : @""];
+                    NSString *countBase = [NSString stringWithFormat:LOC(@"SYNC_COUNT_FMT"), (long)(fetched + failed), (long)total];
+                    overlay.countLabel.text = failed > 0
+                        ? [countBase stringByAppendingString:[NSString stringWithFormat:LOC(@"SYNC_FAILED_SUFFIX"), (long)failed]]
+                        : countBase;
                 });
                 dispatch_group_leave(group);
             }];
@@ -793,11 +874,11 @@
         dispatch_group_notify(group, dispatch_get_main_queue(), ^{
             if (cancelled) return; // overlay already dismissed by the cancel handler
             [overlay dismissAnimated];
-            UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:@"Sync complete"
-                message:[NSString stringWithFormat:@"Downloaded %ld new song(s)%@.", (long)fetched,
-                         failed > 0 ? [NSString stringWithFormat:@" (%ld failed)", (long)failed] : @""]
+            UIAlertController *doneAlert = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_COMPLETE")
+                message:[NSString stringWithFormat:LOC(@"SYNC_COMPLETE_MSG"), (long)fetched,
+                         failed > 0 ? [NSString stringWithFormat:LOC(@"SYNC_FAIL_PAREN"), (long)failed] : @""]
                 preferredStyle:UIAlertControllerStyleAlert];
-            [doneAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [doneAlert addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
             [weakSelf presentViewController:doneAlert animated:YES completion:nil];
             [weakSelf loadPreview];
             [weakSelf.tableView reloadData];
@@ -820,16 +901,16 @@
     // Collect all cache entries (video_id + hash + cv) from LyricsCore.
     NSArray *cacheEntries = YTMULyricsCacheEntries();
     if (!cacheEntries.count) {
-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Nothing to sync"
-            message:@"Local lyrics cache is empty." preferredStyle:UIAlertControllerStyleAlert];
-        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_NOTHING")
+            message:LOC(@"SYNC_NOTHING_MSG") preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
         [self presentViewController:a animated:YES completion:nil];
         return;
     }
 
     YTMUSyncProgressOverlay *overlay = [[YTMUSyncProgressOverlay alloc] initWithFrame:self.view.bounds];
-    overlay.titleLabel.text  = @"Batch sync";
-    overlay.itemLabel.text   = [NSString stringWithFormat:@"Hashing %lu cached songs…", (unsigned long)cacheEntries.count];
+    overlay.titleLabel.text  = LOC(@"BATCH_TITLE");
+    overlay.itemLabel.text   = [NSString stringWithFormat:LOC(@"BATCH_HASHING"), (unsigned long)cacheEntries.count];
     overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     overlay.alpha = 0.0;
     [self.view addSubview:overlay];
@@ -873,7 +954,7 @@
     req.HTTPBody = bodyData;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        weakOverlay.itemLabel.text = @"Uploading hashes…";
+        weakOverlay.itemLabel.text = LOC(@"BATCH_UPLOADING");
     });
 
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req
@@ -882,8 +963,8 @@
         if (!data || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakOverlay dismissAnimated];
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Sync failed"
-                    message:error.localizedDescription ?: @"No response from server."
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_FAILED")
+                    message:error.localizedDescription ?: LOC(@"SYNC_NO_RESPONSE")
                     preferredStyle:UIAlertControllerStyleAlert];
                 [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:a animated:YES completion:nil];
@@ -894,8 +975,8 @@
         if (![root isKindOfClass:[NSDictionary class]]) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakOverlay dismissAnimated];
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Sync failed"
-                    message:@"Unexpected response from server." preferredStyle:UIAlertControllerStyleAlert];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"SYNC_FAILED")
+                    message:LOC(@"SYNC_BAD_RESPONSE") preferredStyle:UIAlertControllerStyleAlert];
                 [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:a animated:YES completion:nil];
             });
@@ -929,11 +1010,11 @@
             // No regen job needed — show summary and done.
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakOverlay dismissAnimated];
-                NSString *msg = [NSString stringWithFormat:@"Up-to-date: %ld  Updated: %ld  Missing (no server data): %ld",
+                NSString *msg = [NSString stringWithFormat:LOC(@"BATCH_SUMMARY_FMT"),
                                  (long)okCount, (long)saved, (long)missing.count];
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Batch sync complete"
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"BATCH_COMPLETE")
                     message:msg preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:a animated:YES completion:nil];
                 [weakSelf loadPreview];
                 [weakSelf.tableView reloadData];
@@ -943,9 +1024,9 @@
 
         // Poll the regen job.
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakOverlay.itemLabel.text = [NSString stringWithFormat:@"Server regenerating %lu missing…", (unsigned long)missing.count];
+            weakOverlay.itemLabel.text = [NSString stringWithFormat:LOC(@"BATCH_REGEN_FMT"), (unsigned long)missing.count];
             weakOverlay.progressView.progress = 0.0;
-            weakOverlay.countLabel.text       = [NSString stringWithFormat:@"0 of %lu", (unsigned long)missing.count];
+            weakOverlay.countLabel.text       = [NSString stringWithFormat:LOC(@"SYNC_COUNT_FMT"), (long)0, (long)missing.count];
         });
 
         NSString *statusURLStr = [NSString stringWithFormat:@"%@/api/lyrics/sync/status/%@", base, jobID];
@@ -1019,17 +1100,17 @@
 
                 dispatch_async(dispatch_get_main_queue(), ^{
                     weakOverlay.progressView.progress = total2 > 0 ? (float)done / (float)total2 : 1.0;
-                    weakOverlay.countLabel.text = [NSString stringWithFormat:@"%ld of %ld done (%ld saved)", (long)done, (long)total2, (long)regenSaved];
+                    weakOverlay.countLabel.text = [NSString stringWithFormat:LOC(@"BATCH_REGEN_COUNT_FMT"), (long)done, (long)total2, (long)regenSaved];
                 });
 
                 if ([state isEqualToString:@"complete"] || [state isEqualToString:@"stopped"]) {
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [weakOverlay dismissAnimated];
-                        NSString *msg = [NSString stringWithFormat:@"Up-to-date: %ld  Downloaded: %ld  Regenerated+saved: %ld  Missing: %ld",
+                        NSString *msg = [NSString stringWithFormat:LOC(@"BATCH_SUMMARY2_FMT"),
                                          (long)okCount, (long)saved, (long)succ, (long)(missing.count - succ)];
-                        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Batch sync complete"
+                        UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"BATCH_COMPLETE")
                             message:msg preferredStyle:UIAlertControllerStyleAlert];
-                        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                         [weakSelf presentViewController:a animated:YES completion:nil];
                         [weakSelf loadPreview];
                         [weakSelf.tableView reloadData];
@@ -1056,8 +1137,8 @@
     NSString *lang = [self ytmu_targetLang];
     BOOL autoZh    = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
 
-    UIAlertController *prompt = [UIAlertController alertControllerWithTitle:@"Sync playlist"
-        message:@"Paste a YouTube Music playlist URL or ID:"
+    UIAlertController *prompt = [UIAlertController alertControllerWithTitle:LOC(@"PLAYLIST_PROMPT_TITLE")
+        message:LOC(@"PLAYLIST_PROMPT_MSG")
         preferredStyle:UIAlertControllerStyleAlert];
     [prompt addTextFieldWithConfigurationHandler:^(UITextField *tf) {
         tf.placeholder = @"PLxxxxxxxx or https://music.youtube.com/playlist?list=PL…";
@@ -1066,8 +1147,8 @@
         tf.autocorrectionType = UITextAutocorrectionTypeNo;
     }];
     __weak typeof(self) weakSelf = self;
-    [prompt addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [prompt addAction:[UIAlertAction actionWithTitle:@"Sync" style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
+    [prompt addAction:[UIAlertAction actionWithTitle:LOC(@"CANCEL") style:UIAlertActionStyleCancel handler:nil]];
+    [prompt addAction:[UIAlertAction actionWithTitle:LOC(@"SYNC_BTN") style:UIAlertActionStyleDefault handler:^(UIAlertAction *act) {
         NSString *input = [prompt.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (!input.length) return;
         [weakSelf _doPlaylistSync:input base:base lang:lang autoZh:autoZh];
@@ -1077,8 +1158,8 @@
 
 - (void)_doPlaylistSync:(NSString *)playlistInput base:(NSString *)base lang:(NSString *)lang autoZh:(BOOL)autoZh {
     YTMUSyncProgressOverlay *overlay = [[YTMUSyncProgressOverlay alloc] initWithFrame:self.view.bounds];
-    overlay.titleLabel.text  = @"Playlist sync";
-    overlay.itemLabel.text   = @"Contacting server…";
+    overlay.titleLabel.text  = LOC(@"PLAYLIST_TITLE");
+    overlay.itemLabel.text   = LOC(@"PLAYLIST_CONTACTING");
     overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     overlay.alpha = 0.0;
     [self.view addSubview:overlay];
@@ -1109,9 +1190,9 @@
         if (!data || error) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakOverlay dismissAnimated];
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync failed"
-                    message:error.localizedDescription ?: @"No response." preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"PLAYLIST_FAILED")
+                    message:error.localizedDescription ?: LOC(@"PLAYLIST_NO_RESPONSE") preferredStyle:UIAlertControllerStyleAlert];
+                [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:a animated:YES completion:nil];
             });
             return;
@@ -1121,10 +1202,10 @@
         if (!jobID.length) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [weakOverlay dismissAnimated];
-                NSString *errMsg = root[@"error"] ?: @"Server did not return a job_id.";
-                UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync failed"
+                NSString *errMsg = root[@"error"] ?: LOC(@"PLAYLIST_NO_JOB");
+                UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"PLAYLIST_FAILED")
                     message:errMsg preferredStyle:UIAlertControllerStyleAlert];
-                [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                 [weakSelf presentViewController:a animated:YES completion:nil];
             });
             return;
@@ -1145,7 +1226,7 @@
         };
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            weakOverlay.itemLabel.text = @"Fetching playlist tracks…";
+            weakOverlay.itemLabel.text = LOC(@"PLAYLIST_FETCHING");
         });
 
         dispatch_queue_t bgQ = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
@@ -1169,7 +1250,7 @@
                     weakOverlay.itemLabel.text = current.length ? current : state;
                     if (total > 0) {
                         weakOverlay.progressView.progress = (float)done / (float)total;
-                        weakOverlay.countLabel.text = [NSString stringWithFormat:@"%ld / %ld tracks  •  %ld found", (long)done, (long)total, (long)found];
+                        weakOverlay.countLabel.text = [NSString stringWithFormat:LOC(@"PLAYLIST_TRACKS_FMT"), (long)done, (long)total, (long)found];
                     }
                 });
 
@@ -1186,16 +1267,16 @@
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [weakOverlay dismissAnimated];
                         NSMutableString *msg = [NSMutableString string];
-                        [msg appendFormat:@"%ld found, %ld unlyriced, %ld errors.\n",
+                        [msg appendFormat:LOC(@"PLAYLIST_SUMMARY_FMT"),
                              (long)foundList.count, (long)unlyricedList.count,
                              (long)([st[@"error_count"] integerValue])];
                         if (foundList.count > 0 && foundList.count <= 10) {
-                            [msg appendString:@"\nFound:\n"];
+                            [msg appendString:LOC(@"PLAYLIST_FOUND_HDR")];
                             for (NSString *s in foundList) [msg appendFormat:@"  %@\n", s];
                         }
-                        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Playlist sync complete"
+                        UIAlertController *a = [UIAlertController alertControllerWithTitle:LOC(@"PLAYLIST_COMPLETE")
                             message:msg preferredStyle:UIAlertControllerStyleAlert];
-                        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [a addAction:[UIAlertAction actionWithTitle:LOC(@"OK") style:UIAlertActionStyleDefault handler:nil]];
                         [weakSelf presentViewController:a animated:YES completion:nil];
                         [weakSelf loadPreview];
                         [weakSelf.tableView reloadData];
@@ -1228,16 +1309,6 @@
         d[key] = urlStr;
         [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
         textField.text = urlStr;
-        return;
-    }
-
-    if ([key isEqualToString:@"lyricsTargetLang"]) {
-        NSString *lang = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (!lang.length) lang = @"zh-TW";
-        NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
-        d[key] = lang;
-        [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
-        textField.text = lang;
         return;
     }
 
