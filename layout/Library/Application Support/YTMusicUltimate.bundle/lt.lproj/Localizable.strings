@@ -128,7 +128,7 @@
 "UPDATE_WHATS_NEW" = "Kas naujo:\n%@";
 
 "LYRICS_ENGINE" = "Dainos žodžių variklis";
-"LYRICS_ENGINE_FOOTER" = "Serveris gauna dainos žodžius ir verčia juos į žemiau nustatytą kalbą. Eilutės, jau parašytos tuo kinų rašmenų sistemos šriftu, tik suvienodinamos pagal rašmenų sistemą ir niekada neperduodamos vertėjui. Srautinis vertimas piešia kiekvieną eilutę ties modeliui rašant, o rašomosios mašinos efektas rašo vertimą po aktyvia eilute.";
+"LYRICS_ENGINE_FOOTER" = "Serveris gauna dainos žodžius ir verčia juos į žemiau nustatytą kalbą. Srautinis vertimas piešia kiekvieną eilutę ties modeliui rašant, o rašomosios mašinos efektas rašo vertimą po aktyvia eilute.";
 "STREAM_TRANSLATE" = "Srautinis vertimas";
 "STREAM_TRANSLATE_DESC" = "Pieš kiekvieną verčią eilutę, kol modelis rašo, nesulaukdamas visos dainos";
 "TYPEWRITER" = "Rašomosios mašinos efektas";

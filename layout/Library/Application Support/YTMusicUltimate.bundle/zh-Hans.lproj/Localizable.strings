@@ -129,7 +129,7 @@
 
 "LYRICS_ENGINE" = "歌词引擎";
 
-"LYRICS_ENGINE_FOOTER" = "服务器负责抓取歌词并翻译成下方指定的语言。已经是该中文字体的歌词只会做简繁转换，不会送去翻译。流式翻译会在模型输出的当下逐行显示，打字机效果则会在当前歌词下方逐字显示译文。";
+"LYRICS_ENGINE_FOOTER" = "服务器负责抓取歌词并翻译成下方指定的语言。流式翻译会在模型输出的当下逐行显示，打字机效果则会在当前歌词下方逐字显示译文。";
 
 "STREAM_TRANSLATE" = "流式翻译";
 
@@ -250,5 +250,5 @@
 "LYRICS_DUET_ALIGN" = "对齐";
 
 "LYRICS_DUET_LABEL" = "标签";
-"LYRICS_PINYIN" = "Pinyin";
-"LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";
+"LYRICS_PINYIN" = "拼音";
+"LYRICS_PINYIN_DESC" = "当歌词附有罗马拼音时，显示在歌词行下方";

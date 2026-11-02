@@ -128,7 +128,7 @@
 "UPDATE_WHATS_NEW" = "Có gì mới:\n%@";
 
 "LYRICS_ENGINE" = "Động cơ lời bài hát";
-"LYRICS_ENGINE_FOOTER" = "Máy chủ lấy lời bài hát và dịch sang ngôn ngữ đặt bên dưới. Dòng đã viết bằng chữ Hán kia chỉ được chuẩn hóa chữ viết, không bao giờ gửi sang bộ dịch. Dịch theo luồng hiển thị từng dòng ngay khi mô hình đang viết, còn hiệu ứng máy đánh máy gõ từng chữ dưới dòng đang nổi bật.";
+"LYRICS_ENGINE_FOOTER" = "Máy chủ lấy lời bài hát và dịch sang ngôn ngữ đặt bên dưới. Dịch theo luồng hiển thị từng dòng ngay khi mô hình đang viết, còn hiệu ứng máy đánh máy gõ từng chữ dưới dòng đang nổi bật.";
 "STREAM_TRANSLATE" = "Dịch theo luồng";
 "STREAM_TRANSLATE_DESC" = "Hiển thị từng dòng đã dịch ngay khi mô hình đang viết, thay vì chờ hết cả bài";
 "TYPEWRITER" = "Hiệu ứng máy đánh máy";

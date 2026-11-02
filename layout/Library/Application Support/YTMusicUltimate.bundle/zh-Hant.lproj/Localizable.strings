@@ -129,7 +129,7 @@
 
 "LYRICS_ENGINE" = "歌詞引擎";
 
-"LYRICS_ENGINE_FOOTER" = "伺服器負責抓取歌詞並翻譯成下方指定的語言。已經是該中文字體的歌詞只會做簡繁轉換，不會送去翻譯。串流翻譯會在模型輸出的當下逐行顯示，打字機效果則會在當前歌詞下方逐字顯示譯文。";
+"LYRICS_ENGINE_FOOTER" = "伺服器負責抓取歌詞並翻譯成下方指定的語言。串流翻譯會在模型輸出的當下逐行顯示，打字機效果則會在當前歌詞下方逐字顯示譯文。";
 
 "STREAM_TRANSLATE" = "串流翻譯";
 
@@ -191,8 +191,8 @@
 
 "DEBUG_TEST_BLOCKED" = "未傳送。上傳被總開關、記錄等級或伺服器的 upload_logs 開關封鎖。";
 
-"LYRICS_FULLSCREEN" = "旋轉時全蟾幕";
-"LYRICS_FULLSCREEN_DESC" = "轉到橫向時自動全蟾幕顯示歌詞";
+"LYRICS_FULLSCREEN" = "旋轉時全螢幕";
+"LYRICS_FULLSCREEN_DESC" = "轉到橫向時自動全螢幕顯示歌詞";
 
 "LG_TITLE" = "液態玻璃 V2";
 "LG_SECTION_THEME" = "主題";
@@ -243,12 +243,12 @@
 
 "LYRICS_DUET" = "合唱歌曲";
 
-"LYRICS_DUET_DESC" = "合唱时如何顯示每行是誰者在單.";
+"LYRICS_DUET_DESC" = "合唱歌曲時，標示每行由哪位演唱者演唱。";
 
 "LYRICS_DUET_OFF" = "關閉";
 
 "LYRICS_DUET_ALIGN" = "對齊";
 
-"LYRICS_DUET_LABEL" = "標穤";
-"LYRICS_PINYIN" = "Pinyin";
-"LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";
+"LYRICS_DUET_LABEL" = "標籤";
+"LYRICS_PINYIN" = "拼音";
+"LYRICS_PINYIN_DESC" = "當歌詞附有羅馬拼音時，顯示在歌詞行下方";
