@@ -74,6 +74,16 @@ static void Screen(UIViewController *c, NSString *k) {
         NSString *controllerName = NSStringFromClass(c.class);
         BOOL resultsPage = [controllerName containsString:@"Results"] ||
                            [controllerName containsString:@"SearchResponse"];
+        // containsString("SearchResponse") alone would have still caught the
+        // lightweight list (its class is
+        // YTMLightweightSearchSuggestionsResponseViewController), but hooking
+        // the list hosts separately is what brings them into the walk at all.
+        c.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        // Force-dark, not just clears: the list's white fill need not compare
+        // equal to whiteColor/systemBackgroundColor (MDC dynamic colours only
+        // resolve against a trait collection), and this one line turns every
+        // system colour the tree inherits dark. The page is dark-glass by
+        // design either way.
         YTMUStyleSearchPage(c.view, resultsPage);
     }
 }
@@ -231,6 +241,17 @@ static void YTMUPlaylistReorderLayoutSubviews(id self, SEL _cmd) {
         @"YTMSearchViewController": @"searchV2Enabled",
         @"YTMSearchResponseViewController": @"searchV2Enabled",
         @"YTMSearchResultsViewController": @"searchV2Enabled",
+        // The RESULT LIST itself lives under the suggestions chain: the dump
+        // hierarchy is YTMSearchViewController -> YTMSearchSuggestionsView-
+        // Controller -> YTMLightweightSearchSuggestionsResponseViewController
+        // -> YTLightweightCollectionViewController, and none of these three
+        // was hooked -- so the whole list kept ITS OWN white background (the
+        // "why is the background white" report) no matter what the response
+        // page's walk cleared. Hooking the list hosts puts them under the
+        // same clear + walk as every other search page.
+        @"YTMSearchSuggestionsViewController": @"searchV2Enabled",
+        @"YTMLightweightSearchSuggestionsResponseViewController": @"searchV2Enabled",
+        @"YTLightweightCollectionViewController": @"searchV2Enabled",
         @"YTMLibraryViewController": @"libraryV2Enabled",
         @"YTMLibraryTabViewController": @"libraryV2Enabled",
         @"YTMAlbumViewController": @"albumV2Enabled",

@@ -73,7 +73,15 @@
     } if (section == 3) {
         NSDictionary *infoDictionary = [[NSBundle mainBundle] infoDictionary];
         NSString *appVersion = infoDictionary[@"CFBundleShortVersionString"];
-        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@\nYTMusicUltimate: v%@\nBuild: %@", appVersion, @(OS_STRINGIFY(TWEAK_VERSION)), @TWEAK_GIT_COMMIT];
+#ifndef TWEAK_BUILD
+#define TWEAK_BUILD 0
+#endif
+        // "9.26.2.313": the YouTube Music app the tweak is running against,
+        // plus the tweak's own CI build as the fourth segment. One string a
+        // screenshot can carry -- no guessing between "latest" and "the one
+        // I actually installed".
+        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@.%@\nBuild: %@",
+                appVersion, @OS_STRINGIFY(TWEAK_BUILD), @TWEAK_GIT_COMMIT];
     }
 
     return nil;

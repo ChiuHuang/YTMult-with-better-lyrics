@@ -8,6 +8,9 @@
 #ifndef TWEAK_VERSION
 #define TWEAK_VERSION 0
 #endif
+#ifndef TWEAK_BUILD
+#define TWEAK_BUILD 0
+#endif
 // Comes from <rootless.h> via Localization.h in the sibling settings pages;
 // defined here too so this file does not depend on that include chain.
 #ifndef OS_STRINGIFY
@@ -367,7 +370,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     [block appendFormat:@"when: %@\n", [NSDateFormatter localizedStringFromDate:[NSDate date]
                                                                     dateStyle:NSDateFormatterMediumStyle
                                                                     timeStyle:NSDateFormatterMediumStyle]];
-    [block appendFormat:@"tweak: %@ (%@)\n", @OS_STRINGIFY(TWEAK_VERSION), @TWEAK_GIT_COMMIT];
+    [block appendFormat:@"tweak: %@.%@ (%@)\n", @OS_STRINGIFY(TWEAK_VERSION), @OS_STRINGIFY(TWEAK_BUILD), @TWEAK_GIT_COMMIT];
     [block appendFormat:@"device: %@ (iOS %@)\n", device.model, device.systemVersion];
     [block appendFormat:@"endpoint: %@\n", YTMUApiBase()];
     [block appendFormat:@"lang: %@\n", YTMUTargetLang()];

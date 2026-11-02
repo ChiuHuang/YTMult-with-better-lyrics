@@ -104,9 +104,11 @@ jobs:
         run: wget "${{ env.IPA_URL }}" --no-verbose -O ytm.ipa
 
       - name: Build Tweak for Sideloading
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           cd main
-          make clean package DEBUG=0 FINALPACKAGE=1 SIDELOADING=1
+          make clean package DEBUG=0 FINALPACKAGE=1 SIDELOADING=1 BUILD_NUMBER=$BUILD_NUMBER
           mv packages/*.deb ../ytmult.deb
 
       - name: Inject tweak into provided IPA
