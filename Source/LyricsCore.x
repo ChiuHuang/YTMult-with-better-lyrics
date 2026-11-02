@@ -193,11 +193,34 @@ NSString *YTMUApiBase(void) {
     while ([base hasSuffix:@"/"]) base = [base substringToIndex:base.length - 1];
     return base;
 }
+// The translate-target language. "auto" (or unset) follows the DEVICE
+// language: BCP-47 preferred language mapped onto what the server
+// understands (zh-*-Hant / TW / HK -> zh-TW, other zh -> zh-CN, otherwise
+// the bare language code, which the server accepts verbatim). The old
+// behaviour pinned a hardcoded zh-TW even on a Japanese device.
 NSString *YTMUTargetLang(void) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
     NSString *lang = settings[@"lyricsTargetLang"];
-    if (![lang isKindOfClass:[NSString class]] || !lang.length) return @"zh-TW";
-    return lang;
+    if ([lang isKindOfClass:[NSString class]] && lang.length &&
+        ![lang isEqualToString:@"auto"]) return lang;
+    // Device resolution is process-stable: iOS restarts the app when the
+    // system language changes, so a memo costs nothing.
+    static NSString *deviceLang;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *bcp = [NSLocale preferredLanguages].firstObject ?: @"";
+        NSArray *parts = [bcp componentsSeparatedByString:@"-"];
+        if (parts.count && [parts[0] isEqualToString:@"zh"]) {
+            deviceLang = ([bcp containsString:@"Hant"] ||
+                          [bcp containsString:@"-TW"] ||
+                          [bcp containsString:@"-HK"]) ? @"zh-TW" : @"zh-CN";
+        } else if (parts.count > 1 && ((NSString *)parts[0]).length) {
+            deviceLang = parts[0];
+        } else {
+            deviceLang = bcp.length ? bcp : @"zh-TW";
+        }
+    });
+    return deviceLang ?: @"zh-TW";
 }
 NSString *YTMUAutoZhParam(void) {
     NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
