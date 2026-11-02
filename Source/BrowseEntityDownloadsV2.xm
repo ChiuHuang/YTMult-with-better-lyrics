@@ -80,11 +80,15 @@ static void Screen(UIViewController *c, NSString *k) {
         // YTMLightweightSearchSuggestionsResponseViewController), but hooking
         // the list hosts separately is what brings them into the walk at all.
         c.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        // Force-dark, not just clears: the list's white fill need not compare
-        // equal to whiteColor/systemBackgroundColor (MDC dynamic colours only
-        // resolve against a trait collection), and this one line turns every
-        // system colour the tree inherits dark. The page is dark-glass by
-        // design either way.
+        // THE BUG, found by toggling this very setting: the white page is OUR
+        // product, not the app's. Screen() transparentised the controller and
+        // the walk only ever killed two EXACT pointer-compared fills, so the
+        // app's real page background was never going dark -- while
+        // YTMUStyleSearchText painted every label in the tree white on top of
+        // it. White on white. The fix stops guessing what the app drew and
+        // OWNS the base: our own dark ink under the whole page, so the
+        // clearings below reveal US and the white text has a dark canvas.
+        c.view.backgroundColor = YTMULGOlive();
         YTMUStyleSearchPage(c.view, resultsPage);
     }
 }
@@ -167,6 +171,19 @@ static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger d
         [root.backgroundColor isEqual:[UIColor systemBackgroundColor]]) {
         root.backgroundColor = UIColor.clearColor;
     }
+    // Round FOUR, resolved lightness instead of pointer references: the exact
+    // semantic compares missed every fill that is merely LIGHT (grey
+    // wrappers, resolved Material colours) and those are exactly what kept
+    // shining over the dark base. A neutral, opaque, bright fill is page
+    // chrome by definition -- kill it to clear so the page's own dark base
+    // shows. Vivid or dark colours, and our own patterned views, survive.
+    CGFloat lr = 0, lg = 0, lb = 0, la = 0;
+    if ([root.backgroundColor getRed:&lr green:&lg blue:&lb alpha:&la]) {
+        CGFloat lo = MIN(MIN(lr, lg), lb), hi = MAX(MAX(lr, lg), lb);
+        if (la >= .5 && (hi - lo) <= .06 && hi >= .72) {
+            root.backgroundColor = UIColor.clearColor;
+        }
+    }
     // WHITE FIX, third round: the search result rows are AsyncDisplayKit —
     // _ASCollectionViewCell / _ASDisplayView, and the white fill the Build
     // 316 screenshots still show is painted BY THE NODE (ASDK rasterizes the
@@ -187,9 +204,20 @@ static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger d
                 SEL bgSel = NSSelectorFromString(@"backgroundColor");
                 if ([node respondsToSelector:bgSel]) {
                     id col = ((id (*)(id, SEL))objc_msgSend)(node, bgSel);
-                    if (col == UIColor.whiteColor ||
-                        [col isEqual:[UIColor systemBackgroundColor]] ||
-                        [col isEqual:[UIColor secondarySystemBackgroundColor]]) {
+                    // The exact semantic compares survived three rounds of the
+                    // user's screenshots, so the node fill is a bypass, a
+                    // resolved near-white, which the same resolved-lightness
+                    // rule as the view level now catches. Patterned node
+                    // colours answer NO and are skipped.
+                    BOOL nodeKill = col == UIColor.whiteColor ||
+                                    [col isEqual:[UIColor systemBackgroundColor]] ||
+                                    [col isEqual:[UIColor secondarySystemBackgroundColor]];
+                    CGFloat nr = 0, ng = 0, nb = 0, na = 0;
+                    if (!nodeKill && [col getRed:&nr green:&ng blue:&nb alpha:&na]) {
+                        CGFloat lo = MIN(MIN(nr, ng), nb), hi = MAX(MAX(nr, ng), nb);
+                        nodeKill = (na >= .5 && (hi - lo) <= .06 && hi >= .72);
+                    }
+                    if (nodeKill) {
                         SEL setBgSel = NSSelectorFromString(@"setBackgroundColor:");
                         if ([node respondsToSelector:setBgSel]) {
                             ((void (*)(id, SEL, id))objc_msgSend)(node, setBgSel, UIColor.clearColor);
