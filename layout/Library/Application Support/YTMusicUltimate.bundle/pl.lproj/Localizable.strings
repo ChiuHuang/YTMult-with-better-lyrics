@@ -178,8 +178,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Karta okładki, szklane sterowanie, suwak i podzielony nagłówek.";
 "LG_LYRICS_V2" = "Tekst utworu V2";
 "LG_LYRICS_V2_DESC" = "Tło immersyjne z rozmytą okładką za tekstem piosenki.";
-"LG_LYRICS_BUTTON" = "Przycisk tekstu";
-"LG_LYRICS_BUTTON_DESC" = "Zachowuje widoczne wejście do tekstu w V1 i V2.";
 "LG_QUEUE_V2" = "Kolejka V2";
 "LG_QUEUE_V2_DESC" = "Szklana lista „Następne” i nagłówek kolejki.";
 "LG_HOME_V2" = "Główna V2";

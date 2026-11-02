@@ -178,8 +178,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Viršelio kortelė, stiklinė valdymo juosta, slankiklis ir padalinta antraštė.";
 "LG_LYRICS_V2" = "Dainos žodžiai V2";
 "LG_LYRICS_V2_DESC" = "Įtraukiantis fonas su išblukusiu albumo menamu už teksto.";
-"LG_LYRICS_BUTTON" = "Dainos žodžių mygtukas";
-"LG_LYRICS_BUTTON_DESC" = "Išlaiko matomą dainos žodžių įėjimą V1 ir V2.";
 "LG_QUEUE_V2" = "Eilė V2";
 "LG_QUEUE_V2_DESC" = "Stiklinis eilės sąrašas ir eilės antraštė.";
 "LG_HOME_V2" = "Namai V2";

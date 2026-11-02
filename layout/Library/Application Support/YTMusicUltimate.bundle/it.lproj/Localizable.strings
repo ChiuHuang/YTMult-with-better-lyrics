@@ -177,8 +177,6 @@
 "LG_FULLPLAYER_V2_DESC" = "Scheda copertina, trasporto in vetro, barra di posizione e header diviso.";
 "LG_LYRICS_V2" = "Testi V2";
 "LG_LYRICS_V2_DESC" = "Sfondo immersivo con copertina sfocata dietro il testo.";
-"LG_LYRICS_BUTTON" = "Pulsante dei testi";
-"LG_LYRICS_BUTTON_DESC" = "Mantiene una voce dei testi sempre visibile in V1 e V2.";
 "LG_QUEUE_V2" = "Coda V2";
 "LG_QUEUE_V2_DESC" = "Elenco in vetro di In arrivo e intestazione della coda.";
 "LG_HOME_V2" = "Home V2";

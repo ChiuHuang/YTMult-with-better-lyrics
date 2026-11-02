@@ -27,7 +27,6 @@
         @[
             @{@"title":LOC(@"LG_FULLPLAYER_V2"), @"key":@"fullPlayerV2Enabled", @"subtitle":LOC(@"LG_FULLPLAYER_V2_DESC")},
             @{@"title":LOC(@"LG_LYRICS_V2"), @"key":@"lyricsV2Enabled", @"subtitle":LOC(@"LG_LYRICS_V2_DESC")},
-            @{@"title":LOC(@"LG_LYRICS_BUTTON"), @"key":@"lyricsEntryButtonEnabled", @"subtitle":LOC(@"LG_LYRICS_BUTTON_DESC")},
             @{@"title":LOC(@"LG_QUEUE_V2"), @"key":@"queueV2Enabled", @"subtitle":LOC(@"LG_QUEUE_V2_DESC")}
         ],
         @[

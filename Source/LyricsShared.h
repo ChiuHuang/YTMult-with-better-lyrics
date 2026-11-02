@@ -362,7 +362,6 @@
 extern double g_currentPlaybackTime;
 extern NSString *g_currentVideoID;
 extern __weak YTPlayerViewController *g_activePlayer;
-extern __weak UIButton *g_ytmuOwnLyricsButton;
 extern __weak UIViewController *g_activeNowPlayingVC;
 extern NSMutableDictionary *g_lyricsCache;
 extern NSString *g_globalLoadingVideoID;
