@@ -1,5 +1,8 @@
 #import "LyricsShared.h"
 #import <CommonCrypto/CommonDigest.h>
+#ifndef TWEAK_BUILD
+#define TWEAK_BUILD 0
+#endif
 
 BOOL _safe_cache_component(NSString *s);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
@@ -1338,7 +1341,7 @@ static void sendUIDump(void) {
     if (!YTMUDebugUploadAllowed(@"info")) return;
     NSMutableString *dump = [NSMutableString string];
     [dump appendFormat:@"=== SCREENSHOT UI DUMP at %@ ===\n", [NSDate date]];
-    [dump appendFormat:@"Tweak Build: %@\n", @TWEAK_GIT_COMMIT];
+    [dump appendFormat:@"Tweak Build: %@.%@ (%@)\n", @OS_STRINGIFY(TWEAK_VERSION), @OS_STRINGIFY(TWEAK_BUILD), @TWEAK_GIT_COMMIT];
     [dump appendFormat:@"Current VideoID: %@\n", g_currentVideoID ?: @"(none)"];
     [dump appendFormat:@"Playback Time: %f\n", g_currentPlaybackTime];
     YTPlayerViewController *dbgPlayer = g_activePlayer;
