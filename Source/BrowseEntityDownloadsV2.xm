@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "YTMULiquidGlassPreferences.h"
 #import "YTMUVisualStyle.h"
 #import "Headers/YTMUBulkHook.h"
@@ -165,6 +166,38 @@ static void YTMUStyleSearchPageDepth(UIView *root, BOOL resultsPage, NSInteger d
     if (root.backgroundColor == UIColor.whiteColor ||
         [root.backgroundColor isEqual:[UIColor systemBackgroundColor]]) {
         root.backgroundColor = UIColor.clearColor;
+    }
+    // WHITE FIX, third round: the search result rows are AsyncDisplayKit —
+    // _ASCollectionViewCell / _ASDisplayView, and the white fill the Build
+    // 316 screenshots still show is painted BY THE NODE (ASDK rasterizes the
+    // node's own background colour into the layer contents, so nothing a
+    // UIKit-level walk sets on the view survives). Yes the result was this:
+    // the fresh dump shows YTLightweightBrowseBackgroundView hidden=YES
+    // (that fix landed) and the page STILL white — the fill lives in the
+    // node stack. Read the view's node back and flatten its white there,
+    // where ASDK will honour it and re-render.
+    static Class asViewClass;
+    static dispatch_once_t asOnce;
+    dispatch_once(&asOnce, ^{ asViewClass = NSClassFromString(@"_ASDisplayView") ?: NSClassFromString(@"ASDisplayView"); });
+    if (asViewClass && [root isKindOfClass:asViewClass]) {
+        SEL nodeSel = NSSelectorFromString(@"node");
+        if ([root respondsToSelector:nodeSel]) {
+            id node = ((id (*)(id, SEL))objc_msgSend)(root, nodeSel);
+            if (node) {
+                SEL bgSel = NSSelectorFromString(@"backgroundColor");
+                if ([node respondsToSelector:bgSel]) {
+                    id col = ((id (*)(id, SEL))objc_msgSend)(node, bgSel);
+                    if (col == UIColor.whiteColor ||
+                        [col isEqual:[UIColor systemBackgroundColor]] ||
+                        [col isEqual:[UIColor secondarySystemBackgroundColor]]) {
+                        SEL setBgSel = NSSelectorFromString(@"setBackgroundColor:");
+                        if ([node respondsToSelector:setBgSel]) {
+                            ((void (*)(id, SEL, id))objc_msgSend)(node, setBgSel, UIColor.clearColor);
+                        }
+                    }
+                }
+            }
+        }
     }
     for (UIView *v in root.subviews) {
         if ([v isKindOfClass:UITableView.class]) {

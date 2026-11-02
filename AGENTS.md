@@ -270,6 +270,12 @@ Current:
   about what the browser is served.
 - Device: screenshot triggers UI dump POST to `/log`; server saves
   `logs/UI_DUMP_*.txt` + prints analysis (video, `has9999`, `hasEngagement`).
+  **UI DUMPS land on the DEPLOYED server, not this dev machine** — the local
+  `logs/UI_DUMP_*.txt` are relics and must not be used to diagnose the
+  current device state. Ask the user to pull the fresh dump from the
+  deployed dashboard, then reason from THAT file (once it is attached, treat
+  it as the only viewpoint; old dumps still describe stable YT class
+  hierarchies but never the current fix state).
 - Dashboard (password-gated): live logs, crash logs, file download, server
   instance chip, self-update card with SHA + parent SHA.
 - Video-ID chain: `g_currentVideoID` -> `YTMUResolveCurrentVideoID()` (player
