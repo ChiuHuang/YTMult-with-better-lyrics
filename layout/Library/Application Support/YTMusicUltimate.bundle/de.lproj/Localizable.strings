@@ -128,7 +128,7 @@
 "UPDATE_WHATS_NEW" = "Neuerungen:\n%@";
 
 "LYRICS_ENGINE" = "Liedtext-Engine";
-"LYRICS_ENGINE_FOOTER" = "Der Server lädt die Liedtexte und übersetzt sie in die unten eingestellte Sprache. Zeilen, die bereits in dieser chinesischen Schrift vorliegen, werden nur in die Schrift normalisiert und nie an den Übersetzer geschickt. Streaming-Übersetzung malt jede Zeile, während das Modell schreibt, und die Schreibmaschinen-Anzeige tippt die Übersetzung unter der aktiven Zeile aus.";
+"LYRICS_ENGINE_FOOTER" = "Der Server lädt die Liedtexte und übersetzt sie in die unten eingestellte Sprache. Streaming-Übersetzung malt jede Zeile, während das Modell schreibt, und die Schreibmaschinen-Anzeige tippt die Übersetzung unter der aktiven Zeile aus.";
 "STREAM_TRANSLATE" = "Streaming-Übersetzung";
 "STREAM_TRANSLATE_DESC" = "Jede übersetzte Zeile malen, während das Modell schreibt, statt auf den ganzen Song zu warten";
 "TYPEWRITER" = "Schreibmaschinen-Anzeige";

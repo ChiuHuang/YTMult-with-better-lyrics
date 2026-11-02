@@ -129,7 +129,7 @@
 
 "LYRICS_ENGINE" = "Lyrics Engine";
 
-"LYRICS_ENGINE_FOOTER" = "The server fetches the lyrics and translates them into the language set below. Lines already in that Chinese script only get their script normalized, they are never sent to the translator. Stream translation paints every line while the model writes it, and the typewriter reveal types the translation under the active line.";
+"LYRICS_ENGINE_FOOTER" = "The server fetches the lyrics and translates them into the language set below. Stream translation paints every line while the model writes it, and the typewriter reveal types the translation under the active line.";
 
 "STREAM_TRANSLATE" = "Stream translation";
 

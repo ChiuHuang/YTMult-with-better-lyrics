@@ -127,7 +127,7 @@
 "UPDATE_WHATS_NEW" = "Novita:\n%@";
 
 "LYRICS_ENGINE" = "Motore dei testi";
-"LYRICS_ENGINE_FOOTER" = "Il server recupera i testi e li traduce nella lingua impostata qui sotto. Le righe già in quello script cinese vengono solo normalizzate, non vengono mai inviate al traduttore. La traduzione in streaming dipinge ogni riga mentre il modello la scrive, e il effetto macchina da scrivere compone la traduzione sotto la riga attiva.";
+"LYRICS_ENGINE_FOOTER" = "Il server recupera i testi e li traduce nella lingua impostata qui sotto. La traduzione in streaming dipinge ogni riga mentre il modello la scrive, e il effetto macchina da scrivere compone la traduzione sotto la riga attiva.";
 "STREAM_TRANSLATE" = "Traduzione in streaming";
 "STREAM_TRANSLATE_DESC" = "Dipinge ogni riga tradotta mentre il modello la scrive, invece di attendere il brano intero";
 "TYPEWRITER" = "Effetto macchina da scrivere";

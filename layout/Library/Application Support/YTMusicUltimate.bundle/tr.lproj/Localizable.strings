@@ -128,7 +128,7 @@
 "UPDATE_WHATS_NEW" = "Yenilikler:\n%@";
 
 "LYRICS_ENGINE" = "Şarkı sözleri motoru";
-"LYRICS_ENGINE_FOOTER" = "Sunucu şarkı sözlerini alır ve aşağıda ayarlanan dile çevirir. Zaten bu Çince yazıyla yazılmış satırlar yalnızca yazı biçimi bakımından normalleştirilir, çevirmeye hiç gönderilmez. Akışlı çeviri model yazarken her satırı boyar, dakika yazımı ise çeviriyi etkin satırın altına harf harf yazar.";
+"LYRICS_ENGINE_FOOTER" = "Sunucu şarkı sözlerini alır ve aşağıda ayarlanan dile çevirir. Akışlı çeviri model yazarken her satırı boyar, dakika yazımı ise çeviriyi etkin satırın altına harf harf yazar.";
 "STREAM_TRANSLATE" = "Akışlı çeviri";
 "STREAM_TRANSLATE_DESC" = "Model yazarken her çevrilmiş satırı boy, tüm şarkıyı bekleme";
 "TYPEWRITER" = "Dakika yazımı";
