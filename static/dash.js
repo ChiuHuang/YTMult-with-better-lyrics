@@ -3041,7 +3041,7 @@
   };
 
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
-  const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','settings','app'];
+  const pages = ['overview','logs','debug','caches','library','nodes','jwt','update','files','crashes','settings','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
   const switchPage = p => {
     if (!pages.includes(p)) return;
@@ -3050,7 +3050,8 @@
     $$('.page').forEach(sec => sec.classList.toggle('active', sec.id === `page-${p}`));
     $$('#nav-list mdui-list-item').forEach(item => { item.active = (item.dataset.page === p); });
     if (p==='overview') loadOverview();
-    else if (p==='logs') { connectSSE(); loadDebugDevices(); }
+    else if (p==='logs') connectSSE();
+    else if (p==='debug') loadDebugDevices();
     else if (p==='caches') loadCaches();
     else if (p==='library') loadLibrary();
     else if (p==='nodes') loadNodes();

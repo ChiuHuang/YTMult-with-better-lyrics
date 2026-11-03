@@ -40,6 +40,7 @@
     <mdui-list id="nav-list">
       <mdui-list-item icon="dashboard" active data-page="overview" href="#/overview">Overview</mdui-list-item>
       <mdui-list-item icon="terminal" data-page="logs" href="#/logs">Live Logs</mdui-list-item>
+      <mdui-list-item icon="developer_mode" data-page="debug" href="#/debug">Debug Devices</mdui-list-item>
       <mdui-list-item icon="storage" data-page="caches" href="#/caches">Caches</mdui-list-item>
       <mdui-list-item icon="library_music" data-page="library" href="#/library">Library</mdui-list-item>
       <mdui-list-item icon="hub" data-page="nodes" href="#/nodes">Nodes</mdui-list-item>
@@ -150,18 +151,21 @@
         </mdui-card>
       </section>
 
-      <mdui-card variant="elevated" class="panel" style="margin-top:16px;">
-        <div class="panel-head">
-          <span class="section-title">Debug device mode</span>
-          <span class="pill" id="ddbg-count">no devices</span>
-          <span class="spacer"></span>
-          <mdui-button id="ddbg-otp" variant="tonal" icon="pin">Generate one-time code</mdui-button>
-        </div>
-        <div class="panel-body">
-          <div id="ddbg-otp-out" class="mono" style="font-size:20px; margin-bottom:12px;"></div>
-          <div id="ddbg-list" class="list-grid"></div>
-        </div>
-      </mdui-card>
+      <!-- ===================== debug devices ===================== -->
+      <section id="page-debug" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Debug device mode</span>
+            <span class="pill" id="ddbg-count">no devices</span>
+            <span class="spacer"></span>
+            <mdui-button id="ddbg-otp" variant="tonal" icon="pin">Generate one-time code</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div id="ddbg-otp-out" class="mono" style="font-size:20px; margin-bottom:12px;"></div>
+            <div id="ddbg-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
+      </section>
 
       <!-- ===================== caches ===================== -->
       <section id="page-caches" class="page">
