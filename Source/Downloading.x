@@ -18,6 +18,21 @@ static BOOL YTMU(NSString *key) {
     return [YTMUltimateDict[key] boolValue];
 }
 
+// THE DOWNLOAD-BADGE CRASH: -[YTPlayerViewController playerResponse]
+// unrecognized selector. The header declares the property, but the runtime
+// class has to actually implement it -- a YT build where the ivar/property
+// was renamed or moved makes the plain `playerVC.playerResponse` read a
+// guaranteed crash, on the badge tap path the user most often reaches.
+// readOnly: ask the runtime first, catch whatever survives that.
+static YTPlayerResponse *YTMUPlayerResponseSafe(YTPlayerViewController *vc) {
+    if (!vc || ![vc respondsToSelector:@selector(playerResponse)]) return nil;
+    @try {
+        return vc.playerResponse;
+    } @catch (NSException *e) {
+        return nil;
+    }
+}
+
 @interface UIView ()
 - (UIViewController *)_viewControllerForAncestor;
 @end
@@ -52,9 +67,16 @@ static BOOL YTMU(NSString *key) {
     }
 
     YTMNowPlayingViewController *playingVC = (YTMNowPlayingViewController *)tapRecognizer.view._viewControllerForAncestor;
-    YTMWatchViewController *watchVC = (YTMWatchViewController *)playingVC.parentViewController;
+    // Type-check the parent instead of blind-casting: a container YT built
+    // above the now-playing VC must not be treated as the watch VC just
+    // because the ivar layout happens to decode.
+    UIViewController *parent = playingVC.parentViewController;
+    if (![parent isKindOfClass:%c(YTMWatchViewController)]) {
+        return %orig;
+    }
+    YTMWatchViewController *watchVC = (YTMWatchViewController *)parent;
     YTPlayerViewController *playerVC = watchVC.playerViewController;
-    YTPlayerResponse *playerResponse = playerVC.playerResponse;
+    YTPlayerResponse *playerResponse = YTMUPlayerResponseSafe(playerVC);
 
     if (playerResponse) {
         YTMActionSheetController *sheetController = [%c(YTMActionSheetController) musicActionSheetController];
@@ -90,7 +112,16 @@ static BOOL YTMU(NSString *key) {
 
 %new
 - (void)downloadAudio:(YTPlayerViewController *)playerVC {
-    YTPlayerResponse *playerResponse = playerVC.playerResponse;
+    YTPlayerResponse *playerResponse = YTMUPlayerResponseSafe(playerVC);
+    YTIPlayerResponse *data = [playerResponse respondsToSelector:@selector(playerData)] ? playerResponse.playerData : nil;
+
+    if (!playerResponse || !data) {
+        YTAlertView *alertView = [%c(YTAlertView) infoDialog];
+        alertView.title = LOC(@"OOPS");
+        alertView.subtitle = LOC(@"DONT_RUSH_DESC");
+        [alertView show];
+        return;
+    }
 
     NSString *title = [playerResponse.playerData.videoDetails.title stringByReplacingOccurrencesOfString:@"/" withString:@""];
     NSString *author = [playerResponse.playerData.videoDetails.author stringByReplacingOccurrencesOfString:@"/" withString:@""];
@@ -126,6 +157,7 @@ static BOOL YTMU(NSString *key) {
 
 %new
 - (NSString *)getURLFromManifest:(NSURL *)manifest {
+    if (!manifest) return nil;  // dataWithContentsOfURL: is nonnull-annotated; a nil manifest must not reach it
     NSData *manifestData = [NSData dataWithContentsOfURL:manifest];
     NSString *manifestString = [[NSString alloc] initWithData:manifestData encoding:NSUTF8StringEncoding];
     NSArray *manifestLines = [manifestString componentsSeparatedByString:@"\n"];
@@ -156,9 +188,17 @@ static BOOL YTMU(NSString *key) {
         hud.mode = MBProgressHUDModeIndeterminate;
     });
 
-    YTPlayerResponse *playerResponse = playerVC.playerResponse;
+    YTPlayerResponse *playerResponse = YTMUPlayerResponseSafe(playerVC);
 
-    NSMutableArray *thumbnailsArray = playerResponse.playerData.videoDetails.thumbnail.thumbnailsArray;
+    NSMutableArray *thumbnailsArray = [playerResponse respondsToSelector:@selector(playerData)] ? playerResponse.playerData.videoDetails.thumbnail.thumbnailsArray : nil;
+    if (!thumbnailsArray.count) {
+        [MBProgressHUD hideHUDForView:[UIApplication sharedApplication].keyWindow animated:YES];
+        YTAlertView *alertView = [%c(YTAlertView) infoDialog];
+        alertView.title = LOC(@"OOPS");
+        alertView.subtitle = LOC(@"DONT_RUSH_DESC");
+        [alertView show];
+        return;
+    }
     YTIThumbnailDetails_Thumbnail *thumbnail = [thumbnailsArray lastObject];
     NSString *thumbnailURL = [thumbnail.URL stringByReplacingOccurrencesOfString:[NSString stringWithFormat:@"w%u-h%u-", thumbnail.width, thumbnail.width] withString:@"w2048-h2048-"];
 

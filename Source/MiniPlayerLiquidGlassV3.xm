@@ -40,8 +40,11 @@ static UIImageView *YTMULoadedImage(UIView *root){NSMutableArray*q=[NSMutableArr
 // pivot bar and full player, tinted by the SONG via YTMUSongGlassFill/Border
 // (the artwork it displays is itself a theme publisher through
 // DynamicArtworkThemeV2's mini-player path, and the song helpers fall back to
-// the olive constants before the first sample).
-static void YTMUMiniTree(UIView *root){Class image=NSClassFromString(@"YTImageView");for(UIView*v in root.subviews){if(image&&[v isKindOfClass:image]){CGFloat w=CGRectGetWidth(v.bounds),h=CGRectGetHeight(v.bounds);if(w>=38&&w<=56&&h>=38&&h<=56){UIImageView*loaded=YTMULoadedImage(v);if(loaded){v.hidden=NO;v.alpha=1;loaded.hidden=NO;loaded.alpha=1;CGFloat scale=MIN(1,40.0/MAX(1,w));v.transform=CGAffineTransformMakeScale(scale,scale);v.layer.cornerRadius=10.0/scale;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;}}}YTMUMiniTree(v);}}
+// the olive constants before the first sample). The thumbnail radius is the
+// EFFECTIVE radius (radius/scale compensates the transform squash); 10pt on a
+// 40pt tile was 25% -> "curved a lil too much", 7pt (17.5%) keeps the
+// squircle shape at a level that does not read as a coin.
+static void YTMUMiniTree(UIView *root){Class image=NSClassFromString(@"YTImageView");for(UIView*v in root.subviews){if(image&&[v isKindOfClass:image]){CGFloat w=CGRectGetWidth(v.bounds),h=CGRectGetHeight(v.bounds);if(w>=38&&w<=56&&h>=38&&h<=56){UIImageView*loaded=YTMULoadedImage(v);if(loaded){v.hidden=NO;v.alpha=1;loaded.hidden=NO;loaded.alpha=1;CGFloat scale=MIN(1,40.0/MAX(1,w));v.transform=CGAffineTransformMakeScale(scale,scale);v.layer.cornerRadius=7.0/scale;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;}}}YTMUMiniTree(v);}}
 @interface YTMMiniPlayerView:UIView@end
 %hook YTMMiniPlayerView
 - (void)didMoveToWindow{%orig;if(!YTMUMiniEnabled())return;self.clipsToBounds=NO;(void)YTMUMiniGlass(self);self.layer.shadowColor=UIColor.blackColor.CGColor;self.layer.shadowOpacity=.25;self.layer.shadowRadius=13;self.layer.shadowOffset=CGSizeMake(0,6);}
