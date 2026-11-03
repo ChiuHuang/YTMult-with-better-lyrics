@@ -397,6 +397,19 @@ NSString *YTMULyricsTier(NSArray *lyrics);
 void sendDebugLog(NSString *msg);
 void sendDebugLogWithPayload(NSString *event, NSString *msg, NSDictionary *payload);
 BOOL YTMUDebugUploadAllowed(NSString *level);
+// Debug device mode (Source/DebugDeviceMode.x): an OTP pairs THIS device with
+// the server, and only a paired device may upload the request capture.
+BOOL YTMUDebugDeviceEnabled(void);
+void YTMUDebugDeviceSetEnabled(BOOL on);
+void YTMUDebugDeviceForget(void);
+NSDictionary *YTMUDebugDeviceStatus(void);
+void YTMUDebugDeviceEnroll(NSString *otp, void (^done)(BOOL ok, NSString *message));
+// Transport observation. Source/Downloading.x owns the ONE hook pair on
+// NSURLSession / AVURLAsset and hands every request to both consumers: the
+// audio-stream capture below (what the download badge copies) and the debug
+// device buffer (which only stores anything once a device is paired).
+void YTMUDownloadCaptureStreamURL(NSURL *url);
+void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 NSString *YTMULyricsCacheDirectory(void);
 NSString *YTMULyricsCachePathForVideoID(NSString *vid);

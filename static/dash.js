@@ -2984,6 +2984,62 @@
     await scanRTrans();
   };
 
+  /* ---- debug device mode: an OTP pairs a phone, and only a paired phone may
+      upload its request capture. The code is the consent step, so it is shown
+      here once and never stored anywhere. ---- */
+  const renderDebugDevices = data => {
+    const list = $('#ddbg-list');
+    const count = $('#ddbg-count');
+    const devices = (data && data.devices) || [];
+    if (count) count.textContent = `${devices.length} device(s) · ${(data && data.pending) || 0} code(s) live`;
+    if (!list) return;
+    list.innerHTML = '';
+    if (!devices.length) {
+      list.appendChild(el('div', {class: 'list-row'},
+        el('span', {}, 'No device enrolled yet. Generate a code, then type it on the phone (Debug page) within 10 minutes.'),
+      ));
+      return;
+    }
+    devices.forEach(d => {
+      const revoke = el('mdui-button', {variant: 'text', icon: 'link_off'}, 'Revoke');
+      revoke.addEventListener('click', async () => {
+        try {
+          await API(`/api/admin/debug/devices/${encodeURIComponent(d.id)}/revoke`, {method: 'POST'});
+          mdui.snackbar({message: `${d.id} revoked`});
+          loadDebugDevices();
+        } catch (e) { mdui.snackbar({message: 'Revoke failed: ' + e.message}); }
+      });
+      list.appendChild(el('div', {class: 'list-row'},
+        el('span', {}, d.id || '--'),
+        el('span', {}, d.name || '--'),
+        el('span', {}, d.build || '--'),
+        el('span', {class: 'v'}, String(d.uploads || 0)),
+        el('span', {class: 'v'}, String(d.records || 0)),
+        el('span', {}, d.revoked ? 'revoked' : (d.last_seen ? ago(d.last_seen) + ' ago' : 'never')),
+        d.revoked ? el('span', {}, '--') : revoke,
+      ));
+    });
+  };
+  const loadDebugDevices = async () => {
+    try { renderDebugDevices(await json('/api/admin/debug/devices')); }
+    catch (e) { console.warn('debug devices load failed', e); }
+  };
+  const generateDebugOtp = async () => {
+    const btn = $('#ddbg-otp');
+    if (btn) btn.loading = true;
+    try {
+      const d = await (await API('/api/admin/debug/otp', {method: 'POST'})).json();
+      const out = $('#ddbg-otp-out');
+      const mins = Math.round((d.expires_in || 600) / 60);
+      if (out) out.textContent = `Code: ${d.otp}   (single use, ${mins} min)`;
+      mdui.snackbar({message: 'One-time code generated'});
+      loadDebugDevices();
+    } catch (e) {
+      mdui.snackbar({message: 'OTP failed: ' + e.message});
+    }
+    if (btn) btn.loading = false;
+  };
+
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
   const pages = ['overview','logs','caches','library','nodes','jwt','update','files','crashes','settings','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
@@ -2994,7 +3050,7 @@
     $$('.page').forEach(sec => sec.classList.toggle('active', sec.id === `page-${p}`));
     $$('#nav-list mdui-list-item').forEach(item => { item.active = (item.dataset.page === p); });
     if (p==='overview') loadOverview();
-    else if (p==='logs') connectSSE();
+    else if (p==='logs') { connectSSE(); loadDebugDevices(); }
     else if (p==='caches') loadCaches();
     else if (p==='library') loadLibrary();
     else if (p==='nodes') loadNodes();
@@ -3070,6 +3126,9 @@
 
     const logoutBtn = $('#logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', async () => { await mdui.confirm({headline:'Sign out',description:'End admin session?',cancelText:'Cancel',confirmText:'Sign out',onConfirm:async()=>{await API('/logout',{method:'POST'}); window.location='/login';}}); });
+
+    const debugOtpBtn = $('#ddbg-otp');
+    if (debugOtpBtn) debugOtpBtn.addEventListener('click', generateDebugOtp);
 
     const logPauseBtn = $('#log-pause');
     if (logPauseBtn) logPauseBtn.addEventListener('click', () => { logPaused = !logPaused; logPauseBtn.setAttribute('icon', logPaused ? 'play_arrow' : 'pause'); logPauseBtn.textContent = logPaused ? 'Resume' : 'Pause'; });

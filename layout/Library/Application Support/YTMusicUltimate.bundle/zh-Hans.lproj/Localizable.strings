@@ -172,6 +172,17 @@
 "DEBUG_COPY" = "复制诊断信息";
 
 "DEBUG_TEST_LOG" = "发送测试记录";
+"DEBUG_DEVICE_SECTION" = "调试设备模式";
+"DEBUG_DEVICE_TOGGLE" = "抓取 App 请求";
+"DEBUG_DEVICE_TOGGLE_DESC" = "记录 App 自己的请求（只有方法与网址，不含内容与 cookie）并上传到服务器。需要仪表板生成的一次性代码，普通用户无法上传。";
+"DEBUG_DEVICE_STATE" = "设备令牌";
+"DEBUG_DEVICE_ENROLLED" = "已配对";
+"DEBUG_DEVICE_NONE" = "无令牌";
+"DEBUG_DEVICE_ENTER_OTP" = "输入一次性代码";
+"DEBUG_DEVICE_OTP_PROMPT" = "输入仪表板（实时日志页）显示的 6 位数字代码，只能使用一次。";
+"DEBUG_DEVICE_OTP_OK" = "设备已配对";
+"DEBUG_DEVICE_OTP_BAD" = "代码被拒绝";
+"DEBUG_DEVICE_FORGET" = "清除设备令牌";
 
 "DEBUG_COPIED" = "诊断信息已复制到剪贴板";
 

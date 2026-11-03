@@ -23,6 +23,8 @@
 static NSString *const kYTMUDebugStreamCellID = @"debugStream";
 static NSString *const kYTMUDebugUploadCellID = @"debugUpload";
 static NSString *const kYTMUDebugActionCellID = @"debugAction";
+static NSString *const kYTMUDebugDeviceToggleID = @"debugDeviceToggle";
+static NSString *const kYTMUDebugDeviceStatusID = @"debugDeviceStatus";
 
 static const CGFloat kYTMUDebugValueMaxWidth = 190.0;
 static const NSUInteger kYTMUDebugLastLineMaxChars = 48;
@@ -95,6 +97,10 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (!self.tableView.window) return;
     [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:0]
                      withRowAnimation:UITableViewRowAnimationNone];
+    // The device row carries live counters too (pending / sent). It is a
+    // static row, so rebuilding it cannot drop a switch drag.
+    [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:3]]
+                          withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (UILabel *)ytmu_valueLabelWithText:(NSString *)text monospaced:(BOOL)monospaced {
@@ -217,13 +223,14 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 #pragma mark - Table
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 3;
+    return 4;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 6;
     if (section == 1) return 3;
     if (section == 2) return 2;
+    if (section == 3) return 4;
     return 0;
 }
 
@@ -231,6 +238,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (section == 0) return LOC(@"DEBUG_STREAM");
     if (section == 1) return LOC(@"DEBUG_UPLOAD");
     if (section == 2) return LOC(@"DEBUG_ACTIONS");
+    if (section == 3) return LOC(@"DEBUG_DEVICE_SECTION");
     return nil;
 }
 
@@ -239,12 +247,13 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 }
 
 - (BOOL)tableView:(UITableView *)tableView shouldHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
-    return indexPath.section == 2;
+    return indexPath.section == 2 || (indexPath.section == 3 && indexPath.row >= 2);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 0) return [self ytmu_streamCellForTableView:tableView row:indexPath.row];
     if (indexPath.section == 1) return [self ytmu_uploadCellForTableView:tableView row:indexPath.row];
+    if (indexPath.section == 3) return [self ytmu_deviceCellForTableView:tableView row:indexPath.row];
     return [self ytmu_actionCellForTableView:tableView row:indexPath.row];
 }
 
@@ -331,6 +340,11 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 3) {
+        if (indexPath.row == 2) [self ytmu_askDeviceOTP];
+        else if (indexPath.row == 3) [self ytmu_forgetDeviceToken];
+        return;
+    }
     if (indexPath.section != 2) return;
     if (indexPath.row == 0) {
         [self ytmu_copyDiagnostics];
@@ -347,6 +361,13 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"]];
     d[key] = @(sender.isOn);
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:@"YTMUltimate"];
+    if ([key isEqualToString:@"debugDeviceMode"]) {
+        // Written through its own setter so the capture timer starts now, not
+        // at the next launch. The value is the same one set above.
+        YTMUDebugDeviceSetEnabled(sender.isOn);
+        [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
+                     withRowAnimation:UITableViewRowAnimationNone];
+    }
 }
 
 - (void)segmentChanged:(UISegmentedControl *)sender {
@@ -388,6 +409,119 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     NSString *message = YTMUDebugUploadAllowed(@"info") ? LOC(@"DEBUG_TEST_SENT")
                                                          : LOC(@"DEBUG_TEST_BLOCKED");
     [self ytmu_alertWithTitle:LOC(@"DEBUG_TEST_LOG") message:message];
+}
+
+#pragma mark - Debug device mode
+
+- (UITableViewCell *)ytmu_deviceCellForTableView:(UITableView *)tableView row:(NSInteger)row {
+    NSDictionary *status = YTMUDebugDeviceStatus();
+
+    if (row == 0) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kYTMUDebugDeviceToggleID];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                          reuseIdentifier:kYTMUDebugDeviceToggleID];
+            cell.detailTextLabel.numberOfLines = 0;
+        }
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.text = LOC(@"DEBUG_DEVICE_TOGGLE");
+        cell.textLabel.textColor = [UIColor labelColor];
+        cell.detailTextLabel.text = LOC(@"DEBUG_DEVICE_TOGGLE_DESC");
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.imageView.image = [UIImage systemImageNamed:@"ladybug.fill"];
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.accessibilityIdentifier = @"debugDeviceMode";
+        sw.on = [status[@"on"] boolValue];
+        [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
+        return cell;
+    }
+
+    if (row == 1) {
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kYTMUDebugDeviceStatusID];
+        if (!cell) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                          reuseIdentifier:kYTMUDebugDeviceStatusID];
+            cell.detailTextLabel.numberOfLines = 0;
+        }
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.textLabel.text = LOC(@"DEBUG_DEVICE_STATE");
+        cell.textLabel.textColor = [UIColor labelColor];
+        cell.imageView.image = [UIImage systemImageNamed:@"key.horizontal"];
+        BOOL enrolled = [status[@"token"] isEqualToString:@"enrolled"];
+        cell.accessoryView = [self ytmu_valueLabelWithText:[NSString stringWithFormat:@"%@ · %@",
+                                                             enrolled ? LOC(@"DEBUG_DEVICE_ENROLLED")
+                                                                      : LOC(@"DEBUG_DEVICE_NONE"),
+                                                             status[@"pending"] ?: @0]
+                                                monospaced:NO];
+        // Error wins over the counters: a device that enrolled but cannot upload
+        // must not look healthy because it has a token.
+        NSString *error = status[@"error"];
+        if (error.length) {
+            cell.detailTextLabel.text = error;
+            cell.detailTextLabel.textColor = [UIColor systemRedColor];
+        } else {
+            NSMutableArray *notes = [NSMutableArray array];
+            if ([status[@"device"] length]) [notes addObject:status[@"device"]];
+            [notes addObject:[NSString stringWithFormat:@"sent %@", status[@"sent"] ?: @0]];
+            if ([status[@"last"] length]) [notes addObject:[NSString stringWithFormat:@"last %@", status[@"last"]]];
+            cell.detailTextLabel.text = [notes componentsJoinedByString:@" · "];
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        }
+        return cell;
+    }
+
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kYTMUDebugActionCellID];
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
+                                      reuseIdentifier:kYTMUDebugActionCellID];
+    }
+    cell.accessoryView = nil;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.textLabel.textColor = [UIColor systemBlueColor];
+    cell.detailTextLabel.text = nil;
+    if (row == 2) {
+        cell.textLabel.text = LOC(@"DEBUG_DEVICE_ENTER_OTP");
+        cell.imageView.image = [UIImage systemImageNamed:@"number.square"];
+    } else {
+        cell.textLabel.text = LOC(@"DEBUG_DEVICE_FORGET");
+        cell.imageView.image = [UIImage systemImageNamed:@"escape"];
+    }
+    return cell;
+}
+
+- (void)ytmu_askDeviceOTP {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:LOC(@"DEBUG_DEVICE_ENTER_OTP")
+                                                                   message:LOC(@"DEBUG_DEVICE_OTP_PROMPT")
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.keyboardType = UIKeyboardTypeNumberPad;
+        field.placeholder = @"000000";
+    }];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:LOC(@"CANCEL")
+                                             style:UIAlertActionStyleCancel
+                                           handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                             style:UIAlertActionStyleDefault
+                                           handler:^(UIAlertAction *action) {
+        NSString *code = alert.textFields.firstObject.text;
+        YTMUDebugDeviceEnroll(code, ^(BOOL ok, NSString *message) {
+            [weakSelf ytmu_alertWithTitle:LOC(ok ? @"DEBUG_DEVICE_OTP_OK" : @"DEBUG_DEVICE_OTP_BAD")
+                                  message:message];
+            [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
+                             withRowAnimation:UITableViewRowAnimationNone];
+        });
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)ytmu_forgetDeviceToken {
+    YTMUDebugDeviceForget();
+    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
+                 withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)ytmu_alertWithTitle:(NSString *)title message:(NSString *)message {

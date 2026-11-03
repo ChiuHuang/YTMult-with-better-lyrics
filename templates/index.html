@@ -150,6 +150,19 @@
         </mdui-card>
       </section>
 
+      <mdui-card variant="elevated" class="panel" style="margin-top:16px;">
+        <div class="panel-head">
+          <span class="section-title">Debug device mode</span>
+          <span class="pill" id="ddbg-count">no devices</span>
+          <span class="spacer"></span>
+          <mdui-button id="ddbg-otp" variant="tonal" icon="pin">Generate one-time code</mdui-button>
+        </div>
+        <div class="panel-body">
+          <div id="ddbg-otp-out" class="mono" style="font-size:20px; margin-bottom:12px;"></div>
+          <div id="ddbg-list" class="list-grid"></div>
+        </div>
+      </mdui-card>
+
       <!-- ===================== caches ===================== -->
       <section id="page-caches" class="page">
         <mdui-card variant="elevated" class="panel">

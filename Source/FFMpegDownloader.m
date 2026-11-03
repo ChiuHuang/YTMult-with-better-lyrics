@@ -95,6 +95,10 @@
     int timeInMilliseconds = [statistics getTime];
     if (timeInMilliseconds > 0) {
         double totalVideoDuration = self.duration;
+        // A capture-only download has no reported length (the player exposes it
+        // only when the response still does), and dividing by zero would paint
+        // the HUD with inf%. Unknown length: keep the spinner, no percentage.
+        if (totalVideoDuration <= 0) return;
         double timeInSeconds = timeInMilliseconds / 1000.0;
         double percentage = timeInSeconds / totalVideoDuration;
 
