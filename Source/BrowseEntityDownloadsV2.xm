@@ -64,11 +64,34 @@ static void ClearTree(UIView *r, NSInteger d) {
     }
 }
 
+// Is this controller instance REALLY a search page? YTLightweightCollection
+// ViewController is in the search hook map because the result list runs on
+// it, but the same class also hosts NON-search pages (the home feed) -- so
+// every keyed mutation guarded only by the feature key painted the home
+// page with the search treatment. The instance and its RESPONSE wrapper
+// (YTMLightweightSearch~) do not always say "Search" in their own class
+// name, so decide by the presentation chain: any ancestor carrying
+// "Search" makes this a search page; no such ancestor -> not ours, do not
+// touch the controller at all.
+static BOOL YTMUIsSearchHostedInstance(UIViewController *c) {
+    for (UIViewController *vc = c; vc; vc = vc.parentViewController) {
+        if ([NSStringFromClass(vc.class) containsString:@"Search"]) return YES;
+    }
+    return NO;
+}
+
 // The feature key differs per controller, so it is recorded at hook time and
 // read back from `self` inside the one shared replacement.
 static void Screen(UIViewController *c, NSString *k) {
     if (!k.length) return;
     if (!YTMULGFeatureEnabled(k) || !c.view.window) return;
+    // GATE BEFORE ANYTHING, before even the transparentise + tree clear:
+    // a home-feed instance of YTLightweightCollectionViewController resolves
+    // the search key by class, but it is not a search page. The clear, the
+    // ink, the force-dark and the walk below are search-only by design -- on
+    // home they must not exist at all (the home page went GREEN the moment
+    // the page base became ours).
+    if ([k isEqualToString:@"searchV2Enabled"] && !YTMUIsSearchHostedInstance(c)) return;
     c.view.backgroundColor = UIColor.clearColor;
     ClearTree(c.view, 0);
     if ([k isEqualToString:@"searchV2Enabled"]) {
@@ -88,7 +111,11 @@ static void Screen(UIViewController *c, NSString *k) {
         // it. White on white. The fix stops guessing what the app drew and
         // OWNS the base: our own dark ink under the whole page, so the
         // clearings below reveal US and the white text has a dark canvas.
-        c.view.backgroundColor = YTMULGOlive();
+        // THE INK IS NEUTRAL, not olive: an olive fill covering the whole
+        // viewport reads as a GREEN page (the user's report). The glass
+        // capsule keeps its green fill (alpha .24 on top of a dark page);
+        // only the page canvas is a near-black neutral.
+        c.view.backgroundColor = YTMUPageInk();
         YTMUStyleSearchPage(c.view, resultsPage);
     }
 }
