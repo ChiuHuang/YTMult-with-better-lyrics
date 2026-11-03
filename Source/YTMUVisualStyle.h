@@ -14,6 +14,14 @@ static inline UIColor *YTMULGSage(void) {
 static inline UIColor *YTMULGOlive(void) {
     return [UIColor colorWithRed:0.16 green:0.20 blue:0.12 alpha:1.0];
 }
+// PAGE CANVAS, not glass: the fill the search/suggestion pages stand on.
+// Near-black NEUTRAL on purpose -- the olive token below is the glass
+// palette, and a whole page filled with it reads as green (that was the
+// "search and home went green" report). Keep the hue out of full-bleed
+// surfaces; the capsule/cards carry the green at partial alpha instead.
+static inline UIColor *YTMUPageInk(void) {
+    return [UIColor colorWithRed:0.055 green:0.055 blue:0.062 alpha:1.0];
+}
 static inline UIColor *YTMULGAccentRed(void) {
     return [UIColor colorWithRed:1.0 green:0.12 blue:0.20 alpha:1.0];
 }
