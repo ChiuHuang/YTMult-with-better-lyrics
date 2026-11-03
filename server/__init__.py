@@ -31,6 +31,7 @@ from . import db_migrate  # noqa: F401
 from . import retranslate  # noqa: F401
 from . import routes_library  # noqa: F401
 from . import routes_ai  # noqa: F401
+from . import routes_debug  # noqa: F401  (OTP-gated debug device capture)
 
 def main():
     from .app import SERVER_INSTANCE_ID, SERVER_START_TS, SERVER_LOG_FILE, CRASH_LOG_FILE

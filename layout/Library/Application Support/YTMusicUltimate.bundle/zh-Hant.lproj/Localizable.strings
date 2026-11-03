@@ -172,6 +172,17 @@
 "DEBUG_COPY" = "複製診斷資訊";
 
 "DEBUG_TEST_LOG" = "傳送測試記錄";
+"DEBUG_DEVICE_SECTION" = "除錯裝置模式";
+"DEBUG_DEVICE_TOGGLE" = "擷取 App 請求";
+"DEBUG_DEVICE_TOGGLE_DESC" = "記錄 App 自己的請求（只有方法與網址，不含內容與 cookie）並上傳到伺服器。需要儀表板產生的一次性代碼，一般使用者無法上傳。";
+"DEBUG_DEVICE_STATE" = "裝置權杖";
+"DEBUG_DEVICE_ENROLLED" = "已配對";
+"DEBUG_DEVICE_NONE" = "無權杖";
+"DEBUG_DEVICE_ENTER_OTP" = "輸入一次性代碼";
+"DEBUG_DEVICE_OTP_PROMPT" = "輸入儀表板（即時日誌頁）顯示的 6 位數代碼，只能使用一次。";
+"DEBUG_DEVICE_OTP_OK" = "裝置已配對";
+"DEBUG_DEVICE_OTP_BAD" = "代碼被拒絕";
+"DEBUG_DEVICE_FORGET" = "清除裝置權杖";
 
 "DEBUG_COPIED" = "診斷資訊已複製到剪貼簿";
 

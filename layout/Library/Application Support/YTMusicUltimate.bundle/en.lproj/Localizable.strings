@@ -172,6 +172,17 @@
 "DEBUG_COPY" = "Copy diagnostics";
 
 "DEBUG_TEST_LOG" = "Send test log";
+"DEBUG_DEVICE_SECTION" = "Debug device mode";
+"DEBUG_DEVICE_TOGGLE" = "Capture app requests";
+"DEBUG_DEVICE_TOGGLE_DESC" = "Records the app's own requests (method and URL only, no bodies or cookies) and uploads them to the server. Requires a one-time code from the dashboard, so ordinary users cannot upload.";
+"DEBUG_DEVICE_STATE" = "Device token";
+"DEBUG_DEVICE_ENROLLED" = "enrolled";
+"DEBUG_DEVICE_NONE" = "no token";
+"DEBUG_DEVICE_ENTER_OTP" = "Enter one-time code";
+"DEBUG_DEVICE_OTP_PROMPT" = "Type the 6-digit code shown on the dashboard (Live logs page). It works once.";
+"DEBUG_DEVICE_OTP_OK" = "Device enrolled";
+"DEBUG_DEVICE_OTP_BAD" = "Code rejected";
+"DEBUG_DEVICE_FORGET" = "Forget device token";
 
 "DEBUG_COPIED" = "Diagnostics copied to the clipboard";
 
