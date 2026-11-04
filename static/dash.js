@@ -328,6 +328,15 @@
     eventSource.addEventListener('node', () => throttledRefresh());
     eventSource.addEventListener('cache', () => throttledRefresh());
     eventSource.addEventListener('crash', () => throttledRefresh());
+    eventSource.addEventListener('debug_cap', e => {
+      try {
+        const d = JSON.parse(e.data);
+        if (activePage !== 'debug') return;
+        if (!ddgPaused) ddgAppend(d.records || []);
+        loadDebugDevices();
+        loadDebugFilesSoon();
+      } catch {}
+    });
     eventSource.addEventListener('rebase_progress', e => {
       try {
         const d = JSON.parse(e.data);
@@ -3009,8 +3018,8 @@
           loadDebugDevices();
         } catch (e) { mdui.snackbar({message: 'Revoke failed: ' + e.message}); }
       });
-      list.appendChild(el('div', {class: 'list-row'},
-        el('span', {}, d.id || '--'),
+      list.appendChild(el('div', {class: 'list-row ddbg'},
+        el('span', {class: 'mono'}, d.id || '--'),
         el('span', {}, d.name || '--'),
         el('span', {}, d.build || '--'),
         el('span', {class: 'v'}, String(d.uploads || 0)),
@@ -3040,6 +3049,104 @@
     if (btn) btn.loading = false;
   };
 
+  /* ---- debug capture: the files a paired phone wrote, and the live tail of
+      what is arriving right now. The tail rides the ONE events stream
+      (event 'debug_cap'), so opening this page never adds a second EventSource
+      to the same host. ---- */
+  let ddgPaused = false;
+  let ddgRows = [];
+  const DDG_MAX = 400;
+  const ddgLine = rec => el('div', {class: 'log-row'},
+    el('span', {class: 'log-time'}, rec.ts || '--:--:--'),
+    el('span', {class: 'log-msg'},
+      `${rec.m || 'GET'} ${rec.host || ''}${rec.path || ''}`
+      + (rec.vid ? `  vid=${rec.vid}` : '')
+      + (rec.device ? `  [${rec.device}]` : '')),
+  );
+  const ddgCount = () => {
+    const c = $('#ddlive-count');
+    if (c) c.textContent = (ddgPaused ? 'paused · ' : '') + `${ddgRows.length} record(s)`;
+  };
+  const ddgAppend = recs => {
+    const list = $('#ddlive-list');
+    if (!list) return;
+    recs.forEach(rec => {
+      const row = ddgLine(rec);
+      list.appendChild(row);
+      ddgRows.push(row);
+    });
+    while (ddgRows.length > DDG_MAX) {
+      const old = ddgRows.shift();
+      if (old.parentNode) old.parentNode.removeChild(old);
+    }
+    ddgCount();
+    if (!ddgPaused) list.scrollTop = list.scrollHeight;
+  };
+  const loadDebugRecent = async () => {
+    try {
+      const d = await json('/api/admin/debug/recent?limit=80');
+      const list = $('#ddlive-list');
+      if (!list) return;
+      list.innerHTML = '';
+      ddgRows = [];
+      ddgAppend(d.records || []);
+    } catch (e) { console.warn('debug recent load failed', e); }
+  };
+  const renderDebugFiles = data => {
+    const list = $('#ddfile-list');
+    const count = $('#ddfile-count');
+    const files = (data && data.files) || [];
+    if (count) count.textContent = files.length ? `${files.length} file(s)` : 'none';
+    if (!list) return;
+    list.innerHTML = '';
+    if (!files.length) {
+      list.appendChild(el('div', {class: 'list-row'},
+        el('span', {}, 'No capture file yet. A paired phone writes one on its first upload.'),
+      ));
+      return;
+    }
+    files.forEach(f => {
+      const view = el('mdui-button', {variant: 'text', icon: 'subject'}, 'View');
+      view.addEventListener('click', () => viewDebugFile(f.device));
+      list.appendChild(el('div', {class: 'list-row ddfile'},
+        el('span', {class: 'mono'}, f.device),
+        el('span', {class: 'v'}, String(f.records || 0) + ' rec'),
+        el('span', {class: 'v'}, f.size_human || ''),
+        el('span', {}, f.modified || ''),
+        view,
+      ));
+    });
+  };
+  const loadDebugFiles = async () => {
+    try { renderDebugFiles(await json('/api/admin/debug/files')); }
+    catch (e) { console.warn('debug files load failed', e); }
+  };
+  // The file list costs a full pass over every capture file (it counts the
+  // records a viewer can open), and a device flushes every 15s. One refresh per
+  // flush burst is enough; the LIVE card is the per-record view.
+  let ddgFilesAt = 0;
+  const loadDebugFilesSoon = () => {
+    const now = Date.now();
+    if (now - ddgFilesAt < 8000) return;
+    ddgFilesAt = now;
+    loadDebugFiles();
+  };
+  const viewDebugFile = async id => {
+    const wrap = $('#ddfile-view');
+    const body = $('#ddfile-body');
+    const title = $('#ddfile-view-title');
+    if (!wrap || !body) return;
+    try {
+      const d = await json(`/api/admin/debug/files/${encodeURIComponent(id)}?limit=300`);
+      const records = d.records || [];
+      body.innerHTML = '';
+      records.forEach(rec => body.appendChild(ddgLine(rec)));
+      if (title) title.textContent = `${id}  (${records.length} record(s), newest last)`;
+      wrap.style.display = '';
+      body.scrollTop = body.scrollHeight;
+    } catch (e) { mdui.snackbar({message: 'Open failed: ' + e.message}); }
+  };
+
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
   const pages = ['overview','logs','debug','caches','library','nodes','jwt','update','files','crashes','settings','app'];
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
@@ -3051,7 +3158,7 @@
     $$('#nav-list mdui-list-item').forEach(item => { item.active = (item.dataset.page === p); });
     if (p==='overview') loadOverview();
     else if (p==='logs') connectSSE();
-    else if (p==='debug') loadDebugDevices();
+    else if (p==='debug') { loadDebugDevices(); loadDebugFiles(); loadDebugRecent(); }
     else if (p==='caches') loadCaches();
     else if (p==='library') loadLibrary();
     else if (p==='nodes') loadNodes();
@@ -3130,6 +3237,28 @@
 
     const debugOtpBtn = $('#ddbg-otp');
     if (debugOtpBtn) debugOtpBtn.addEventListener('click', generateDebugOtp);
+
+    const ddgPauseBtn = $('#ddlive-pause');
+    if (ddgPauseBtn) ddgPauseBtn.addEventListener('click', () => {
+      ddgPaused = !ddgPaused;
+      ddgPauseBtn.setAttribute('icon', ddgPaused ? 'play_arrow' : 'pause');
+      ddgPauseBtn.textContent = ddgPaused ? 'Resume' : 'Pause';
+      ddgCount();
+    });
+    const ddgClearBtn = $('#ddlive-clear');
+    if (ddgClearBtn) ddgClearBtn.addEventListener('click', () => {
+      const list = $('#ddlive-list');
+      if (list) list.innerHTML = '';
+      ddgRows = [];
+      ddgCount();
+    });
+    const ddfileRefreshBtn = $('#ddfile-refresh');
+    if (ddfileRefreshBtn) ddfileRefreshBtn.addEventListener('click', loadDebugFiles);
+    const ddfileCloseBtn = $('#ddfile-close');
+    if (ddfileCloseBtn) ddfileCloseBtn.addEventListener('click', () => {
+      const w = $('#ddfile-view');
+      if (w) w.style.display = 'none';
+    });
 
     const logPauseBtn = $('#log-pause');
     if (logPauseBtn) logPauseBtn.addEventListener('click', () => { logPaused = !logPaused; logPauseBtn.setAttribute('icon', logPaused ? 'play_arrow' : 'pause'); logPauseBtn.textContent = logPaused ? 'Resume' : 'Pause'; });

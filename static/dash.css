@@ -93,6 +93,8 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
 .list-row.file { grid-template-columns: 1fr 90px 160px 44px; }
 .list-row.node { grid-template-columns: 1fr 120px 120px 90px 80px 36px; }
 .list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 80px 100px 36px; }
+.list-row.ddbg { grid-template-columns: 100px 1fr 80px 70px 70px 130px 40px; }
+.list-row.ddfile { grid-template-columns: 120px 80px 80px 170px 40px; }
 .list-head { font-size:11px; color: rgb(var(--mdui-color-on-surface-variant)); font-weight:500; padding:0 16px 6px; }
 .list-head.lh-rq { grid-template-columns: 1fr 80px 80px 100px 70px; display:grid; gap:10px; }
 .list-head.lh-cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; display:grid; gap:10px; }
@@ -251,6 +253,15 @@ html.mdui-theme-dark .live-dot::after { border-color: rgb(102,187,106); }
   .list-row.lat > :nth-child(7),
   .list-head.lh-lat > :nth-child(6),
   .list-head.lh-lat > :nth-child(7) { display:none; }
+  /* a phone keeps the id and the two counters that mean something (uploads,
+     records); build and last-seen go */
+  .list-row.ddbg { grid-template-columns: 1fr 70px 70px 40px; }
+  .list-row.ddbg > :nth-child(2),
+  .list-row.ddbg > :nth-child(3),
+  .list-row.ddbg > :nth-child(6) { display:none; }
+  .list-row.ddfile { grid-template-columns: 1fr 110px 40px; }
+  .list-row.ddfile > :nth-child(2),
+  .list-row.ddfile > :nth-child(3) { display:none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
