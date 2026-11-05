@@ -1,4 +1,5 @@
 #import "FFMpegDownloader.h"
+#import "LyricsShared.h"
 
 @implementation FFMpegDownloader {
 
@@ -40,6 +41,9 @@
                 BOOL isMoved = [[NSFileManager defaultManager] moveItemAtURL:destinationURL toURL:outputURL error:nil];
 
                 if (isMoved) {
+                    // The playback hooks key on the video id, so the id ->
+                    // file mapping is recorded the moment the file exists.
+                    YTMURememberDownload(self.tempName, self.mediaName);
                     [[NSNotificationCenter defaultCenter] postNotificationName:@"ReloadDataNotification" object:nil];
                     self.hud = [MBProgressHUD showHUDAddedTo:[UIApplication sharedApplication].keyWindow animated:YES];
                     self.hud.mode = MBProgressHUDModeCustomView;
