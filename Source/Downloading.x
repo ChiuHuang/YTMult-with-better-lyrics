@@ -270,6 +270,9 @@ static id YTMUGetterOrValue(id obj, SEL getter, YTMUIvarPredicate match) {
 }
 
 static id YTMUResponseData(id response) {
+    // playbackData handed to -playbackControllerDidLoadPlayerWithPlaybackData:
+    // may be the YTIPlayerResponse itself, not a YTPlayerResponse wrapper.
+    if ([response isKindOfClass:%c(YTIPlayerResponse)]) return response;
     return YTMUGetterOrValue(response, @selector(playerData),
         ^BOOL (id v) { return [v isKindOfClass:%c(YTIPlayerResponse)]; });
 }
@@ -431,6 +434,123 @@ static void YTMUConsumeResponse(id response, NSString *vid) {
         } else {
             YTMUDebugNoteResponseProbe(response, vid);
         }
+    } @catch (NSException *e) {
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LOCAL PLAYBACK -- the downloaded file becomes what the app itself plays.
+//
+// The app has an offline feature (YTMMusicDownloadsStore on the watch VC
+// ivars), but nothing speaks for OUR files, and the whole download flow had
+// the same answer before it was measured. The cheap measurable road is the
+// one already constructed: every response the watch VC consumes passes
+// through the hooks this file installs, and YTIFormatStream.URL is a
+// readwrite property. So when a downloaded file exists for the response's
+// video, every mime=audio format URL is swapped to file:// of that file
+// BEFORE %orig -- the player stack resolves the URL it is given or it does
+// not, and both outcomes are recorded in the paired debug channel
+// (-playbackControllerDidPlay / -playbackControllerDidFailWithError:).
+//
+// The experiment is gated on the debug-device pairing, NOT on a user-facing
+// pref yet: an unpaired device keeps 100% stock behavior, and a real toggle
+// with L10N is only worth its weight once this round says file URLs are
+// actually accepted by the fetch layer beneath YTLocalPlaybackController.
+// ---------------------------------------------------------------------------
+
+void YTMURememberDownload(NSString *videoID, NSString *mediaName) {
+    if (!videoID.length || !mediaName.length) return;
+    @try {
+        NSMutableDictionary *map = [NSMutableDictionary dictionaryWithDictionary:
+            [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUDownloads"]];
+        map[videoID] = mediaName;
+        [[NSUserDefaults standardUserDefaults] setObject:map forKey:@"YTMUDownloads"];
+    } @catch (NSException *e) {
+    }
+}
+
+// vid -> "<author> - <title>.m4a" under Documents/YTMusicUltimate/, only when
+// the file is actually there right now.
+NSString *YTMULocalAudioPathForVideoID(NSString *videoID) {
+    if (!videoID.length) return nil;
+    NSString *mediaName = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUDownloads"][videoID];
+    if (!mediaName.length) return nil;
+    NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+    NSString *full = [[documentsURL URLByAppendingPathComponent:
+        [NSString stringWithFormat:@"YTMusicUltimate/%@.m4a", mediaName]] path];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:full]) return nil;
+    return full;
+}
+
+// The video id a response stands for: videoDetails.videoId when the runtime
+// class still carries it, else whatever the caller fell back to.
+static NSString *YTMUResponseVideoID(id response) {
+    id data = YTMUResponseData(response);
+    if (!data || ![data respondsToSelector:@selector(videoDetails)]) return nil;
+    @try {
+        id details = ((id (*)(id, SEL))objc_msgSend)(data, @selector(videoDetails));
+        if (!details) return nil;
+        for (NSString *key in @[ @"videoId", @"videoID" ]) {
+            SEL sel = NSSelectorFromString(key);
+            if ([details respondsToSelector:sel]) {
+                id value = ((id (*)(id, SEL))objc_msgSend)(details, sel);
+                if ([value isKindOfClass:[NSString class]]) return value;
+            }
+        }
+    } @catch (NSException *e) {
+    }
+    return nil;
+}
+
+// Formats in AXE URL before the response is consumed: the property setter
+// when it answers, the ivar write when it does not. Returns how many audio
+// formats now point at the local file -- zero for every song without one.
+static NSUInteger YTMUSwapToLocalFiles(id response) {
+    if (!YTMUDebugDeviceEnabled() || !response) return 0;
+    NSUInteger count = 0;
+    @try {
+        NSString *vid = YTMUResponseVideoID(response) ?: g_currentVideoID;
+        NSString *path = YTMULocalAudioPathForVideoID(vid);
+        if (!path) return 0;
+        NSArray *fmts = YTMUAdaptiveFormatsFrom(YTMUStreamingDataFrom(YTMUResponseData(response)));
+        NSURL *fileURL = [NSURL fileURLWithPath:path];
+        for (id fmt in fmts) {
+            if (![fmt respondsToSelector:@selector(URL)]) continue;
+            NSString *uStr = ((NSString *(*)(id, SEL))objc_msgSend)(fmt, @selector(URL));
+            if (![uStr isKindOfClass:[NSString class]] || !uStr.length) continue;
+            if ([uStr hasPrefix:@"file://"]) { count++; continue; }
+            if (![uStr containsString:@"mime=audio"]) continue;
+            SEL setSel = @selector(setURL:);
+            if ([fmt respondsToSelector:setSel]) {
+                ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, fileURL.absoluteString);
+                count++;
+            } else {
+                Ivar iv = class_getInstanceVariable(object_getClass(fmt), "URL");
+                if (iv) { object_setIvar(fmt, iv, fileURL); count++; }
+            }
+        }
+        if (count) NSLog(@"[YTMU-DL] playing local file vid=%@ (%lu format(s))", vid, (unsigned long)count);
+    } @catch (NSException *e) {
+    }
+    return count;
+}
+
+// One outcome record per vid+event: DidPlay means the fetch layer accepted a
+// file URL; a failure right after a swap means it did not, and the error row
+// says which layer refused.
+static void YTMUNotePlaybackEvent(NSString *event, NSString *vid, NSArray *extraLines) {
+    static NSMutableSet *noted;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ noted = [NSMutableSet set]; });
+    NSString *key = [NSString stringWithFormat:@"%@|%@", event, vid ?: @""];
+    @synchronized(noted) {
+        if ([noted containsObject:key]) return;
+        [noted addObject:key];
+    }
+    @try {
+        NSMutableArray *lines = [NSMutableArray arrayWithObject:event];
+        if (extraLines.count) [lines addObjectsFromArray:extraLines];
+        YTMUDebugDeviceNoteProbe(event, vid, @{ @"evt": @{@"cls": @"evt", @"items": [lines copy]} });
     } @catch (NSException *e) {
     }
 }
@@ -637,12 +757,28 @@ static void YTMUConsumeResponse(id response, NSString *vid) {
 // own response.
 %hook YTMWatchViewController
 - (void)playbackControllerDidActivateVideo:(id)video withPlayerResponse:(id)response {
+    YTMUSwapToLocalFiles(response);
     %orig;
     YTMUConsumeResponse(response, nil);
 }
 - (void)playbackControllerDidLoadPlayerWithPlaybackData:(id)playbackData {
+    YTMUSwapToLocalFiles(playbackData);
     %orig;
     YTMUConsumeResponse(playbackData, nil);
+}
+- (void)playbackControllerDidPlay {
+    %orig;
+    if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
+        YTMUNotePlaybackEvent(@"local-playback-ok", g_currentVideoID,
+            nil);
+    }
+}
+- (void)playbackControllerDidFailWithError:(id)error {
+    %orig;
+    if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
+        YTMUNotePlaybackEvent(@"local-playback-fail", g_currentVideoID,
+            @[[NSString stringWithFormat:@"error=%@", error]]);
+    }
 }
 %end
 

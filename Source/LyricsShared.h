@@ -415,6 +415,10 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method);
 // stack never crosses NSURLSession, so the next hook target must come from
 // the device itself). Same paired-device token as the traffic capture.
 void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload);
+// Downloaded files (Source/FFMpegDownloader.m records on success,
+// Source/Downloading.x reads to feed the file back to the player).
+void YTMURememberDownload(NSString *videoID, NSString *mediaName);
+NSString *YTMULocalAudioPathForVideoID(NSString *videoID);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 NSString *YTMULyricsCacheDirectory(void);
 NSString *YTMULyricsCachePathForVideoID(NSString *vid);
