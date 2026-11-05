@@ -410,6 +410,11 @@ void YTMUDebugDeviceEnroll(NSString *otp, void (^done)(BOOL ok, NSString *messag
 // device buffer (which only stores anything once a device is paired).
 void YTMUDownloadCaptureStreamURL(NSURL *url);
 void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method);
+// A runtime probe of the player/watch/now-playing classes (Source/Downloading.x
+// builds the payload on a badge tap whose capture came up empty; the media
+// stack never crosses NSURLSession, so the next hook target must come from
+// the device itself). Same paired-device token as the traffic capture.
+void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 NSString *YTMULyricsCacheDirectory(void);
 NSString *YTMULyricsCachePathForVideoID(NSString *vid);

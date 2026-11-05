@@ -72,7 +72,7 @@ def _clean_record(raw, device_id):
         path = (parts.path or '') + (('?' + parts.query[:300]) if parts.query else '')
     except Exception:
         pass
-    return {
+    record = {
         'ts': _txt(raw.get('t'), 40),
         'device': device_id,
         'm': _txt(raw.get('m'), 10) or 'GET',
@@ -81,6 +81,29 @@ def _clean_record(raw, device_id):
         'vid': _txt(raw.get('vid'), 20),
         'u': url,
     }
+    # A runtime probe ships a structured member dump (class names, ivar names
+    # and value classes) instead of a request -- none of it is a URL, so none
+    # of it fits the u/m/path columns; it rides the same envelope but keeps
+    # its payload in `d`, bounded per item and per probe.
+    if raw.get('kind') == 'probe':
+        payload = raw.get('d')
+        if isinstance(payload, dict):
+            clean = {}
+            for key, value in list(payload.items())[:12]:
+                if not isinstance(value, dict):
+                    continue
+                items = value.get('items') if isinstance(value, dict) else None
+                if not isinstance(items, list):
+                    continue
+                names = [_txt(x, 220) for x in items[:120] if isinstance(x, str)]
+                clean[_txt(key, 40)] = {
+                    'cls': _txt(value.get('cls'), 120),
+                    'items': names,
+                }
+            if clean:
+                record['kind'] = 'probe'
+                record['d'] = clean
+    return record
 
 
 def _human(size):

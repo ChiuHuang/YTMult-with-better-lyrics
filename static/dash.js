@@ -3056,13 +3056,23 @@
   let ddgPaused = false;
   let ddgRows = [];
   const DDG_MAX = 400;
-  const ddgLine = rec => el('div', {class: 'log-row'},
-    el('span', {class: 'log-time'}, rec.ts || '--:--:--'),
-    el('span', {class: 'log-msg'},
-      `${rec.m || 'GET'} ${rec.host || ''}${rec.path || ''}`
-      + (rec.vid ? `  vid=${rec.vid}` : '')
-      + (rec.device ? `  [${rec.device}]` : '')),
-  );
+  const ddgLine = rec => {
+    const row = el('div', {class: 'log-row'},
+      el('span', {class: 'log-time'}, rec.ts || '--:--:--'),
+      el('span', {class: 'log-msg'},
+        `${rec.m || 'GET'} ${rec.host || ''}${rec.path || ''}`
+        + (rec.vid ? `  vid=${rec.vid}` : '')
+        + (rec.device ? `  [${rec.device}]` : '')));
+    if (rec.kind === 'probe' && rec.d && rec.d.constructor === Object) {
+      // A runtime probe: render the member dump it is actually about.
+      const body = Object.entries(rec.d).map(([k, v]) =>
+        `${k} → ${v.cls || '?'}`
+          + (v.items || []).map(m => `\n    ${m}`).join('')).join('\n');
+      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.85;margin:2px 0 8px 22px;font-size:11px;'}, body || '(empty)');
+      row.appendChild(pre);
+    }
+    return row;
+  };
   const ddgCount = () => {
     const c = $('#ddlive-count');
     if (c) c.textContent = (ddgPaused ? 'paused · ' : '') + `${ddgRows.length} record(s)`;

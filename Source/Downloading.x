@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <objc/runtime.h>
+#import <objc/message.h>
 #import "FFMpegDownloader.h"
 #import "Headers/YTUIResources.h"
 #import "Headers/YTMActionSheetController.h"
@@ -131,6 +133,99 @@ static NSString *YTMUCapturedStreamURL(NSString *videoID) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// RUNTIME PROBE. The capture file (devfecab41d, 300 records over two days)
+// settled the assumption this capture was built on: youtubei API calls,
+// thumbnails and watchtime stats all cross NSURLSession, but a googlevideo
+// media URL NEVER does -- the app's media stack speaks through its own
+// transport, invisible to the hooks above. The next hook target is therefore
+// whatever private session the player really uses, and the runtime is the one
+// that knows its name. One probe per badge tap when the capture came up
+// empty: the member names of the player/watch/now-playing classes (keyword
+// filtered) plus which ivars are populated with which class. Uploaded through
+// the paired debug channel (YTMUDebugDeviceNoteProbe), so only an enrolled
+// device can ask for -- or receive -- this.
+// ---------------------------------------------------------------------------
+
+static BOOL YTMUProbeKeyword(NSString *name) {
+    if (!name.length) return NO;
+    static NSArray *keys;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keys = @[@"respon", @"stream", @"format", @"media", @"manifest",
+                 @"url", @"URL", @"egment", @"layback", @"ata"];
+    });
+    for (NSString *key in keys) {
+        if ([name containsString:key]) return YES;
+    }
+    return NO;
+}
+
+static void YTMUDebugProbeAddClass(NSMutableDictionary *payload, Class startCls,
+                                   id instance, NSString *label, NSMutableSet *seen) {
+    for (Class cls = startCls; cls; cls = class_getSuperclass(cls)) {
+        if (cls == [NSObject class]) break;
+        NSString *clsName = NSStringFromClass(cls);
+        if (!clsName.length || [seen containsObject:clsName]) return;
+        [seen addObject:clsName];
+
+        NSMutableArray *lines = [NSMutableArray array];
+        unsigned int count = 0;
+        Method *methods = class_copyMethodList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            NSString *sel = NSStringFromSelector(method_getName(methods[i]));
+            if (YTMUProbeKeyword(sel)) [lines addObject:[@"m: " stringByAppendingString:sel]];
+        }
+        free(methods);
+        Ivar *ivars = class_copyIvarList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char *cname = ivar_getName(ivars[i]);
+            NSString *name = cname ? [NSString stringWithUTF8String:cname] : nil;
+            if (!name.length) continue;
+            const char *tenc = ivar_getTypeEncoding(ivars[i]);
+            NSString *type = (tenc && tenc[0]) ? [NSString stringWithUTF8String:tenc] : @"?";
+            NSString *line = [NSString stringWithFormat:@"i: %@ (%@)", name, type];
+            // Object-typed ivars are safe to READ on a live instance (gated on
+            // the encoding's leading '@'), and the class of the value is the
+            // one bit we actually need: is there a response object at all, and
+            // under which name its records live in THIS build.
+            if (instance && [type hasPrefix:@"@"]) {
+                @try {
+                    id value = object_getIvar(instance, ivars[i]);
+                    line = [line stringByAppendingFormat:@" = %@",
+                            value ? NSStringFromClass([value class]) : @"nil"];
+                } @catch (NSException *e) {
+                    line = [line stringByAppendingString:@" = <refused>"];
+                }
+            }
+            [lines addObject:line];
+        }
+        free(ivars);
+        payload[label] = @{@"cls": clsName, @"items": [lines copy]};
+        label = [label stringByAppendingString:@"^"];
+    }
+}
+
+
+// One shipped record per badge tap: player, watch and now-playing VCs, each
+// walking its own hierarchy. Returned strings never contain URLs/data beyond
+// names, and only a paired device can receive them.
+static void YTMUDebugProbeRuntime(id player, id watch, id nowPlaying, NSString *vid) {
+    if (!YTMUDebugDeviceEnabled()) return;
+    @try {
+        NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+        NSMutableSet *seen = [NSMutableSet set];
+        YTMUDebugProbeAddClass(payload, player ? [player class] : Nil, player, @"player", seen);
+        YTMUDebugProbeAddClass(payload, watch ? [watch class] : Nil, watch, @"watch", seen);
+        YTMUDebugProbeAddClass(payload, nowPlaying ? [nowPlaying class] : Nil, nowPlaying, @"now", seen);
+        if (!payload.count) return;
+        YTMUDebugDeviceNoteProbe(@"player-runtime", vid, payload);
+        NSLog(@"[YTMU-DL] runtime probe posted (vid=%@)", vid ?: @"?");
+    } @catch (NSException *e) {
+        NSLog(@"[YTMU-DL] probe failed: %@", e);
+    }
+}
+
 @interface UIView ()
 - (UIViewController *)_viewControllerForAncestor;
 @end
@@ -185,6 +280,11 @@ static NSString *YTMUCapturedStreamURL(NSString *videoID) {
     // that truly needs the response) simply is not offered without it.
     NSString *captured = YTMUCapturedStreamURL(g_currentVideoID);
     if (!playerResponse && !captured.length) {
+        // Empty capture is not just "play longer" any more: the capture file
+        // proved the media stack never crosses NSURLSession. The miss is the
+        // information -- post the runtime probe through the paired debug
+        // channel so the next hook target comes from the device, not a guess.
+        YTMUDebugProbeRuntime(playerVC, watchVC, playingVC, g_currentVideoID);
         YTAlertView *alertView = [%c(YTAlertView) infoDialog];
         alertView.title = LOC(@"DONT_RUSH");
         alertView.subtitle = LOC(@"DONT_RUSH_DESC");
