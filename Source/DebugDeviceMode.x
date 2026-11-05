@@ -115,6 +115,30 @@ static void YTMUDebugFlush(void) {
     }] resume];
 }
 
+// One probe the operator asked for (see YTMUDebugProbeRuntime in
+// Downloading.x): posts immediately, not on the next 15s tick, because the
+// operator is sitting on the badge tap waiting for this exact record. The
+// payload is runtime metadata only -- class and member names -- and still
+// reaches the server only through the same paired-device token as traffic.
+void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload) {
+    if (!YTMUDebugDeviceEnabled() || !YTMUDebugHasToken()) return;
+    @try {
+        NSDictionary *record = @{
+            @"t": [NSDate date].description ?: @"",
+            @"kind": @"probe",
+            @"m": @"PROBE",
+            @"u": [NSString stringWithFormat:@"probe://%@", label ?: @"runtime"],
+            @"vid": vid ?: @"",
+            @"d": payload ?: @{},
+        };
+        NSMutableArray *records = YTMUDebugRecords();
+        @synchronized(records) { [records addObject:record]; }
+        YTMUDebugStartFlushTimer();
+        YTMUDebugFlush();
+    } @catch (NSException *e) {
+    }
+}
+
 // Called from the transport hooks only, and cheap by construction: disabled or
 // unenrolled devices pay one NSUserDefaults read per request and nothing else.
 void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method) {
