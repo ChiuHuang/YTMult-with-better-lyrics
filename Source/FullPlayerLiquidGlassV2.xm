@@ -66,7 +66,13 @@ static BOOL IsButton(UIView*v){return [v isKindOfClass:UIButton.class]||[NSStrin
 static BOOL IsPlay(UIView*v){NSString*s=[NSString stringWithFormat:@"%@ %@",v.accessibilityLabel?:@"",v.accessibilityIdentifier?:@""].lowercaseString;return [s containsString:@"play"]||[s containsString:@"pause"];}
 static BOOL IsArtwork(UIView*v){Class c=NSClassFromString(@"YTImageView");return (c&&[v isKindOfClass:c])||([v isKindOfClass:UIImageView.class]&&((UIImageView*)v).image);}
 static BOOL KeepBg(NSString*n){return [n hasPrefix:@"YTMGradientScrim"]||[n hasPrefix:@"YTPlayerView"]||[n hasPrefix:@"MLHAMIO"]||[n hasPrefix:@"YTMVideoOverlay"]||[n hasPrefix:@"MPV"]||[n hasPrefix:@"YTVolumeBar"]||[n hasPrefix:@"YTVRCaptionOverlay"];}
-static void ClearRoot(UIView*r,NSInteger d){if(!r||d>7)return;for(UIView*v in r.subviews){NSString*n=NSStringFromClass(v.class);if((v.tag>=7318&&v.tag<=7321)||KeepBg(n))continue;if([v isKindOfClass:UIVisualEffectView.class])continue;if(!IsArtwork(v)&&![v isKindOfClass:UILabel.class]&&!IsButton(v)&&![n containsString:@"Slider"]&&![n containsString:@"Scrubber"]){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}ClearRoot(v,d+1);}}
+// The seek bar must be skipped as a SUBTREE, not as a node. YTMStoryboardScrubber
+// does not paint itself: its track is three plain UIViews inside it (dump
+// 22-38-55, song 25.49s of 3:27 = 12.3% and the "elapsed" child measured 47pt
+// of the 388pt track) -- a node-only exemption still recursed into those
+// children and cleared their backgroundColor, so the bar went transparent and
+// the full player showed no progress bar at all. Same for a Slider.
+static void ClearRoot(UIView*r,NSInteger d){if(!r||d>7)return;for(UIView*v in r.subviews){NSString*n=NSStringFromClass(v.class);if((v.tag>=7318&&v.tag<=7321)||KeepBg(n))continue;if([v isKindOfClass:UIVisualEffectView.class])continue;if([n containsString:@"Slider"]||[n containsString:@"Scrubber"])continue;if(!IsArtwork(v)&&![v isKindOfClass:UILabel.class]&&!IsButton(v)){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}ClearRoot(v,d+1);}}
 static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])return;objc_setAssociatedObject(v,kAnimated,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);if(UIAccessibilityIsReduceMotionEnabled())return;v.alpha=0;v.transform=CGAffineTransformMakeScale(.975,.975);[UIView animateWithDuration:.38 delay:0 usingSpringWithDamping:.84 initialSpringVelocity:.22 options:0 animations:^{v.alpha=1;v.transform=CGAffineTransformIdentity;}completion:nil];}
 
 @interface YTMNowPlayingViewController:UIViewController@end
