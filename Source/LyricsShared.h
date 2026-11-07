@@ -419,6 +419,11 @@ void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payl
 // Source/Downloading.x reads to feed the file back to the player).
 void YTMURememberDownload(NSString *videoID, NSString *mediaName);
 NSString *YTMULocalAudioPathForVideoID(NSString *videoID);
+// One-shot sweep: audio files under ANY YTMusicUltimate folder outside the
+// canonical Documents/YTMusicUltimate get MOVED there (container changes after
+// a tweak update leave them strayed). Call sites: the Downloads page reload
+// and the playback lookup's first miss.
+void YTMUAdoptStrayedDownloads(void);
 BOOL YTMUAppSettingBool(NSString *key, BOOL dflt);
 NSString *YTMULyricsCacheDirectory(void);
 NSString *YTMULyricsCachePathForVideoID(NSString *vid);

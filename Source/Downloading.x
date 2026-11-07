@@ -495,8 +495,67 @@ void YTMURememberDownload(NSString *videoID, NSString *mediaName) {
     }
 }
 
+// A container change (tweak update, reinstall) can leave the audio files
+// someplace other than the canonical Documents/YTMusicUltimate -- the ASSET
+// record of 4cLaxFWT9iI proved doubled paths exist on the device for real.
+// One depth-limited sweep is NOT the job of the Downloads page alone: also run
+// in-process so the stray lookup pulls the file back into its original location.
+// Every audio track inside ANY folder named YTMusicUltimate moves to the
+// canonical folder (the adjacent cover image also moves together with it), and the
+// playback file lookup below runs the sweep exactly once before every miss.
+static void YTMUAdoptStrayedDownloadsOnce(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    if (!documents.length) return;
+    NSString *canonical = [documents stringByAppendingPathComponent:@"YTMusicUltimate"];
+    [fm createDirectoryAtPath:canonical withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSMutableArray *strays = [NSMutableArray array];
+    NSDirectoryEnumerator *walk = [fm enumeratorAtPath:documents];
+    NSString *rel = nil;
+    NSUInteger visited = 0;
+    while ((rel = [walk nextObject])) {
+        if (++visited > 5000) break;
+        // Six directories below Documents is already deeper than any layout the
+        // double-path proof produced; reserve the rest so a single corrupt
+        // directory cannot cause the enumeration to time out.
+        if (rel.pathComponents.count > 7) { [walk skipDescendants]; continue; }
+        NSString *full = [documents stringByAppendingPathComponent:rel];
+        BOOL isDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&isDir];
+        if (isDir) continue;
+        NSString *ext = rel.pathExtension.lowercaseString;
+        if (![ext isEqualToString:@"m4a"] && ![ext isEqualToString:@"mp3"]) { [walk skipDescendants]; continue; }
+        // Only collections that lived in downloads folders get adopted;
+        // stray audio files elsewhere in Documents belong to something else.
+        if (![rel.pathComponents containsObject:@"YTMusicUltimate"]) continue;
+        if ([full hasPrefix:[canonical stringByAppendingString:@"/"]]) continue;
+        [walk skipDescendants];
+        [strays addObject:full];
+    }
+    for (NSString *src in strays) {
+        NSString *name = src.lastPathComponent;
+        NSString *dst = [canonical stringByAppendingPathComponent:name];
+        if ([fm fileExistsAtPath:dst]) continue;
+        [fm moveItemAtPath:src toPath:dst error:nil];
+        NSString *cover = [[name stringByDeletingPathExtension] stringByAppendingPathExtension:@"png"];
+        NSString *srcCover = [[src stringByDeletingLastPathComponent] stringByAppendingPathComponent:cover];
+        if ([fm fileExistsAtPath:srcCover]
+            && ![fm fileExistsAtPath:[canonical stringByAppendingPathComponent:cover]]) {
+            [fm moveItemAtPath:srcCover toPath:[canonical stringByAppendingPathComponent:cover] error:nil];
+        }
+    }
+    if (strays.count) NSLog(@"[YTMU-DL] adopted %lu strayed download(s)", (unsigned long)strays.count);
+}
+
+void YTMUAdoptStrayedDownloads(void) {
+    static dispatch_once_t adoptOnce;
+    dispatch_once(&adoptOnce, ^{ YTMUAdoptStrayedDownloadsOnce(); });
+}
+
 // vid -> "<author> - <title>.m4a" under Documents/YTMusicUltimate/, only when
-// the file is actually there right now.
+// the file is actually there right now. A miss runs the one-shot adoption
+// sweep first, so a container change heals itself on the first play.
 NSString *YTMULocalAudioPathForVideoID(NSString *videoID) {
     if (!videoID.length) return nil;
     NSString *mediaName = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUDownloads"][videoID];
@@ -504,8 +563,11 @@ NSString *YTMULocalAudioPathForVideoID(NSString *videoID) {
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     NSString *full = [[documentsURL URLByAppendingPathComponent:
         [NSString stringWithFormat:@"YTMusicUltimate/%@.m4a", mediaName]] path];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:full]) return nil;
-    return full;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:full]) return full;
+    static dispatch_once_t adoptOnce;
+    dispatch_once(&adoptOnce, ^{ YTMUAdoptStrayedDownloads(); });
+    if ([[NSFileManager defaultManager] fileExistsAtPath:full]) return full;
+    return nil;
 }
 
 // The video id a response stands for: videoDetails.videoId when the runtime
@@ -533,8 +595,10 @@ static NSString *YTMUResponseVideoID(id response) {
 // object exists but no mime=audio entry does, build one YTIFormatStream
 // pointing at the local file and put it INTO the formats container, so the
 // loader has something to pick. Container replacement goes through the ivar
-// that held the original array, mutable copy first.
-static NSUInteger YTMUInjectLocalFormat(id streaming, NSURL *fileURL) {
+// that held the original array, mutable copy first. relPath is the
+// documents-relative placement YTMUSwapToLocalFiles builds (see the measured
+// reason there).
+static NSUInteger YTMUInjectLocalFormat(id streaming, NSString *relPath) {
     if (!streaming) return 0;
     Class streamCls = %c(YTIFormatStream);
     if (!streamCls) return 0;
@@ -542,10 +606,10 @@ static NSUInteger YTMUInjectLocalFormat(id streaming, NSURL *fileURL) {
     if (!fmt) return 0;
     SEL setSel = @selector(setURL:);
     if ([fmt respondsToSelector:setSel]) {
-        ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, fileURL.absoluteString);
+        ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, relPath);
     } else {
         Ivar iv = class_getInstanceVariable(streamCls, "URL");
-        if (iv) object_setIvar(fmt, iv, fileURL);
+        if (iv) object_setIvar(fmt, iv, relPath);
         else return 0;
     }
     for (Class cls = object_getClass(streaming); cls; cls = class_getSuperclass(cls)) {
@@ -581,6 +645,13 @@ static NSUInteger YTMUInjectLocalFormat(id streaming, NSURL *fileURL) {
 // when it answers, the ivar write when it does not; formats=empty gets an
 // injected one instead. Returns how many audio formats now point at or come
 // from the local file -- zero for every song without one.
+//
+// The value written into the format URL is a DOCUMENTS-RELATIVE path, not a
+// file:// absolute: the 4cLaxFWT9iI ASSET record showed the loader re-basing an
+// absolute file URL onto its own Documents after stripping the sandbox prefix
+// (/var/mobile/Containers/), producing a doubled path that does not exist. A
+// relative string falls under whatever base the loader resolves against -- the
+// Documents/YTMusicUltimate subtree the file really lives in.
 static NSUInteger YTMUSwapToLocalFiles(id response) {
     if (!YTMUDebugDeviceEnabled() || !response) return 0;
     NSUInteger count = 0;
@@ -588,26 +659,27 @@ static NSUInteger YTMUSwapToLocalFiles(id response) {
         NSString *vid = YTMUResponseVideoID(response) ?: g_currentVideoID;
         NSString *path = YTMULocalAudioPathForVideoID(vid);
         if (!path) return 0;
+        NSString *relPath = [@"YTMusicUltimate/" stringByAppendingString:path.lastPathComponent];
         id streaming = YTMUStreamingDataFrom(YTMUResponseData(response));
         NSArray *fmts = YTMUAdaptiveFormatsFrom(streaming);
-        NSURL *fileURL = [NSURL fileURLWithPath:path];
         for (id fmt in fmts) {
             if (![fmt respondsToSelector:@selector(URL)]) continue;
             NSString *uStr = ((NSString *(*)(id, SEL))objc_msgSend)(fmt, @selector(URL));
             if (![uStr isKindOfClass:[NSString class]] || !uStr.length) continue;
-            if ([uStr hasPrefix:@"file://"]) { count++; continue; }
+            // Both spellings a previous swap left behind count as ours.
+            if ([uStr hasPrefix:@"file://"] || [uStr hasPrefix:@"YTMusicUltimate/"]) { count++; continue; }
             if (![uStr containsString:@"mime=audio"]) continue;
             SEL setSel = @selector(setURL:);
             if ([fmt respondsToSelector:setSel]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, fileURL.absoluteString);
+                ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, relPath);
                 count++;
             } else {
                 Ivar iv = class_getInstanceVariable(object_getClass(fmt), "URL");
-                if (iv) { object_setIvar(fmt, iv, fileURL); count++; }
+                if (iv) { object_setIvar(fmt, iv, relPath); count++; }
             }
         }
-        if (!count) count = YTMUInjectLocalFormat(streaming, fileURL);
-        if (count) NSLog(@"[YTMU-DL] playing local file vid=%@ (%lu format(s))", vid, (unsigned long)count);
+        if (!count) count = YTMUInjectLocalFormat(streaming, relPath);
+        if (count) NSLog(@"[YTMU-DL] playing local file vid=%@ rel=%@ (%lu format(s))", vid, relPath, (unsigned long)count);
         else NSLog(@"[YTMU-DL] local file exists but no formats container took it vid=%@", vid);
     } @catch (NSException *e) {
     }
@@ -848,15 +920,21 @@ static void YTMUNotePlaybackEvent(NSString *event, NSString *vid, NSArray *extra
 - (void)playbackControllerDidPlay {
     %orig;
     if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
+        // docs pins the Documents base THIS process resolves, so the ASSET
+        // record can be compared against it: a joined path under a different
+        // Documents is the loader ignoring ours.
         YTMUNotePlaybackEvent(@"local-playback-ok", g_currentVideoID,
-            nil);
+            @[[NSString stringWithFormat:@"docs=%@",
+                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]]]);
     }
 }
 - (void)playbackControllerDidFailWithError:(id)error {
     %orig;
     if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
         YTMUNotePlaybackEvent(@"local-playback-fail", g_currentVideoID,
-            @[[NSString stringWithFormat:@"error=%@", error]]);
+            @[[NSString stringWithFormat:@"error=%@", error],
+              [NSString stringWithFormat:@"docs=%@",
+                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]]]);
     }
 }
 %end
