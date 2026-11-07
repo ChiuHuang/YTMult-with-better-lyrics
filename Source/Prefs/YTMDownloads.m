@@ -1,5 +1,5 @@
 #import "YTMDownloads.h"
-#import "LyricsShared.h"
+#import "../LyricsShared.h"
 
 @implementation YTMDownloads
 
