@@ -230,7 +230,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (section == 0) return 6;
     if (section == 1) return 3;
     if (section == 2) return 2;
-    if (section == 3) return 4;
+    if (section == 3) return 5;
     return 0;
 }
 
@@ -343,6 +343,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (indexPath.section == 3) {
         if (indexPath.row == 2) [self ytmu_askDeviceOTP];
         else if (indexPath.row == 3) [self ytmu_forgetDeviceToken];
+        else if (indexPath.row == 4) [self ytmu_copyFetchToken];
         return;
     }
     if (indexPath.section != 2) return;
@@ -351,6 +352,25 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
         return;
     }
     [self ytmu_sendTestLog];
+}
+
+// The fetch credential is the pairing token itself: the server stores only its
+// hash, so the copy here is the one place it exists outside the device. The
+// pasteboard carries the curl form too, so the request can be replayed from a
+// PC without looking the route up.
+- (void)ytmu_copyFetchToken {
+    NSString *token = YTMUDebugDeviceToken();
+    if (!token.length) {
+        [self ytmu_alertWithTitle:LOC(@"DEBUG_COPIED")
+                          message:LOC(@"DEBUG_DEVICE_TOKEN_NONE")];
+        return;
+    }
+    NSString *text = [NSString stringWithFormat:
+        @"curl -s -H \"X-YTMU-Debug-Token: %@\" \"https://ytmtranslate.chiuhuang.dev/api/debug/fetch?kind=server&limit=200\"\n"
+        "curl -s -H \"X-YTMU-Debug-Token: %@\" \"https://ytmtranslate.chiuhuang.dev/api/debug/fetch?kind=device&limit=200\"",
+        token, token];
+    [UIPasteboard generalPasteboard].string = text;
+    [self ytmu_alertWithTitle:LOC(@"DEBUG_COPIED") message:nil];
 }
 
 #pragma mark - Switch / segment
@@ -485,9 +505,15 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (row == 2) {
         cell.textLabel.text = LOC(@"DEBUG_DEVICE_ENTER_OTP");
         cell.imageView.image = [UIImage systemImageNamed:@"number.square"];
-    } else {
+    } else if (row == 3) {
         cell.textLabel.text = LOC(@"DEBUG_DEVICE_FORGET");
         cell.imageView.image = [UIImage systemImageNamed:@"escape"];
+    } else {
+        cell.textLabel.text = LOC(@"DEBUG_DEVICE_FETCH_TOKEN");
+        cell.imageView.image = [UIImage systemImageNamed:@"network"];
+        cell.detailTextLabel.text = LOC(@"DEBUG_DEVICE_FETCH_TOKEN_DESC");
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+        cell.detailTextLabel.numberOfLines = 0;
     }
     return cell;
 }

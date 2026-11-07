@@ -165,6 +165,15 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method) {
     }
 }
 
+// The enrolled token itself, for the one purpose the dashboard cannot serve
+// (the server stores only its hash): the user copies it from the Debug page
+// and uses it as the credential of the read endpoint
+// (GET /api/debug/fetch, X-YTMU-Debug-Token) to pull the device capture and
+// the server log tail from anywhere. Only answers when a token is at all.
+NSString *YTMUDebugDeviceToken(void) {
+    return [[NSUserDefaults standardUserDefaults] stringForKey:kYTMUDebugTokenKey] ?: @"";
+}
+
 NSDictionary *YTMUDebugDeviceStatus(void) {
     NSUInteger pending = 0;
     NSMutableArray *records = YTMUDebugRecords();

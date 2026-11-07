@@ -16,9 +16,11 @@ import time
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from collections import deque
+
 from flask import request, jsonify
 
-from .app import app, login_required, LOG_DIR, _sse_broadcast
+from .app import app, login_required, LOG_DIR, _sse_broadcast, SERVER_LOG_FILE, CRASH_LOG_FILE
 from . import debug_mode
 
 # Enroll is the one route a stranger can reach, and the only thing standing
@@ -217,6 +219,46 @@ def debug_upload():
     if kept_records:
         _sse_broadcast('debug_cap', {'device': device_id, 'records': kept_records})
     return jsonify({'ok': True, 'accepted': kept})
+
+
+@app.route('/api/debug/fetch', methods=['GET'])
+def debug_fetch():
+    """The read half of the pairing channel. The enrolled token (the one already
+    on the device, and copyable from the Debug page) fetches two things without
+    a dashboard session: THIS device's capture records and the tail of the
+    server (or crash) log. Read-only on purpose -- verify_read bumps no counter,
+    so uploads stay measurable as uploads. Token goes in the X-YTMU-Debug-Token
+    header, never in the query string: the access log prints URLs, and a token
+    would end up in the same file this endpoint returns.
+    GET /api/debug/fetch?kind=device&limit=200   (default; this device's records)
+    GET /api/debug/fetch?kind=server&limit=300   (server.log tail)
+    GET /api/debug/fetch?kind=crash&limit=100    (crash.log tail)
+    """
+    token = request.headers.get('X-YTMU-Debug-Token', '')
+    device = debug_mode.verify_read(token)
+    if not device:
+        return jsonify({'ok': False, 'error': 'unknown or revoked token'}), 401
+    try:
+        limit = int(request.args.get('limit', _TAIL_DEFAULT))
+    except (TypeError, ValueError):
+        limit = _TAIL_DEFAULT
+    limit = min(max(limit, 1), _TAIL_MAX)
+    kind = request.args.get('kind', 'device')
+    if kind == 'device':
+        path = _debug_path(device['id'])
+        records = _tail(path, limit) if path else []
+        return jsonify({'ok': True, 'kind': kind, 'device': device['id'], 'records': records})
+    if kind in ('server', 'crash'):
+        path = SERVER_LOG_FILE if kind == 'server' else CRASH_LOG_FILE
+        lines = []
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                for raw in deque(f, maxlen=limit):
+                    lines.append(_txt(raw.rstrip('\n'), 600))
+        except OSError:
+            lines = []
+        return jsonify({'ok': True, 'kind': kind, 'lines': lines})
+    return jsonify({'ok': False, 'error': 'kind must be device, server or crash'}), 400
 
 
 @app.route('/api/admin/debug/otp', methods=['POST'])

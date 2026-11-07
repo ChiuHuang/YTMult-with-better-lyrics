@@ -183,6 +183,9 @@
 "DEBUG_DEVICE_OTP_OK" = "裝置已配對";
 "DEBUG_DEVICE_OTP_BAD" = "代碼被拒絕";
 "DEBUG_DEVICE_FORGET" = "清除裝置權杖";
+"DEBUG_DEVICE_FETCH_TOKEN" = "複製查詢權杖";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "複製配對權杖與 GET /api/debug/fetch 的 curl 範例，可直接讀回本裝置的上傳紀錄與伺服器日誌結尾，不必開啟儀表板。";
+"DEBUG_DEVICE_TOKEN_NONE" = "尚無裝置權杖：請先配對";
 
 "DEBUG_COPIED" = "診斷資訊已複製到剪貼簿";
 

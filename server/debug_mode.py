@@ -163,6 +163,23 @@ def verify(token, count=0):
     return None
 
 
+def verify_read(token):
+    """Device record for a valid, unrevoked token; None otherwise. The READ
+    half of verify: no counters bump, no save happens, because the fetch
+    channel must not be indistinguishable from the upload channel in stats."""
+    if not token or not isinstance(token, str):
+        return None
+    digest = _hash_token(token)
+    with _LOCK:
+        data = _load()
+        for record in data['devices'].values():
+            if record.get('revoked'):
+                continue
+            if secrets.compare_digest(record.get('token_hash') or '', digest):
+                return {k: v for k, v in record.items() if k != 'token_hash'}
+    return None
+
+
 def list_devices():
     """Dashboard view. The token hash never leaves this module."""
     with _LOCK:

@@ -415,6 +415,10 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method);
 // stack never crosses NSURLSession, so the next hook target must come from
 // the device itself). Same paired-device token as the traffic capture.
 void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload);
+// The enrolled pairing token itself (DebugDeviceMode.x). The server keeps only
+// its hash, so this is the one place the credential for GET /api/debug/fetch
+// (X-YTMU-Debug-Token header) can be copied from.
+NSString *YTMUDebugDeviceToken(void);
 // Downloaded files (Source/FFMpegDownloader.m records on success,
 // Source/Downloading.x reads to feed the file back to the player).
 void YTMURememberDownload(NSString *videoID, NSString *mediaName);

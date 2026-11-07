@@ -183,6 +183,9 @@
 "DEBUG_DEVICE_OTP_OK" = "设备已配对";
 "DEBUG_DEVICE_OTP_BAD" = "代码被拒绝";
 "DEBUG_DEVICE_FORGET" = "清除设备令牌";
+"DEBUG_DEVICE_FETCH_TOKEN" = "复制查询令牌";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "复制配对令牌与 GET /api/debug/fetch 的 curl 示例，可直接读回本设备的上传记录与服务器日志结尾，不必打开仪表板。";
+"DEBUG_DEVICE_TOKEN_NONE" = "尚无设备令牌：请先配对";
 
 "DEBUG_COPIED" = "诊断信息已复制到剪贴板";
 
