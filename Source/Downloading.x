@@ -269,12 +269,26 @@ static id YTMUGetterOrValue(id obj, SEL getter, YTMUIvarPredicate match) {
     return YTMUFirstIvarValue(obj, match);
 }
 
+// The "playerData" level: YTIPlayerResponse directly, OR one YTPlayerResponse
+// wrapper below it. The drill proved -playbackControllerDidLoadPlayerWith-
+// PlaybackData: hands over a YTPlaybackData wrapper whose inner response the
+// original class-match never saw -- the runtime class chain is
+// YTPlaybackData -> (YTPlayerResponse) -> YTIPlayerResponse.
 static id YTMUResponseData(id response) {
-    // playbackData handed to -playbackControllerDidLoadPlayerWithPlaybackData:
-    // may be the YTIPlayerResponse itself, not a YTPlayerResponse wrapper.
+    if (!response) return nil;
     if ([response isKindOfClass:%c(YTIPlayerResponse)]) return response;
-    return YTMUGetterOrValue(response, @selector(playerData),
-        ^BOOL (id v) { return [v isKindOfClass:%c(YTIPlayerResponse)]; });
+    @try {
+        if ([response respondsToSelector:@selector(playerData)]) {
+            id value = ((id (*)(id, SEL))objc_msgSend)(response, @selector(playerData));
+            if ([value isKindOfClass:%c(YTIPlayerResponse)]) return value;
+        }
+    } @catch (NSException *e) {
+    }
+    id wrapped = YTMUFirstIvarValue(response, ^BOOL (id v) {
+        return [v isKindOfClass:%c(YTPlayerResponse)] || [v isKindOfClass:%c(YTIPlayerResponse)];
+    });
+    if ([wrapped isKindOfClass:%c(YTPlayerResponse)]) return YTMUResponseData(wrapped);
+    return wrapped;
 }
 
 static id YTMUStreamingDataFrom(id data) {
@@ -388,9 +402,16 @@ static void YTMUDebugNoteResponseProbe(id response, NSString *vid) {
         [lines addObject:[NSString stringWithFormat:@"streaming=%@", streaming ? NSStringFromClass([streaming class]) : @"nil"]];
         [lines addObject:[NSString stringWithFormat:@"fmts=%u", fmtCount]];
         for (NSString *u in urls) [lines addObject:[@"url: " stringByAppendingString:u]];
-        YTMUDebugDeviceNoteProbe(@"response-drill", vid, @{
-            @"levels": @{@"cls": NSStringFromClass([response class]), @"items": [lines copy]},
-        });
+        NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+        payload[@"levels"] = @{@"cls": NSStringFromClass([response class]), @"items": [lines copy]};
+        // The member walk of the response object itself: which ivars hold
+        // WHICH live classes. The YTPlaybackData record proved data=nil is a
+        // class-match miss, and seeing every ivar's value class is the one
+        // look that ends the guessing about where the response hides.
+        NSMutableDictionary *selfWalk = [NSMutableDictionary dictionary];
+        YTMUDebugProbeAddClass(selfWalk, [response class], response, @"self", [NSMutableSet set]);
+        for (NSString *label in selfWalk) payload[[NSString stringWithFormat:@"walk-%@", label]] = selfWalk[label];
+        YTMUDebugDeviceNoteProbe(@"response-drill", vid, payload);
         NSLog(@"[YTMU-DL] response yielded no audio stream, drill probe posted (vid=%@)", vid ?: @"?");
     } @catch (NSException *e) {
     }
@@ -432,7 +453,12 @@ static void YTMUConsumeResponse(id response, NSString *vid) {
             }
             NSLog(@"[YTMU-DL] captured audio stream from player response vid=%@", key ?: @"?");
         } else {
-            YTMUDebugNoteResponseProbe(response, vid);
+            // A song the swap owns would barf a fake drill (its formats contain
+            // file:// URLs the capture filter rightly refuses): no local file
+            // under this response means the miss is real information.
+            if (!YTMULocalAudioPathForVideoID(vid ?: g_currentVideoID)) {
+                YTMUDebugNoteResponseProbe(response, vid);
+            }
         }
     } @catch (NSException *e) {
     }
@@ -502,9 +528,59 @@ static NSString *YTMUResponseVideoID(id response) {
     return nil;
 }
 
-// Formats in AXE URL before the response is consumed: the property setter
-// when it answers, the ivar write when it does not. Returns how many audio
-// formats now point at the local file -- zero for every song without one.
+// The offline half: OFFLINE the resolved response carries NO formats at all
+// (the 0:00-0:00 state) -- there is nothing to rewrite. When a streamingData
+// object exists but no mime=audio entry does, build one YTIFormatStream
+// pointing at the local file and put it INTO the formats container, so the
+// loader has something to pick. Container replacement goes through the ivar
+// that held the original array, mutable copy first.
+static NSUInteger YTMUInjectLocalFormat(id streaming, NSURL *fileURL) {
+    if (!streaming) return 0;
+    Class streamCls = %c(YTIFormatStream);
+    if (!streamCls) return 0;
+    YTIFormatStream *fmt = [[streamCls alloc] init];
+    if (!fmt) return 0;
+    SEL setSel = @selector(setURL:);
+    if ([fmt respondsToSelector:setSel]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(fmt, setSel, fileURL.absoluteString);
+    } else {
+        Ivar iv = class_getInstanceVariable(streamCls, "URL");
+        if (iv) object_setIvar(fmt, iv, fileURL);
+        else return 0;
+    }
+    for (Class cls = object_getClass(streaming); cls; cls = class_getSuperclass(cls)) {
+        unsigned int count = 0;
+        Ivar foundIvar = NULL;
+        NSMutableArray *nuevo = nil;
+        Ivar *ivars = class_copyIvarList(cls, &count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char *tenc = ivar_getTypeEncoding(ivars[i]);
+            if (!tenc || tenc[0] != '@') continue;
+            id value = nil;
+            @try {
+                value = object_getIvar(streaming, ivars[i]);
+            } @catch (NSException *e) {
+                continue;
+            }
+            if (![value isKindOfClass:[NSArray class]]) continue;
+            nuevo = [NSMutableArray arrayWithArray:value];
+            foundIvar = ivars[i];
+            break;
+        }
+        free(ivars);
+        if (foundIvar) {
+            [nuevo addObject:fmt];
+            object_setIvar(streaming, foundIvar, nuevo);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// Local file re-pointed before the response is consumed: formats existing get
+// when it answers, the ivar write when it does not; formats=empty gets an
+// injected one instead. Returns how many audio formats now point at or come
+// from the local file -- zero for every song without one.
 static NSUInteger YTMUSwapToLocalFiles(id response) {
     if (!YTMUDebugDeviceEnabled() || !response) return 0;
     NSUInteger count = 0;
@@ -512,7 +588,8 @@ static NSUInteger YTMUSwapToLocalFiles(id response) {
         NSString *vid = YTMUResponseVideoID(response) ?: g_currentVideoID;
         NSString *path = YTMULocalAudioPathForVideoID(vid);
         if (!path) return 0;
-        NSArray *fmts = YTMUAdaptiveFormatsFrom(YTMUStreamingDataFrom(YTMUResponseData(response)));
+        id streaming = YTMUStreamingDataFrom(YTMUResponseData(response));
+        NSArray *fmts = YTMUAdaptiveFormatsFrom(streaming);
         NSURL *fileURL = [NSURL fileURLWithPath:path];
         for (id fmt in fmts) {
             if (![fmt respondsToSelector:@selector(URL)]) continue;
@@ -529,7 +606,9 @@ static NSUInteger YTMUSwapToLocalFiles(id response) {
                 if (iv) { object_setIvar(fmt, iv, fileURL); count++; }
             }
         }
+        if (!count) count = YTMUInjectLocalFormat(streaming, fileURL);
         if (count) NSLog(@"[YTMU-DL] playing local file vid=%@ (%lu format(s))", vid, (unsigned long)count);
+        else NSLog(@"[YTMU-DL] local file exists but no formats container took it vid=%@", vid);
     } @catch (NSException *e) {
     }
     return count;
