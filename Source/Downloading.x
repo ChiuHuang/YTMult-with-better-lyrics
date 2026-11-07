@@ -706,6 +706,88 @@ static void YTMUNotePlaybackEvent(NSString *event, NSString *vid, NSArray *extra
     }
 }
 
+// The docs= record of 4cLaxFWT9iI showed THIS process's NSDocumentDirectory
+// itself resolving to a nested path
+// (.../0273918F.../Documents/Data/Application/EBAFA0A9.../Documents) — either
+// the sandbox anchor genuinely IS nested (a roothide-style camouflage
+// container) or the Documents resolver is lying, and the adoption sweep starts
+// from whichever it is. One sandbox probe per process answers which: every
+// Documents spelling the runtime offers, the top-level listings of home and
+// Documents, and the state of the canonical download store under the anchored
+// Documents. Fired from the playback-event hooks only -- the airplane-mode
+// round that measures swap failures also carries this for free.
+static void YTMUNoteSandboxProbe(NSString *vid) {
+    if (!YTMUDebugDeviceEnabled()) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        @try {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSString *home = NSHomeDirectory();
+            NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+
+            NSMutableArray *homeLines = [NSMutableArray array];
+            [homeLines addObject:[@"home=" stringByAppendingString:home ?: @""]];
+            const char *cffix = getenv("CFFIXED_USER_HOME");
+            if (cffix && cffix[0]) {
+                [homeLines addObject:[@"CFFIXED_USER_HOME=" stringByAppendingString:@(cffix)]];
+            }
+            const char *envHome = getenv("HOME");
+            if (envHome && envHome[0]) {
+                [homeLines addObject:[@"HOME=" stringByAppendingString:@(envHome)]];
+            }
+
+            NSMutableArray *docsLines = [NSMutableArray array];
+            [docsLines addObject:[@"docs=" stringByAppendingString:docs ?: @""]];
+            BOOL homeIsDir = NO;
+            [fm fileExistsAtPath:home isDirectory:&homeIsDir];
+            [docsLines addObject:[NSString stringWithFormat:@"homeExists=%d", homeIsDir]];
+            NSArray *homeTop = [fm contentsOfDirectoryAtPath:home error:nil] ?: @[];
+            for (NSString *name in homeTop) {
+                if (docsLines.count >= 40) break;
+                [docsLines addObject:[@"h: " stringByAppendingString:name]];
+            }
+            BOOL docsIsDir = NO;
+            [fm fileExistsAtPath:docs ?: @"" isDirectory:&docsIsDir];
+            [docsLines addObject:[NSString stringWithFormat:@"docsExists=%d", docsIsDir]];
+            NSArray *docsTop = [fm contentsOfDirectoryAtPath:docs error:nil] ?: @[];
+            for (NSString *name in docsTop) {
+                if (docsLines.count >= 40) break;
+                [docsLines addObject:[@"d: " stringByAppendingString:name]];
+            }
+
+            NSMutableArray *storeLines = [NSMutableArray array];
+            NSString *canonical = docs.length
+                ? [docs stringByAppendingPathComponent:@"YTMusicUltimate"] : nil;
+            BOOL storeIsDir = NO;
+            [fm fileExistsAtPath:canonical ?: @"" isDirectory:&storeIsDir];
+            [storeLines addObject:[NSString stringWithFormat:@"storeExists=%d", storeIsDir]];
+            if (storeIsDir) {
+                NSArray *store = [fm contentsOfDirectoryAtPath:canonical error:nil] ?: @[];
+                NSUInteger audio = 0;
+                NSMutableArray *names = [NSMutableArray array];
+                for (NSString *name in store) {
+                    if ([@[@"m4a", @"mp3"] containsObject:name.pathExtension.lowercaseString]) audio++;
+                    if (names.count < 10) [names addObject:name];
+                }
+                [storeLines addObject:[NSString stringWithFormat:@"audioFiles=%lu", (unsigned long)audio]];
+                [storeLines addObjectsFromArray:names];
+            }
+            NSUInteger mapped = [[[NSUserDefaults standardUserDefaults]
+                dictionaryForKey:@"YTMUDownloads"] count];
+            [storeLines addObject:[NSString stringWithFormat:@"mapped=%lu", (unsigned long)mapped]];
+
+            NSMutableDictionary *payload = [NSMutableDictionary dictionary];
+            payload[@"home"] = @{@"cls": NSStringFromClass([fm class]), @"items": [homeLines copy]};
+            payload[@"docs"] = @{@"cls": @"NSFileManager", @"items": [docsLines copy]};
+            payload[@"store"] = @{@"cls": @"NSFileManager", @"items": [storeLines copy]};
+            YTMUDebugDeviceNoteProbe(@"local-sandbox", vid, payload);
+            NSLog(@"[YTMU-DL] sandbox probe posted home=%@ docs=%@", home, docs);
+        } @catch (NSException *e) {
+            NSLog(@"[YTMU-DL] sandbox probe failed: %@", e);
+        }
+    });
+}
+
 @interface UIView ()
 - (UIViewController *)_viewControllerForAncestor;
 @end
@@ -919,22 +1001,26 @@ static void YTMUNotePlaybackEvent(NSString *event, NSString *vid, NSArray *extra
 }
 - (void)playbackControllerDidPlay {
     %orig;
+    YTMUNoteSandboxProbe(g_currentVideoID);
     if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
-        // docs pins the Documents base THIS process resolves, so the ASSET
-        // record can be compared against it: a joined path under a different
-        // Documents is the loader ignoring ours.
+        // docs pins the Documents base THIS process resolves, and home pins
+        // the sandbox root, so the ASSET record can be compared against both:
+        // a joined path under a different Documents is the loader ignoring ours.
         YTMUNotePlaybackEvent(@"local-playback-ok", g_currentVideoID,
             @[[NSString stringWithFormat:@"docs=%@",
-                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]]]);
+                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]],
+              [NSString stringWithFormat:@"home=%@", NSHomeDirectory()]]);
     }
 }
 - (void)playbackControllerDidFailWithError:(id)error {
     %orig;
+    YTMUNoteSandboxProbe(g_currentVideoID);
     if (YTMULocalAudioPathForVideoID(g_currentVideoID)) {
         YTMUNotePlaybackEvent(@"local-playback-fail", g_currentVideoID,
             @[[NSString stringWithFormat:@"error=%@", error],
               [NSString stringWithFormat:@"docs=%@",
-                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]]]);
+                [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]],
+              [NSString stringWithFormat:@"home=%@", NSHomeDirectory()]]);
     }
 }
 %end
