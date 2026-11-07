@@ -99,6 +99,27 @@
             [(UIControl *)btn addTarget:self action:@selector(ytmu_didTapLyricsButtonAction:) forControlEvents:UIControlEventTouchUpInside];
         }
 
+        // Long-press: YT Music's own lyrics window pops on the long press and
+        // nothing of ours is wired for it, so the reader gets the app's popup
+        // (not ours, and the one that renders ugly) exactly when they held the
+        // button. Wire the long press to the SAME open action as the tap; our
+        // recognizer cancels the touches, which makes the app's own long-press
+        // recognizer fail.
+        if (!objc_getAssociatedObject(btn, @selector(ytmu_longPressLyrics:))) {
+            UILongPressGestureRecognizer *lp = [[UILongPressGestureRecognizer alloc]
+                initWithTarget:self action:@selector(ytmu_longPressLyrics:)];
+            lp.minimumPressDuration = 0.4;
+            [btn addGestureRecognizer:lp];
+            objc_setAssociatedObject(btn, @selector(ytmu_longPressLyrics:), lp, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (v != btn && !objc_getAssociatedObject(v, @selector(ytmu_longPressLyrics:))) {
+            UILongPressGestureRecognizer *lp2 = [[UILongPressGestureRecognizer alloc]
+                initWithTarget:self action:@selector(ytmu_longPressLyrics:)];
+            lp2.minimumPressDuration = 0.4;
+            [v addGestureRecognizer:lp2];
+            objc_setAssociatedObject(v, @selector(ytmu_longPressLyrics:), lp2, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+
         if (![btn isKindOfClass:[UIControl class]] && !objc_getAssociatedObject(btn, @selector(ytmu_didTapLyricsBar:))) {
             UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_didTapLyricsBar:)];
             tap.cancelsTouchesInView = NO;
@@ -151,6 +172,17 @@
         return;
     }
     sendDebugLog(@"[MUSIC] Lyrics chip tapped via UITapGestureRecognizer");
+    openLyricsFromViewController((UIViewController *)self);
+}
+
+%new
+- (void)ytmu_longPressLyrics:(UILongPressGestureRecognizer *)gr {
+    if (gr.state != UIGestureRecognizerStateBegan) return;
+    if (YTMUIsInterfaceLandscape()) {
+        sendDebugLog(@"[MUSIC] Lyrics long-press ignored in landscape (auto-open path)");
+        return;
+    }
+    sendDebugLog(@"[MUSIC] Lyrics long-press captured -> injected panel (app's own long-press window suppressed)");
     openLyricsFromViewController((UIViewController *)self);
 }
 
