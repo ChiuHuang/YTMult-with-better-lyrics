@@ -1,4 +1,5 @@
 #import "YTMDownloads.h"
+#import "LyricsShared.h"
 
 @implementation YTMDownloads
 
@@ -67,6 +68,11 @@
 }
 
 - (void)refreshAudioFiles {
+    // A tweak update can shift the data container and leave the audio files
+    // under a nested YTMusicUltimate (the doubled-path ASSET proof); one sweep
+    // at load pulls them back so the list (and the id -> file map) shows them.
+    YTMUAdoptStrayedDownloads();
+
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
     NSURL *downloadsURL = [documentsURL URLByAppendingPathComponent:@"YTMusicUltimate"];
 
