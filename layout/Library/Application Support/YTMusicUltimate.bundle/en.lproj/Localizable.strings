@@ -183,6 +183,9 @@
 "DEBUG_DEVICE_OTP_OK" = "Device enrolled";
 "DEBUG_DEVICE_OTP_BAD" = "Code rejected";
 "DEBUG_DEVICE_FORGET" = "Forget device token";
+"DEBUG_DEVICE_FETCH_TOKEN" = "Copy fetch token";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "Copies the pairing token plus curl forms for GET /api/debug/fetch, which returns this device's capture and the server log tail without opening the dashboard.";
+"DEBUG_DEVICE_TOKEN_NONE" = "No device token: pair first";
 
 "DEBUG_COPIED" = "Diagnostics copied to the clipboard";
 
