@@ -147,10 +147,11 @@ static void YTMUStyleLyricsEntries(UIView *root) {
     for (UIView *view in root.subviews) {
         BOOL marked = view.tag == 9777 || view.tag == 9778 || objc_getAssociatedObject(view, @selector(ytmu_isLyricsButton));
         if (marked && !view.hidden && !CGRectIsEmpty(view.bounds)) {
-            // Song glass, not the olive constant: these chips sit on the
-            // player, where the yellow-green fill was the same "why does a
-            // blue cover have yellow glass" report the transport buttons were.
-            view.backgroundColor = YTMUSongGlassFill(.24);
+            // NEUTRAL, not song glass: the chips sit straight on the artwork
+            // backdrop and a song-hued fill competed with the cover (the same
+            // "glass colour is wrong" report). They must stay readable, so a
+            // translucent black backs the white ink instead of the song hue.
+            view.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:.42];
             view.layer.cornerRadius = MIN(18.0, CGRectGetHeight(view.bounds) * 0.5);
             view.layer.cornerCurve = kCACornerCurveContinuous;
             view.layer.borderWidth = 0.0;

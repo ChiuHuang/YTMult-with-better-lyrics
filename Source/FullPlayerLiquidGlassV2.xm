@@ -34,17 +34,21 @@ static const void *kAnimated = &kAnimatedKey;
 
 static UIVisualEffectView*Glass(UIView*h,UIBlurEffectStyle style){
     UIVisualEffectView*g=objc_getAssociatedObject(h,kGlass);
-    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=YTMUSongGlassFill(.24);g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
+    // NEUTRAL GLASS NOW: the song-derived fill never reliably matched the
+    // player's own artwork backdrop (the "color is still wrong" report), so
+    // the fill is transparent and the border is the same white the artwork
+    // ring wears. The song accent survives exactly where it is MEANT to be
+    // loud: the play button and the selected tab.
+    if(!g){g=[[UIVisualEffectView alloc]initWithEffect:[UIBlurEffect effectWithStyle:style]];g.userInteractionEnabled=NO;g.backgroundColor=UIColor.clearColor;g.contentView.backgroundColor=UIColor.clearColor;g.clipsToBounds=YES;[h insertSubview:g atIndex:0];objc_setAssociatedObject(h,kGlass,g,OBJC_ASSOCIATION_RETAIN_NONATOMIC);}
     return g;
 }
 static void ApplyGlass(UIView*h,CGRect f,CGFloat r,CGFloat border){
     UIVisualEffectView*g=Glass(h,UIBlurEffectStyleSystemChromeMaterialDark);
     g.hidden=NO;g.frame=f;g.layer.cornerRadius=r;g.layer.cornerCurve=kCACornerCurveContinuous;
-    g.layer.borderWidth=.7;g.layer.borderColor=YTMUSongGlassBorder(border).CGColor;
-    // Re-tinted every pass, not only at creation: YT reuses these views
-    // across songs, so a fill written once at Glass() creation survived the
-    // song change and the next track wore the previous track's colour.
-    g.contentView.backgroundColor=YTMUSongGlassFill(.24);
+    g.layer.borderWidth=.7;g.layer.borderColor=[UIColor colorWithWhite:1 alpha:border].CGColor;
+    // Per-pass work stays frame-only now: YT reuses these views across songs,
+    // and the old re-tint made the next track wear the previous track's
+    // colour. With a transparent fill there is nothing left to re-tint.
     [h sendSubviewToBack:g];h.backgroundColor=UIColor.clearColor;h.layer.backgroundColor=UIColor.clearColor.CGColor;
 }
 // A real circle, tap target untouched. The header icons are NOT all square --
@@ -151,8 +155,8 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
             if(cr>=h*0.44&&![v isKindOfClass:UIVisualEffectView.class]&&!lyricChip){
                 UIVisualEffectView*g=Glass(v,UIBlurEffectStyleSystemChromeMaterialDark);
                 g.hidden=NO;g.frame=v.bounds;g.layer.cornerRadius=h/2;g.layer.cornerCurve=kCACornerCurveContinuous;
-                g.contentView.backgroundColor=YTMUSongGlassFill(.22);
-                g.layer.borderColor=YTMUSongGlassBorder(.24).CGColor;g.layer.borderWidth=.6;
+                g.contentView.backgroundColor=UIColor.clearColor;
+                g.layer.borderColor=[UIColor colorWithWhite:1 alpha:.24].CGColor;g.layer.borderWidth=.6;
                 // the glass sits AT index 0 (behind YT's own pill paint);
                 // behind an OPAQUE stock background it is invisible, so
                 // clear the host's own fill and let the glass carry it.
@@ -182,7 +186,7 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
     CGFloat hInk = 0, sInk = 0, bInk = 0;
     UIColor *ink = YTMUSongHue(YTMULGArtworkTint(), &hInk, &sInk, &bInk)
         ? YTMUSongAccent(1.0) : UIColor.whiteColor;
-    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?YTMUSongAccent(.26):YTMUSongGlassFill(.24);if(play)g.layer.borderColor=YTMUSongAccent(.56).CGColor;v.tintColor=ink;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
+    for(UIView*v in self.subviews){if(!IsButton(v)||v.hidden||CGRectGetWidth(v.bounds)<34)continue;BOOL play=IsPlay(v);CGFloat d=MIN(CGRectGetWidth(v.bounds),CGRectGetHeight(v.bounds));ApplyGlass(v,v.bounds,d/2,play?.58:.26);UIVisualEffectView*g=objc_getAssociatedObject(v,kGlass);g.contentView.backgroundColor=play?YTMUSongAccent(.26):UIColor.clearColor;if(play)g.layer.borderColor=YTMUSongAccent(.56).CGColor;v.tintColor=ink;ApplyDrop(v,play?.30:.10,play?15:5,play?6:2);}
 }
 %end
 

@@ -22,20 +22,26 @@ static UIVisualEffectView *YTMUMiniGlass(UIView *host) {
         objc_setAssociatedObject(host, &kMiniGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     glass.frame = CGRectInset(host.bounds, 1, 2);
-    // Song glass, re-tinted EVERY pass: the fill written once at creation
-    // survived the song change (the same reuse trap the full player hit) and
-    // the mini player is on screen on every page, so a stale colour followed
-    // the reader around the app. The song helpers fall back to the old
-    // olive/sage constants when no artwork is sampled, so the pre-first-frame
-    // look is unchanged.
-    glass.contentView.backgroundColor = YTMUSongGlassFill(.24);
-    glass.layer.borderColor = YTMUSongGlassBorder(.38).CGColor;
+    // NEUTRAL GLASS NOW: the song-derived fill was the third colour pass and
+    // still never matched the big player's artwork backdrop (the "color is
+    // still wrong" report), so the fill is gone and the blur carries the
+    // surface. Border is the same white the artwork ring uses; the dither
+    // detail below survives.
+    glass.contentView.backgroundColor = UIColor.clearColor;
+    glass.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.26].CGColor;
     [host sendSubviewToBack:glass];
     YTMULGApplyDither(host, glass, .48);
     return glass;
 }
 
 static UIImageView *YTMULoadedImage(UIView *root){NSMutableArray*q=[NSMutableArray arrayWithObject:root];while(q.count){UIView*v=q.firstObject;[q removeObjectAtIndex:0];[q addObjectsFromArray:v.subviews];if([v isKindOfClass:UIImageView.class]&&((UIImageView*)v).image)return(UIImageView*)v;}return nil;}
+// The swipe carousel (art + title pages, the left ~332pt of the bar) paints an
+// OPAQUE background of its own, and a bar-wide glass dish sent to the back of
+// YTMMiniPlayerView is covered across all of it -- which is how the glass
+// survived ONLY around the right-side buttons (the "trimmed out, only the
+// icons kept" screenshot). Clear the collection/scroll surfaces the same way
+// the V1 cleaner did, so the dish reads across the whole bar.
+static void YTMUMiniClearBg(UIView *root){Class swipe=NSClassFromString(@"YTLightweightSwipeContentScrollView");for(UIView*v in root.subviews){if([v isKindOfClass:UICollectionView.class]||(swipe&&[v isKindOfClass:swipe])){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}YTMUMiniClearBg(v);}}
 // The mini player shares the glass surface and dither detail used by the
 // pivot bar and full player, tinted by the SONG via YTMUSongGlassFill/Border
 // (the artwork it displays is itself a theme publisher through
@@ -48,5 +54,5 @@ static void YTMUMiniTree(UIView *root){Class image=NSClassFromString(@"YTImageVi
 @interface YTMMiniPlayerView:UIView@end
 %hook YTMMiniPlayerView
 - (void)didMoveToWindow{%orig;if(!YTMUMiniEnabled())return;self.clipsToBounds=NO;(void)YTMUMiniGlass(self);self.layer.shadowColor=UIColor.blackColor.CGColor;self.layer.shadowOpacity=.25;self.layer.shadowRadius=13;self.layer.shadowOffset=CGSizeMake(0,6);}
-- (void)layoutSubviews{%orig;if(!YTMUMiniEnabled())return;self.clipsToBounds=NO;(void)YTMUMiniGlass(self);YTMUMiniTree(self);dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(.35*NSEC_PER_SEC)),dispatch_get_main_queue(),^{YTMUMiniTree(self);});}
+- (void)layoutSubviews{%orig;if(!YTMUMiniEnabled())return;self.clipsToBounds=NO;(void)YTMUMiniGlass(self);YTMUMiniClearBg(self);YTMUMiniTree(self);dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(.35*NSEC_PER_SEC)),dispatch_get_main_queue(),^{YTMUMiniClearBg(self);YTMUMiniTree(self);});}
 %end
