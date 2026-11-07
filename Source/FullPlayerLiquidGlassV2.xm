@@ -191,6 +191,35 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 - (void)layoutSubviews{%orig;if(!PlayerV2())return;self.backgroundColor=UIColor.clearColor;self.layer.cornerCurve=kCACornerCurveContinuous;for(UIView*v in self.subviews){NSString*n=NSStringFromClass(v.class);if([n containsString:@"Slider"]||[n containsString:@"Scrubber"]){v.layer.cornerRadius=MIN(3,CGRectGetHeight(v.bounds)/2);v.layer.cornerCurve=kCACornerCurveContinuous;}}}
 %end
 
+// The seek bar wears the song too: elapsed = the vivid accent the play button
+// uses, everything not yet played = a plain translucent white. The paints are
+// the two plain UIView children of the track wrapper INSIDE the scrubber (a
+// size predicate keeps the hidden 96x96 thumb plate and its singleton
+// children out); the mini player's own scrubber is a 1pt line hidden by
+// LiquidGlass.xm, so a 2pt height floor scopes this to the player bars -- the
+// bottom row and the video overlay card's bar are both >= 2pt tall.
+@interface YTMStoryboardScrubber:UIView@end
+%hook YTMStoryboardScrubber
+- (void)layoutSubviews{
+    %orig;
+    if(!PlayerV2())return;
+    if(CGRectGetHeight(self.bounds)<2.0||CGRectGetWidth(self.bounds)<100.0)return;
+    UIColor *played=YTMUSongAccent(.95);
+    UIColor *track=[UIColor.whiteColor colorWithAlphaComponent:.25];
+    for(UIView*v in self.subviews){
+        if([v isKindOfClass:UIImageView.class])continue;
+        if(CGRectGetHeight(v.bounds)>8.0||CGRectGetWidth(v.bounds)<100.0)continue;
+        v.backgroundColor=track;
+        for(UIView*t in v.subviews){
+            if([t isKindOfClass:UIImageView.class])continue;
+            CGFloat tw=CGRectGetWidth(t.frame), th=CGRectGetHeight(t.bounds);
+            if(th<0.5||th>10.0)continue;
+            t.backgroundColor=(CGRectGetMinX(t.frame)<=0.5&&tw>0.5)?played:track;
+        }
+    }
+}
+%end
+
 @interface YTMPlayerTabView:UIView@end
 %hook YTMPlayerTabView
 - (void)layoutSubviews{
