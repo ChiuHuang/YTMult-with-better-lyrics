@@ -1903,6 +1903,16 @@ static BOOL __attribute__((unused)) YTMUIsLandscapeBounds(CGSize size) {
 // two buttons are hidden for the whole time the landscape branch runs -- never
 // destroyed, the portrait branch shows them again.
 static const NSInteger YTMUHeaderCloseTag = 8889;
+// The thick drag bar the modal portrait sheet carries (the system grabber is
+// 34x5 and nearly invisible on the blurred artwork background; YouTube Music's
+// is a wide capsule). Found by tag out of self.view -- LyricsShared.h owns the
+// ivars and is not edited from here.
+static const NSInteger YTMUGrabberTag = 8890;
+static UIView *YTMUGrabberView(UIView *root) {
+    if (!root) return nil;
+    UIView *found = [root viewWithTag:YTMUGrabberTag];
+    return [found isKindOfClass:[UIView class]] ? found : nil;
+}
 static UIButton *YTMUHeaderCloseButton(UIView *header) {
     if (!header) return nil;
     UIView *found = [header viewWithTag:YTMUHeaderCloseTag];
@@ -2238,6 +2248,20 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     self.tableView.tableHeaderView = header;
 
     [self.view addSubview:self.tableView];
+
+    // The drag bar, modal portrait sheet only: the landscape fullscreen has
+    // its own exit button and the embedded panel rides YouTube's chrome, so a
+    // bar there would be drei chrome for one window. userInteractionEnabled
+    // stays NO: the sheet's interactive dismiss (UISheetPresentationController)
+    // must receive the drag, the bar is just the affordance to grab.
+    if (self.isModal && self.modalPresentationStyle != UIModalPresentationFullScreen) {
+        UIView *grabber = [[UIView alloc] initWithFrame:CGRectZero];
+        grabber.tag = YTMUGrabberTag;
+        grabber.backgroundColor = YTMULyricFill(self.view);
+        grabber.layer.cornerRadius = 5.0;
+        grabber.userInteractionEnabled = NO;
+        [self.view addSubview:grabber];
+    }
 
     // --- Landscape split-view: Image-2 style ---
     // No opaque columns: the fullscreen blurred artwork (ambient) shows
@@ -4156,6 +4180,17 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         header.frame = CGRectMake(0, 0, self.tableView.bounds.size.width, 54);
         self.tableView.tableHeaderView = header;
     }
+
+    // The drag bar: a 64x10 capsule centered on the sheet's top edge, above
+    // everything else so the blur/animations can never bury it. It sits over
+    // the header band, clear of the X (x=16..52) and the menu button
+    // (right edge) for any sheet wider than ~160pt.
+    UIView *grabber = YTMUGrabberView(self.view);
+    if (grabber && grabber.hidden == NO) {
+        CGFloat gw = 64.0, gh = 10.0;
+        grabber.frame = CGRectMake((W - gw) / 2.0, 9.0, gw, gh);
+        [self.view bringSubviewToFront:grabber];
+    }
 }
 
 // Rotating INTO landscape is the auto-open path's business (the device
@@ -4455,6 +4490,8 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     if (self.providerSwitcherLabel) self.providerSwitcherLabel.textColor = YTMULyricInk(0.75, 0.75, ref);
     UILabel *statusLabel = [self.tableView.tableHeaderView viewWithTag:8888];
     if (statusLabel) statusLabel.textColor = YTMULyricInk(0.7, 0.75, ref);
+    UIView *grabber = YTMUGrabberView(ref);
+    if (grabber) grabber.backgroundColor = fill;
     if (self.fpsLabel) self.fpsLabel.textColor = YTMULyricInk(0.7, 0.75, ref);
     [self ytmu_setLandscapePlaying:self.landscapeIsPlaying];
 }
@@ -6583,7 +6620,10 @@ static void __attribute__((unused)) YTMUAttemptFallbackPresent(NSString *resolve
     if (@available(iOS 15.0, *)) {
         UISheetPresentationController *sheet = lyricsVC.sheetPresentationController;
         sheet.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
-        sheet.prefersGrabberVisible = YES;
+        // prefersGrabberVisible stays NO: the sheet carries the thick capsule
+        // drag bar drawn in -viewDidLoad (YTMUGrabberTag); the system grabber
+        // under it would read as two bars.
+        sheet.prefersGrabberVisible = NO;
     }
     NSString *tapVideoID = YTMUResolveCurrentVideoID() ?: resolvedVideoID;
     if (tapVideoID) {
