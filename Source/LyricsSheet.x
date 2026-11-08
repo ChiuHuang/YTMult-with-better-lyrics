@@ -4469,23 +4469,83 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 // works without the full travel; under the threshold the touch is a dead drag
 // and pops back (same feel as a rubber-banded detent snap).
 - (void)ytmu_grabberPan:(UIPanGestureRecognizer *)gr {
-    if (gr.state != UIGestureRecognizerStateEnded) return;
+    // A threshold-only pan reads as broken: the user grabs the bar, drags, and
+    // nothing moves until the release happens to cross a line. The sheet API
+    // has no continuous drive, so the DRAG ITSELF is ours: follow the finger
+    // with resistance on self.view.transform, then on release decide
+    // dismiss / large / snap-back from where the finger actually ended up.
     CGPoint tr = [gr translationInView:self.view];
     CGPoint vel = [gr velocityInView:self.view];
-    if (tr.y > 60.0 || vel.y > 800.0) {
-        sendDebugLog(@"[MUSIC] lyrics grabber pan -> dismiss");
-        [self dismissViewControllerAnimated:YES completion:nil];
-        return;
-    }
-    if (tr.y < -60.0 || vel.y < -800.0) {
-        if (@available(iOS 15.0, *)) {
-            UISheetPresentationController *sheet = self.sheetPresentationController;
-            if (sheet && ![sheet.selectedDetentIdentifier isEqualToString:UISheetPresentationControllerDetentIdentifierLarge]) {
-                sendDebugLog(@"[MUSIC] lyrics grabber pan -> large detent");
-                [sheet animateChanges:^{
-                    sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
-                }];
+    switch (gr.state) {
+        case UIGestureRecognizerStateBegan: {
+            sendDebugLog(@"[MUSIC] lyrics grabber pan began (live drag feedback)");
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            self.view.transform = CGAffineTransformIdentity;
+            [CATransaction commit];
+            break;
+        }
+        case UIGestureRecognizerStateChanged: {
+            BOOL atLarge = NO;
+            if (@available(iOS 15.0, *)) {
+                UISheetPresentationController *sheet = self.sheetPresentationController;
+                atLarge = sheet && [sheet.selectedDetentIdentifier isEqualToString:UISheetPresentationControllerDetentIdentifierLarge];
             }
+            CGFloat h = self.view.bounds.size.height;
+            CGFloat ty;
+            if (tr.y >= 0.0) {
+                // Downwards: follow at ~0.6 resistance so the sheet visibly
+                // yields while the finger is down.
+                ty = MIN(tr.y * 0.6, h * 0.55);
+            } else {
+                // Upwards: stretch toward large at ~0.35 resistance; there is
+                // no detent taller than large, so from large only rubber-band.
+                ty = MAX(tr.y * (atLarge ? 0.12 : 0.35), -h * 0.18);
+            }
+            // A transform write outside a disabled transaction takes a 0.25s
+            // implicit animation and the drag trails the finger.
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            self.view.transform = CGAffineTransformMakeTranslation(0, ty);
+            [CATransaction commit];
+            break;
+        }
+        case UIGestureRecognizerStateEnded: {
+            // Reset FIRST: whether we dismiss, grow or snap back, the sheet
+            // must end the gesture at its own geometry and let the chosen
+            // animation run from there, never from a stale offset.
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            self.view.transform = CGAffineTransformIdentity;
+            [CATransaction commit];
+            if (tr.y > 120.0 || vel.y > 800.0) {
+                sendDebugLog(@"[MUSIC] lyrics grabber pan -> dismiss");
+                [self dismissViewControllerAnimated:YES completion:nil];
+                break;
+            }
+            if (tr.y < -100.0 || vel.y < -800.0) {
+                if (@available(iOS 15.0, *)) {
+                    UISheetPresentationController *sheet = self.sheetPresentationController;
+                    if (sheet && ![sheet.selectedDetentIdentifier isEqualToString:UISheetPresentationControllerDetentIdentifierLarge]) {
+                        sendDebugLog(@"[MUSIC] lyrics grabber pan -> large detent");
+                        [sheet animateChanges:^{
+                            sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+                        }];
+                    }
+                }
+            }
+            break;
+        }
+        case UIGestureRecognizerStateCancelled:
+        case UIGestureRecognizerStateFailed:
+        default: {
+            // A transitional state carries no commitment: bounce back.
+            [UIView animateWithDuration:0.3
+                delay:0.0
+                options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction
+                animations:^{ self.view.transform = CGAffineTransformIdentity; }
+                completion:nil];
+            break;
         }
     }
 }
