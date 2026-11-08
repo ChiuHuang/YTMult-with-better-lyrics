@@ -198,13 +198,10 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 - (void)layoutSubviews{%orig;if(!PlayerV2())return;self.backgroundColor=UIColor.clearColor;self.layer.cornerCurve=kCACornerCurveContinuous;for(UIView*v in self.subviews){NSString*n=NSStringFromClass(v.class);if([n containsString:@"Slider"]||[n containsString:@"Scrubber"]){v.layer.cornerRadius=MIN(3,CGRectGetHeight(v.bounds)/2);v.layer.cornerCurve=kCACornerCurveContinuous;}}}
 %end
 
-// The seek bar wears the song too: elapsed = the vivid accent the play button
-// uses, everything not yet played = a plain translucent white. The paints are
-// the two plain UIView children of the track wrapper INSIDE the scrubber (a
-// size predicate keeps the hidden 96x96 thumb plate and its singleton
-// children out); the mini player's own scrubber is a 1pt line hidden by
-// LiquidGlass.xm, so a 2pt height floor scopes this to the player bars -- the
-// bottom row and the video overlay card's bar are both >= 2pt tall.
+// NO RECOLOR: the song accent on the seek bar was reviewed out the same way
+// the mini bar's was ("don't make it change color"); YT's own fill/track
+// colors stand, and this hook no longer touches any backgroundColor. What the
+// hook STILL owns:
 //
 // THE 1-STEP-PER-SECOND BAR: YT writes the elapsed fill from
 // didReceivePlaybackPositionTime, which fires about once per second, so the
@@ -213,7 +210,8 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 // so a per-frame CADisplayLink reads it and moves the fill itself. The song
 // duration is never asked for: it falls out of YT's own fill write
 // (elapsed / fillRatio), cached and refreshed whenever a fill we did not write
-// is seen -- which is exactly YT's ~1s pulse, a seek, or a new song.
+// is seen -- which is exactly YT's ~1s pulse, a seek, or a new song. Only
+// FRAMES are written here, never colors.
 static char kScrubLinkKey;
 static char kScrubStateKey;
 // The drag knob the report asked for ("no knob, can't tell it's draggable"):
@@ -272,24 +270,10 @@ static void YTMUAttachScrubberLink(UIView *scrub) {
     %orig;
     if(!PlayerV2())return;
     if(CGRectGetHeight(self.bounds)<2.0||CGRectGetWidth(self.bounds)<100.0)return;
-    // The mini bar's 2pt raised line is styled by MiniPlayerLiquidGlassV3,
-    // which deliberately does NOT recolor it (the song accent there was a
-    // complaint). Excluded as a SUBTREE here or this hook paints it every
-    // layout pass and the two pass systems fight over the same fills.
+    // The mini bar's raised line is styled by MiniPlayerLiquidGlassV3 and must
+    // stay stock-colored (the song accent there was a complaint) -- excluded
+    // as a SUBTREE so this hook gives it neither the link nor the knob.
     if(YTMUInMiniPlayer(self))return;
-    UIColor *played=YTMUSongAccent(.95);
-    UIColor *track=[UIColor.whiteColor colorWithAlphaComponent:.35];
-    for(UIView*v in self.subviews){
-        if([v isKindOfClass:UIImageView.class])continue;
-        if(CGRectGetHeight(v.bounds)>8.0||CGRectGetWidth(v.bounds)<100.0)continue;
-        v.backgroundColor=track;
-        for(UIView*t in v.subviews){
-            if([t isKindOfClass:UIImageView.class])continue;
-            CGFloat tw=CGRectGetWidth(t.frame), th=CGRectGetHeight(t.bounds);
-            if(th<0.5||th>10.0)continue;
-            t.backgroundColor=(CGRectGetMinX(t.frame)<=0.5&&tw>0.5)?played:track;
-        }
-    }
     YTMUAttachScrubberLink(self);
 }
 %new
