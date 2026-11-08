@@ -148,12 +148,22 @@ def _translate_prompt(texts, target_lang):
         # the reading of ANY syllable in the source, because "transliterate"
         # invited the model to spell kana out in hanzi. Real Cubism, real
         # translation, both lines.
-        f"IMPORTANT: a run of onomatopoeia, scat or nonsense syllables (ラララ, "
-        f"啦啦, 'ba ba', 'la la') is a VOCALISE, not words. Render it as a plain "
-        f"repetition of the matching onomatopoeia in {lang_name} (ララララ -> 啦啦啦啦), "
-        f"or keep the kana exactly as written. Never invent characters for it and "
-        f"never spell one syllable out as a different hanzi (ラ is 拉, never 蘭). "
-        f"If a line is already in {lang_name} or is romanization/gibberish, keep it as-is. "
+        #
+        # Two exemptions this rule used to grant are gone on purpose: "keep the
+        # kana as written" let vocalise rows through untranslated, and
+        # "romanization/gibberish, keep it as-is" was read as covering ENGLISH
+        # lines, so an English song came back in English. Latin lyrics are
+        # lyrics; only CJK romanisation (romaji/pinyin/romaja) is not text to
+        # translate.
+        f"IMPORTANT: every line is translated, INCLUDING English lines -- an "
+        f"English lyric is a lyric, not romanization, so translate it into "
+        f"{lang_name} like any other line. A run of onomatopoeia, scat or nonsense "
+        f"syllables (ラララ, ドキドキ, 啦啦, 'ba ba', 'la la') is a VOCALISE: "
+        f"translate it into the matching sound word in {lang_name} (ララララ -> "
+        f"啦啦啦啦, ドキドキ -> 撲通撲通) instead of leaving the source kana in "
+        f"place. Never invent words for it and never spell one syllable out as a "
+        f"different hanzi (ラ is 拉, never 蘭). Only romanisation of CJK text "
+        f"(romaji, pinyin, romaja) and pure gibberish stay exactly as written. "
         f"STRICT OUTPUT RULES: output ONLY the translated lines with their numbers. "
         f"Never repeat the original text. Never add romanization, transliteration, "
         f"or explanations. Never merge lines. Never add extra lines.\n\n"
