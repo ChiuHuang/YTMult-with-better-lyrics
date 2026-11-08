@@ -2251,15 +2251,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
     // The drag bar, modal portrait sheet only: the landscape fullscreen has
     // its own exit button and the embedded panel rides YouTube's chrome, so a
-    // bar there would be drei chrome for one window. userInteractionEnabled
-    // stays NO: the sheet's interactive dismiss (UISheetPresentationController)
-    // must receive the drag, the bar is just the affordance to grab.
+    // bar there would be drei chrome for one window. The bar is interactive:
+    // its pan drives the sheet (dismiss down, expand to large up) -- touches
+    // here used to fall through to the table scroll, which is why grabbing
+    // the bar did nothing.
     if (self.isModal && self.modalPresentationStyle != UIModalPresentationFullScreen) {
         UIView *grabber = [[UIView alloc] initWithFrame:CGRectZero];
         grabber.tag = YTMUGrabberTag;
         grabber.backgroundColor = YTMULyricFill(self.view);
         grabber.layer.cornerRadius = 5.0;
-        grabber.userInteractionEnabled = NO;
+        grabber.userInteractionEnabled = YES;
+        UIPanGestureRecognizer *grabberPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(ytmu_grabberPan:)];
+        [grabber addGestureRecognizer:grabberPan];
         [self.view addSubview:grabber];
     }
 
@@ -4455,6 +4458,36 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     g_ytmu_bgLight = light;
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] bg luminance %.2f -> %@ ink (tint %@)", lum, light ? @"black" : @"white", mean ? @"artwork" : @"none"]);
     [self ytmu_refreshBgDerivedInk];
+}
+
+// The thick drag bar is the affordance the reader grabs, so its pan is ours
+// and forwards onto the sheet. iOS exposes no API for a custom view to drive
+// a UISheetPresentationController continuously (the system grabber owns that,
+// and prefersGrabberVisible stays off or the sheet wears two bars), so the
+// bar drag is a FINITE gesture: pull down past the threshold dismisses, push
+// up past it jumps onto the large detent. Velocity counts, so a quick flick
+// works without the full travel; under the threshold the touch is a dead drag
+// and pops back (same feel as a rubber-banded detent snap).
+- (void)ytmu_grabberPan:(UIPanGestureRecognizer *)gr {
+    if (gr.state != UIGestureRecognizerStateEnded) return;
+    CGPoint tr = [gr translationInView:self.view];
+    CGPoint vel = [gr velocityInView:self.view];
+    if (tr.y > 60.0 || vel.y > 800.0) {
+        sendDebugLog(@"[MUSIC] lyrics grabber pan -> dismiss");
+        [self dismissViewControllerAnimated:YES completion:nil];
+        return;
+    }
+    if (tr.y < -60.0 || vel.y < -800.0) {
+        if (@available(iOS 15.0, *)) {
+            UISheetPresentationController *sheet = self.sheetPresentationController;
+            if (sheet && ![sheet.selectedDetentIdentifier isEqualToString:UISheetPresentationControllerDetentIdentifierLarge]) {
+                sendDebugLog(@"[MUSIC] lyrics grabber pan -> large detent");
+                [sheet animateChanges:^{
+                    sheet.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+                }];
+            }
+        }
+    }
 }
 
 - (void)ytmu_refreshChromeInk {
