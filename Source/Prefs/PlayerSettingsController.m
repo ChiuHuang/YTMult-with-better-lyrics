@@ -27,7 +27,7 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 4;
+    return 5;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -37,6 +37,8 @@
         return 4;
     } if (section == 3) {
         return 2;
+    } if (section == 4) {
+        return 1;
     } else {
         return 1;
     }
@@ -45,6 +47,9 @@
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 3) {
         return LOC(@"SEEK_TIME_FOOTER");
+    }
+    if (section == 4) {
+        return LOC(@"ANIM_FPS_FOOTER");
     }
 
     return nil;
@@ -216,11 +221,39 @@
         }
     }
 
+    if (indexPath.section == 4) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"animFpsCell"];
+
+        cell.textLabel.text = LOC(@"ANIM_FPS");
+        cell.textLabel.adjustsFontSizeToFitWidth = YES;
+        cell.detailTextLabel.text = LOC(@"ANIM_FPS_DESC");
+        cell.detailTextLabel.numberOfLines = 0;
+        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+        UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:@[@"60", @"120"]];
+        // Absent key = the default (120 = index 1), the same rule the
+        // YTMUAnimFrameRate() reader applies.
+        id stored = YTMUltimateDict[@"animFrameRate"];
+        control.selectedSegmentIndex = stored ? [stored integerValue] : 1;
+        [control addTarget:self action:@selector(animFpsSelect:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = control;
+
+        return cell;
+    }
+
     return cell;
 }
 
 - (BOOL)tableView:(UITableView *)tableView shouldHighlightRowAtIndexPath:(NSIndexPath *)indexPath {
     return NO;
+}
+
+- (void)animFpsSelect:(UISegmentedControl *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *YTMUltimateDict = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+
+    [YTMUltimateDict setObject:@(sender.selectedSegmentIndex) forKey:@"animFrameRate"];
+    [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
 }
 
 - (void)toggleSwitch:(UISwitch *)sender {

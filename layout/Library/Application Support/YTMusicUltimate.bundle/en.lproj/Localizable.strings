@@ -41,6 +41,9 @@
 
 "SEEK_BUTTONS" = "Replace next/previous with forward and backward buttons";
 "SEEK_TIME_FOOTER" = "Select a seek time in seconds\n\nDefaults:\nSeek backward = 10 sec.\nSeek forward = 30 sec.\n\nSkip to the next and previous tracks available by long-pressing the buttons.";
+"ANIM_FPS" = "Animation frame rate";
+"ANIM_FPS_DESC" = "Frame rate for our animations and the progress bar (120 is native on ProMotion displays)";
+"ANIM_FPS_FOOTER" = "120 fps is the default. Lower this to 60 if the player stutters or you want less battery drain.";
 "DEFAULT" = "Default";
 
 "THEME_SETTINGS" = "Theme options";

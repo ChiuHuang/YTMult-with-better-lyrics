@@ -41,6 +41,9 @@
 
 "SEEK_BUTTONS" = "用“快进/快退”按钮替换“上一曲/下一曲”";
 "SEEK_TIME_FOOTER" = "选择跳过时间(秒)\n\n默认:\n快退 = 10秒\n快进 = 30秒\n\n长按按钮可跳到下一曲和上一曲";
+"ANIM_FPS" = "动画帧率";
+"ANIM_FPS_DESC" = "自绘动画与进度条的帧率（ProMotion 屏幕原生为 120）";
+"ANIM_FPS_FOOTER" = "默认 120 fps。若播放器卡顿或想省电可调回 60。";
 "DEFAULT" = "默认";
 
 "THEME_SETTINGS" = "主题选项";

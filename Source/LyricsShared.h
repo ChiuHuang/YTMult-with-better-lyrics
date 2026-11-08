@@ -384,6 +384,10 @@ NSArray *YTMUProviderLyricsForProvider(NSString *videoID, NSString *provider);
 NSUInteger YTMUProviderLyricsCount(NSString *videoID);
 void YTMUProviderLyricsDrop(NSString *videoID);
 BOOL YTMULyricsPreference(NSString *key, BOOL fallback);
+// Frame rate our per-frame work runs at (60/120; default 120). Read live, so
+// flipping the settings row applies wherever the caller re-applies its
+// CADisplayLink's preferredFrameRateRange on the settings notification.
+NSInteger YTMUAnimFrameRate(void);
 double YTMULyricsOffsetForVideoID(NSString *videoID);
 void YTMULyricsSetOffsetForVideoID(NSString *videoID, double offset);
 double YTMULyricsManualOffsetForVideoID(NSString *videoID);

@@ -41,6 +41,9 @@
 
 "SEEK_BUTTONS" = "將「下一首/上一首」替換為「快轉/倒轉」按鈕";
 "SEEK_TIME_FOOTER" = "選擇一個「快轉/倒轉」時間/秒\n\n預設:\n倒轉 = 10秒\n快轉 = 30秒\n\n長按按鈕可跳到「下一首/上一首」曲目";
+"ANIM_FPS" = "動畫幀率";
+"ANIM_FPS_DESC" = "自己繪製的動畫與進度條的幀率（ProMotion 螢幕原生為 120）";
+"ANIM_FPS_FOOTER" = "預設 120 fps。若播放器卡頓或想省電可調回 60。";
 "DEFAULT" = "預設";
 
 "THEME_SETTINGS" = "介面主題";

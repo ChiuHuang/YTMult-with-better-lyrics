@@ -109,6 +109,15 @@ BOOL YTMULyricsPreference(NSString *key, BOOL fallback) {
     id value = settings[key];
     return value ? [value boolValue] : fallback;
 }
+
+// Frame rate for OUR motion (the lyrics tick, the scrubber interpolation):
+// 60 or 120, default 120. Stored as the segmented index (0=60, 1=120), and an
+// absent key is the default, NOT 60.
+NSInteger YTMUAnimFrameRate(void) {
+    NSDictionary *settings = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    id value = settings[@"animFrameRate"];
+    return (value && [value integerValue] == 0) ? 60 : 120;
+}
 // Central gate for every device->server debug upload (log POSTs, DEBUG_
 // pings, screenshot dumps). Default OFF on all three inputs: the local
 // master toggle, the log-level segment, and the server remote switch.

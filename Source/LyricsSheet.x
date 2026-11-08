@@ -2552,7 +2552,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     // work, cached measurement, culled lines.)
     self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updatePlaybackTime)];
     if (@available(iOS 15.0, *)) {
-        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, 120, 120);
+        // (60, rate, rate): the 60 floor keeps the range open on a ProMotion
+        // panel when the preference asks for 60 -- pinning min=max=60 is the
+        // requested cap, not a lockstep rate.
+        NSInteger rate = YTMUAnimFrameRate();
+        self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, rate, rate);
     } else if ([self.displayLink respondsToSelector:@selector(setPreferredFramesPerSecond:)]) {
         self.displayLink.preferredFramesPerSecond = 120;
     }
@@ -2687,13 +2691,22 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     // App defaults churn (YT writes its own keys constantly), so keep this to
     // one dictionary read and a pointer-free decision. NSUserDefaults posts on
     // whichever thread wrote; the work itself is main-thread UI.
-    if ([NSThread isMainThread]) {
-        [self ytmu_enforceFullscreenAutoOpen];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self ytmu_settingsChanged:note];
+        });
         return;
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self ytmu_enforceFullscreenAutoOpen];
-    });
+    [self ytmu_enforceFullscreenAutoOpen];
+    // The tick honors the 60/120 frame-rate preference live: the link exists
+    // for the life of the panel, so the range has to be re-applied here (the
+    // scrubber link re-reads it the same way from its own hook file).
+    if (self.displayLink) {
+        if (@available(iOS 15.0, *)) {
+            NSInteger rate = YTMUAnimFrameRate();
+            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(60, rate, rate);
+        }
+    }
 }
 
 // Undo everything ytmu_assertOnTop hid while our lyrics were on top. The panel
