@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
 #import "YTMUVisualStyle.h"
+#import "LyricsShared.h"
 
 static BOOL PlayerV2(void){return YTMULGFeatureEnabled(@"fullPlayerV2Enabled");}
 // The associated-object keys. They must be the ADDRESS of something with static
@@ -79,7 +80,9 @@ static BOOL KeepBg(NSString*n){return [n hasPrefix:@"YTMGradientScrim"]||[n hasP
 static void ClearRoot(UIView*r,NSInteger d){if(!r||d>7)return;for(UIView*v in r.subviews){NSString*n=NSStringFromClass(v.class);if((v.tag>=7318&&v.tag<=7321)||KeepBg(n))continue;if([v isKindOfClass:UIVisualEffectView.class])continue;if([n containsString:@"Slider"]||[n containsString:@"Scrubber"])continue;if(!IsArtwork(v)&&![v isKindOfClass:UILabel.class]&&!IsButton(v)){v.backgroundColor=UIColor.clearColor;v.opaque=NO;}ClearRoot(v,d+1);}}
 static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])return;objc_setAssociatedObject(v,kAnimated,@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);if(UIAccessibilityIsReduceMotionEnabled())return;v.alpha=0;v.transform=CGAffineTransformMakeScale(.975,.975);[UIView animateWithDuration:.38 delay:0 usingSpringWithDamping:.84 initialSpringVelocity:.22 options:0 animations:^{v.alpha=1;v.transform=CGAffineTransformIdentity;}completion:nil];}
 
-@interface YTMNowPlayingViewController:UIViewController@end
+// YTMNowPlayingViewController's interface arrives via LyricsShared.h's stub
+// header import (Headers/YTMNowPlayingViewController.h); do not re-declare it
+// here -- a second full interface is a duplicate-definition error.
 %hook YTMNowPlayingViewController
 - (void)viewDidAppear:(BOOL)a{%orig;if(PlayerV2())Enter(self.view);}
 - (void)viewDidLayoutSubviews{%orig;if(!PlayerV2()||CGRectGetWidth(self.view.bounds)<300)return;self.view.backgroundColor=UIColor.clearColor;[self.view setOpaque:NO];ClearRoot(self.view,0);}
@@ -202,12 +205,50 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 // children out); the mini player's own scrubber is a 1pt line hidden by
 // LiquidGlass.xm, so a 2pt height floor scopes this to the player bars -- the
 // bottom row and the video overlay card's bar are both >= 2pt tall.
+//
+// THE 1-STEP-PER-SECOND BAR: YT writes the elapsed fill from
+// didReceivePlaybackPositionTime, which fires about once per second, so the
+// fill JUMPS a second at a time. The player clock itself is continuous while
+// playing (and frozen while paused -- the same source the lyrics tick reads),
+// so a per-frame CADisplayLink reads it and moves the fill itself. The song
+// duration is never asked for: it falls out of YT's own fill write
+// (elapsed / fillRatio), cached and refreshed whenever a fill we did not write
+// is seen -- which is exactly YT's ~1s pulse, a seek, or a new song.
+static char kScrubLinkKey;
+static char kScrubStateKey;
+static BOOL YTMUInMiniPlayer(UIView *v) {
+    for (UIView *u = v; u; u = u.superview) {
+        if ([NSStringFromClass(u.class) isEqualToString:@"YTMMiniPlayerView"]) return YES;
+    }
+    return NO;
+}
+// Attached once per scrubber instance; (60, rate, rate) honors the 60/120
+// preference live on each tick re-read.
+static void YTMUAttachScrubberLink(UIView *scrub) {
+    CADisplayLink *link = objc_getAssociatedObject(scrub, &kScrubLinkKey);
+    if (!link) {
+        link = [CADisplayLink displayLinkWithTarget:scrub
+                                           selector:@selector(ytmu_scrubTick:)];
+        [link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        objc_setAssociatedObject(scrub, &kScrubLinkKey, link, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (@available(iOS 15.0, *)) {
+        NSInteger rate = YTMUAnimFrameRate();
+        link.preferredFrameRateRange = CAFrameRateRangeMake(60, rate, rate);
+    }
+}
+
 @interface YTMStoryboardScrubber:UIView@end
 %hook YTMStoryboardScrubber
 - (void)layoutSubviews{
     %orig;
     if(!PlayerV2())return;
     if(CGRectGetHeight(self.bounds)<2.0||CGRectGetWidth(self.bounds)<100.0)return;
+    // The mini bar's 2pt raised line is styled by MiniPlayerLiquidGlassV3,
+    // which deliberately does NOT recolor it (the song accent there was a
+    // complaint). Excluded as a SUBTREE here or this hook paints it every
+    // layout pass and the two pass systems fight over the same fills.
+    if(YTMUInMiniPlayer(self))return;
     UIColor *played=YTMUSongAccent(.95);
     UIColor *track=[UIColor.whiteColor colorWithAlphaComponent:.25];
     for(UIView*v in self.subviews){
@@ -219,6 +260,62 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
             CGFloat tw=CGRectGetWidth(t.frame), th=CGRectGetHeight(t.bounds);
             if(th<0.5||th>10.0)continue;
             t.backgroundColor=(CGRectGetMinX(t.frame)<=0.5&&tw>0.5)?played:track;
+        }
+    }
+    YTMUAttachScrubberLink(self);
+}
+%new
+- (void)ytmu_scrubTick:(CADisplayLink *)link {
+    if (!g_activePlayer) return;
+    double elapsed = 0.0;
+    if ([g_activePlayer respondsToSelector:@selector(currentVideoMediaTime)]) {
+        elapsed = [g_activePlayer currentVideoMediaTime];
+    } else if ([g_activePlayer respondsToSelector:@selector(currentMediaTime)]) {
+        elapsed = [g_activePlayer currentMediaTime];
+    }
+    if (elapsed <= 0.0) return;
+    NSMutableDictionary *state = objc_getAssociatedObject(self, &kScrubStateKey);
+    if (!state) {
+        state = [NSMutableDictionary dictionary];
+        objc_setAssociatedObject(self, &kScrubStateKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    double lastRaw = [state[@"raw"] doubleValue];
+    double lastWritten = [state[@"written"] doubleValue];
+    BOOL rebase = NO;
+    if (fabs(elapsed - lastRaw) > 1.5) rebase = YES;  // seek or song change
+    state[@"raw"] = @(elapsed);
+    for (UIView *wrap in self.subviews) {
+        if ([wrap isKindOfClass:UIImageView.class]) continue;
+        CGFloat trackW = CGRectGetWidth(wrap.frame);
+        if (CGRectGetHeight(wrap.bounds) > 8.0 || trackW < 100.0) continue;
+        for (UIView *fill in wrap.subviews) {
+            if ([fill isKindOfClass:UIImageView.class]) continue;
+            CGFloat th = CGRectGetHeight(fill.bounds);
+            if (th < 0.5 || th > 10.0) continue;
+            CGFloat fx = CGRectGetMinX(fill.frame);
+            if (fx > 0.5) continue;                 // the trailing filler, not the elapsed bar
+            CGFloat fw = CGRectGetWidth(fill.frame);
+            CGFloat ratio = fw / trackW;            // YT's own last-written position
+            // YT wrote this fill since we last did: its geometry is the truth,
+            // so re-derive the duration from it. Avoid a 0-fill base (song
+            // start): the first pulse with width comes within a second.
+            if (fw > 1.0 && (ratio <= 1.0) &&
+                (rebase ? (fabs(fw - lastWritten) > 0.6)
+                        : (fabs(fw - lastWritten) > 0.3))) {
+                double duration = elapsed / ratio;
+                if (duration > 1.0) state[@"dur"] = @(duration);
+            }
+            double duration = [state[@"dur"] doubleValue];
+            if (duration <= 1.0) continue;          // no reliable base yet
+            CGFloat newW = (CGFloat)(trackW * (elapsed / duration));
+            if (newW < 0.5) newW = 0.5;
+            if (newW > trackW) newW = trackW;
+            if (fabs(newW - fw) < 0.25) continue;
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            fill.frame = CGRectMake(fx, CGRectGetMinY(fill.frame), newW, th);
+            [CATransaction commit];
+            state[@"written"] = @(newW);
         }
     }
 }
