@@ -28,6 +28,7 @@ from .providers_cubey import (fetch_cubey, fetch_cubey_all, cubey_candidate,
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
+from .parsers_srt import parse_synced_text
 from .translate import cohere_translate, google_translate_fast
 from .cache import sanitize_lyrics_parts
 from .nodes import pick_node
@@ -169,7 +170,7 @@ def _race_cubey(queries, video_id, duration, jwt_token, req_id='?'):
                         {'lyrics': parsed, 'source': cubey.get('source'), 'synced': True},
                         queries, video_id, duration, jwt_token, via_node, req_id)
                 if cubey.get('synced'):
-                    parsed = parse_lrc(cubey['synced'], duration)
+                    parsed = parse_synced_text(cubey['synced'], duration)
                     sanitize_lyrics_parts(parsed)
                     print(f"  [REQ {req_id}] [Race] Cubey hit from {cubey.get('source')} ({(time_module.time()-t0)*1000:.0f}ms)")
                     return _maybe_cubey_second_pass(

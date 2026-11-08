@@ -31,9 +31,11 @@
 stripped again before anything could use it. The bg/romanization sub-lines are
 where it mattered and they keep their window.
 
-**Still open:** everything in §2 (LRC), §3 (QRC), §4 (SRT), §5 (credits), plus
-TTML rows 1.10, 1.11, 1.13, 1.16, 1.23, 1.24, 1.25, and §7 (the whole device
-half). See §8.
+**Still open:** everything in §7 (the whole device half), TTML rows 1.10
+(songwriters), 1.11 (`amll:meta`), 1.13 (`itunes:timing`), 1.23, 1.24
+(`blockIndex`) and 1.25, and §8 open questions 3 and 4. LRC (§2), QRC (§3),
+SRT (§4) and credits (§5) are landed -- §4 most recently, and 1.16 stays
+deliberately not adopted (see the note above the table).
 
 Sources read in full at these pins, and re-read before changing anything:
 
@@ -129,12 +131,24 @@ exactly what AMLL's own exporter does — currently produces nothing at all.
 
 ---
 
-## 4. SRT — a format we do not have at all
+## 4. SRT — SHIPPED (`server/parsers_srt.py`)
 
-`isSrt` predicate, cue number + `HH:MM:SS,mmm --> HH:MM:SS,mmm` blocks,
-`<tag>` stripping, multi-line cue text joined with `\n`. No provider of ours
-returns SRT today, so this is a free win for anything that does (a node's mesh
-payload, a manual paste).
+`parse_srt()` follows braccato's `SRTParser` exactly (cue blocks on blank
+lines, the arrow line is the timing line, everything after it is the text,
+`<tag>` markup stripped, multi-line cues joined with `\n`), plus what the
+module needed as a lyric source: credit lines dropped via the shared
+`is_credit_line`, real cue windows (`durationMs = end - start`, no guessing),
+`wordSynced=False`, entries sorted defensively. `is_srt` is braccato's
+`isSrt` predicate verbatim, and the comma and the dot millisecond
+separators are both accepted.
+
+Dispatched through `parsers_srt.parse_synced_text`, the ONE entry point for
+an undeclared "synced" lyric blob, wired into every consumer of external
+raw text: `cubey_candidate`, race.py, pipeline.py (both Cubey raw sites) and
+`providers_braccato._candidate_dict`. Before this, an SRT payload passed
+`parse_lrc`, whose `[mm:ss.xx]` tags match nothing, and the WHOLE file came
+back empty. LRC passes through unchanged (tmp/test_srt.py asserts the
+dispatcher is transparent for LRC).
 
 ---
 

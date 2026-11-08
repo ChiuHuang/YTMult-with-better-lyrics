@@ -26,6 +26,7 @@ from .providers_cubey import fetch_cubey
 from .providers_unison import fetch_unison
 from .providers_braccato import fetch_direct_best
 from .parsers_lrc import parse_lrc, parse_plain
+from .parsers_srt import parse_synced_text
 from .translate import google_translate_fast, translatable_rows
 from .cache import is_not_found_result, sanitize_lyrics_parts
 from .candidates import (save_candidates, graft_wbw_parts,
@@ -254,7 +255,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
                     consider({'lyrics': cubey['parsed'], 'source': cubey.get('source'), 'synced': True}, 'Cubey TTML')
                 elif cubey.get('synced'):
                     print(f"  [OK] Cubey: synced LRC lyrics found from {cubey.get('source')}! (query: {q['title']})")
-                    consider({'lyrics': parse_lrc(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
+                    consider({'lyrics': parse_synced_text(cubey['synced'], duration), 'source': cubey.get('source'), 'synced': True}, 'Cubey synced')
             _stage('Cubey', 'done')
         except Exception as e:
             print(f"  [FAIL] Cubey stage error (continuing): {e}")
@@ -753,7 +754,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
                         if raw.get('parsed'):
                             cand = {'lyrics': raw['parsed'], 'source': raw.get('source', inner), 'synced': True}
                         elif raw.get('synced'):
-                            cand = {'lyrics': parse_lrc(raw['synced'], duration), 'source': raw.get('source', inner), 'synced': True}
+                            cand = {'lyrics': parse_synced_text(raw['synced'], duration), 'source': raw.get('source', inner), 'synced': True}
                         else:
                             continue
                         cur = inner_best.get(inner)

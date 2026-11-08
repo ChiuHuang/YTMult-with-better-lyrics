@@ -212,8 +212,8 @@ def _candidate_dict(raw, duration, priority):
         lyrics = raw['parsed']
         wbw = bool(raw.get('wordSynced'))
     elif raw.get('synced'):
-        from .parsers_lrc import parse_lrc
-        lyrics = parse_lrc(raw['synced'], duration)
+        from .parsers_srt import parse_synced_text
+        lyrics = parse_synced_text(raw['synced'], duration)
         wbw = bool(raw.get('wordSynced'))
     else:
         return None

@@ -22,6 +22,7 @@ import logging
 from .nodes import relay_http_request
 from .egress import egress_url
 from .parsers_lrc import parse_lrc
+from .parsers_srt import parse_synced_text
 from .parsers_ttml import parse_ttml_basic
 
 # ============================================================
@@ -392,7 +393,9 @@ def cubey_candidate(raw, duration_sec=0, inner=None):
     if raw.get('parsed'):
         parsed = raw['parsed']
     elif raw.get('synced'):
-        parsed = parse_lrc(raw['synced'], duration_sec)
+        # The blob's format is undeclared: an SRT payload handed to parse_lrc
+        # returned [] and the whole file was dropped.
+        parsed = parse_synced_text(raw['synced'], duration_sec)
     else:
         return None
     if not parsed:
