@@ -73,8 +73,10 @@ static void YTMUQueueCard(UIView*h,UIImage*thumb){
     if(!last||last.pointerValue!=key){
         objc_setAssociatedObject(h,kQueueSampled,[NSValue valueWithPointer:key],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         UIColor*hue=YTMUQueueHue(thumb);
-        tint.backgroundColor=hue?[hue colorWithAlphaComponent:.10]:[UIColor colorWithWhite:1 alpha:.04];
-        b.layer.borderColor=(hue?[hue colorWithAlphaComponent:.34]:[UIColor colorWithWhite:1 alpha:.14]).CGColor;
+        // The audit called the rows visually heavy (border+fill on every card
+        // with tight gaps): both washes are a step down from the first tint.
+        tint.backgroundColor=hue?[hue colorWithAlphaComponent:.07]:[UIColor colorWithWhite:1 alpha:.04];
+        b.layer.borderColor=(hue?[hue colorWithAlphaComponent:.20]:[UIColor colorWithWhite:1 alpha:.12]).CGColor;
     }
 
     CGRect f=CGRectInset(h.bounds,10,3);
@@ -109,6 +111,19 @@ static void YTMUQueueCard(UIView*h,UIImage*thumb){
 - (void)layoutSubviews{
     %orig;if(!YTMUQueueV2()||CGRectGetWidth(self.bounds)<340||CGRectGetHeight(self.bounds)<60)return;
     self.backgroundColor=UIColor.clearColor;self.contentView.backgroundColor=UIColor.clearColor;
+    // YT draws the queue's "now playing" state as a full-width selection band
+    // behind the row, outside our inset card -- the blue strip that ran past
+    // the panel edge in the audit screenshot. Our card carries the highlight
+    // now, so the stock band is dead weight. The stock band lives on
+    // selectedBackgroundView; the multiple-selection twin only exists on
+    // UITableViewCell, and the true superclass of this YT class is unknown,
+    // so that one goes through a guarded message send instead of the
+    // compile-time property.
+    UIView *multi = nil;
+    if ([self respondsToSelector:@selector(multipleSelectionBackgroundView)])
+        multi = (UIView *)[self performSelector:@selector(multipleSelectionBackgroundView)];
+    UIView*sels[]={(id)self.selectedBackgroundView,(id)multi};
+    for(NSUInteger i=0;i<(sizeof(sels)/sizeof(sels[0]));++i)if([sels[i] isKindOfClass:UIView.class])sels[i].hidden=YES;
     UIImage*thumb=nil;
     for(UIView*v in self.contentView.subviews){
         if(![NSStringFromClass(v.class)isEqualToString:@"YTImageView"]||CGRectGetWidth(v.bounds)>64)continue;
