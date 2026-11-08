@@ -50,7 +50,54 @@ static void YTMUMiniClearBg(UIView *root){Class swipe=NSClassFromString(@"YTLigh
 // EFFECTIVE radius (radius/scale compensates the transform squash); 10pt on a
 // 40pt tile was 25% -> "curved a lil too much", 7pt (17.5%) keeps the
 // squircle shape at a level that does not read as a coin.
-static void YTMUMiniTree(UIView *root){Class image=NSClassFromString(@"YTImageView");for(UIView*v in root.subviews){if(image&&[v isKindOfClass:image]){CGFloat w=CGRectGetWidth(v.bounds),h=CGRectGetHeight(v.bounds);if(w>=38&&w<=56&&h>=38&&h<=56){UIImageView*loaded=YTMULoadedImage(v);if(loaded){v.hidden=NO;v.alpha=1;loaded.hidden=NO;loaded.alpha=1;CGFloat scale=MIN(1,40.0/MAX(1,w));v.transform=CGAffineTransformMakeScale(scale,scale);v.layer.cornerRadius=7.0/scale;v.layer.cornerCurve=kCACornerCurveContinuous;v.layer.masksToBounds=YES;}}}YTMUMiniTree(v);}}
+//
+// THE "QUERCLE" FIX (the cover report: a CIRCLE that rotates over a static
+// BLACK SQUARE = a half-square/half-circle blob). The spinner is not ours --
+// nothing in this tweak rotates an image -- it is YT 9.35's mini art. Both
+// parts go here, inside the pass that owns the bar's tree:
+//   rotation: no animation stays on the art layer; the paint is the same
+//             plain rounded RECT every pass re-asserts;
+//   base:     the near-square black container under the art (<= 72pt wide)
+//             matches the tile's radius and drops its fill, so the cover
+//             reads as ONE rounded rect on the glass dish.
+static void YTMUMiniTree(UIView *root){
+    Class image=NSClassFromString(@"YTImageView");
+    for(UIView*v in root.subviews){
+        if(image&&[v isKindOfClass:image]){
+            CGFloat w=CGRectGetWidth(v.bounds),h=CGRectGetHeight(v.bounds);
+            if(w>=30&&w<=64&&h>=30&&h<=64){
+                UIImageView*loaded=YTMULoadedImage(v);
+                if(loaded){
+                    v.hidden=NO;v.alpha=1;loaded.hidden=NO;loaded.alpha=1;
+                    CGFloat scale=MIN(1,40.0/MAX(1,w));
+                    v.transform=CGAffineTransformMakeScale(scale,scale);
+                    v.layer.cornerRadius=7.0/scale;
+                    v.layer.cornerCurve=kCACornerCurveContinuous;
+                    v.layer.masksToBounds=YES;
+                    // Kill the disc spinner on the art layer itself. A keyed
+                    // lookup would guess the key ("transform" vs a rotation
+                    // key path); removing ALL of them also kills the
+                    // crossdissolve -- re-asserted every layout pass, and the
+                    // bar re-lays out on every song change anyway.
+                    if(v.layer.animationKeys.count){
+                        for(NSString *key in [v.layer.animationKeys copy]){[v.layer removeAnimationForKey:key];}
+                    }
+                    // The black base square goes with it: near-square
+                    // containers under the art (<= 72pt wide) match the
+                    // tile's radius and drop their fill, so the whole cover
+                    // reads as ONE rounded rect on the glass dish.
+                    for(UIView*base=v.superview;base&&base!=root;base=base.superview){
+                        if(CGRectGetWidth(base.bounds)>72.0)break;
+                        base.layer.cornerRadius=7.0/scale;
+                        base.layer.cornerCurve=kCACornerCurveContinuous;
+                        base.backgroundColor=UIColor.clearColor;
+                    }
+                }
+            }
+        }
+        YTMUMiniTree(v);
+    }
+}
 // The mini bar's progress line: 1pt and all-but-invisible (a review said
 // "no progress bar"). Raise it to 2pt and STOP -- the song accent here was
 // reviewed as unwanted ("don't make the mini player's bar change color"), so

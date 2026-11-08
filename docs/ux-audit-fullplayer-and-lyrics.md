@@ -41,7 +41,7 @@ part of that report that is still open.
 | M3 | Panel's top corners overpainted by the mini bar; 8px apart reads as stacked | [ours] | Z-order/offset between the mini bar and the injected panel. |
 | M4 | Status bar near-black vs panel dark-blue vs mini bar -- three mismatched background layers | [ours]/[native] | Our dish dither vs YT's surface vs system bar; needs one base tone decision. |
 | M5 | Mini title ellipsis at x~800 while the cast button starts at x~950 (150px wasted) | [native] | The swipe carousel metadata width is YT's; our dish counts only inset. Probably leave. |
-| M6 | Round cover rotates but its black square base does not | [investigate] | The rotating art is not ours (no rotation hook in V3); the square is YT's platter. Confirm with a dump, then either square rotates too (native) or our tree hook corrects the radius only. |
+| M6 | Round cover rotates but its black square base does not | [ours, fixed] | The spinner is NOT ours -- nothing in the tweak rotates an image; it is YT 9.35's mini art. YTMUMiniTree now kills every animation on the art layer each pass (a plain rounded rect re-asserted), and the near-square black containers under the art (<= 72pt) match the tile's radius and drop their fill, so the cover reads as ONE rounded rect on the glass dish ("same rect with rounded"). Not provable from code alone -- if a rotation lives on a container ABOVE the art layer it survives this; verify on device. |
 | M7 | Dot-pattern texture on the mini bar and lyrics bg | [ours] | YTMULGApplyDither(.48). Keep or reduce per surface; not all surfaces carry it -- inconsistent by design worth revisiting. |
 
 ## Lyrics screen (figures 4/5)
