@@ -216,6 +216,34 @@ static void Enter(UIView*v){if([objc_getAssociatedObject(v,kAnimated)boolValue])
 // is seen -- which is exactly YT's ~1s pulse, a seek, or a new song.
 static char kScrubLinkKey;
 static char kScrubStateKey;
+// The drag knob the report asked for ("no knob, can't tell it's draggable"):
+// one injected circle per scrubber, kept on top, its center riding the ELAPSED
+// fill's leading edge -- the same quantity the interpolator already computes,
+// so the knob costs nothing extra to track. The stock thumb plate is a
+// 96x96 hidden singleton this hook deliberately does not touch; ours is
+// visible chrome sized against the 2-4pt bar (12pt), not against YT's plate.
+static char kScrubKnobKey;
+static void YTMUApplyScrubKnob(UIView *scrub, CGPoint center) {
+    UIView *knob = objc_getAssociatedObject(scrub, &kScrubKnobKey);
+    if (!knob) {
+        knob = [[UIView alloc] initWithFrame:CGRectZero];
+        knob.layer.cornerRadius = 6.0;
+        knob.layer.cornerCurve = kCACornerCurveContinuous;
+        knob.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.92];
+        knob.layer.borderColor = [UIColor colorWithWhite:0.0 alpha:0.25].CGColor;
+        knob.layer.borderWidth = 0.5;
+        knob.layer.shadowColor = UIColor.blackColor.CGColor;
+        knob.layer.shadowOpacity = 0.25;
+        knob.layer.shadowRadius = 3.0;
+        knob.layer.shadowOffset = CGSizeMake(0, 1);
+        knob.userInteractionEnabled = NO;   // scrubbing stays YT's gesture
+        [scrub addSubview:knob];
+        objc_setAssociatedObject(scrub, &kScrubKnobKey, knob, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (knob.hidden) { knob.hidden = NO; [scrub bringSubviewToFront:knob]; }
+    if (fabs(center.x - knob.center.x) < 0.25 && fabs(center.y - knob.center.y) < 0.25) return;
+    knob.center = center;
+}
 static BOOL YTMUInMiniPlayer(UIView *v) {
     for (UIView *u = v; u; u = u.superview) {
         if ([NSStringFromClass(u.class) isEqualToString:@"YTMMiniPlayerView"]) return YES;
@@ -250,7 +278,7 @@ static void YTMUAttachScrubberLink(UIView *scrub) {
     // layout pass and the two pass systems fight over the same fills.
     if(YTMUInMiniPlayer(self))return;
     UIColor *played=YTMUSongAccent(.95);
-    UIColor *track=[UIColor.whiteColor colorWithAlphaComponent:.25];
+    UIColor *track=[UIColor.whiteColor colorWithAlphaComponent:.35];
     for(UIView*v in self.subviews){
         if([v isKindOfClass:UIImageView.class])continue;
         if(CGRectGetHeight(v.bounds)>8.0||CGRectGetWidth(v.bounds)<100.0)continue;
@@ -284,6 +312,8 @@ static void YTMUAttachScrubberLink(UIView *scrub) {
     BOOL rebase = NO;
     if (fabs(elapsed - lastRaw) > 1.5) rebase = YES;  // seek or song change
     state[@"raw"] = @(elapsed);
+    CGPoint knobCenter = CGRectZero.origin;
+    BOOL knobFound = NO;
     for (UIView *wrap in self.subviews) {
         if ([wrap isKindOfClass:UIImageView.class]) continue;
         CGFloat trackW = CGRectGetWidth(wrap.frame);
@@ -310,13 +340,24 @@ static void YTMUAttachScrubberLink(UIView *scrub) {
             CGFloat newW = (CGFloat)(trackW * (elapsed / duration));
             if (newW < 0.5) newW = 0.5;
             if (newW > trackW) newW = trackW;
-            if (fabs(newW - fw) < 0.25) continue;
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            fill.frame = CGRectMake(fx, CGRectGetMinY(fill.frame), newW, th);
-            [CATransaction commit];
-            state[@"written"] = @(newW);
+            if (fabs(newW - fw) >= 0.25) {
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                fill.frame = CGRectMake(fx, CGRectGetMinY(fill.frame), newW, th);
+                [CATransaction commit];
+                state[@"written"] = @(newW);
+            }
+            // Knob rides the fill's leading edge in SCRUBBER coordinates: the
+            // fill frame is in wrap space, so offset by the wrap's origin.
+            CGFloat kx = CGRectGetMinX(wrap.frame) + newW;
+            CGFloat ky = CGRectGetMinY(wrap.frame) + CGRectGetHeight(wrap.frame) / 2.0;
+            knobCenter = CGPointMake(kx, ky);
+            knobFound = YES;
         }
+    }
+    if (knobFound) {
+        CGFloat kx = MIN(MAX(knobCenter.x, 6.0), CGRectGetWidth(self.bounds) - 6.0);
+        YTMUApplyScrubKnob(self, CGPointMake(kx, knobCenter.y));
     }
 }
 %end
