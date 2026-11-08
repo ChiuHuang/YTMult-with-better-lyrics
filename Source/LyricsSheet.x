@@ -562,7 +562,13 @@ static CGFloat YTMULyricGutterTrailing(void) { return 45.0; }
 // Tightened from 14/10/14 at the user's ask ("line distance smaller"): lines
 // still separate visibly -- the translation needs its own band -- but a sheet
 // of 50 lines no longer reads as airy as a playlist.
-static const CGFloat YTMURowPadTop = 9.0;
+// Then 9 -> 12 at the audit's L11: with intra-group (lyric -> translation) at
+// 7pt, an inter-group separation of 9pt was too close to it (117px vs 143px at
+// 3x) and the reader could not tell which translation belonged to which
+// original. This pad is the BETWEEN-GROUPS one; the intra-group gap below
+// stays put because taking it down re-opens the "glued into one line" report
+// this value was raised to fix.
+static const CGFloat YTMURowPadTop = 12.0;
 // Gap between a lyric line and its translation. 6pt read as a single glued
 // string at 0.68x scale -- "Every single morning ((Huh)" followed by
 // "（哈）每一個清晨" looked like one mangled line rather than two. The
