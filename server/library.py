@@ -757,8 +757,12 @@ _RETITLE_PROMPT_TEMPLATE = (
     "You are a song metadata cleaner. Given a YouTube video title and artist, "
     "return a JSON object with cleaned title and artist fields.\n"
     "Remove: official video, official audio, official lyric video, "
-    "official mv, lyrics, mv, (cover ...), "
+    "official mv, lyrics, mv, (cover ...), (合作), (翻唱), "
     "歌ってみた, self cover tags, and YouTube noise.\n"
+    "Remove 【...】 groups too: the event, workshop or channel name a Japanese "
+    "upload puts at either end is not part of the song title.\n"
+    "Only DELETE text. Never translate, reorder or rephrase a title, and "
+    "never add a word that is not in the input.\n"
     "If the title contains Title - Artist format, split them properly.\n"
     "Keep (feat. ...) in the artist field only.\n"
     "Remove duplicated artist name embedded in the title.\n"
@@ -772,7 +776,65 @@ _OFFICIAL_NOISE_RE = re.compile(
     r'lyric\s*video|official\b)')
 _COVER_NOISE_RE = re.compile(
     r'(?i)[\(\[\{]?\s*(?:cover(?:ed)?(?:\s+by[^\)\]\}]*)?|歌ってみた|'
-    r'self\s*cover)\s*[\)\]\}]?')
+    r'self\s*cover|커버|翻唱|合作)\s*[\)\]\}]?')
+
+# Is there anything here for a cleaner to REMOVE? Only a yes here spends an
+# LLM call (or a batch slot); a clean title never does. Cover/collab tags are
+# the reported cases ("(Cover)", "(合作)", "【(channel)/event】"), the rest
+# are the same family. The CJK corner brackets are their own class: a Japanese
+# upload puts the event/workshop/channel in 【...】 at either end, so
+# "【ZZZ/HoYoFair】讃えよ！絶対学権リュシア様 (feat.ななひら)【アニメMV】" is
+# mostly tags.
+_DECORATION_RE = re.compile(
+    r'(?i)(?:\bcover(?:ed)?\b|\bself\s*cover\b|歌ってみた|커버|翻唱|合作|'
+    r'\bcollab\b|\bfeat\.?\b|\bft\.?\b|official|\blyrics?\b|\bmv\b|'
+    r'\baudio\b|visuali[sz]er|full\s+ver|\bremix\b|ver\.|版本|'
+    r'【[^】]*】)')
+
+# 【...】 groups (event, channel, "アニメMV", a rewrite's own title). Stripped
+# whole, edges first: the text inside is never the song name.
+_CJK_BRACKET_RE = re.compile(r'【[^】]*】|〖[^〗]*〗')
+
+
+def title_has_decoration(song):
+    """True when `song` still carries a tag a metadata cleaner could drop.
+
+    This is the gate in front of every LLM call: the dashboard retitle job
+    and the rebase path both run over whole caches, so "ask the model about
+    every title" is 200 prompts for 200 titles that were already clean.
+    Nothing about the answer is decided here -- only whether asking is worth
+    it.
+    """
+    return bool(_DECORATION_RE.search(song or ''))
+
+
+def retitle_text_matches(orig_title, new_title):
+    """True when `new_title` is `orig_title` with decoration removed and
+    nothing else changed.
+
+    The model is only allowed to DELETE: every character it hands back has to
+    come out of the input, in order (compared through norm_title, so case,
+    spacing and separators do not matter), it may not be longer than the
+    input, and it may not be a stub of it. Before this guard a model that
+    decided a title was in the wrong language rewrote it, and the rewrite was
+    cached as if it were the song's real name.
+    """
+    o = (orig_title or '').strip()
+    n = (new_title or '').strip()
+    if not o or not n:
+        return False
+    if len(n) > len(o):
+        return False
+    # Floor against the text our OWN cleaner would leave, not against the raw
+    # title: "... (Official Video)" is 28 chars, so a 40%-of-input rule called
+    # the correct 9-char answer a stub. What is left after the decoration is
+    # gone is the right yardstick.
+    base = _retitle_via_regex(o, '')['title'] or o
+    if len(n) < max(3, int(len(base) * 0.6)):
+        return False
+    no, nn = norm_title(o), norm_title(n)
+    return bool(nn) and nn in no
+
 _YT_NOISE_RE = re.compile(
     r'(?i)\b(?:mv|audio|visualizer|visualiser|'
     r'full\s+ver\.?|full\s+version)\b')
@@ -791,10 +853,19 @@ def retitle_song(song, artist):
         if cache_key in _retitled_cache:
             return _retitled_cache[cache_key]
 
+    if not title_has_decoration(song):
+        # Nothing to remove: identity answer, no LLM call, no regex pass.
+        result = {'title': song or '', 'artist': artist or ''}
+        with _retitled_cache_lock:
+            _retitled_cache[cache_key] = result
+        return result
+
     result = _retitle_via_llm(song, artist)
     if result is not None:
         reason = retitle_reject_reason(song, artist,
                                        result.get('title'), result.get('artist'))
+        if not reason and not retitle_text_matches(song, result.get('title')):
+            reason = 'answer is not the original title minus decoration'
         if reason:
             print(f"[RETITLE] [WARN] rejected LLM answer for {song!r}: {reason}")
             result = None
@@ -890,6 +961,7 @@ def _retitle_via_regex(song, artist):
     # Strip official/cover/yt noise. Substitute a SPACE, never '': the closing
     # bracket is part of the match, so "TIME(Cover)Kobo" collapsed into
     # "TIMEKobo" and the mashed string was cached as the song title.
+    t = _CJK_BRACKET_RE.sub(' ', t)
     t = _OFFICIAL_NOISE_RE.sub(' ', t)
     t = _COVER_NOISE_RE.sub(' ', t)
     t = _YT_NOISE_RE.sub(' ', t)
@@ -914,9 +986,9 @@ def _retitle_via_regex(song, artist):
     return {'title': t, 'artist': a}
 
 
-# Empty bracket pairs left behind by the noise patterns above: "ものふぉびあ
+    # Empty bracket pairs left behind by the noise patterns above: "ものふぉびあ
 # (Official MV) [Ghost Marija...]" -> "ものふぉびあ () [Ghost Marija...]".
-_EMPTY_BRACKET_RE = re.compile(r'(?:\(\s*\)|\[\s*\]|\{\s*\}|（\s*）|【\s*】)')
+_EMPTY_BRACKET_RE = re.compile(r'(?:\(\s*\)|\[\s*\]|\{\s*\}|（\s*）|【\s*】|〖\s*〗)')
 
 
 def _clean_title_text(t):
@@ -970,8 +1042,10 @@ _BATCH_PROMPT_HEADER = (
     "videos. Return a JSON array with one object per input, in the same "
     "order, each with keys title and artist.\n"
     "Remove: official video, official audio, official lyric video, official "
-    "mv, lyrics, mv, (cover ...), 歌ってみた, self cover tags, and YouTube "
-    "noise.\n"
+    "mv, lyrics, mv, (cover ...), (合作), (翻唱), 歌ってみた, self cover "
+    "tags, YouTube noise, and 【...】 groups (event/channel tags).\n"
+    "Only DELETE text from the given title. Never translate, reorder or "
+    "rephrase it.\n"
     "The artist field is often the uploader's channel handle while the real "
     "artist sits inside the title. Move the real artist out of the title "
     "into the artist field, but never use a channel handle as the song "
@@ -1006,6 +1080,11 @@ def retitle_batch(pairs, chunk_size=None, on_chunk=None):
         with _retitled_cache_lock:
             if k in _retitled_cache:
                 continue
+        if not title_has_decoration(s):
+            # Clean title: identity, and it never occupies a chunk slot.
+            with _retitled_cache_lock:
+                _retitled_cache[k] = {'title': s, 'artist': a}
+            continue
         todo.append((k, s, a))
     if not todo:
         return 0
@@ -1126,6 +1205,8 @@ def _parse_batch_from_text(text, chunk):
         t = (item.get('title') or '').strip()
         na = (item.get('artist') or '').strip() or a
         reason = retitle_reject_reason(s, a, t, na)
+        if not reason and not retitle_text_matches(s, t):
+            reason = 'answer is not the original title minus decoration'
         if reason:
             rejected += 1
             fb = _retitle_via_regex(s, a)
