@@ -27,18 +27,32 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[DONE] ses_lyrchip_20261108 | the lyrics chip marker no longer lands on the
-  action-row bar, and a chip YT disables is re-enabled on the spot | files:
-  Source/{LyricsEngagement,LyricsNowPlaying}.x, Source/LyricsShared.h | next:
-  device check -- drag a popup sheet off and watch the action row dim WITH the
-  chip, then find a song whose chip opens greyed and confirm it taps into our
-  panel | does: `YTMUMarkLyricsPath` stops at a CHIP SIZE (parent >240pt wide or
-  >120pt tall) instead of 250pt / 90%-of-window, so chrome is never marked, and
-  `setEnabled:NO` on an unmarked control whose own text/accessibility reads as
-  lyrics marks it and forces YES. TRAP: the marker drives forced alpha/hidden/
-  userInteraction, so ANY marker above the chip refuses YT's popup-drag dim --
-  that is the "chip escapes out of the popup first" symptom; never climb past
-  the chip. LyricsNowPlaying's local climb is gone (one definition now).`
+- `[DONE] ses_lyrchip_20261108 | chip marker no longer lands on the action-row
+  bar (the dim reaches the chip), a chip YT disables by HIDING an ASDK cell is
+  rescued on the spot, mini cover base walk fixed, retitle gated to decorated
+  titles only | files: Source/{LyricsEngagement,LyricsNowPlaying}.x,
+  Source/LyricsShared.h, Source/MiniPlayerLiquidGlassV3.xm, server/library.py |
+  next: device check -- drag a popup sheet off and watch the action row dim WITH
+  the chip; a song whose chip is missing/greyed must show it and open our panel;
+  the mini cover must be ONE rounded rect; a title with 【...】 must come back
+  without the brackets | does: (1) `YTMUMarkLyricsPath` stops at a CHIP SIZE
+  (parent >240pt wide or >120pt tall) instead of 250pt / 90%-of-window, so the
+  marker never sits on chrome. (2) 9.35 chips are ASDK `_ASDisplayView`s -- no
+  UILabel and no UIControl -- so the text walk never marked them and the disable
+  (which is `cell.hidden = YES`, NOT `enabled = NO`) went through;
+  `YTMURescueLyricsChip` probes accessibilityElements on hide/dim for CHIP-SIZED
+  views, `_actionButtonsFromRenderers` pairs renderer to button, and the ELM tap
+  marks whatever view carried the lyrics command. (3) mini: the base walk
+  stopped at "width > 72pt", so a 76pt mount kept its fill = a circle riding a
+  square; the stop is SHAPE now (near-square, <=200pt) and the base takes a flat
+  7pt (7/scale was 11.2pt and disagreed with the art's visible radius). (4)
+  retitle: `title_has_decoration` gates the LLM (a clean title costs nothing)
+  and `retitle_text_matches` only lets it DELETE -- substring of the input, not
+  longer than it, at least 60% of what our own cleaner leaves. TRAPS: ANY marker
+  above the chip refuses YT's popup-drag dim (that is the "chip escapes out of
+  the popup first" symptom); the size gate is also what keeps YT's 412pt
+  "沒有歌詞" snackbar a toast; and 【...】 is a decoration class stripped whole at
+  both ends.
 - `[DONE] ses_ci_fix_20261010 | fixed the shared artwork declaration compile error and made mirror-host rejection non-fatal; Build 291 released successfully | files: Source/YTMUVisualStyle.h, .github/workflows/main.yml | Asia mirror unavailable on 413; GitHub CDN release is live`
 - `[DONE] ses_6a1f0c2bd41YQq7XhR3mNzK | FIVE device reads are ONE endpoint, and
   the race route turned out never to save a provider snapshot AT ALL | files:
