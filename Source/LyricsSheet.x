@@ -5602,6 +5602,14 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.view.hidden = NO;
         [self ytmu_assertOnTop];
     }
+    // A live push that lands mid-song must not wait for the next display-link
+    // tick to light the highlight: activeIndexes/classes were just nilled, so
+    // pull the tick once NOW against the new payload. vc=%p is in the log so a
+    // sibling instance eating a stream (modal vs embedded panel) is provable
+    // from a dump instead of guessed at.
+    sendDebugLog([NSString stringWithFormat:@"[MUSIC] lyrics applied vc=%p rows=%lu synced=%d typewriter=%d",
+                  (void *)self, (unsigned long)newLyrics.count, self.isSynced, self.typewriterLive]);
+    [self updatePlaybackTime];
 }
 
 // The song's type size: the largest size in [min, max] at which no line of the
