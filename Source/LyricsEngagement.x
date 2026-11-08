@@ -271,6 +271,45 @@ static BOOL YTMUControlLooksLikeLyrics(UIControl *c) {
     return NO;
 }
 
+// The action-row chips of YT 9.35 are ASDK views: no UILabel, no UIControl,
+// so neither the layout walk (it reads text) nor -setEnabled: (it needs a
+// UIControl) is ever reached for them -- the chip YT disables by HIDING its
+// cell stayed hidden, which is the "lyrics button is disabled" report. The
+// same question is asked of a plain UIView here, and the probe is bounded: a
+// chip is small, and that size gate is also what keeps YT's own "no lyrics"
+// toast (a 412pt snackbar carrying the word 歌詞) from being forced on.
+#define YTMU_LYRICS_CHIP_MAX_W 240.0
+#define YTMU_LYRICS_CHIP_MAX_H 60.0
+
+static BOOL YTMUViewLooksLikeLyrics(UIView *v, NSInteger depth) {
+    if (!v || depth < 0) return NO;
+    if (YTMUTextLooksLyrics(v.accessibilityLabel)) return YES;
+    if (YTMUTextLooksLyrics(v.accessibilityIdentifier)) return YES;
+    if ([v isKindOfClass:[UILabel class]] && YTMUTextLooksLyrics(((UILabel *)v).text)) return YES;
+    for (id e in v.accessibilityElements) {
+        if ([e respondsToSelector:@selector(accessibilityLabel)] &&
+            YTMUTextLooksLyrics([e accessibilityLabel])) return YES;
+    }
+    for (UIView *c in v.subviews) {
+        if (YTMUViewLooksLikeLyrics(c, depth - 1)) return YES;
+    }
+    return NO;
+}
+
+static BOOL YTMUIsChipSized(UIView *v) {
+    CGFloat w = CGRectGetWidth(v.bounds), h = CGRectGetHeight(v.bounds);
+    return w > 0.0 && h > 0.0 && w <= YTMU_LYRICS_CHIP_MAX_W && h <= YTMU_LYRICS_CHIP_MAX_H;
+}
+
+// A view YT is about to hide/dim that is chip-sized and reads as lyrics IS the
+// entry: mark it (which makes every hook below refuse) and keep it on screen.
+static BOOL YTMURescueLyricsChip(UIView *v) {
+    if (!v || !YTMUIsChipSized(v)) return NO;
+    if (!YTMUViewLooksLikeLyrics(v, 2)) return NO;
+    YTMUMarkLyricsPath(v);
+    return YES;
+}
+
 %hook UIControl
 
 - (void)setEnabled:(BOOL)enabled {
@@ -293,25 +332,43 @@ static BOOL YTMUControlLooksLikeLyrics(UIControl *c) {
 %hook UIView
 
 - (void)setUserInteractionEnabled:(BOOL)enabled {
-    if (!enabled && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
-        %orig(YES);
-        return;
+    if (!enabled) {
+        if (objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+            %orig(YES);
+            return;
+        }
+        if (YTMURescueLyricsChip(self)) {
+            %orig(YES);
+            return;
+        }
     }
     %orig(enabled);
 }
 
 - (void)setAlpha:(CGFloat)alpha {
-    if (alpha < 0.8 && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
-        %orig(1.0);
-        return;
+    if (alpha < 0.8) {
+        if (objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+            %orig(1.0);
+            return;
+        }
+        if (YTMURescueLyricsChip(self)) {
+            %orig(1.0);
+            return;
+        }
     }
     %orig(alpha);
 }
 
 - (void)setHidden:(BOOL)hidden {
-    if (hidden && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
-        %orig(NO);
-        return;
+    if (hidden) {
+        if (objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+            %orig(NO);
+            return;
+        }
+        if (YTMURescueLyricsChip(self)) {
+            %orig(NO);
+            return;
+        }
     }
     %orig(hidden);
 }
@@ -354,6 +411,11 @@ static BOOL YTMUControlLooksLikeLyrics(UIControl *c) {
         return %orig;
     }
 
+    // Identity from the node itself, not from its text: whatever view the
+    // lyrics command was tapped on IS the chip, so mark it now and the forced
+    // hidden/alpha/enabled hooks cover it from here on.
+    if (tapRecognizer.view) YTMUMarkLyricsPath(tapRecognizer.view);
+
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] Lyrics ELM tap key=%@ vc=%@", key ?: @"(nil)", NSStringFromClass([vc class])]);
     if (YTMUIsInterfaceLandscape()) {
         sendDebugLog(@"[MUSIC] Lyrics ELM tap ignored in landscape (auto-open path)");
@@ -370,6 +432,29 @@ static BOOL YTMUControlLooksLikeLyrics(UIControl *c) {
 
 - (void)layoutSubviews {
     %orig;
+    // The row keeps its renderers NEXT TO its buttons (_actionButtons /
+    // _actionButtonsFromRenderers), so the lyrics chip can be identified from
+    // the renderer's command instead of from a label it may never have. This
+    // is the only path here that does not depend on text arriving at all.
+    @try {
+        NSArray *renderers = [self valueForKey:@"_actionButtonsFromRenderers"];
+        NSArray *buttons = [self valueForKey:@"_actionButtons"];
+        if ([renderers isKindOfClass:[NSArray class]] && [buttons isKindOfClass:[NSArray class]]) {
+            NSUInteger n = MIN(renderers.count, buttons.count);
+            for (NSUInteger i = 0; i < n; i++) {
+                id r = renderers[i];
+                id b = buttons[i];
+                if (![r isKindOfClass:[YTIButtonRenderer class]]) continue;
+                if (!YTMUIsLyricsRenderer((YTIButtonRenderer *)r)) continue;
+                if (![b isKindOfClass:[UIView class]]) continue;
+                [(UIView *)b setAlpha:1.0];
+                [(UIView *)b setHidden:NO];
+                [(UIView *)b setUserInteractionEnabled:YES];
+                YTMUMarkLyricsPath((UIView *)b);
+            }
+        }
+    } @catch (NSException *e) {}
+
     UIViewController *vc = [self _viewControllerForAncestor];
     if (vc && [vc respondsToSelector:@selector(ytmu_makeLyricsViewClickable:)]) {
         for (UIView *sub in self.subviews) {

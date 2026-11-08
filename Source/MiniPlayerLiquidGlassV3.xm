@@ -82,15 +82,33 @@ static void YTMUMiniTree(UIView *root){
                     if(v.layer.animationKeys.count){
                         for(NSString *key in [v.layer.animationKeys copy]){[v.layer removeAnimationForKey:key];}
                     }
-                    // The black base square goes with it: near-square
-                    // containers under the art (<= 72pt wide) match the
-                    // tile's radius and drop their fill, so the whole cover
-                    // reads as ONE rounded rect on the glass dish.
+                    // The base under the art goes with it, and this walk is
+                    // the part Build 349 got wrong in two ways -- both now
+                    // fixed:
+                    //   - the stop was "width > 72pt", so a 76pt mount (and
+                    //     anything larger) escaped with its fill intact and
+                    //     the cover read as a CIRCLE riding a SQUARE ("squircle").
+                    //     Shape is the test now: a near-square ancestor is a
+                    //     cover mount at any size up to 200pt, while the
+                    //     swipe PAGE (~332x240) and the bar are not square
+                    //     and end the walk immediately.
+                    //   - the radius was 7/scale (11.2pt on a 64pt tile) while
+                    //     the art's VISIBLE radius is 7pt, so the two edges
+                    //     disagreed and the bigger one won at the corners.
+                    //     Ancestors are not scaled, so they take a flat 7pt.
                     for(UIView*base=v.superview;base&&base!=root;base=base.superview){
-                        if(CGRectGetWidth(base.bounds)>72.0)break;
-                        base.layer.cornerRadius=7.0/scale;
+                        CGFloat bw=CGRectGetWidth(base.bounds),bh=CGRectGetHeight(base.bounds);
+                        if(bw<20.0||bh<20.0||bw>200.0||bh>200.0)break;
+                        if(bw/bh<0.8||bw/bh>1.25)break;
+                        base.layer.cornerRadius=7.0;
                         base.layer.cornerCurve=kCACornerCurveContinuous;
                         base.backgroundColor=UIColor.clearColor;
+                        // A disc painter above the art (the rotation that
+                        // refused to go away in 349) wins here too: no
+                        // animation survives on any cover mount.
+                        if(base.layer.animationKeys.count){
+                            for(NSString *key in [base.layer.animationKeys copy]){[base.layer removeAnimationForKey:key];}
+                        }
                     }
                 }
             }
