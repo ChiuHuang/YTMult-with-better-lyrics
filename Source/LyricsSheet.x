@@ -399,7 +399,12 @@ static const NSTimeInterval YTMUWaveOscillationDuration = 1.25;  // variables.cs
 // Distance ladder: opacity by how far a row sits from the sung line. braccato's
 // Sustain theme pairs each step with a blur; the blur needs an effect view per
 // row and reads as a notification card, so only the opacity moves.
-static const CGFloat YTMUDistanceLadder[6] = { 1.0, 0.88, 0.72, 0.52, 0.28, 0.0 };
+// The old tail (0.52/0.28/0.0) made the not-yet-sung lines almost invisible on
+// a bright or teal blurred artwork (audit L3) while the sung/next rows were
+// fine. The floor now holds at .38 instead of collapsing to 0 -- distant lines
+// stay readable, and the active row still pops because it is the only
+// full-brightness ink.
+static const CGFloat YTMUDistanceLadder[6] = { 1.0, 0.88, 0.76, 0.62, 0.50, 0.38 };
 static const NSInteger YTMUDistanceLadderSteps = 5;
 // Row of the animated scroll currently in flight, -1 when the table is at
 // rest. A second target arriving inside the transition would queue behind the
