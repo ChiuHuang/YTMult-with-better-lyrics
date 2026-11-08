@@ -1,5 +1,78 @@
 #import "LyricsShared.h"
 
+// ---- THE LYRICS CHUNK MARKER (one definition) ----
+// Privacy hooks (control enabled, chip visible) key off a `ytmu_isLyricsButton`
+// associated marker. This is the ONE place that decides where that marker
+// lives, so switching from `a `%`` walk won't disagree.
+//
+// HISTORY THAT SHAPED IT:
+//  - The old climb stopped at 250pt (LyricsNowPlaying) / 90% of the window
+//    (here); on a 428pt phone both surface at the whole action-row BAR, so
+//    the marker sat on chrome nowhere near the chip and the per-`UIView`
+//    forced-YES hooks then fought YT's popup-drag transitions (dimming the
+//    background) -- the chip visibly "escaped" out of the dimming before
+//    everything else around it. The stop is a CHIP SIZE now and nothing
+//    above the chip is marked, so a dim reaches the row like anything else.
+//  - Marking only the tile (not the path) let YT disable an INTERMEDIATE
+//    control the tile's marker never covered -- the chip sometimes stayed
+//    greyed out. Any node on the path may be the one YT tries to disable.
+//  - The chip's label text can ARRIVE LATE (after the layout pass that
+//    searched for it): the text-arrival hook below re-asserts the mark on
+//    the same rules.
+BOOL YTMUTextLooksLyrics(NSString *text) {
+    if (!text.length || text.length > 2048) return NO;
+    if ([text containsString:@"歌詞"] || [text containsString:@"歌词"]) return YES;
+    return [[text lowercaseString] containsString:@"lyric"];
+}
+
+// Defined below; the chip mark walks into it.
+void YTMUMarkLyricsSubtree(UIView *root, NSInteger depth);
+
+// Marks the chip and everything INSIDE it, and re-enables every control in
+// there (goes through our setEnabled hook, which is a no-op for non-chips).
+// Returns the chip: the highest ancestor whose parent is still chip-sized.
+// The stop is a SIZE, not "the first surface": a chip is one cell of the
+// action row (~96pt) while the row is 388-428pt wide, and the row keeps
+// containing other chips. Nothing above the chip carries the marker, so the
+// forced-alpha/hidden hooks below can never freeze chrome.
+UIView *YTMUMarkLyricsPath(UIView *leaf) {
+    if (!leaf) return nil;
+    UIView *chip = leaf;
+    while (chip.superview) {
+        UIView *p = chip.superview;
+        if (p.bounds.size.width > 240.0 || p.bounds.size.height > 120.0) break;
+        chip = p;
+    }
+    objc_setAssociatedObject(chip, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    YTMUMarkLyricsSubtree(chip, 6);
+    for (UIView *n = leaf; n; n = n.superview) {
+        if ([n isKindOfClass:[UIControl class]]) [(UIControl *)n setEnabled:YES];
+        if (n == chip) break;
+    }
+    return chip;
+}
+
+// Subtree marking, depth-capped. The tile reached path-level covers its
+// children; recursion here is bounded because cells deep in a sheet could
+// otherwise walk the whole window.
+void YTMUMarkLyricsSubtree(UIView *root, NSInteger depth) {
+    if (!root || depth <= 0) return;
+    for (UIView *c in root.subviews) {
+        objc_setAssociatedObject(c, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        YTMUMarkLyricsSubtree(c, depth - 1);
+    }
+}
+
+// Cell/tile REUSE: the same view can later carry a non-lyrics action, and a
+// stale marker would then keep forcing YES on the wrong row. Strip the
+// marker key (only this association; objc_removeAssociatedObjects would kill
+// unrelated systems' data).
+void YTMUClearLyricsMarkersFrom(UIView *root, NSInteger depth) {
+    if (!root || depth <= 0) return;
+    objc_setAssociatedObject(root, @selector(ytmu_isLyricsButton), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    for (UIView *c in root.subviews) YTMUClearLyricsMarkersFrom(c, depth - 1);
+}
+
 // The lyrics entry button is YTM's OWN button; there is no owning pref
 // anymore. The four hooks below force it un-hideable (YT disables and hides
 // it to gate lyrics on subscription), and lyricsEntryButtonEnabled -- the
@@ -177,12 +250,40 @@ static BOOL YTMUIsLyricsRenderer(YTIButtonRenderer *renderer) {
 %end
 
 
+// A chip whose text had not arrived when the layout pass ran (or one YT built
+// fresh afterwards) never got the marker, and YT is then free to grey it --
+// that is the "sometimes the lyrics button is disabled" report. Disabling is
+// a rare event, so the text read is paid for HERE instead of on every pass,
+// and the mark is applied on the spot so the rest of the forcing follows.
+static BOOL YTMUControlLooksLikeLyrics(UIControl *c) {
+    if (!c) return NO;
+    if (YTMUTextLooksLyrics(c.accessibilityLabel)) return YES;
+    if (YTMUTextLooksLyrics(c.accessibilityIdentifier)) return YES;
+    @try {
+        if ([c respondsToSelector:@selector(titleForState:)]) {
+            if (YTMUTextLooksLyrics([(UIButton *)c titleForState:UIControlStateNormal])) return YES;
+        }
+    } @catch (NSException *e) {}
+    for (UIView *s in c.subviews) {
+        if ([s isKindOfClass:[UILabel class]] && YTMUTextLooksLyrics(((UILabel *)s).text)) return YES;
+        if (YTMUTextLooksLyrics(s.accessibilityLabel)) return YES;
+    }
+    return NO;
+}
+
 %hook UIControl
 
 - (void)setEnabled:(BOOL)enabled {
-    if (!enabled && objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
-        %orig(YES);
-        return;
+    if (!enabled) {
+        if (objc_getAssociatedObject(self, @selector(ytmu_isLyricsButton))) {
+            %orig(YES);
+            return;
+        }
+        if (YTMUControlLooksLikeLyrics(self)) {
+            YTMUMarkLyricsPath(self);
+            %orig(YES);
+            return;
+        }
     }
     %orig(enabled);
 }

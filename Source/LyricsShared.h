@@ -377,6 +377,9 @@ extern __weak id g_activeEngagementPanelContainer;
 extern "C" {
 #endif
 
+// Defined in LyricsEngagement.x: marks the lyrics chip (and everything inside
+// it) on `ytmu_isLyricsButton`, re-enables the controls in it, and returns it.
+UIView *YTMUMarkLyricsPath(UIView *leaf);
 void YTMUReleaseGlobalFetch(void);
 // Device-side RAM store for every provider's lyrics (never persisted).
 void YTMUProviderLyricsStore(NSString *videoID, NSArray *entries);

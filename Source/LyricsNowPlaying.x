@@ -75,12 +75,15 @@
     }
 
     if (isLyrics) {
-        UIView *btn = v;
-        while (btn.superview && btn.superview != self.view && btn.superview.bounds.size.width < 250) {
-            btn = btn.superview;
-        }
-
-        objc_setAssociatedObject(btn, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // ONE definition of where the marker lives and where "the chip" stops:
+        // YTMUMarkLyricsPath (LyricsEngagement.x). The local climb that used to
+        // live here stopped at 250pt, which on a 428pt phone is the whole
+        // action-row BAR; marking that bar made the chip refuse the dim YT
+        // applies to the screen during a popup drag, so the chip stayed bright
+        // while everything around it faded -- "it escapes out of the popup
+        // first". Nothing above the chip is marked now.
+        UIView *btn = YTMUMarkLyricsPath(v);
+        if (!btn) return;
         btn.userInteractionEnabled = YES;
         btn.alpha = 1.0;
         btn.hidden = NO;
@@ -88,7 +91,6 @@
             btn.superview.userInteractionEnabled = YES;
         }
         for (UIView *child in btn.subviews) {
-            objc_setAssociatedObject(child, @selector(ytmu_isLyricsButton), @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             child.userInteractionEnabled = YES;
             child.alpha = 1.0;
             child.hidden = NO;
