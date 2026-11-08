@@ -18,11 +18,11 @@ part of that report that is still open.
 | # | Report | Triage | Notes |
 |---|--------|--------|-------|
 | F1 | Brown-red gradient block y~1575-2240 hard-cut against deep blue elsewhere | [investigate] | Likely YT's own ambient scrims (`YTMGradientScrim`, which ClearRoot deliberately keeps) over a song whose artwork mean is warm; ours only clears. Need a dump tagging which view carries the warm fill before touching it. |
-| F2 | Four different left insets (34/57/28/25px) across header / cover+title / transport / bottom panel | [ours] | Our glass insets (ApplyCircle cap, YTMTimeControl, embedded panel) each chose its own inset with no shared constant. Introduce one leading/trailing constant for injected chrome and re-check. |
+| F2 | Four different left insets (34/57/28/25px) across header / cover+title / transport / bottom panel | [investigate] | Revised: most of those boundaries are YT's own layout of its children -- we paint glass INSIDE existing bounds and reposition almost nothing. Only the bottom panel's inset is ours. Blindly re-framing YT's buttons risks hitting its animation targets; needs the dump's per-view frames first. |
 | F3 | Title "Hatsune Miku" cut mid-glyph, half a "u" visible, no ellipsis | [ours] | YTMNowPlayingView's own title restyle (`layoutSubviews` font bump). A size change wedged between YT's label config passes clips mid-glyph. Re-approach: keep YT's font, only weight, or set truncation semantics explicitly. |
 | F4 | Title glued to block top edge (~10px) | [ours] | Same restyle pass; needs a top inset before attribution. |
 | F5 | Artist name low contrast (grey on the warm block) | [ours] | YTMULyricInk/brightness-derived ink hooked to lyrics, but the full-player artist label is native. If [native], leave; the dump must decide. |
-| F6 | Progress-bar has no drag knob, played/track contrast low | [ours, partially] | 335 deliberately skipped the thumb plate as a subtree. A knob drawn by us must not fight YT's thumb sizing; open decision. Track contrast is ours now (white .25) -- bump alpha bottom limit. |
+| F6 | Progress-bar has no drag knob, played/track contrast low | SHIPPED (Build 343+) | The interpolator's display link now also positions a 12pt injected knob riding the elapsed fill's leading edge (scrubbing itself stays YT's gesture); track alpha .25 -> .35 for contrast. |
 | F7 | Time text too small/dim, 15px from the transport row | [native] | YTMTimeControl is native layout; we only round it. Needs a deliberate design call before restyling. |
 | F8 | Transport row crowded (pause top edge touches the time, 15px below) | [native] | Same. |
 | F9 | Shuffle/repeat have no enabled state distinct from default | [native] | YT's own buttons; a state indicator is a feature request first. |
@@ -50,15 +50,15 @@ part of that report that is still open.
 |---|--------|--------|-------|
 | L1 | ~185px blank header where tabs should live | [ours] | Our embedded panel header band; tabs were never drawn by us. Either give it YT's tab row or shrink the band. |
 | L2 | Blank area hard-cuts against the blurred artwork; cut-y differs between figures (495/507) | [ours, partially] | Layout-order jitter between the pass that clears and the pass that sizes the table header. Needs a stable height (compute once per layout pass, not per tick). |
-| L3 | Unsung lyrics very low contrast on the teal blur | [ours] | The distance ladder (0.88/0.72/0.52 alpha) plus ink derivation. Raise the furthest step floor or bias ink by the artwork mean. |
+| L3 | Unsung lyrics very low contrast on the teal blur | SHIPPED (Build 343+) | Distance ladder floor raised: {…0.72, 0.52, 0.28, 0.0} -> {…0.76, 0.62, 0.50, 0.38}. Distant lines stay readable; the active row still pops as the only full-brightness ink. |
 | L4 | One wrapped line ("僕もち…") truncated with ellipsis while every other line wraps | [ours] | Truncation is not expected anywhere in the sheet; suspect the fitted-size path producing a max-lines count that turned one row into a clipped label. Reproduce with the same payload before touching. |
 | L5 | Line breaks split words (モ/ノトーン, どうす/ればいい) | [native] | UILabel word-wrap has no CJK word segmentation on iOS by default. Real fix = measure-aware own breaking (expensive); leave unless the user insists. |
-| L6 | Asymmetric gutters: 157px left vs 105px right | [ours] | YTMULyricGutterLeading/Trailing are two separate constants; make one left=right. |
+| L6 | Asymmetric gutters: 157px left vs 105px right | SHIPPED (Build 343, 2cdfd49) | 45/45 at the same sum, so the fitted type size did not move. |
 | L7 | Floating button y drifts (770 vs 783) and sits off the text column boundary | [ours] | The retranslate button's y depends on row height; pin it to the text column's trailing edge. |
 | L8 | Floating button icon unclear, low contrast | [ours] | Same button; own the ink and a clearer glyph. |
 | L9 | Current line sits at 83% (too low, top-heavy) | [ours, pending measured numbers] | AGENTS.md already has the standing note: get real contentOffset/contentSize/bounds from a debug line BEFORE touching the 37% ratio. |
 | L10 | Dark shadow around the current line reads dirty | [ours, device check] | 716b99d deleted the dark glow (now the bright ink). If a device still shows a dark box, that is a stale cache or a different shadow -- needs a fresh dump. |
-| L11 | Translation grouping unclear (orig->trans 117px vs trans->next 143px) | [ours] | Row spacing constants; group tighter within an original line, larger between groups. |
+| L11 | Translation grouping unclear (orig->trans 117px vs trans->next 143px) | SHIPPED (Build 343+) | YTMURowPadTop 9 -> 12 (the BETWEEN-groups pad; the translation is the last element inside a cell, so the next cell's top pad IS the group gap). The intra-group gap stays 7pt: taking it down re-opens the "glued into one line" report that raised it. |
 | L12 | No bottom fade mask / no safe-area bottom inset | [ours] | Add a gradient mask over the last visible rows and respect the safe area. |
 | L13 | No progress bar / time / prev-next in the lyrics screen | [ours, feature] | The landscape toolbar has them; the portrait sheet does not. A feature decision, not a bug. |
 | L14 | Per-word highlight cuts mid-glyph ("始" half-filled) | [ours, device check] | The wipe's feather strip width vs the glyph's own advance; needs the [FPS]/wipe debug lines from a device before tuning. |
