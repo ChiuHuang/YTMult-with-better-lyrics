@@ -541,12 +541,14 @@ static UIImage *YTMUTierIcon(NSString *tier, CGFloat size) {
 // one table, so the margins are cell constraints built once at init (never
 // recomputed per row or per payload): they therefore hold through a song
 // change, a raw -> final swap and a rotation with no jump. The landscape
-// album column butts against the table, which is why the left side is deeper.
-// Eased from 64/40 to 56/34: more row width means the per-song fit lands on a
-// bigger type size before it has to wrap, which is the same ask as the ceiling
-// above. The left stays deeper than the right for the landscape album column.
-static CGFloat YTMULyricGutterLeading(void) { return 56.0; }
-static CGFloat YTMULyricGutterTrailing(void) { return 34.0; }
+// album column never leans on the CELL gutter: the landscape pass insets the
+// table's own frame by kLyricsGap on both sides (the "cell adds its own
+// gutter" comment there), so one leading value can serve both orientations.
+// Was 56/34, which put the text column visibly off-center (157px left vs
+// 105px right on a 3x device); now symmetric at the same SUM, so the fitted
+// row width -- and therefore the per-song type size -- does not move.
+static CGFloat YTMULyricGutterLeading(void) { return 45.0; }
+static CGFloat YTMULyricGutterTrailing(void) { return 45.0; }
 
 // Row vertical padding, held in one place so -ytmu_setRowCollapsed: can take it
 // to zero. A hidden label still reports its intrinsic size through its
