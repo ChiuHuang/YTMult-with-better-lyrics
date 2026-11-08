@@ -16,37 +16,48 @@ cause; `[investigate]` = not yet attributed.
 - [investigate] Double-container overlap: the queue panel has a rounded outer
   frame, but the frame stops at the filter chip row and the song list is not
   contained inside it, as if it fell out of the container.
-- [ours] The now-playing row's highlight band overflows: the blue highlight on
+- [ours 339] The now-playing row's highlight band overflows: the blue highlight on
   the "Overdose" row spans the full screen width, outside the panel frame, and
   there is also an inset card inside it. The gap between the highlight band
-  and the next card is too tight. (Likely our row's card/glass styling combined
-  with YT's selection highlight.)
+  and the next card is too tight. (SHIPPED: the stock full-width selection
+  band is hidden; our inset card carries the highlight.)
 - [investigate] Last row thumbnail misaligned: the bottom "CHAooIN" thumbnail
   is further left and appears wider than the other rows' thumbnails.
-- [ours] Bottom content clipped: the last row's artist and duration text are
-  cut off by the screen bottom; no safe-area leave for the home indicator.
-  (Our bottomPad math or the sheet's detent inset.)
+- [investigate -> likely normal] Bottom content clipped: the last row's artist
+  and duration text are cut off by the screen bottom. The queue's content
+  inset already reserves 92pt at the bottom (QueueLiquidGlassV2.xm contentInset
+  bottom), so the likelier reading is that the sheet is a half-screen detent
+  and rows continue below -- a mid-scroll state, not clipped chrome. Confirm
+  on device by scrolling to the end; if the LAST row is still clipped with the
+  list at its end, re-open this item.
 - [investigate] Mini player position and spacing: it sits at the very top,
   nearly touching the status bar with little headroom, and only a small gap
   to the panel below. Looks cramped.
-- Mini player has no progress bar: [ours by design] the 1pt scrubber line is
-  deliberately alpha=0 (LiquidGlass.xm); if we want it visible, style it to
-  match the full player's accent bar instead of hiding it.
+- [SHIPPED 339] Mini player has no progress bar: the 1pt scrubber line was
+  deliberately invisible; it is now raised to 2pt at the bar's bottom edge and
+  coloured like the full player's scrubber (elapsed = song accent, unplayed =
+  white .25).
 
 ## Components and styles
 
-- [ours?] "All" chip contrast too low: selected "All" is dark grey text on a
-  grey fill, harder to read than the unselected chips. (If our chip styling
-  touches the queue filter chips, re-check contrast; otherwise native.)
+- [pending-dump] "All" chip contrast too low: selected "All" is dark grey text
+  on a grey fill, harder to read than the unselected chips. No hook of ours
+  paints chip TEXT colour anywhere (the only chip hooks paint fills/borders,
+  and the home chip hook is gated on homeV2Enabled), so this is likely the
+  app's own selected-chip styling. Needs a dump of the queue chip row before
+  attributing or fixing.
 - [native] The rightmost filter chip ("Explore...") is cut off at the edge.
   Possibly normal horizontal scroll, but there is no fade mask or affordance
   hinting it can scroll.
 - [native] The playing indicator covers the artwork: the equalizer icon sits
   on top of the "Overdose" thumbnail and reads as a blurry "I.I.I".
-- [ours] The drag-reorder icon ("$") is small and thin; the touch target is
-  not obvious. (If we shrink rows or overlap the icon zone, our fault.)
-- [ours?] Every row looks like a button: borders and grey fills everywhere,
-  tight vertical gaps, heavy and crowded. (Our row card styling, likely.)
+- [native] The drag-reorder icon ("=") is small and thin; the touch target is
+  not obvious. (Initial triage said ours-if-we-overlap-the-icon-zone, but the
+  queue card is an INSET view added behind the content -- the icon's size and
+  weight are the app's drawable unchanged.)
+- [SHIPPED 339] Every row looks like a button: row card fill .10 -> .07 and
+  border alpha .34 -> .20 (song-hued when the cover has colour). Tight vertical
+  gaps remain the app's layout.
 
 ## Text and typography
 
