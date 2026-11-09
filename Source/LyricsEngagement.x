@@ -444,7 +444,12 @@ static BOOL YTMURescueLyricsChip(UIView *v) {
             for (NSUInteger i = 0; i < n; i++) {
                 id r = renderers[i];
                 id b = buttons[i];
-                if (![r isKindOfClass:[YTIButtonRenderer class]]) continue;
+                // NOT `[YTIButtonRenderer class]`: a direct class reference
+                // hard-imports _OBJC_CLASS_$_YTIButtonRenderer, and this
+                // target's link stage does not resolve binary symbols
+                // (Undefined symbols at link). %c is the runtime lookup every
+                // other YT class reference in the tree goes through.
+                if (![r isKindOfClass:%c(YTIButtonRenderer)]) continue;
                 if (!YTMUIsLyricsRenderer((YTIButtonRenderer *)r)) continue;
                 if (![b isKindOfClass:[UIView class]]) continue;
                 [(UIView *)b setAlpha:1.0];
