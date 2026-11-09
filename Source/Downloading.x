@@ -665,32 +665,47 @@ static void YTMUTakePlayerCensus(NSString *videoID) {
             Class *classes = (Class *)malloc((size_t)count * sizeof(Class));
             if (classes) {
                 objc_getClassList(classes, count);
-                for (int i = 0; i < count && rows.count < 48; i++) {
+                for (int i = 0; i < count && rows.count < 96; i++) {
                     const char *cName = class_getName(classes[i]);
                     if (!cName) continue;
                     NSString *name = [NSString stringWithUTF8String:cName];
-                    if (!name || (![name containsString:@"Player"]
-                                  && ![name containsString:@"Playback"])) continue;
+                    // YT-prefix ONLY. The first census filled all 48 rows with
+                    // system-framework classes (MusicKit, RealityKit, ...)
+                    // because the runtime class list reports frameworks
+                    // before the app's own classes, so the interesting rows
+                    // were past the cap before the loop reached them.
+                    if (!name || ![name hasPrefix:@"YT"]) continue;
+                    if ([name containsString:@"Player"] == NO
+                        && [name containsString:@"Playback"] == NO
+                        && [name containsString:@"Service"] == NO) continue;
                     unsigned int methodCount = 0;
                     Method *methods = class_copyMethodList(classes[i], &methodCount);
                     NSMutableArray *starts = [NSMutableArray array];
-                    for (unsigned int j = 0; j < methodCount && starts.count < 8; j++) {
+                    for (unsigned int j = 0; j < methodCount && starts.count < 10; j++) {
                         NSString *sel = NSStringFromSelector(method_getName(methods[j]));
                         if ([sel hasPrefix:@"play"] || [sel containsString:@"Video"]
                             || [sel containsString:@"Song"] || [sel hasPrefix:@"load"]) {
                             [starts addObject:sel];
                         }
                     }
-                    free(methods);
-                    BOOL shared = NO;
-                    for (NSString *acc in @[@"sharedInstance", @"shared", @"currentInstance"]) {
-                        if ([classes[i] respondsToSelector:NSSelectorFromString(acc)]) {
-                            shared = YES;
-                            break;
+                    // Class methods live on the METAclass, not the class -- the
+                    // shared accessors we can actually use are down this list.
+                    unsigned int clsCount = 0;
+                    Method *clsMethods = class_copyMethodList(object_getClass(classes[i]), &clsCount);
+                    NSMutableArray *clsStarts = [NSMutableArray array];
+                    for (unsigned int j = 0; j < clsCount && clsStarts.count < 10; j++) {
+                        NSString *sel = NSStringFromSelector(method_getName(clsMethods[j]));
+                        if ([sel hasPrefix:@"shared"] || [sel hasPrefix:@"current"]
+                            || [sel hasPrefix:@"playUpNext"] || [sel hasPrefix:@"play"]
+                            || [sel containsString:@"Video"] || [sel containsString:@"Song"]) {
+                            [clsStarts addObject:sel];
                         }
                     }
+                    free(methods);
+                    free(clsMethods);
                     [rows addObject:[NSString stringWithFormat:
-                        @"%@%@ starts=%@", name, shared ? @" shared=YES" : @"",
+                        @"%@ cls=%@ inst=%@", name,
+                        clsStarts.count ? [clsStarts componentsJoinedByString:@","] : @"-",
                         starts.count ? [starts componentsJoinedByString:@","] : @"-"]];
                 }
                 free(classes);
@@ -704,15 +719,37 @@ static void YTMUTakePlayerCensus(NSString *videoID) {
     });
 }
 
+// The schemes that are actually music deep links, in priority order. The
+// bundle declares several OTHER own-schemes (fb*, com.googleusercontent*
+// sign-in) that pass canOpenURL for their own URLs -- opening watch?v= on the
+// fb scheme hands the URL to the Facebook SDK handler, which resolves nothing
+// and plays nothing, and that is exactly how the first scheme in the list ate
+// every tap. Only a scheme this filter vets is allowed to win playback.
+static NSArray *YTMUPlaySchemes(NSArray *declared) {
+    if (!declared.count) return @[];
+    NSArray *priority = @[@"youtubemusic", @"vnd.youtube.music",
+                          @"youtubemusicsdk", @"vnd.youtube.music-broad-matching",
+                          @"youtubemusic.wazeaudio"];
+    NSMutableArray *out = [NSMutableArray array];
+    for (NSString *name in priority) {
+        if ([declared containsObject:name]) [out addObject:name];
+    }
+    return out;
+}
+
 BOOL YTMUPlayVideoID(NSString *videoID) {
     if (!videoID.length) return NO;
     YTMUTakePlayerCensus(videoID);
     NSMutableDictionary *probe = [NSMutableDictionary dictionary];
     NSMutableArray *tried = [NSMutableArray array];
 
-    // Layer 1: the app's own scheme. canOpen: is asked first, so a declared
-    // but unhandled scheme does not swallow the tap.
-    for (NSString *scheme in YTMUAppURLSchemes()) {
+    // Layer 1: a music deep-link scheme, not "the first declared scheme".
+    // canOpen: is asked first, so a declared but unhandled scheme does not
+    // swallow the tap -- and the fb / google sign-in schemes still in the
+    // bundle can NEVER be picked here, because the handleOpenURL that would
+    // receive them is the wrong app component (it resolves nothing).
+    NSArray *schemes = YTMUPlaySchemes(YTMUAppURLSchemes());
+    for (NSString *scheme in schemes) {
         NSString *string = [NSString stringWithFormat:@"%@://watch?v=%@", scheme, YTMUUrlEncode(videoID)];
         NSURL *url = [NSURL URLWithString:string];
         if (!url) continue;
