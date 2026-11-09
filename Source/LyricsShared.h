@@ -430,6 +430,12 @@ NSString *YTMUDebugDeviceToken(void);
 // Source/Downloading.x reads to feed the file back to the player).
 void YTMURememberDownload(NSString *videoID, NSString *mediaName);
 NSString *YTMULocalAudioPathForVideoID(NSString *videoID);
+// The Downloads page lists files, the app's player takes ids: this is the
+// reverse of the vid -> mediaName map, and the entry point that asks the app
+// to play one (NO when this build offers no way in, so the caller can fall
+// back rather than swallow the tap).
+NSString *YTMUVideoIDForMediaName(NSString *mediaName);
+BOOL YTMUPlayVideoID(NSString *videoID);
 // One-shot sweep: audio files under ANY YTMusicUltimate folder outside the
 // canonical Documents/YTMusicUltimate get MOVED there (container changes after
 // a tweak update leave them strayed). Call sites: the Downloads page reload

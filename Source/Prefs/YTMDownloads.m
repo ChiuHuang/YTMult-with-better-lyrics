@@ -288,6 +288,20 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     // Playing song can conflict with YTMusicPlayer
     if (indexPath.section == 0) {
+        // Hand the song to the app's own player when this build lets us: the
+        // id -> file map already knows which video a listed file is, and the
+        // app's player is the one that has the mini player, the queue and the
+        // lyrics panel -- and the one whose local-file swap can actually play
+        // the download. The AVPlayerViewController below stays the fallback for
+        // a file with no id (renamed by hand, or older than the map) and for a
+        // build that offers no entry point at all.
+        NSString *listedName = [self.audioFiles[indexPath.row] stringByDeletingPathExtension];
+        NSString *videoID = YTMUVideoIDForMediaName(listedName);
+        if (videoID.length && YTMUPlayVideoID(videoID)) {
+            [tableView deselectRowAtIndexPath:indexPath animated:YES];
+            return;
+        }
+
         NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
         NSURL *audioURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"YTMusicUltimate/%@", self.audioFiles[indexPath.row]]];
         NSString *imageName = [NSString stringWithFormat:@"%@.png", [self.audioFiles[indexPath.row] stringByDeletingPathExtension]];

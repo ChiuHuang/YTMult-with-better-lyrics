@@ -570,6 +570,142 @@ NSString *YTMULocalAudioPathForVideoID(NSString *videoID) {
     return nil;
 }
 
+// The video id a listed file belongs to: the reverse of the vid -> mediaName
+// map the download writes. The Downloads page is handed a file name and
+// nothing else, and the app's player takes an id, not a path.
+NSString *YTMUVideoIDForMediaName(NSString *mediaName) {
+    if (!mediaName.length) return nil;
+    NSDictionary *map = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUDownloads"];
+    if (![map isKindOfClass:[NSDictionary class]]) return nil;
+    for (NSString *vid in map) {
+        id name = map[vid];
+        if ([name isKindOfClass:[NSString class]] && [name isEqualToString:mediaName]) return vid;
+    }
+    return nil;
+}
+
+// ---------------------------------------------------------------------------
+// OPEN A DOWNLOAD IN THE APP'S OWN PLAYER.
+//
+// The Downloads page used to hand the file to an AVPlayerViewController, which
+// is a different player: no mini player, no queue, no lyrics panel. The app's
+// player takes a video id, so the page only needs the reverse map above.
+//
+// No player-start method exists in the headers this project carries, so the
+// entry point is discovered rather than assumed: layer 1 is the app's OWN URL
+// scheme read from the bundle (never hardcoded -- if the bundle declares none,
+// nothing is tried), layer 2 is a small table of shared-instance player
+// services with a one-object playVideo... and a checked v@:@ signature. Every
+// attempt goes out on the paired-device probe channel, so a miss leaves the
+// next round a fact instead of another guess.
+// ---------------------------------------------------------------------------
+static NSArray *YTMUAppURLSchemes(void) {
+    static NSArray *schemes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray *out = [NSMutableArray array];
+        NSArray *types = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleURLTypes"];
+        for (NSDictionary *t in types) {
+            if (![t isKindOfClass:[NSDictionary class]]) continue;
+            id list = t[@"CFBundleURLSchemes"];
+            if (![list isKindOfClass:[NSArray class]]) continue;
+            for (id s in list) {
+                if ([s isKindOfClass:[NSString class]] && [s length]) [out addObject:s];
+            }
+        }
+        schemes = [out copy];
+    });
+    return schemes;
+}
+
+static id YTMUPlayerServiceInstance(Class cls) {
+    if (!cls) return nil;
+    SEL sels[3] = {@selector(sharedInstance), @selector(shared), @selector(defaultManager)};
+    for (int i = 0; i < 3; i++) {
+        if (![cls respondsToSelector:sels[i]]) continue;
+        @try {
+            id (*f)(id, SEL) = (id (*)(id, SEL))[cls methodForSelector:sels[i]];
+            if (!f) continue;
+            id instance = f((id)cls, sels[i]);
+            if (instance) return instance;
+        } @catch (NSException *e) {
+        }
+    }
+    return nil;
+}
+
+// Only a selector taking exactly one object may be invoked blind: anything else
+// is a different call than the one this code is shaped for, and a wrong-arity
+// msgSend is a hard crash rather than an exception.
+static BOOL YTMUTakesOneObject(id target, SEL sel) {
+    if (!target || !sel) return NO;
+    @try {
+        NSMethodSignature *sig = [target methodSignatureForSelector:sel];
+        if (!sig || sig.numberOfArguments != 3) return NO;
+        const char *type = [sig getArgumentTypeAtIndex:2];
+        return type && type[0] == '@';
+    } @catch (NSException *e) {
+    }
+    return NO;
+}
+
+BOOL YTMUPlayVideoID(NSString *videoID) {
+    if (!videoID.length) return NO;
+    NSMutableDictionary *probe = [NSMutableDictionary dictionary];
+    NSMutableArray *tried = [NSMutableArray array];
+
+    // Layer 1: the app's own scheme. canOpen: is asked first, so a declared
+    // but unhandled scheme does not swallow the tap.
+    for (NSString *scheme in YTMUAppURLSchemes()) {
+        NSString *string = [NSString stringWithFormat:@"%@://watch?v=%@", scheme, YTMUUrlEncode(videoID)];
+        NSURL *url = [NSURL URLWithString:string];
+        if (!url) continue;
+        BOOL can = NO;
+        @try {
+            can = [[UIApplication sharedApplication] canOpenURL:url];
+        } @catch (NSException *e) {
+        }
+        [tried addObject:[NSString stringWithFormat:@"%@ canOpen=%d", string, can]];
+        if (!can) continue;
+        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+        probe[@"tried"] = tried;
+        probe[@"via"] = @"scheme";
+        YTMUDebugDeviceNoteProbe(@"play-api", videoID, probe);
+        NSLog(@"[YTMU-DL] play vid=%@ via scheme %@", videoID, string);
+        return YES;
+    }
+
+    // Layer 2: a player service, if this build has one by any of these names.
+    NSArray *table = @[@[@"YTPlayerService", @"playVideoWithVideoID:"],
+                       @[@"YTMPlayerService", @"playVideoWithVideoID:"],
+                       @[@"YTMusicPlayerService", @"playVideoWithVideoID:"],
+                       @[@"YTPlayerManager", @"playVideoWithVideoID:"]];
+    for (NSArray *row in table) {
+        Class cls = NSClassFromString(row[0]);
+        if (!cls) continue;
+        [tried addObject:[NSString stringWithFormat:@"class %@ present", row[0]]];
+        SEL sel = NSSelectorFromString(row[1]);
+        id service = YTMUPlayerServiceInstance(cls);
+        if (!service || !YTMUTakesOneObject(service, sel)) continue;
+        @try {
+            ((void (*)(id, SEL, id))objc_msgSend)(service, sel, videoID);
+            probe[@"tried"] = tried;
+            probe[@"via"] = [NSString stringWithFormat:@"%@/%@", row[0], row[1]];
+            YTMUDebugDeviceNoteProbe(@"play-api", videoID, probe);
+            NSLog(@"[YTMU-DL] play vid=%@ via %@", videoID, probe[@"via"]);
+            return YES;
+        } @catch (NSException *e) {
+            [tried addObject:[NSString stringWithFormat:@"%@ raised %@", row[0], e.reason ?: @"?"]];
+        }
+    }
+
+    probe[@"tried"] = tried;
+    probe[@"via"] = @"none";
+    YTMUDebugDeviceNoteProbe(@"play-api", videoID, probe);
+    NSLog(@"[YTMU-DL] no player entry point for vid=%@", videoID);
+    return NO;
+}
+
 // The video id a response stands for: videoDetails.videoId when the runtime
 // class still carries it, else whatever the caller fell back to.
 static NSString *YTMUResponseVideoID(id response) {
