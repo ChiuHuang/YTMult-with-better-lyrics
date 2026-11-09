@@ -649,8 +649,64 @@ static BOOL YTMUTakesOneObject(id target, SEL sel) {
     return NO;
 }
 
+// A one-shot CENSUS of the player surface this build actually carries. The
+// entry-point table in YTMUPlayVideoID guesses class names; this probe replaces
+// a guess round-trip with facts: every class whose name carries Player /
+// Playback, whether it HAS a shared accessor (never CALLS it blind), and which
+// methods its REAL method list exposes that look like a way to start a song.
+// This is the only honest way to ask "what CAN we call in this build" without
+// a class dump on the host.
+static void YTMUTakePlayerCensus(NSString *videoID) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray *rows = [NSMutableArray array];
+        int count = objc_getClassList(NULL, 0);
+        if (count > 0) {
+            Class *classes = (Class *)malloc((size_t)count * sizeof(Class));
+            if (classes) {
+                objc_getClassList(classes, count);
+                for (int i = 0; i < count && rows.count < 48; i++) {
+                    const char *cName = class_getName(classes[i]);
+                    if (!cName) continue;
+                    NSString *name = [NSString stringWithUTF8String:cName];
+                    if (!name || (![name containsString:@"Player"]
+                                  && ![name containsString:@"Playback"])) continue;
+                    unsigned int methodCount = 0;
+                    Method *methods = class_copyMethodList(classes[i], &methodCount);
+                    NSMutableArray *starts = [NSMutableArray array];
+                    for (unsigned int j = 0; j < methodCount && starts.count < 8; j++) {
+                        NSString *sel = NSStringFromSelector(method_getName(methods[j]));
+                        if ([sel hasPrefix:@"play"] || [sel containsString:@"Video"]
+                            || [sel containsString:@"Song"] || [sel hasPrefix:@"load"]) {
+                            [starts addObject:sel];
+                        }
+                    }
+                    free(methods);
+                    BOOL shared = NO;
+                    for (NSString *acc in @[@"sharedInstance", @"shared", @"currentInstance"]) {
+                        if ([classes[i] respondsToSelector:NSSelectorFromString(acc)]) {
+                            shared = YES;
+                            break;
+                        }
+                    }
+                    [rows addObject:[NSString stringWithFormat:
+                        @"%@%@ starts=%@", name, shared ? @" shared=YES" : @"",
+                        starts.count ? [starts componentsJoinedByString:@","] : @"-"]];
+                }
+                free(classes);
+            }
+        }
+        NSArray *schemes = YTMUAppURLSchemes() ?: @[];
+        [rows addObject:[NSString stringWithFormat:@"SCHEMES %@",
+            [schemes componentsJoinedByString:@"|"]]];
+        YTMUDebugDeviceNoteProbe(@"player-census", videoID,
+                                 @{ @"evt": @{@"cls": @"evt", @"items": [rows copy]} });
+    });
+}
+
 BOOL YTMUPlayVideoID(NSString *videoID) {
     if (!videoID.length) return NO;
+    YTMUTakePlayerCensus(videoID);
     NSMutableDictionary *probe = [NSMutableDictionary dictionary];
     NSMutableArray *tried = [NSMutableArray array];
 
