@@ -101,7 +101,13 @@ _CACHE_FORMAT_VERSION = 4
 #    these" says nothing to a consumer that concatenates. Baking the separator
 #    into the text makes the payload self-describing; the device trims each part
 #    and re-joins on its own rule, so it is unaffected either way.
-_PARSER_EPOCH = 5
+# 6: parsers_ttml now emits the `space` flag for EVERY part (three states:
+#    True/False/absent instead of False-or-absent). The CJK-to-CJK skip below
+#    used to treat every kanji boundary as glued, because "absent" bundled
+#    "unknown" with "the source printed a space" -- a background cue written
+#    `皮 あざ` lost its gap. With True explicit, a known gap bakes verbatim
+#    regardless of script; the heuristic only covers absent.
+_PARSER_EPOCH = 6
 
 # A part whose words must not be followed by a space: the source glued this word
 # to the previous one (Apple's mid-word splits, CJK runs). Everything else gets a
@@ -150,14 +156,22 @@ def _bake_part_separators(line):
             continue
         if not isinstance(nxt_words, str) or not nxt_words.strip():
             continue
-        if nxt.get('space') is False:
+        flag = nxt.get('space')
+        if flag is False:
             continue
         if words != words.rstrip():
             continue
-        # Same rule the device's own join uses, so the two can never disagree:
-        # no space when this part ends in CJK and the next begins with CJK. A
-        # Japanese line is not "お ない" -- and Apple splits kanji into one timed
-        # span EACH, so those runs stay glued while `生き`+`る` keeps its space.
+        if flag is True:
+            # EXPLICIT gap: the source printed a space in front of the next
+            # part, whatever script it is -- a CJK pair here used to fall into
+            # the heuristic below and a bg cue written `皮 あざ` served glued.
+            p['words'] = words + ' '
+            continue
+        # Unknown: legacy heuristic, the same rule the device's own join uses,
+        # so the two can never disagree -- no space when this part ends in CJK
+        # and the next begins with CJK. A Japanese line is not "お ない" -- and
+        # Apple splits kanji into one timed span EACH, so those runs stay glued
+        # while `生き`+`る` keeps its space.
         if _is_cjk(words[-1]) and _is_cjk(nxt_words.strip()[0]):
             continue
         p['words'] = words + ' '

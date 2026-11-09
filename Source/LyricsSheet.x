@@ -5804,17 +5804,23 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         NSString *rawW = (NSString *)(p[@"words"] ?: @"");
         NSString *w = [rawW stringByTrimmingCharactersInSet:wsTrim];
         if (w.length == 0) continue;
-        // `space: false` marks a part the source glued to the previous one (a
-        // word Apple split down the middle, "foll" + "ow"). Joining those with a
-        // space is what printed "foll ow" on the device even after the server
-        // text was fixed, because the display text is rebuilt from parts and the
-        // server text is not what is drawn.
+        // `space` is THREE STATES now: false = the source glued this part to
+        // the previous one (a word Apple split down the middle, "foll" + "ow");
+        // true = the source printed a space in front (honored VERBATIM, even
+        // between two CJK glyphs -- a background cue written `皮 あざ` used to
+        // lose that gap here); absent = unknown, fall back to the CJK
+        // heuristic. Joining an unknown CJK pair without one is the right
+        // default for the lead sheet because Apple hands each kanji its own
+        // timed span -- it is only a cue whose DOCUMENT carried a space that
+        // must be kept, which is exactly what "true" means.
         id sp = p[@"space"];
-        BOOL glued = (sp != nil && sp != NSNull.null && ![sp boolValue]);
+        BOOL known = (sp != nil && sp != NSNull.null);
+        BOOL glued = known && ![sp boolValue];
         if (concat.length > 0 && !glued) {
             unichar prev = [concat characterAtIndex:concat.length - 1];
             unichar next = [w characterAtIndex:0];
-            NSString *sep = (YTMUIsCJKChar(prev) && YTMUIsCJKChar(next)) ? @"" : @" ";
+            NSString *sep = known ? @" "
+                : ((YTMUIsCJKChar(prev) && YTMUIsCJKChar(next)) ? @"" : @" ");
             [concat appendString:sep];
         }
         [concat appendString:w];

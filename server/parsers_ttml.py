@@ -392,16 +392,16 @@ def _finish_parts(acc):
     """Trim the edges, drop a lone 0/0 placeholder, and convert the internal
     gap flags into the `space` key the device already reads.
 
-    `space: false` means THE SOURCE GLUED THIS WORD TO THE PREVIOUS ONE, which
-    is what the device reads as "join without a separator" (LyricsSheet's
-    wbwDisplayTextForLyric). Note the shift: the parser records the gap AFTER a
-    word, because that is where a space physically lives in the document (it is
-    the previous span's tail), while `space` describes the gap BEFORE a word.
-    Reading one as the other is what put a separator on the wrong side of every
-    word -- `赤 ずっと` came out as `赤ずっと` with a stray space at the end.
+    `space` describes the gap BEFORE a word. The parser records the gap AFTER
+    a word, because that is where a space physically lives in the document
+    (it is the previous span's tail); `_finish_parts` shifts by one so the
+    mark lands on the following word. Reading one as the other is what put a
+    separator on the wrong side of every word -- `赤 ずっと` came out as
+    `赤ずっと` with a stray space at the end.
 
-    `space` is emitted only when it is False, so a document whose spacing we now
-    read correctly produces the same payload the old heuristic produced."""
+    The flag is emitted for EVERY part (three states): True = the source
+    printed a space in front of this word, False = the source glued it to the
+    previous one, absent = unknown (legacy payloads, one-shot consumers)."""
     parts = [p for p in acc['parts'] if p.get('words')]
     if len(parts) == 1 and parts[0]['startTimeMs'] == 0 and parts[0]['durationMs'] == 0:
         # A single word with no timing at all is a placeholder, not karaoke.
@@ -410,10 +410,13 @@ def _finish_parts(acc):
     for p in parts:
         p['words'] = p['words'].strip()
         had_gap = bool(p.pop('spaceAfter', False))
-        if prev_had_gap:
-            p.pop('space', None)
-        else:
-            p['space'] = False
+        # THREE STATES now, not two. Emitting the flag only when False made
+        # absence double as "unknown" and as "the source had a gap", and the
+        # device resolved an unknown CJK-to-CJK boundary by GLUING -- which is
+        # what ate the explicit space in background cues written with one
+        # (`皮 あざ` came back `皮あざ` on the phone). True says "the source
+        # printed a space here"; the device honors it verbatim.
+        p['space'] = bool(prev_had_gap)
         prev_had_gap = had_gap
     return [p for p in parts if p['words']]
 
