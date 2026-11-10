@@ -14,11 +14,14 @@ import requests
 from .paths import MIRROR_FILE, BUILDS_FILE
 
 GH_REPO = os.environ.get('YTMU_GH_REPO', 'ChiuHuang/YTMult-with-better-lyrics')
-# Stable AltStore icon (Asia file CDN). Release-asset icon.png is preferred
-# when present; this is the fallback for older builds.
+# Stable AltStore icon. The release asset icon.png is preferred when present
+# (webhook icon_url / GitHub API asset); this is the fallback when a release
+# carries none. It used to point at the Asia file CDN, but those opaque
+# /dl/pub/<uuid>/<hash> URLs rotate per upload and the icon 403'd -- the
+# GitHub raw file is durable (it is the repo's Resources/icon.png).
 ALTSTORE_ICON = os.environ.get(
     'YTMU_ALTSTORE_ICON',
-    'https://file.chiuhuang.dev/dl/pub/8ff6dc29-6cc0-4371-be7a-47f8390b4cf6/723b6e53-89dd-49af-b5a0-323d5da5a2a0')
+    'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
 # Worker prefix: prepended to the release asset URL for regions where
 # github.com is slow (Cloudflare CDN). Trailing slash added automatically.
 WORKER_PREFIX = os.environ.get(

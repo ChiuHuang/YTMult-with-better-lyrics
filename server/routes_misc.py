@@ -330,8 +330,13 @@ def api_app_altstore():
         return jsonify({'error': 'No release with an IPA asset found'}), 503
     tag = rel.get('tag') or 'build-?'
     version = tag[6:] if tag.startswith('build-') else tag
-    icon_url = (rel.get('icon_url') or ALTSTORE_ICON or
-                'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
+    # Icon fallback order (probed 2026-11-10): the release asset icon.png is
+    # 200 but arrives as application/octet-stream; ALTSTORE_ICON (default now
+    # = the repo's raw icon.png, 200 image/png) is the durable second. The
+    # Asia CDN "stable" icon 403'd -- those opaque /dl/pub/<uuid>/<hash> URLs
+    # rotate per upload, which is exactly how the icon got "forgotten".
+    icon_url = (rel.get('icon_url') or ALTSTORE_ICON
+                or 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
     asia = (rel.get('asia_url') or '').strip()
     cloudflare = worker_url(rel['download_url'])
 
