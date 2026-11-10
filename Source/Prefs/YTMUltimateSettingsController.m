@@ -1,6 +1,7 @@
 #import "YTMUltimateSettingsController.h"
 #import "LyricsSettingsController.h"
 #import "DebugSettingsController.h"
+#import "../LyricsShared.h"
 #import "../Headers/Localization.h"
 
 #ifndef TWEAK_GIT_COMMIT
@@ -91,7 +92,26 @@
     if (section == 3) {
         UITableViewHeaderFooterView *footer = (UITableViewHeaderFooterView *)view;
         footer.textLabel.textAlignment = NSTextAlignmentCenter;
+        // OWNER DOOR: the Debug row is hidden until the debug toggle is on,
+        // but pairing UI lives INSIDE the Debug page -- so a fresh install
+        // still needs one path in. A long-press on the build footer is that
+        // path; it is documented in the repo docs and invisible otherwise.
+        BOOL hasDoor = NO;
+        for (UIGestureRecognizer *g in view.gestureRecognizers) {
+            if ([g isKindOfClass:[UILongPressGestureRecognizer class]]) { hasDoor = YES; break; }
+        }
+        if (!hasDoor) {
+            UILongPressGestureRecognizer *door = [[UILongPressGestureRecognizer alloc]
+                initWithTarget:self action:@selector(ytmu_openDebugPage)];
+            door.minimumPressDuration = 1.0;
+            [view addGestureRecognizer:door];
+        }
     }
+}
+
+- (void)ytmu_openDebugPage {
+    UIViewController *controller = [[DebugSettingsController alloc] init];
+    [self.navigationController pushViewController:controller animated:YES];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section{
@@ -99,7 +119,9 @@
         case 0:
             return 1;
         case 1:
-            return 7;
+            // The Debug entry appears only while the debug toggle is on;
+            // the owner door (long-press on the build footer) is always there.
+            return YTMUDebugDeviceEnabled() ? 7 : 6;
         case 2:
             return 1;
         case 3:
@@ -144,15 +166,21 @@
     if (indexPath.section == 1) {
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"settingsSection"];
 
-        NSArray *settingsData = @[
+        // OWNER-DEBUG UI HIDE: the Debug page's row only exists while the
+        // debug toggle is on (the page itself is device-gated too). Fresh
+        // installs pair through the owner door instead: long-press the build
+        // footer (willDisplayFooterView, section 3).
+        NSMutableArray *settingsData = [NSMutableArray arrayWithArray:@[
             @{@"title": LOC(@"PREMIUM_SETTINGS"), @"image": @"flame"},
             @{@"title": LOC(@"PLAYER_SETTINGS"), @"image": @"play.rectangle"},
             @{@"title": LOC(@"THEME_SETTINGS"), @"image": @"paintbrush"},
             @{@"title": LOC(@"NAVBAR_SETTINGS"), @"image": @"sidebar.trailing"},
             @{@"title": LOC(@"TABBAR_SETTINGS"), @"image": @"dock.rectangle"},
             @{@"title": @"Lyrics System", @"image": @"music.note.list"},
-            @{@"title": LOC(@"DEBUG_SETTINGS"), @"image": @"ladybug"}
-        ];
+        ]];
+        if (YTMUDebugDeviceEnabled()) {
+            [settingsData addObject:@{@"title": LOC(@"DEBUG_SETTINGS"), @"image": @"ladybug"}];
+        }
 
         NSDictionary *settingData = settingsData[indexPath.row];
 
@@ -240,13 +268,16 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     if (indexPath.section == 1) {
-        NSArray *controllers = @[[PremiumSettingsController class],
+        // Mirrors the row list: Debug is only pushable when the row exists.
+        NSMutableArray *controllers = [NSMutableArray arrayWithArray:@[[PremiumSettingsController class],
                                  [PlayerSettingsController class],
                                  [ThemeSettingsController class],
                                  [NavBarSettingsController class],
                                  [OtherSettingsController class],
-                                 [LyricsSettingsController class],
-                                 [DebugSettingsController class]];
+                                 [LyricsSettingsController class]]];
+        if (YTMUDebugDeviceEnabled()) {
+            [controllers addObject:[DebugSettingsController class]];
+        }
 
         if (indexPath.row >= 0 && indexPath.row < controllers.count) {
             UIViewController *controller = [[controllers[indexPath.row] alloc] init];
