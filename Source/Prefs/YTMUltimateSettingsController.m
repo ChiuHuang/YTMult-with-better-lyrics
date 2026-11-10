@@ -64,6 +64,15 @@
     return 4;
 }
 
+// The Debug row exists only while the debug toggle is on, and that toggle
+// lives on the pushed page: rebuild the table on every return, or the row
+// count is stale (a dead 7th row after turning debug off, a missing one
+// after pairing through the owner door).
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
+}
+
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     return section == 3 ? LOC(@"LINKS") : nil;
 }
