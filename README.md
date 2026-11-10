@@ -132,9 +132,10 @@ python proxy_server.py        # listens on :20016
   so the page always describes the server this build actually talks to
   (Lyrics settings → API endpoint).
 - **Self-hosted:** the page is a template — `templates/privacy.html`, served by
-  `server/routes_misc.py` — so edit it to match what your own deployment
-  keeps. If your server has no `/privacy`, that settings row leads nowhere and
-  should be removed or the template added.
+  `server/routes_misc.py` — and it names whatever host is serving it, so a fork
+  does not claim to be someone else's server. Edit the body to match what your
+  deployment actually keeps. If your server has no `/privacy`, that settings
+  row leads nowhere: add the template or drop the row.
 - **In this repo:** [`docs/ownership-and-debug.md`](docs/ownership-and-debug.md)
   is the written version: the count ping, the debug gate (off until you pair a
   device), and what a stable install never sends.
