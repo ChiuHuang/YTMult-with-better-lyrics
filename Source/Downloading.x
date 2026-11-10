@@ -724,6 +724,205 @@ static void YTMUTakePlayerCensus(NSString *videoID) {
     });
 }
 
+// ---- player-census2: the FOCUSED census ----------------------------------
+//
+// census1 proved its own lesson: 96 rows of "Player/Playback/Service" classes
+// were eaten by YT*EntityModel before the loop reached anything that actually
+// FETCHES a player response, so the injection point for the offline replay was
+// not in the payload. This pass flips the logic:
+//   - EntityModel classes are excluded outright.
+//   - A row exists only if the class HAS a method matching the fetch vocab
+//     (playerResponse / playbackData / playerRequest / fetchPlayer / ...
+//     / parseFromData), so noise costs nothing and the cap cannot drown the
+//     signal.
+//   - "carry" separately lists every YT*/YTI* class that owns a
+//     playerResponse-shaped method (getter/setter/builder) regardless of its
+//     name -- that is the object a fetched response lands in, i.e. the thing
+//     an offline injection must satisfy or substitute.
+//   - "res" probes YTIPlayerResponse directly: the snapshot half serializes it
+//     and the replay half rebuilds it with +parseFromData:error:, so the class
+//     existing at runtime with that class method is the whole contract.
+//   - "proto" enumerates PlaybackController/PlayerController protocols, their
+//     data-shaped methods, and WHICH classes conform -- the delegate list is
+//     the honest map of who receives playback data in this build.
+static BOOL YTMUCensus2SelMatches(NSString *sel) {
+    if (!sel.length) return NO;
+    NSString *s = sel.lowercaseString;
+    return [s containsString:@"playerresponse"]
+        || [s containsString:@"playbackdata"]
+        || [s containsString:@"playerrequest"]
+        || [s containsString:@"fetchplayer"]
+        || [s containsString:@"loadplayer"]
+        || [s containsString:@"parsefromdata"]
+        || [s containsString:@"playvideo"]
+        || [s containsString:@"loadvideo"]
+        || [s containsString:@"activatevideo"]
+        || [s containsString:@"videodata"]
+        || [s containsString:@"didloadcontentplaybackdata"];
+}
+
+static void YTMUTakePlayerCensus2(NSString *videoID) {
+    if (!YTMUDebugDeviceEnabled()) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray *resRows = [NSMutableArray array];
+        NSMutableArray *fetchRows = [NSMutableArray array];
+        NSMutableArray *carryRows = [NSMutableArray array];
+        NSMutableArray *protoRows = [NSMutableArray array];
+
+        // The response contract, checked directly instead of guessed from a
+        // method list. class_getClassMethod is the safe ask for CLASS methods.
+        for (NSString *cname in @[@"YTIPlayerResponse", @"YTPlayerResponse",
+                                  @"YTMPlayerResponse", @"YTPlayerResponseModel",
+                                  @"YTWatchNextResponse", @"YTAbstractPlayerDataSpecification"]) {
+            Class c = objc_getClass(cname.UTF8String);
+            if (!c) { [resRows addObject:[NSString stringWithFormat:@"%@ MISSING", cname]]; continue; }
+            NSString *supers = NSStringFromClass(class_getSuperclass(c)) ?: @"?";
+            [resRows addObject:[NSString stringWithFormat:
+                @"%@ super=%@ +parseFromData:error:%@ +data:%@",
+                cname, supers,
+                class_getClassMethod(c, @selector(parseFromData:error:)) ? @"Y" : @"n",
+                class_getClassMethod(c, @selector(data)) ? @"Y" : @"n"]];
+        }
+
+        // Candidate delegate protocols: the receivers of playback data. Their
+        // conformance check needs the full class walk below anyway, so collect
+        // them first and fold the check into that single pass.
+        unsigned int pCount = 0;
+        Protocol * __unsafe_unretained *allProtos = objc_copyProtocolList(&pCount);
+        NSMutableArray *candProtos = [NSMutableArray array];      // names
+        NSMutableArray *candProtoRefs = [NSMutableArray array];   // NSValue-wrapped Protocol *
+        NSMutableDictionary *conform = [NSMutableDictionary dictionary]; // protocol name -> [class names]
+        for (unsigned int p = 0; p < pCount && candProtos.count < 8; p++) {
+            const char *pn = protocol_getName(allProtos[p]);
+            if (!pn) continue;
+            NSString *name = [NSString stringWithUTF8String:pn];
+            if ([name containsString:@"PlaybackController"]
+                || [name containsString:@"PlayerController"]) {
+                [candProtos addObject:name];
+                [candProtoRefs addObject:[NSValue valueWithPointer:(__bridge const void *)allProtos[p]]];
+                conform[name] = [NSMutableArray array];
+                // The delegate's data-shaped methods: the exact selectors a
+                // hook of ours would implement or call.
+                NSMutableSet *sels = [NSMutableSet set];
+                Protocol *proto = allProtos[p];
+                unsigned int mCount = 0;
+                Method *ms = protocol_copyMethodList(proto, &mCount);
+                for (unsigned int j = 0; j < mCount; j++) {
+                    NSString *sel = NSStringFromSelector(method_getName(ms[j]));
+                    if (YTMUCensus2SelMatches(sel)) [sels addObject:sel];
+                }
+                free(ms);
+                ms = protocol_copyOptionalMethodList(proto, &mCount);
+                for (unsigned int j = 0; j < mCount && sels.count < 14; j++) {
+                    NSString *sel = NSStringFromSelector(method_getName(ms[j]));
+                    if (YTMUCensus2SelMatches(sel)) [sels addObject:sel];
+                }
+                free(ms);
+                [protoRows addObject:[NSString stringWithFormat:@"%@ methods=%@",
+                    name, sels.count ? [sels.allObjects componentsJoinedByString:@","] : @"-"]];
+            }
+        }
+        free(allProtos);
+
+        int count = objc_getClassList(NULL, 0);
+        if (count > 0) {
+            Class *classes = (Class *)malloc((size_t)count * sizeof(Class));
+            if (classes) {
+                objc_getClassList(classes, count);
+                for (int i = 0; i < count; i++) {
+                    const char *cName = class_getName(classes[i]);
+                    if (!cName) continue;
+                    // YT* covers YT/YTM/YTI in one compare; GPB* is the
+                    // protobuf family the responses live in.
+                    BOOL yt = (strncmp(cName, "YT", 2) == 0);
+                    BOOL gpb = (strncmp(cName, "GPB", 3) == 0);
+                    if (!yt && !gpb) continue;
+                    NSString *name = [NSString stringWithUTF8String:cName];
+                    if ([name containsString:@"EntityModel"]) continue; // census1's lesson
+                    if (fetchRows.count >= 96 && carryRows.count >= 40) break;
+
+                    unsigned int mCount = 0;
+                    Method *ms = class_copyMethodList(classes[i], &mCount);
+                    NSMutableArray *inst = [NSMutableArray array];
+                    NSMutableArray *instPR = [NSMutableArray array];
+                    for (unsigned int j = 0; j < mCount; j++) {
+                        NSString *sel = NSStringFromSelector(method_getName(ms[j]));
+                        if (YTMUCensus2SelMatches(sel) && inst.count < 12) [inst addObject:sel];
+                        if ([sel.lowercaseString containsString:@"playerresponse"] && instPR.count < 8) [instPR addObject:sel];
+                    }
+                    free(ms);
+                    unsigned int cCount = 0;
+                    Method *cms = class_copyMethodList(object_getClass(classes[i]), &cCount);
+                    NSMutableArray *clsm = [NSMutableArray array];
+                    NSMutableArray *clsPR = [NSMutableArray array];
+                    for (unsigned int j = 0; j < cCount; j++) {
+                        NSString *sel = NSStringFromSelector(method_getName(cms[j]));
+                        if (YTMUCensus2SelMatches(sel) && clsm.count < 12) [clsm addObject:sel];
+                        if ([sel.lowercaseString containsString:@"playerresponse"] && clsPR.count < 8) [clsPR addObject:sel];
+                    }
+                    free(cms);
+
+                    // Delegate conformance, folded into the same walk (only
+                    // app classes, never the protobuf runtime).
+                    if (yt && candProtoRefs.count) {
+                        for (NSUInteger pIdx = 0; pIdx < candProtoRefs.count; pIdx++) {
+                            Protocol *proto = (__bridge Protocol *)[candProtoRefs[pIdx] pointerValue];
+                            NSString *pn = candProtos[pIdx];
+                            NSMutableArray *list = conform[pn];
+                            if (proto && list && list.count < 24
+                                && class_conformsToProtocol(classes[i], proto)) {
+                                [list addObject:name];
+                            }
+                        }
+                    }
+
+                    // fetch: name-shaped classes that ALSO carry a matching
+                    // method. PlayerResponse-named classes jump the queue so
+                    // generic InnerTube traffic cannot push them past the cap.
+                    if (fetchRows.count < 96 && (inst.count || clsm.count)
+                        && ([name containsString:@"PlayerResponse"]
+                            || [name.lowercaseString containsString:@"playbackdata"]
+                            || [name.lowercaseString containsString:@"playerrequest"]
+                            || [name.lowercaseString containsString:@"playerdatasource"]
+                            || [name.lowercaseString containsString:@"watchdata"]
+                            || [name.lowercaseString containsString:@"watchnext"]
+                            || [name.lowercaseString containsString:@"dataservice"]
+                            || gpb)) {
+                        NSString *row = [NSString stringWithFormat:@"%@ inst=%@ cls=%@",
+                            name,
+                            inst.count ? [inst componentsJoinedByString:@","] : @"-",
+                            clsm.count ? [clsm componentsJoinedByString:@","] : @"-"];
+                        if ([name containsString:@"PlayerResponse"]) [fetchRows insertObject:row atIndex:0];
+                        else [fetchRows addObject:row];
+                    }
+                    // carry: ANY YT* class owning a playerResponse-shaped
+                    // method -- the landing spots for a fetched response.
+                    if (carryRows.count < 40 && yt && (instPR.count || clsPR.count)) {
+                        [carryRows addObject:[NSString stringWithFormat:@"%@ inst=%@ cls=%@",
+                            name,
+                            instPR.count ? [instPR componentsJoinedByString:@","] : @"-",
+                            clsPR.count ? [clsPR componentsJoinedByString:@","] : @"-"]];
+                    }
+                }
+                free(classes);
+            }
+        }
+        for (NSString *pn in candProtos) {
+            NSMutableArray *list = conform[pn];
+            [protoRows addObject:[NSString stringWithFormat:@"%@ conforms=%@", pn,
+                list.count ? [list componentsJoinedByString:@","] : @"-"]];
+        }
+
+        YTMUDebugDeviceNoteProbe(@"player-census2", videoID, @{
+            @"res":   @{@"cls": @"evt", @"items": resRows},
+            @"fetch": @{@"cls": @"evt", @"items": fetchRows},
+            @"carry": @{@"cls": @"evt", @"items": carryRows},
+            @"proto": @{@"cls": @"evt", @"items": protoRows},
+        });
+    });
+}
+
 // The schemes that are actually music deep links, in priority order. The
 // bundle declares several OTHER own-schemes (fb*, com.googleusercontent*
 // sign-in) that pass canOpenURL for their own URLs -- opening watch?v= on the
@@ -765,6 +964,7 @@ BOOL YTMUIsNetworkReachable(void) {
 BOOL YTMUPlayVideoID(NSString *videoID) {
     if (!videoID.length) return NO;
     YTMUTakePlayerCensus(videoID);
+    YTMUTakePlayerCensus2(videoID);
     // Owner-debug only bookkeeping: on a stable install (no paired debug
     // device) both stay nil, and every later [probe ...] / [tried ...] send
     // is a silent nil-message no-op -- nothing is built, nothing is noted.
