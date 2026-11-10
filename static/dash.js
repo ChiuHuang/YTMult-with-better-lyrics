@@ -1060,14 +1060,20 @@
     const t0 = Date.now();
     const hist = getPingHistory();
     const avg = hist.length > 0 ? hist.reduce((a, b) => a + b, 0) / hist.length : 8;
-    const estMs = Math.max(8000, (avg + 1) * 1600);
+    // Pace the sweep by the RECORDED restart cost (avg attempts x the 1.6s
+    // poll interval), NO +1 padding: a server that always comes back in 4
+    // polls gets a bar that lands on full right as the check succeeds, not
+    // one paced for a fifth step that never comes and parked at 95%.
+    const estMs = Math.max(6400, avg * 1600);
     if (progress) { progress.indeterminate = false; progress.value = 0.15; }
     if (stage) stage.textContent = 'Server restarting...';
     if (pingEl) pingEl.innerHTML = '<span class="live-dot"></span> Waiting for server...';
     const anim = () => {
       if (!alive || !progress) return;
-      const k = Math.min(1, (Date.now() - t0) / estMs);
-      progress.value = 0.15 + k * 0.8;
+      const k = (Date.now() - t0) / estMs;
+      // Reach FULL at the estimated end; if the real restart overruns the
+      // estimate the bar sits at full instead of freezing at 95%.
+      progress.value = k >= 1 ? 1 : 0.15 + k * 0.85;
       if (k < 1) requestAnimationFrame(anim);
     };
     requestAnimationFrame(anim);
