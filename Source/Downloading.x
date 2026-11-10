@@ -745,6 +745,15 @@ static void YTMUTakePlayerCensus(NSString *videoID) {
 //   - "proto" enumerates PlaybackController/PlayerController protocols, their
 //     data-shaped methods, and WHICH classes conform -- the delegate list is
 //     the honest map of who receives playback data in this build.
+//
+// SDK GAP (CI failure, run 42810108420): the iPhoneOS16.5.sdk theos headers
+// declare only the legacy protocol_copyMethodDescriptionList; the Method*-based
+// protocol_copyMethodList / protocol_copyOptionalMethodList exist in libobjc
+// for a decade but carry no declaration in this SDK, so -Werror turned the
+// implicit declarations into a build break. Declare them here once.
+extern Method *protocol_copyMethodList(Protocol * _Nonnull proto, unsigned int * _Nullable outCount);
+extern Method *protocol_copyOptionalMethodList(Protocol * _Nonnull proto, unsigned int * _Nullable outCount);
+
 static BOOL YTMUCensus2SelMatches(NSString *sel) {
     if (!sel.length) return NO;
     NSString *s = sel.lowercaseString;

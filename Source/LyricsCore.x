@@ -1,5 +1,6 @@
 #import "LyricsShared.h"
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/message.h>
 #ifndef TWEAK_BUILD
 #define TWEAK_BUILD 0
 #endif
@@ -1540,7 +1541,13 @@ static void YTMUSendCountPing(void) {
         req.timeoutInterval = 15;
         [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         req.HTTPBody = json;
-        [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:nil] resume];
+        // The SDK annotates completionHandler nonnull, so nil needs an
+        // explicit cast (-Wnonnull is an error under -Werror; the synall
+        // stubs carry no nullability, so only CI sees this class).
+        SEL taskSel = @selector(dataTaskWithRequest:completionHandler:);
+        id task = ((id (*)(id, SEL, NSURLRequest *, void (^)(NSData *, NSURLResponse *, NSError *)))objc_msgSend)(
+            NSURLSession.sharedSession, taskSel, req, (void (^)(NSData *, NSURLResponse *, NSError *))nil);
+        ((void (*)(id, SEL))objc_msgSend)(task, @selector(resume));
     });
 }
 
