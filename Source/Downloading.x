@@ -902,6 +902,55 @@ static NSUInteger YTMUInjectLocalFormat(id streaming, NSString *relPath) {
 // (/var/mobile/Containers/), producing a doubled path that does not exist. A
 // relative string falls under whatever base the loader resolves against -- the
 // Documents/YTMusicUltimate subtree the file really lives in.
+// The OFFLINE REPLAY snapshot. The swapped response is the one object the
+// player stack demonstrably plays (the ASSET + watchtime records proved the
+// transport loads the relative file URL), and a YTIPlayerResponse is a
+// GPBMessage: `data` is its serialized protobuf and +parseFromData:error:
+// rebuilds it byte-for-byte. Snapshotted AFTER the swap, the cached bytes
+// carry our local file URL, so an offline replay needs no network at all.
+static NSString *YTMUResponseSnapshotPath(NSString *videoID) {
+    if (!videoID.length) return nil;
+    NSString *documents = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+    if (!documents.length) return nil;
+    NSString *dir = [documents stringByAppendingPathComponent:@"YTMusicUltimate/responses"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return [dir stringByAppendingPathComponent:[videoID stringByAppendingPathExtension:@"pb"]];
+}
+
+static void YTMUSnapshotResponseForVideoID(id response, NSString *videoID) {
+    if (!YTMUDebugDeviceEnabled() || !response || !videoID.length) return;
+    @try {
+        id data = YTMUResponseData(response);
+        if (!data || ![data respondsToSelector:@selector(data)]) return;
+        NSData *bytes = ((NSData *(*)(id, SEL))objc_msgSend)(data, @selector(data));
+        if (!bytes.length) return;
+        NSString *path = YTMUResponseSnapshotPath(videoID);
+        if (!path) return;
+        [bytes writeToFile:path atomically:YES];
+        NSLog(@"[YTMU-DL] response snapshot saved vid=%@ bytes=%lu", videoID, (unsigned long)bytes.length);
+    } @catch (NSException *e) {
+    }
+}
+
+// The replay half. NOT wired yet: the offline injection point (the fetch the
+// playback controller runs before it would ever call the delegate) needs the
+// class and method names the YT-prefix census now reports. The snapshot lands
+// first, so the day the injection lands the replay already has a body.
+__attribute__((unused))
+static id YTMUCachedResponseForVideoID(NSString *videoID) {
+    if (!videoID.length) return nil;
+    NSData *bytes = [NSData dataWithContentsOfFile:YTMUResponseSnapshotPath(videoID)];
+    if (!bytes.length) return nil;
+    Class cls = %c(YTIPlayerResponse);
+    if (!cls) return nil;
+    @try {
+        return ((id (*)(Class, SEL, NSData *, NSError **))objc_msgSend)(
+            cls, @selector(parseFromData:error:), bytes, nil);
+    } @catch (NSException *e) {
+    }
+    return nil;
+}
+
 static NSUInteger YTMUSwapToLocalFiles(id response) {
     if (!YTMUDebugDeviceEnabled() || !response) return 0;
     NSUInteger count = 0;
@@ -931,6 +980,7 @@ static NSUInteger YTMUSwapToLocalFiles(id response) {
         if (!count) count = YTMUInjectLocalFormat(streaming, relPath);
         if (count) NSLog(@"[YTMU-DL] playing local file vid=%@ rel=%@ (%lu format(s))", vid, relPath, (unsigned long)count);
         else NSLog(@"[YTMU-DL] local file exists but no formats container took it vid=%@", vid);
+        YTMUSnapshotResponseForVideoID(response, vid);
     } @catch (NSException *e) {
     }
     return count;
