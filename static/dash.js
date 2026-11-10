@@ -282,11 +282,32 @@
   };
 
   /* ---- logs ---- */
+  // VS Code-style log tokenizing: timestamps dim, bracketed tags accent, the
+  // level words in the editor's own palette (error #F14C4C / warning #CCA700
+  // / info #3794FF / debug #808080 in the dark theme, the classic light-theme
+  // set on the light side). Text goes in as text nodes only -- no innerHTML
+  // of raw log content.
+  const LOG_TOKEN_RE = /(\d{4}-\d{2}-\d{2}[ T][\d:.]+Z?|\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)|(\[[^\]]{1,48}\])|\b(CRITICAL|ERROR)\b|\b(WARN|WARNING)\b|\b(INFO)\b|\b(DEBUG|TRACE)\b|(https?:\/\/[^\s]+)/g;
+  const colorizeLog = msg => {
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    LOG_TOKEN_RE.lastIndex = 0;
+    while ((m = LOG_TOKEN_RE.exec(msg))) {
+      if (m.index > last) frag.appendChild(document.createTextNode(msg.slice(last, m.index)));
+      const cls = m[1] ? 'lg-ts' : m[2] ? 'lg-tag' : m[3] ? 'lg-err' : m[4] ? 'lg-warn' : m[5] ? 'lg-info' : m[6] ? 'lg-dbg' : 'lg-url';
+      frag.appendChild(el('span', {class: cls}, m[0]));
+      last = m.index + m[0].length;
+    }
+    if (last < msg.length) frag.appendChild(document.createTextNode(msg.slice(last)));
+    return frag;
+  };
   const renderLogRow = entry => {
     const cls = `log-row lv-${entry.level||'info'}`;
+    const msg = el('span', {class:'log-msg'});
+    msg.appendChild(colorizeLog(entry.msg || ''));
     return el('div', {class: cls},
       el('span', {class:'log-time'}, entry.ts || ''),
-      el('span', {class:'log-msg'}, entry.msg || ''),
+      msg,
     );
   };
   const connectSSE = () => {
@@ -537,31 +558,57 @@
       renderCaches();
     } catch {}
   };
+  // Lazy render: the scan can hold thousands of entries and painting them all
+  // at once stalls the page. Rows go in CHUNK-sized batches; an
+  // IntersectionObserver on a sentinel row appends the next batch as the
+  // user scrolls to it.
+  const CACHE_CHUNK = 120;
+  let cacheFiltered = [];
+  let cacheRendered = 0;
+  const cacheRow = c => {
+    const lang = c.lang || 'zh-TW';
+    const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': lang});
+    pvBtn.addEventListener('click', () => openPreview(c.video_id, lang));
+    const rnBtn = el('mdui-button-icon', {icon:'edit', variant:'text'});
+    rnBtn.title = c.rename ? 'Edit saved rename' : 'Rename to improve fetching';
+    rnBtn.addEventListener('click', () => openRenameDialog({video_id: c.video_id, song: c.song, artist: c.artist, rename: c.rename}));
+    return el('div', {class:'list-row cache', style:'font-size:13px;'},
+      el('span', {class:'truncate'}, `${c.artist} - ${c.song}`,
+        c.rename ? el('span', {class:'rename-tag'}, ` renamed: ${c.rename.title || ''} - ${c.rename.artist || ''}`) : null),
+      el('span', {}, c.source),
+      el('span', {}, c.synced ? 'sync' : ''),
+      el('span', {class:'mono'}, fmt(c.lines)),
+      el('span', {}, c.time_ago),
+      el('span', {class:'truncate mono'}, c.video_id?.slice(0,6) || ''),
+      rnBtn,
+      pvBtn,
+    );
+  };
+  const appendCacheChunk = () => {
+    const list = $('#cache-list'); if (!list) return;
+    const sentinel = list.querySelector('#cache-more');
+    const slice = cacheFiltered.slice(cacheRendered, cacheRendered + CACHE_CHUNK);
+    slice.forEach(c => list.insertBefore(cacheRow(c), sentinel));
+    cacheRendered += slice.length;
+    if (cacheRendered >= cacheFiltered.length && sentinel) {
+      sentinel.textContent = `All ${fmt(cacheFiltered.length)} entries`;
+      sentinel.dataset.done = '1';
+    }
+  };
   const renderCaches = (filter='') => {
     const list = $('#cache-list'); if (!list) return;
     list.innerHTML = '';
     const q = filter.toLowerCase();
-    const items = q ? cachesData.filter(c => `${c.song} ${c.artist} ${c.video_id}`.toLowerCase().includes(q)) : cachesData;
-    if (!items.length) { list.appendChild(el('div', {class:'list-row'}, 'No cached entries')); return; }
-    items.forEach(c => {
-      const lang = c.lang || 'zh-TW';
-      const pvBtn = el('mdui-button-icon', {icon:'visibility', variant:'tonal', 'data-video-id': c.video_id || '', 'data-lang': lang});
-      pvBtn.addEventListener('click', () => openPreview(c.video_id, lang));
-      const rnBtn = el('mdui-button-icon', {icon:'edit', variant:'text'});
-      rnBtn.title = c.rename ? 'Edit saved rename' : 'Rename to improve fetching';
-      rnBtn.addEventListener('click', () => openRenameDialog({video_id: c.video_id, song: c.song, artist: c.artist, rename: c.rename}));
-      list.appendChild(el('div', {class:'list-row cache', style:'font-size:13px;'},
-        el('span', {class:'truncate'}, `${c.artist} - ${c.song}`,
-          c.rename ? el('span', {class:'rename-tag'}, ` renamed: ${c.rename.title || ''} - ${c.rename.artist || ''}`) : null),
-        el('span', {}, c.source),
-        el('span', {}, c.synced ? 'sync' : ''),
-        el('span', {class:'mono'}, fmt(c.lines)),
-        el('span', {}, c.time_ago),
-        el('span', {class:'truncate mono'}, c.video_id?.slice(0,6) || ''),
-        rnBtn,
-        pvBtn,
-      ));
-    });
+    cacheFiltered = q ? cachesData.filter(c => `${c.song} ${c.artist} ${c.video_id}`.toLowerCase().includes(q)) : cachesData;
+    cacheRendered = 0;
+    if (!cacheFiltered.length) { list.appendChild(el('div', {class:'list-row'}, 'No cached entries')); return; }
+    const sentinel = el('div', {class:'list-row', id:'cache-more', style:'color:rgb(var(--mdui-color-on-surface-variant));'}, 'Loading more...');
+    list.appendChild(sentinel);
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting) && cacheRendered < cacheFiltered.length && !sentinel.dataset.done) appendCacheChunk();
+    }, {root: list.closest('.panel-body') || null, rootMargin: '400px'});
+    io.observe(sentinel);
+    appendCacheChunk();
   };
   const clearEmptyCaches = async () => {
     await mdui.confirm({ headline: 'Clear empty caches', description: 'Remove not-found cache entries?', cancelText: 'Cancel', confirmText: 'Clear', onConfirm: async () => { const r = await API('/api/admin/caches/clear_empty', {method:'POST'}); const d = await r.json(); mdui.snackbar({message:`Cleared ${d.cleared} entry(ies)`}); loadCaches(); } });
