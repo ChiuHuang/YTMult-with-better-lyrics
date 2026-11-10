@@ -422,6 +422,12 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody);
 // stack never crosses NSURLSession, so the next hook target must come from
 // the device itself). Same paired-device token as the traffic capture.
 void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload);
+// Application log lines (Source/DebugLogCapture.x hooks NSLog and _os_log_impl).
+// `src` is "nslog" (fully formatted) or "oslog" (the raw FORMAT STRING -- the
+// argument buffer is not decoded, so %@/%d are still in it). Same paired-device
+// token, budgeted per flush window so a chatty app cannot crowd out the traffic
+// records.
+void YTMUDebugDeviceNoteLog(NSString *src, NSString *line);
 // The enrolled pairing token itself (DebugDeviceMode.x). The server keeps only
 // its hash, so this is the one place the credential for GET /api/debug/fetch
 // (X-YTMU-Debug-Token header) can be copied from.

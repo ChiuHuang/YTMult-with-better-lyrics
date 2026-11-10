@@ -189,6 +189,59 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody) 
     }
 }
 
+// Application log lines (Source/DebugLogCapture.x). The app talks through
+// NSLog and os_log; neither text is readable on a device without Xcode, and an
+// offline playback failure is exactly the kind of thing only the app's own log
+// explains (the transport capture cannot see the player).
+//
+// Two limits exist because this is a firehose, not a probe:
+//  - a per-window BUDGET (kYTMUDebugLogBudget per kYTMUDebugFlushInterval) is
+//    checked FIRST, so a chatty frame cannot pay for a pref read on every
+//    line, and a burst cannot push the traffic records out of the buffer;
+//  - the prefix check drops our OWN diagnostics ([YTMU...) which would
+//    otherwise record the act of recording.
+static const NSUInteger kYTMUDebugLogBudget = 120;
+static const NSUInteger kYTMUDebugLogLimit = 700;
+static NSTimeInterval g_ytmuLogWindowStart = 0;
+static NSUInteger g_ytmuLogWindowCount = 0;
+static NSUInteger g_ytmuLogDropped = 0;
+void YTMUDebugDeviceNoteLog(NSString *src, NSString *line) {
+    @try {
+        if (!line.length) return;
+        if ([line hasPrefix:@"[YTMU"]) return;
+        NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+        if (now - g_ytmuLogWindowStart > kYTMUDebugFlushInterval) {
+            g_ytmuLogWindowStart = now;
+            g_ytmuLogWindowCount = 0;
+        }
+        if (g_ytmuLogWindowCount >= kYTMUDebugLogBudget) { g_ytmuLogDropped++; return; }
+        if (!YTMUDebugDeviceEnabled() || !YTMUDebugHasToken()) return;
+        g_ytmuLogWindowCount++;
+        // One record per line: a multi-line message is folded, and the whole
+        // thing is capped -- a log line is context, not a payload.
+        NSString *flat = [line stringByReplacingOccurrencesOfString:@"\n" withString:@" | "];
+        if (flat.length > kYTMUDebugLogLimit) flat = [flat substringToIndex:kYTMUDebugLogLimit];
+        NSDictionary *record = @{
+            @"t": [NSDate date].description ?: @"",
+            @"kind": @"log",
+            @"m": @"LOG",
+            @"u": [NSString stringWithFormat:@"log://%@", src ?: @"app"],
+            @"vid": g_currentVideoID ?: @"",
+            @"line": flat,
+            @"owner_debug": @YES,
+        };
+        NSMutableArray *records = YTMUDebugRecords();
+        @synchronized(records) {
+            [records addObject:record];
+            if (records.count > kYTMUDebugBufferMax) {
+                [records removeObjectsInRange:NSMakeRange(0, records.count - kYTMUDebugBufferMax)];
+            }
+        }
+        YTMUDebugStartFlushTimer();
+    } @catch (NSException *e) {
+    }
+}
+
 // The enrolled token itself, for the one purpose the dashboard cannot serve
 // (the server stores only its hash): the user copies it from the Debug page
 // and uses it as the credential of the read endpoint
@@ -210,6 +263,7 @@ NSDictionary *YTMUDebugDeviceStatus(void) {
         @"device": deviceID.length ? deviceID : @"",
         @"pending": @(pending),
         @"sent": @(g_ytmuDebugSent),
+        @"logdropped": @(g_ytmuLogDropped),
         @"error": g_ytmuDebugLastError ?: @"",
         @"last": g_ytmuDebugLastSent ?: @"",
     };
@@ -291,3 +345,5 @@ void YTMUDebugDeviceEnroll(NSString *otp, void (^done)(BOOL ok, NSString *messag
 // capture) plus YTMUDebugDeviceNoteRequest (this buffer). Two files hooking
 // the same selector would be a chain of two replacements where one is enough,
 // and the download capture has to run whether or not debug mode is on.
+// The LOG capture follows the same shape: the hooks (NSLog and _os_log_impl)
+// live alone in Source/DebugLogCapture.x and only call into this buffer.

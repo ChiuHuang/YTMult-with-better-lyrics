@@ -3228,6 +3228,13 @@
       const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.85;margin:2px 0 8px 22px;font-size:11px;'}, body || '(empty)');
       row.appendChild(pre);
     }
+    if (rec.kind === 'log' && rec.log) {
+      // One line the app itself wrote (NSLog text, or the os_log format
+      // string). Colorized like the server log so tags and errors stand out.
+      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.8;margin:2px 0 8px 22px;font-size:11px;'}, '');
+      pre.appendChild(colorizeLog(rec.log));
+      row.appendChild(pre);
+    }
     if (rec.body) {
       // The request body a paired device captured (owner-debug only, capped
       // by the device at 8KB). Collapsible: it is rarely the thing you want.
