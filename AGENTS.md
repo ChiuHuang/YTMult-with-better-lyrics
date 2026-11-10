@@ -28,8 +28,9 @@
 
 Current:
 - `[DONE] ses_logcap_20261110 | the app's own log now uploads (NSLog full text +
-  os_log format string) through the paired buffer, the live-log filter is
-  actually wired, and the server stopped dropping request bodies | files:
+  os_log format string) through the paired buffer, the Debug page's capture
+  feed got the colouring + a kind-aware filter (Live logs was the wrong
+  place), and the server stopped dropping request bodies | files:
   Source/DebugLogCapture.x (new), Source/{DebugDeviceMode.x,LyricsShared.h},
   server/routes_debug.py, static/dash.js, templates/index.html | next: device
   check -- Debug page must show LOG lines with kind=log once paired, dashboard
@@ -47,7 +48,12 @@ Current:
   by the os_log hook); an os_log record holds the FORMAT STRING, not values;
   and the log-filter predicate + chips shipped with NO listeners for a whole
   session -- existing UI is not running UI. Build 383 is the first beta with
-  all of it (382 was 73537b7).`
+  all of it (382 was 73537b7). The dashboard filter then MOVED to the Debug
+  page's capture feed (18db24d, Build 385): that feed mixes three record
+  shapes, so its chips select kind (Log/Net/Probe/Err) and the text box ANDs
+  on top -- and both the new dash.js and the server's kind=log persistence
+  only exist where the DEPLOYED instance has pulled this repo, so a phone can
+  upload LOG records into an old server that silently drops them.`
 - `[DONE] ses_lyrchip_20261108 | chip marker no longer lands on the action-row
   bar (the dim reaches the chip), a chip YT disables by HIDING an ASDK cell is
   rescued on the spot, mini cover base walk fixed, retitle gated to decorated
