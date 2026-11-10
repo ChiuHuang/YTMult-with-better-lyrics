@@ -349,17 +349,21 @@ def api_app_altstore():
             'size': rel.get('size') or 0,
         }
 
+    # The channel is a LABEL on the same packed binary: debug features are
+    # runtime-gated to the paired owner device in every build, so a stable
+    # install never sees them. The wording tells the user what they hold.
+    stable_note = 'stable -- debug disabled' if channel == 'stable' else 'beta -- owner/debug build'
     if asia and asia != cloudflare:
         # Mirror first: a direct file host beats a proxied GitHub asset.
         apps = [
             _app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
-                 asia, f'YTMusicUltimate ({tag}) -- Asia CDN'),
+                 asia, f'YTMusicUltimate ({tag}, {stable_note}) -- Asia CDN'),
             _app('YouTube Music (Cloudflare CDN)', cloudflare,
-                 f'YTMusicUltimate ({tag}) -- GitHub via Cloudflare proxy'),
+                 f'YTMusicUltimate ({tag}, {stable_note}) -- GitHub via Cloudflare proxy'),
         ]
     else:
         apps = [_app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
-                     cloudflare, f'YTMusicUltimate ({tag})')]
+                     cloudflare, f'YTMusicUltimate ({tag}, {stable_note})')]
     payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',

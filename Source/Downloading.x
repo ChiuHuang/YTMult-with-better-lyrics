@@ -374,7 +374,7 @@ static NSString *YTMUAudioURLFromStreaming(id streaming) {
 // what each level actually looks like in THIS build, so the next extraction
 // change is decided on data, not hope.
 static void YTMUDebugNoteResponseProbe(id response, NSString *vid) {
-    if (!response) return;
+    if (!YTMUDebugDeviceEnabled() || !response) return;
     static NSMutableSet *noted;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ noted = [NSMutableSet set]; });
@@ -765,8 +765,12 @@ BOOL YTMUIsNetworkReachable(void) {
 BOOL YTMUPlayVideoID(NSString *videoID) {
     if (!videoID.length) return NO;
     YTMUTakePlayerCensus(videoID);
-    NSMutableDictionary *probe = [NSMutableDictionary dictionary];
-    NSMutableArray *tried = [NSMutableArray array];
+    // Owner-debug only bookkeeping: on a stable install (no paired debug
+    // device) both stay nil, and every later [probe ...] / [tried ...] send
+    // is a silent nil-message no-op -- nothing is built, nothing is noted.
+    const BOOL dbg = YTMUDebugDeviceEnabled();
+    NSMutableDictionary *probe = dbg ? [NSMutableDictionary dictionary] : nil;
+    NSMutableArray *tried = dbg ? [NSMutableArray array] : nil;
 
     // Layer 1: a music deep-link scheme, not "the first declared scheme".
     // canOpen: is asked first, so a declared but unhandled scheme does not
@@ -994,6 +998,7 @@ static NSUInteger YTMUSwapToLocalFiles(id response) {
 // file URL; a failure right after a swap means it did not, and the error row
 // says which layer refused.
 static void YTMUNotePlaybackEvent(NSString *event, NSString *vid, NSArray *extraLines) {
+    if (!YTMUDebugDeviceEnabled()) return;
     static NSMutableSet *noted;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ noted = [NSMutableSet set]; });
