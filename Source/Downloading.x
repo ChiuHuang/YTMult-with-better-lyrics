@@ -658,6 +658,10 @@ static BOOL YTMUTakesOneObject(id target, SEL sel) {
 // This is the only honest way to ask "what CAN we call in this build" without
 // a class dump on the host.
 static void YTMUTakePlayerCensus(NSString *videoID) {
+    // OWNER-DEBUG ONLY: the class-list walk costs real CPU on every install's
+    // first play, and its payload is meaningless off the paired debug device.
+    // Gate BEFORE the once, so a stable install never even runs it.
+    if (!YTMUDebugDeviceEnabled()) return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableArray *rows = [NSMutableArray array];
