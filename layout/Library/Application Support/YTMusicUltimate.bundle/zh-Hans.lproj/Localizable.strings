@@ -92,6 +92,8 @@
 "DISCORD_DESC" = "反馈问题和请求新功能";
 "SOURCE_CODE" = "开源代码";
 "SOURCE_CODE_DESC" = "查看开源代码";
+"PRIVACY" = "隐私权政策";
+"PRIVACY_DESC" = "歌词服务器保存了哪些资料";
 
 "CLOSE" = "关闭";
 "WARNING" = "警告";

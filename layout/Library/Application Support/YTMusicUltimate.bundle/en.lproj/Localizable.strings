@@ -92,6 +92,8 @@
 "DISCORD_DESC" = "Report bugs and request features";
 "SOURCE_CODE" = "Source code";
 "SOURCE_CODE_DESC" = "Take a look at the code";
+"PRIVACY" = "Privacy policy";
+"PRIVACY_DESC" = "What the lyrics server keeps";
 
 "CLOSE" = "Close";
 "WARNING" = "Warning";

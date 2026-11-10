@@ -134,7 +134,7 @@
         case 2:
             return 1;
         case 3:
-            return 5;
+            return 6;
         default:
             return 0;
     }
@@ -228,7 +228,10 @@
             @{@"text": [NSString stringWithFormat:LOC(@"TWITTER"), @"Dayanch96"], @"detail": LOC(@"TWITTER_DESC"), @"image": @"dayanch96-24@2x"},
             @{@"text": LOC(@"DISCORD"), @"detail": LOC(@"DISCORD_DESC"), @"image": @"discord-24@2x"},
             @{@"text": LOC(@"SOURCE_CODE"), @"detail": LOC(@"SOURCE_CODE_DESC"), @"image": @"github-24@2x"},
-            @{@"text": @"Check for updates", @"detail": @"Compare this build's commit with the latest online build.", @"image": @"arrow.triangle.2.circlepath"}
+            @{@"text": @"Check for updates", @"detail": @"Compare this build's commit with the latest online build.", @"image": @"arrow.triangle.2.circlepath"},
+            // The policy lives on the lyrics server itself, so the link follows
+            // whatever server this build talks to (a self-hosted one included).
+            @{@"text": LOC(@"PRIVACY"), @"detail": LOC(@"PRIVACY_DESC"), @"image": @"hand.raised"}
         ];
 
         NSDictionary *settingData = settingsData[indexPath.row];
@@ -239,7 +242,7 @@
         cell.detailTextLabel.text = settingData[@"detail"];
         cell.detailTextLabel.numberOfLines = 0;
 
-        if (indexPath.row == 4) {
+        if (indexPath.row >= 4) {
             cell.imageView.image = [UIImage systemImageNamed:settingData[@"image"]];
         } else {
             UIImage *image = [UIImage imageWithContentsOfFile:[NSBundle.ytmu_defaultBundle pathForResource:settingData[@"image"] ofType:@"png" inDirectory:@"icons"]];
@@ -313,11 +316,18 @@
 
     if (indexPath.section == 3 && indexPath.row == 4) {
         [self checkForUpdates];
+    } else if (indexPath.section == 3 && indexPath.row == 5) {
+        // No hardcoded host: the server that answers this build's lyrics
+        // requests is the one whose policy page is shown.
+        NSString *privacy = [NSString stringWithFormat:@"%@/privacy", YTMUApiBase()];
+        [[UIApplication sharedApplication] openURL:[NSURL URLWithString:privacy] options:@{} completionHandler:nil];
     } else if (indexPath.section == 3) {
+        // Our fork, not upstream: the lyrics system and the server these
+        // settings talk to live here.
         NSArray *urls = @[@"https://twitter.com/ginsudev",
                         @"https://twitter.com/dayanch96",
                         @"https://discord.gg/VN9ZSeMhEW",
-                        @"https://github.com/dayanch96/YTMusicUltimate"];
+                        @"https://github.com/ChiuHuang/ytmusicultimate"];
 
         if (indexPath.row >= 0 && indexPath.row < urls.count) {
             NSURL *url = [NSURL URLWithString:urls[indexPath.row]];

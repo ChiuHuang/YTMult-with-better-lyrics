@@ -111,6 +111,8 @@ python proxy_server.py        # listens on :20016
   - `/api/app/badge?type=release|lyrics|devices|tracks|nodes` — MD3 badge
     SVG, same look as `assets/badges/`. Self-hosters can drop the README
     image URLs on your own domain.
+  - `/privacy` — the public privacy policy (what this server keeps). See
+    [Privacy](#privacy).
 
 ## Tweak features (highlights)
 
@@ -121,6 +123,21 @@ python proxy_server.py        # listens on :20016
   (every 6h, toggle in Lyrics settings)
 - Liquid Glass mini-player surface, landscape lyrics, FPS meter
 - In-app update check (Settings → Check for updates) with proxied download
+
+## Privacy
+
+- **Public instance:** https://ytmtranslate.chiuhuang.dev/privacy — what that
+  server keeps, for how long, and how to make it forget you.
+- **In the app:** Settings → `Privacy policy` opens `<your server>/privacy`,
+  so the page always describes the server this build actually talks to
+  (Lyrics settings → API endpoint).
+- **Self-hosted:** the page is a template — `templates/privacy.html`, served by
+  `server/routes_misc.py` — so edit it to match what your own deployment
+  keeps. If your server has no `/privacy`, that settings row leads nowhere and
+  should be removed or the template added.
+- **In this repo:** [`docs/ownership-and-debug.md`](docs/ownership-and-debug.md)
+  is the written version: the count ping, the debug gate (off until you pair a
+  device), and what a stable install never sends.
 
 ## Repo layout
 

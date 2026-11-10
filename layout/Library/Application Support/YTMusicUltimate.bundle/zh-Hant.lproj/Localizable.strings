@@ -92,6 +92,8 @@
 "DISCORD_DESC" = "回報問題和請求新功能";
 "SOURCE_CODE" = "原始碼";
 "SOURCE_CODE_DESC" = "查看原始碼";
+"PRIVACY" = "隱私權政策";
+"PRIVACY_DESC" = "歌詞伺服器保存了哪些資料";
 
 "CLOSE" =  "關閉";
 "LOGIN_INFO" = "成功登入 Google 帳戶後需要重新啟動應用程式";
