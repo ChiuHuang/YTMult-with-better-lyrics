@@ -325,44 +325,10 @@
     const cls = `log-row lv-${entry.level||'info'}`;
     const msg = el('span', {class:'log-msg'});
     msg.appendChild(colorizeLog(entry.msg || ''));
-    const row = el('div', {class: cls},
+    return el('div', {class: cls},
       el('span', {class:'log-time'}, entry.ts || ''),
       msg,
     );
-    // The raw text the filters match against (lowercased match, original here).
-    row.dataset.raw = `${entry.ts || ''} ${entry.msg || ''}`;
-    return row;
-  };
-
-  /* ---- log filters ---- */
-  // Substring filter + one active mode chip. Modes read the row's level class
-  // or well-known tokens; the text input ANDs on top. Rows are hidden, not
-  // dropped, so clearing a filter brings everything back without a refetch.
-  let logFilterText = '';
-  let logFilterMode = 'all';
-  const logRowMatches = row => {
-    if (logFilterMode === 'err') {
-      if (!/\blv-(err|warn)\b/.test(row.className)) return false;
-    } else if (logFilterMode === 'req') {
-      if (!(row.dataset.raw || '').includes('[REQ')) return false;
-    } else if (logFilterMode === 'probe') {
-      const raw = (row.dataset.raw || '').toLowerCase();
-      if (!raw.includes('probe') && !raw.includes('[census')) return false;
-    }
-    if (logFilterText && !(row.dataset.raw || '').toLowerCase().includes(logFilterText)) return false;
-    return true;
-  };
-  const applyLogFilter = row => {
-    const rows = row ? [row] : logLines;
-    rows.forEach(r => { r.style.display = logRowMatches(r) ? '' : 'none'; });
-  };
-  const setLogMode = (mode, btn) => {
-    logFilterMode = logFilterMode === mode ? 'all' : mode;
-    ['logf-all', 'logf-err', 'logf-req', 'logf-probe'].forEach(id => {
-      const b = $(`#${id}`);
-      if (b) b.setAttribute('variant', (b.id === `logf-${logFilterMode}`) ? 'filled' : 'text');
-    });
-    applyLogFilter();
   };
   const connectSSE = () => {
     if (eventSource) return;
@@ -382,7 +348,6 @@
           const old = logLines.shift();
           if (old.parentNode) old.parentNode.removeChild(old);
         }
-        applyLogFilter();
       } catch {}
     });
     eventSource.addEventListener('log', e => {
@@ -397,7 +362,6 @@
           const old = logLines.shift();
           if (old.parentNode) old.parentNode.removeChild(old);
         }
-        applyLogFilter(row);
         if (logLines.length > 10) container.scrollTop = container.scrollHeight;
         throttledRefresh();
       } catch {}
@@ -3212,43 +3176,109 @@
   let ddgPaused = false;
   let ddgRows = [];
   const DDG_MAX = 400;
+  // A capture record is one of three shapes -- an app log line, a transport
+  // request, a runtime probe -- plus an optional captured body. They read very
+  // differently, so each gets its own badge, accent and body treatment: a log
+  // line is the message itself (colorized like the server log), a request is
+  // method + endpoint, a probe is a member dump.
+  const DDG_ERR_RE = /\b(error|failed|failure|fault|exception|crash|denied|timeout)\b/i;
+  const ddgKind = rec => (rec.kind === 'log' ? 'log' : rec.kind === 'probe' ? 'probe' : 'net');
+  // The server stamps a full ISO timestamp; the feed only needs the clock, and
+  // the full value stays available in the row's filter text.
+  const ddgTime = ts => { const m = String(ts || '').match(/(\d{2}:\d{2}:\d{2})/); return m ? m[1] : '--:--'; };
   const ddgLine = rec => {
-    const row = el('div', {class: 'log-row'},
-      el('span', {class: 'log-time'}, rec.ts || '--:--:--'),
-      el('span', {class: 'log-msg'},
-        `${rec.m || 'GET'} ${rec.host || ''}${rec.path || ''}`
-        + (rec.vid ? `  vid=${rec.vid}` : '')
-        + (rec.device ? `  [${rec.device}]` : '')
-        + (rec.owner_debug ? '  [owner-debug]' : '')));
-    if (rec.kind === 'probe' && rec.d && rec.d.constructor === Object) {
+    const kind = ddgKind(rec);
+    const isErr = kind === 'log'
+      ? DDG_ERR_RE.test(rec.log || '')
+      : kind === 'probe' ? false : DDG_ERR_RE.test(`${rec.path || ''}${rec.m || ''}`);
+    const row = el('div', {class: `log-row ddg-row ddg-${kind}${isErr ? ' ddg-err' : ''}`});
+    const head = el('div', {class: 'ddg-head'});
+    head.appendChild(el('span', {class: `ddg-pill k-${kind}`},
+      kind === 'log' ? 'LOG' : kind === 'probe' ? 'PROBE' : (rec.m || 'GET')));
+    head.appendChild(el('span', {class: 'log-time'}, ddgTime(rec.ts)));
+    let summary = '';
+    if (kind === 'log') {
+      summary = String(rec.host || 'app');
+    } else if (kind === 'probe') {
+      summary = `probe · ${rec.host || ''}`;
+    } else {
+      summary = `${rec.host || ''}${rec.path || ''}`;
+    }
+    if (rec.vid) summary += `  vid=${rec.vid}`;
+    head.appendChild(el('span', {class: 'log-msg'}, summary));
+    if (rec.device) head.appendChild(el('span', {class: 'ddg-pill meta'}, rec.device));
+    if (rec.owner_debug) head.appendChild(el('span', {class: 'ddg-pill meta'}, 'owner'));
+    row.appendChild(head);
+    if (kind === 'probe' && rec.d && rec.d.constructor === Object) {
       // A runtime probe: render the member dump it is actually about.
       const body = Object.entries(rec.d).map(([k, v]) =>
         `${k} → ${v.cls || '?'}`
           + (v.items || []).map(m => `\n    ${m}`).join('')).join('\n');
-      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.85;margin:2px 0 8px 22px;font-size:11px;'}, body || '(empty)');
-      row.appendChild(pre);
+      row.appendChild(el('pre', {class: 'ddg-pre'}, body || '(empty)'));
     }
-    if (rec.kind === 'log' && rec.log) {
-      // One line the app itself wrote (NSLog text, or the os_log format
-      // string). Colorized like the server log so tags and errors stand out.
-      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.8;margin:2px 0 8px 22px;font-size:11px;'}, '');
+    if (kind === 'log' && rec.log) {
+      // The line the app itself wrote (NSLog text, or an os_log format string).
+      const pre = el('pre', {class: 'ddg-pre ddg-line'});
       pre.appendChild(colorizeLog(rec.log));
       row.appendChild(pre);
     }
     if (rec.body) {
-      // The request body a paired device captured (owner-debug only, capped
-      // by the device at 8KB). Collapsible: it is rarely the thing you want.
-      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.7;margin:2px 0 8px 22px;font-size:11px;max-height:180px;overflow:auto;'}, rec.body);
-      const d = el('details', {style: 'margin-left:22px; font-size:11.5px;'},
-        el('summary', {style: 'cursor:pointer; opacity:.75;'}, 'request body'),
-        pre);
-      row.appendChild(d);
+      // The request body a paired device captured (owner-debug only, capped at
+      // 8KB by the device). Collapsible: it is rarely the thing you want.
+      row.appendChild(el('details', {class: 'ddg-body'},
+        el('summary', {}, `request body · ${rec.body.length}B`),
+        el('pre', {class: 'ddg-pre'}, rec.body)));
     }
+    // What the filter matches: everything a viewer could type, one string.
+    row.dataset.kind = kind;
+    row.dataset.err = isErr ? '1' : '0';
+    row.dataset.raw = [rec.ts, rec.m, rec.host, rec.path, rec.vid, rec.device, rec.log, rec.body]
+      .filter(Boolean).join(' ').toLowerCase();
     return row;
+  };
+
+  /* ---- capture feed filter (Debug page) ---- */
+  // The chips pick a record SHAPE (the feed carries three) and the text box
+  // ANDs on top of it; `err` is the interesting fourth mode, because a failed
+  // request and a logged exception are different rows in this data. Rows are
+  // hidden, never dropped, so clearing a filter restores what is on screen
+  // without another round trip to the server.
+  let ddgFilterText = '';
+  let ddgFilterMode = 'all';
+  const DDG_MODES = ['all', 'log', 'net', 'probe', 'err'];
+  const ddgMatches = row => {
+    if (ddgFilterMode === 'err') {
+      if (row.dataset.err !== '1') return false;
+    } else if (ddgFilterMode !== 'all' && row.dataset.kind !== ddgFilterMode) {
+      return false;
+    }
+    if (ddgFilterText && !(row.dataset.raw || '').includes(ddgFilterText)) return false;
+    return true;
+  };
+  const applyDdgFilter = () => {
+    let shown = 0;
+    ddgRows.forEach(r => {
+      const ok = ddgMatches(r);
+      r.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    const s = $('#ddg-shown');
+    if (s) s.textContent = (ddgFilterMode === 'all' && !ddgFilterText)
+      ? `${ddgRows.length} record(s)`
+      : `${shown} of ${ddgRows.length} shown`;
+  };
+  const setDdgMode = mode => {
+    ddgFilterMode = ddgFilterMode === mode ? 'all' : mode;
+    DDG_MODES.forEach(m => {
+      const b = $(`#ddgf-${m}`);
+      if (b) b.setAttribute('variant', m === ddgFilterMode ? 'filled' : 'text');
+    });
+    applyDdgFilter();
   };
   const ddgCount = () => {
     const c = $('#ddlive-count');
     if (c) c.textContent = (ddgPaused ? 'paused · ' : '') + `${ddgRows.length} record(s)`;
+    applyDdgFilter();
   };
   const ddgAppend = recs => {
     const list = $('#ddlive-list');
@@ -3452,18 +3482,17 @@
     if (logDownloadBtn) logDownloadBtn.addEventListener('click', downloadLogs);
     const logClearBtn = $('#log-clear');
     if (logClearBtn) logClearBtn.addEventListener('click', clearLogs);
-    const logFilterInput = $('#log-filter');
-    if (logFilterInput) {
-      logFilterInput.addEventListener('input', () => {
-        logFilterText = (logFilterInput.value || '').trim().toLowerCase();
-        applyLogFilter();
+    const ddgFilterInput = $('#ddg-filter');
+    if (ddgFilterInput) {
+      ddgFilterInput.addEventListener('input', () => {
+        ddgFilterText = (ddgFilterInput.value || '').trim().toLowerCase();
+        applyDdgFilter();
       });
     }
-    ['all', 'err', 'req', 'probe'].forEach(mode => {
-      const btn = $(`#logf-${mode}`);
-      if (btn) btn.addEventListener('click', () => setLogMode(mode));
+    DDG_MODES.forEach(mode => {
+      const btn = $(`#ddgf-${mode}`);
+      if (btn) btn.addEventListener('click', () => setDdgMode(mode));
     });
-    applyLogFilter();
 
     const cacheSearch = $('#cache-search');
     if (cacheSearch) cacheSearch.addEventListener('input', () => renderCaches(cacheSearch.value));

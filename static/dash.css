@@ -99,6 +99,35 @@ html.mdui-theme-dark .lg-dbg { color: rgb(128,128,128); }
 html.mdui-theme-dark .lg-url { color: rgb(100,181,246); }
 @keyframes login { from { opacity:0; transform: translateY(-5px); } to { opacity:1; transform:none; } }
 
+/* ---- debug capture feed (paired device: app log / transport / probe) ---- */
+.ddg-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; padding-bottom:12px; }
+.ddg-toolbar .ddg-search { flex:1 1 240px; min-width:170px; }
+.ddg-modes { display:flex; gap:6px; flex-wrap:wrap; }
+.ddg-row { display:block; padding:7px 10px; margin-bottom:4px; }
+.ddg-head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.ddg-head .log-msg { flex:1 1 auto; min-width:0; word-break:break-word; }
+.ddg-pill { flex:0 0 auto; font-size:10.5px; font-weight:600; letter-spacing:.5px; padding:1px 7px;
+  border-radius:999px; background: rgba(var(--mdui-color-surface-variant),.55);
+  color: rgb(var(--mdui-color-on-surface-variant)); }
+.ddg-pill.k-log { background: rgba(26,133,255,.16); color: rgb(26,133,255); }
+.ddg-pill.k-probe { background: rgba(234,179,8,.18); color: rgb(178,129,3); }
+.ddg-pill.meta { background: transparent; opacity:.7; font-weight:500; }
+html.mdui-theme-dark .ddg-pill.k-log { color: rgb(100,181,246); }
+html.mdui-theme-dark .ddg-pill.k-probe { color: rgb(204,167,0); }
+.log-row.ddg-log { --log-c: rgb(26,133,255); }
+.log-row.ddg-probe { --log-c: rgb(234,179,8); }
+.log-row.ddg-net { --log-c: rgb(var(--mdui-color-outline-variant)); }
+.log-row.ddg-err { --log-c: rgb(var(--mdui-color-error)); }
+html.mdui-theme-dark .log-row.ddg-log { --log-c: rgb(55,148,255); }
+html.mdui-theme-dark .log-row.ddg-probe { --log-c: rgb(204,167,0); }
+.ddg-pre { white-space:pre-wrap; word-break:break-word; margin:5px 0 0; padding:6px 9px; border-radius:6px;
+  background: rgba(var(--mdui-color-surface-variant),.4); font-size:11.5px; line-height:1.55;
+  max-height:240px; overflow:auto; }
+.ddg-pre.ddg-line { background:transparent; padding:1px 0 0; font-size:12.5px; max-height:none; }
+.ddg-body { margin-top:5px; font-size:11.5px; }
+.ddg-body summary { cursor:pointer; opacity:.7; }
+.ddg-body summary:hover { opacity:1; }
+
 /* ---- cache / request / node / file lists ---- */
 .list-grid { display:flex; flex-direction:column; gap:6px; max-height: 60vh; overflow: auto; }
 .list-row { display:grid; gap:10px; align-items:center; padding:10px 16px; border-radius: var(--mdui-shape-corner-extra-small); background: rgba(var(--mdui-color-surface),.55); font-size: 13.5px; }

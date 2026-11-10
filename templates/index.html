@@ -170,13 +170,6 @@
             <mdui-button id="log-download" variant="text" icon="download">Download</mdui-button>
             <mdui-button id="log-clear" variant="text" icon="delete">Clear</mdui-button>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px 14px 0;">
-            <mdui-text-field id="log-filter" variant="outlined" placeholder="filter (substring, case-insensitive)" clearable style="flex:1 1 220px;"></mdui-text-field>
-            <mdui-button id="logf-all" variant="text">All</mdui-button>
-            <mdui-button id="logf-err" variant="text">Err+Warn</mdui-button>
-            <mdui-button id="logf-req" variant="text">[REQ</mdui-button>
-            <mdui-button id="logf-probe" variant="text">Probe</mdui-button>
-          </div>
           <div id="log-list" class="log-list"></div>
         </mdui-card>
       </section>
@@ -225,6 +218,17 @@
             <mdui-button id="ddlive-clear" variant="text" icon="delete">Clear</mdui-button>
           </div>
           <div class="panel-body">
+            <div class="ddg-toolbar">
+              <mdui-text-field id="ddg-filter" class="ddg-search" variant="outlined" icon="search" placeholder="filter text / vid / device" clearable></mdui-text-field>
+              <div class="ddg-modes">
+                <mdui-button id="ddgf-all" variant="filled">All</mdui-button>
+                <mdui-button id="ddgf-log" variant="text">Log</mdui-button>
+                <mdui-button id="ddgf-net" variant="text">Net</mdui-button>
+                <mdui-button id="ddgf-probe" variant="text">Probe</mdui-button>
+                <mdui-button id="ddgf-err" variant="text">Err</mdui-button>
+              </div>
+              <span class="pill" id="ddg-shown">0 record(s)</span>
+            </div>
             <div id="ddlive-list" class="log-list"></div>
           </div>
         </mdui-card>
