@@ -422,6 +422,10 @@ void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody);
 // stack never crosses NSURLSession, so the next hook target must come from
 // the device itself). Same paired-device token as the traffic capture.
 void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payload);
+// Re-run the focused player census (player-census2) by hand. The automatic pass
+// is dispatch_once per PROCESS, so a device paired after its first play would
+// never send one; the Debug page's manual row calls this instead.
+void YTMURunPlayerCensus2Manually(void);
 // Application log lines (Source/DebugLogCapture.x hooks NSLog and _os_log_impl).
 // `src` is "nslog" (fully formatted) or "oslog" (the raw FORMAT STRING -- the
 // argument buffer is not decoded, so %@/%d are still in it). Same paired-device

@@ -175,6 +175,9 @@
 "DEBUG_COPY" = "复制诊断信息";
 
 "DEBUG_TEST_LOG" = "发送测试记录";
+"DEBUG_CENSUS" = "运行播放器普查";
+"DEBUG_CENSUS_DESC" = "重新收集这个 build 的播放器类别，并以 player-census2 上传（dashboard → Debug → Probe）。";
+"DEBUG_CENSUS_NEEDED" = "请先开启设备模式并完成配对。";
 "DEBUG_DEVICE_SECTION" = "调试设备模式";
 "DEBUG_DEVICE_TOGGLE" = "抓取 App 请求";
 "DEBUG_DEVICE_TOGGLE_DESC" = "记录 App 自己的请求（只有方法与网址，不含内容与 cookie）并上传到服务器。需要仪表板生成的一次性代码，普通用户无法上传。";

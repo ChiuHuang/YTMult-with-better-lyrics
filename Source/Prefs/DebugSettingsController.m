@@ -229,7 +229,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 6;
     if (section == 1) return 3;
-    if (section == 2) return 2;
+    if (section == 2) return 3;
     if (section == 3) return 5;
     return 0;
 }
@@ -331,9 +331,17 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (row == 0) {
         cell.textLabel.text = LOC(@"DEBUG_COPY");
         cell.imageView.image = [UIImage systemImageNamed:@"square.and.arrow.up"];
-    } else {
+    } else if (row == 1) {
         cell.textLabel.text = LOC(@"DEBUG_TEST_LOG");
         cell.imageView.image = [UIImage systemImageNamed:@"paperplane"];
+    } else {
+        // The automatic player census is once per PROCESS. A device that got
+        // paired (or updated) after its first play already spent that shot, so
+        // the only way to get the record is to ask for it again deliberately.
+        cell.textLabel.text = LOC(@"DEBUG_CENSUS");
+        cell.imageView.image = [UIImage systemImageNamed:@"scope"];
+        BOOL ready = YTMUDebugDeviceEnabled() && YTMUDebugDeviceToken().length;
+        cell.detailTextLabel.text = ready ? LOC(@"DEBUG_CENSUS_DESC") : LOC(@"DEBUG_CENSUS_NEEDED");
     }
     return cell;
 }
@@ -349,6 +357,10 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     if (indexPath.section != 2) return;
     if (indexPath.row == 0) {
         [self ytmu_copyDiagnostics];
+        return;
+    }
+    if (indexPath.row == 2) {
+        [self ytmu_runPlayerCensus];
         return;
     }
     [self ytmu_sendTestLog];
@@ -429,6 +441,20 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     NSString *message = YTMUDebugUploadAllowed(@"info") ? LOC(@"DEBUG_TEST_SENT")
                                                          : LOC(@"DEBUG_TEST_BLOCKED");
     [self ytmu_alertWithTitle:LOC(@"DEBUG_TEST_LOG") message:message];
+}
+
+// The census walks every class on the runtime, so it runs off the main queue:
+// a settings tap freezing the table for a moment would look like a hang. The
+// record posts immediately (probes are not batched), so the alert can promise
+// "look at the dashboard" without a spinner.
+- (void)ytmu_runPlayerCensus {
+    BOOL allowed = YTMUDebugDeviceEnabled() && YTMUDebugDeviceToken().length;
+    [self ytmu_alertWithTitle:LOC(@"DEBUG_CENSUS")
+                      message:allowed ? LOC(@"DEBUG_CENSUS_DESC") : LOC(@"DEBUG_CENSUS_NEEDED")];
+    if (!allowed) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        YTMURunPlayerCensus2Manually();
+    });
 }
 
 #pragma mark - Debug device mode

@@ -781,10 +781,13 @@ static BOOL YTMUCensus2SelMatches(NSString *sel) {
         || [s containsString:@"didloadcontentplaybackdata"];
 }
 
-static void YTMUTakePlayerCensus2(NSString *videoID) {
-    if (!YTMUDebugDeviceEnabled()) return;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
+// The collection itself, callable more than once: the automatic pass below is
+// dispatch_once per PROCESS, which is the wrong shape for a device that was
+// paired (or updated) after its first play -- that process already spent its
+// one shot, and nothing short of a respring would ever send a census. The
+// Debug page's manual row calls this directly.
+static void YTMUPlayerCensus2Now(NSString *videoID) {
+    @try {
         NSMutableArray *resRows = [NSMutableArray array];
         NSMutableArray *fetchRows = [NSMutableArray array];
         NSMutableArray *carryRows = [NSMutableArray array];
@@ -942,6 +945,29 @@ static void YTMUTakePlayerCensus2(NSString *videoID) {
             @"carry": @{@"cls": @"evt", @"items": carryRows},
             @"proto": @{@"cls": @"evt", @"items": protoRows},
         });
+        NSLog(@"[YTMU-DL] player-census2 posted fetch=%lu carry=%lu proto=%lu",
+              (unsigned long)fetchRows.count, (unsigned long)carryRows.count,
+              (unsigned long)protoRows.count);
+    } @catch (NSException *e) {
+        NSLog(@"[YTMU-DL] player-census2 failed: %@", e.reason ?: @"?");
+    }
+}
+
+// Manual run from the Debug settings page: the operator is looking at the
+// dashboard, so the pair gate is the only requirement.
+void YTMURunPlayerCensus2Manually(void) {
+    // YTMUDebugHasToken is file-local in DebugDeviceMode.x; the exported token
+    // accessor answers the same question from here.
+    if (!YTMUDebugDeviceEnabled() || !YTMUDebugDeviceToken().length) return;
+    NSString *vid = g_currentVideoID.length ? g_currentVideoID : YTMUResolveCurrentVideoID();
+    YTMUPlayerCensus2Now(vid ?: @"");
+}
+
+static void YTMUTakePlayerCensus2(NSString *videoID) {
+    if (!YTMUDebugDeviceEnabled()) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        YTMUPlayerCensus2Now(videoID);
     });
 }
 

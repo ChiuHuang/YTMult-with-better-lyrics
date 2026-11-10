@@ -175,6 +175,9 @@
 "DEBUG_COPY" = "Copy diagnostics";
 
 "DEBUG_TEST_LOG" = "Send test log";
+"DEBUG_CENSUS" = "Run player census";
+"DEBUG_CENSUS_DESC" = "Collects the player classes of this build and posts them as player-census2 (dashboard -> Debug -> Probe).";
+"DEBUG_CENSUS_NEEDED" = "Turn on device mode and pair this device first.";
 "DEBUG_DEVICE_SECTION" = "Debug device mode";
 "DEBUG_DEVICE_TOGGLE" = "Capture app requests";
 "DEBUG_DEVICE_TOGGLE_DESC" = "Records the app's own requests (method and URL only, no bodies or cookies) and uploads them to the server. Requires a one-time code from the dashboard, so ordinary users cannot upload.";
