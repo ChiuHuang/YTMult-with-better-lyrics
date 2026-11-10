@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YTMusicUltimate - Privacy</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; color: #1d1d1f; line-height: 1.55; background: #fff; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  p, li { font-size: 14.5px; }
+  .muted { color: #6e6e73; font-size: 13px; }
+  code { background: #f5f5f7; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 10px 0; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e5e5ea; vertical-align: top; }
+  th { color: #6e6e73; font-weight: 600; font-size: 12.5px; }
+</style>
+</head>
+<body>
+  <h1>YTMusicUltimate privacy</h1>
+  <p class="muted">What the tweak's companion server keeps, why, and how to make it forget you. This page describes the server at ytmtranslate.chiuhuang.dev only.</p>
+
+  <h2>The short version</h2>
+  <ul>
+    <li>A normal install sends: lyrics requests (the songs you fetch lyrics for) and one anonymous count ping. Nothing else.</li>
+    <li>The count ping contains a random id your device generated. The server stores a <b>salted hash</b> of it, never the raw id.</li>
+    <li>Debug features are off until you (the owner) turn them on and pair the device. No debug data leaves a device you have not paired.</li>
+  </ul>
+
+  <h2>What is kept</h2>
+  <table>
+    <tr><th>Data</th><th>What it is</th><th>Kept for</th></tr>
+    <tr><td>Lyrics cache</td><td>The synced-lyrics text for songs fetched through the tweak, plus provider snapshots. Content is song lyrics, not your activity: entries are keyed by video id.</td><td>Until cache limits evict them</td></tr>
+    <tr><td>Count ping</td><td>Salted hash of a random device-generated id, the channel label (stable / debug), first-seen and last-seen timestamps. Used only to answer "how many installs".</td><td>As long as the device keeps pinging; stale entries age out</td></tr>
+    <tr><td>Crash logs</td><td>Server-side crash traces of the lyrics server itself (not your device).</td><td>Rotated with the logs</td></tr>
+    <tr><td>Debug captures</td><td>Structured probe records from devices you explicitly paired (class lists, playback outcomes, capped request bodies). Every record is tagged owner_debug.</td><td>Until you revoke the pairing or delete the file</td></tr>
+  </table>
+
+  <h2>What a stable install never sends</h2>
+  <p>No logs, no UI dumps, no request bodies, no crash reports, no analytics events. The debug probes on the device are gated before they run: without the pairing and the toggle, they do not execute at all.</p>
+
+  <h2>Channels are labels</h2>
+  <p>Stable and beta are the same binary with different labels. What differs is what the owner turns on: debug features exist in both but stay off until the device is paired.</p>
+
+  <h2>How to vanish</h2>
+  <ul>
+    <li><b>New count identity:</b> clear the tweak's preferences on the device - the next ping carries a fresh random id (the old hash entry ages out).</li>
+    <li><b>Remove debug captures:</b> revoke the device on the dashboard (Debug page) or ask the operator to delete the capture file.</li>
+    <li><b>Lyrics cache:</b> it is keyed by video id, not by you; cache-clear endpoints on the dashboard wipe it wholesale.</li>
+  </ul>
+
+  <p class="muted">Questions: the dashboard's Debug page is where pairing and capture removal live. This policy is in the repo at docs/ownership-and-debug.md; the code is the source of truth.</p>
+</body>
+</html>

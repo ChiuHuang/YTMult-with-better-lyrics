@@ -121,6 +121,15 @@ def admin_channels():
     return jsonify({'ok': True, **channels_state()})
 
 
+@app.route('/api/admin/instances', methods=['GET'])
+@login_required
+def admin_instances():
+    """Device counts from the ping: stable / debug counters and the recent
+    list (salted-hash ids masked to 12 hex chars -- never the raw uid)."""
+    from .instances import instances_state
+    return jsonify(instances_state())
+
+
 @app.route('/api/admin/channels/promote', methods=['POST'])
 @login_required
 def admin_channels_promote():

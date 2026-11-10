@@ -127,6 +127,25 @@
   };
 
   /* ---- overview ---- */
+  // Device counts from the ping (salted hashes only -- see /privacy).
+  const loadInstances = async () => {
+    try {
+      const d = await json('/api/admin/instances');
+      setVal('#stat-installs', `${fmt(d.stable)} / ${fmt(d.debug)}`);
+      const chip = $('#inst-total');
+      if (chip) { chip.textContent = `${fmt(d.total)} device(s)`; chip.className = 'pill ' + (d.total ? 'pill-ok' : 'pill-mute'); }
+      const list = $('#inst-list'); if (!list) return;
+      list.innerHTML = '';
+      (d.devices || []).forEach(dev => {
+        list.appendChild(el('div', {class:'list-row'},
+          el('span', {class:'mono'}, dev.id),
+          el('span', {class:'pill ' + (dev.channel === 'debug' ? 'pill-warn' : 'pill-ok')}, dev.channel),
+          el('span', {}, ago(new Date((dev.last_seen || 0) * 1000).toISOString()) + ' ago'),
+        ));
+      });
+      if (!(d.devices || []).length) list.appendChild(el('div', {class:'list-row'}, 'No pings yet'));
+    } catch {}
+  };
   const loadOverview = async () => {
     try {
       const info = await json('/api/admin/server_info');
@@ -175,6 +194,7 @@
     } catch (e) {
       console.warn('overview load failed', e);
     }
+    loadInstances();
   };
 
   /* ---- lyrics latency widget ----
@@ -3457,6 +3477,8 @@
 
     const infoRefreshBtn = $('#info-refresh');
     if (infoRefreshBtn) infoRefreshBtn.addEventListener('click', loadOverview);
+    const instRefreshBtn = $('#inst-refresh');
+    if (instRefreshBtn) instRefreshBtn.addEventListener('click', loadInstances);
     const latRefreshBtn = $('#lat-refresh');
     if (latRefreshBtn) latRefreshBtn.addEventListener('click', loadLatency);
     const latClearBtn = $('#lat-clear');

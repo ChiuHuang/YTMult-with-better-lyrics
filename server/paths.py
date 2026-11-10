@@ -40,6 +40,10 @@ RENAME_FILE = os.path.join(DATA_DIR, 'rename.json')
 # after a restart. Deliberately NOT in _MIGRATE_FILES: it is new state, there
 # is no legacy `cache/` copy to rescue.
 MIRROR_FILE = os.path.join(DATA_DIR, 'release_mirror.json')
+# Device-count ping storage: salted-hash -> {last_seen, channel, first_seen}.
+# The salt lives beside it and never leaves the server.
+INSTANCES_FILE = os.path.join(DATA_DIR, 'instances.json')
+PING_SALT_FILE = os.path.join(DATA_DIR, 'ping_salt')
 # The channel state: every CI build registers here (beta first), the stable
 # pointer moves only through an explicit promote. Served by /api/app/altstore
 # and /api/update, so a restart must not lose it.

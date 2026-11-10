@@ -1516,12 +1516,41 @@ BOOL isLyricsViewVisibleOnScreen(void) {
     return (isect.size.width > 50 && isect.size.height > 100);
 }
 
+// The device-count ping (docs/ownership-and-debug.md). ONE random UUID the
+// device generated, sent ONLY to /api/app/ping -- the server keeps a salted
+// hash + lastSeen + channel and nothing else. Fire-and-forget, once per
+// launch, 2s after didFinishLaunching so it never delays startup.
+static void YTMUSendCountPing(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSString *uidKey = @"YTMUCountPingUID";
+        NSString *uid = [[NSUserDefaults standardUserDefaults] stringForKey:uidKey];
+        if (!uid.length) {
+            uid = [[NSUUID UUID] UUIDString];
+            [[NSUserDefaults standardUserDefaults] setObject:uid forKey:uidKey];
+        }
+        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/app/ping", YTMUApiBase()]];
+        if (!url) return;
+        NSDictionary *body = @{@"uid": uid,
+                               @"channel": YTMUDebugDeviceEnabled() ? @"debug" : @"stable"};
+        NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+        if (!json) return;
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+        req.HTTPMethod = @"POST";
+        req.timeoutInterval = 15;
+        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        req.HTTPBody = json;
+        [[NSURLSession.sharedSession dataTaskWithRequest:req completionHandler:nil] resume];
+    });
+}
+
 %hook YTMAppDelegate
 - (BOOL)application:(id)app didFinishLaunchingWithOptions:(id)options {
     BOOL result = %orig;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [[YTMUTurnstileManager sharedManager] getJWTTokenWithCompletion:nil];
         YTMUAutoSyncIfDue();
+        YTMUSendCountPing();
     });
     return result;
 }

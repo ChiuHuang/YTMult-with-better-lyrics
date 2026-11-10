@@ -407,6 +407,28 @@ def api_app_altstore():
             pass
     return resp
 
+
+@app.route('/api/app/ping', methods=['POST'])
+def api_app_ping():
+    """Device-count ping. Body: {uid, channel}. The uid is a random UUID the
+    DEVICE generated (stored in its NSUserDefaults); we keep only a salted
+    hash + lastSeen + channel -- see server/instances.py and /privacy."""
+    from .instances import record_ping
+    body = request.get_json(silent=True) or {}
+    hid = record_ping((body.get('uid') or '').strip(),
+                      'debug' if body.get('channel') == 'debug' else 'stable')
+    if not hid:
+        return jsonify({'ok': False, 'error': 'bad uid'}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/privacy', methods=['GET'])
+def privacy_page():
+    """The public privacy policy. Rendered, no auth: it must answer what the
+    server keeps without the user having to ask."""
+    return render_template('privacy.html')
+
+
 def _dump_screen_name(dump_content):
     """Topmost screen from the VC hierarchy section (presented wins, else deepest child)."""
     try:

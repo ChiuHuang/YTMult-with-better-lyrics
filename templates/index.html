@@ -95,6 +95,13 @@
               <div class="stat-value mono" id="stat-lyrics">--</div>
             </div>
           </mdui-card>
+          <mdui-card variant="elevated" class="stat-card">
+            <mdui-icon name="devices"></mdui-icon>
+            <div>
+              <div class="stat-label">Installs (stable / debug)</div>
+              <div class="stat-value mono" id="stat-installs">--</div>
+            </div>
+          </mdui-card>
         </div>
 
         <mdui-card variant="elevated" class="panel">
@@ -106,6 +113,22 @@
           </div>
           <div class="panel-body">
             <div id="server-kv" class="kv"></div>
+          </div>
+        </mdui-card>
+
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">Instances</span>
+            <span class="pill pill-mute" id="inst-total">counting</span>
+            <span class="spacer"></span>
+            <mdui-button id="inst-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              Devices that pinged. The id is a salted hash of a random UUID the device generated
+              (the raw id never leaves it); channel is the debug toggle state. Policy: <a href="/privacy" target="_blank">/privacy</a>.
+            </div>
+            <div id="inst-list" class="list-grid"></div>
           </div>
         </mdui-card>
 
