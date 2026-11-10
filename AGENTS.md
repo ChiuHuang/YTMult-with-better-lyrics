@@ -27,6 +27,18 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
+  privacy page, and the policy page now names the host that serves it | files:
+  Source/Prefs/YTMUltimateSettingsController.m, layout/.../*.lproj/Localizable.strings,
+  templates/privacy.html, README.md | next: device check -- Settings row 6 of the
+  links section ("Privacy policy") must open `<lyrics endpoint>/privacy`, and
+  `Source code` must open ChiuHuang/ytmusicultimate | does: the row is built from
+  YTMUApiBase(), never a hardcoded host, so a build pointed at a self-hosted
+  endpoint opens THAT server's policy (and a server without /privacy 404s -- the
+  row assumes the template exists). TRAPS: the links section is index 3 with
+  `Check for updates` pinned at row 4 and privacy appended at 5, so any new link
+  row must go AFTER 5 or the update check breaks; rows >= 4 use SF Symbols while
+  rows 0-3 load PNGs from the bundle's icons dir.`
 - `[DONE] ses_censbtn_20261110 | census2 is runnable by hand from the Debug
   page (its dispatch_once was per PROCESS, so a device paired after its first
   play could never send one) and the offline fullscreen header names the song
