@@ -746,14 +746,12 @@ static void YTMUTakePlayerCensus(NSString *videoID) {
 //     data-shaped methods, and WHICH classes conform -- the delegate list is
 //     the honest map of who receives playback data in this build.
 //
-// SDK GAP (CI failure, run 42810108420): the iPhoneOS16.5.sdk theos headers
-// declare only the legacy protocol_copyMethodDescriptionList; the Method*-based
-// protocol_copyMethodList / protocol_copyOptionalMethodList exist in libobjc
-// for a decade but carry no declaration in this SDK, so -Werror turned the
-// implicit declarations into a build break. Declare them here once.
-extern Method *protocol_copyMethodList(Protocol * _Nonnull proto, unsigned int * _Nullable outCount);
-extern Method *protocol_copyOptionalMethodList(Protocol * _Nonnull proto, unsigned int * _Nullable outCount);
-
+// SDK GAP (CI failures 42810108420 + 42811112181): protocol_copyMethodList /
+// protocol_copyOptionalMethodList are NOT declared in this SDK's objc/runtime.h
+// AND not exported by the iOS libobjc at all (the extern-declare attempt broke
+// at LINK: undefined symbols for arm64). The exported iOS API is the legacy
+// protocol_copyMethodDescriptionList, whose objc_method_description.name IS the
+// SEL -- same information, one indirection deeper.
 static BOOL YTMUCensus2SelMatches(NSString *sel) {
     if (!sel.length) return NO;
     NSString *s = sel.lowercaseString;
@@ -812,22 +810,24 @@ static void YTMUTakePlayerCensus2(NSString *videoID) {
                 [candProtoRefs addObject:[NSValue valueWithPointer:(__bridge const void *)allProtos[p]]];
                 conform[name] = [NSMutableArray array];
                 // The delegate's data-shaped methods: the exact selectors a
-                // hook of ours would implement or call.
+                // hook of ours would implement or call. iOS exports only the
+                // description-list flavor (see the SDK GAP note above).
                 NSMutableSet *sels = [NSMutableSet set];
                 Protocol *proto = allProtos[p];
                 unsigned int mCount = 0;
-                Method *ms = protocol_copyMethodList(proto, &mCount);
+                struct objc_method_description *ds =
+                    protocol_copyMethodDescriptionList(proto, YES, YES, &mCount);
                 for (unsigned int j = 0; j < mCount; j++) {
-                    NSString *sel = NSStringFromSelector(method_getName(ms[j]));
+                    NSString *sel = NSStringFromSelector(ds[j].name);
                     if (YTMUCensus2SelMatches(sel)) [sels addObject:sel];
                 }
-                free(ms);
-                ms = protocol_copyOptionalMethodList(proto, &mCount);
+                free(ds);
+                ds = protocol_copyMethodDescriptionList(proto, NO, YES, &mCount);
                 for (unsigned int j = 0; j < mCount && sels.count < 14; j++) {
-                    NSString *sel = NSStringFromSelector(method_getName(ms[j]));
+                    NSString *sel = NSStringFromSelector(ds[j].name);
                     if (YTMUCensus2SelMatches(sel)) [sels addObject:sel];
                 }
-                free(ms);
+                free(ds);
                 [protoRows addObject:[NSString stringWithFormat:@"%@ methods=%@",
                     name, sels.count ? [sels.allObjects componentsJoinedByString:@","] : @"-"]];
             }
