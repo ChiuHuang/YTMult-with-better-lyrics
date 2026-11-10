@@ -170,6 +170,13 @@
             <mdui-button id="log-download" variant="text" icon="download">Download</mdui-button>
             <mdui-button id="log-clear" variant="text" icon="delete">Clear</mdui-button>
           </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:8px 14px 0;">
+            <mdui-text-field id="log-filter" variant="outlined" placeholder="filter (substring, case-insensitive)" clearable style="flex:1 1 220px;"></mdui-text-field>
+            <mdui-button id="logf-all" variant="text">All</mdui-button>
+            <mdui-button id="logf-err" variant="text">Err+Warn</mdui-button>
+            <mdui-button id="logf-req" variant="text">[REQ</mdui-button>
+            <mdui-button id="logf-probe" variant="text">Probe</mdui-button>
+          </div>
           <div id="log-list" class="log-list"></div>
         </mdui-card>
       </section>

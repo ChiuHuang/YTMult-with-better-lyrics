@@ -325,10 +325,44 @@
     const cls = `log-row lv-${entry.level||'info'}`;
     const msg = el('span', {class:'log-msg'});
     msg.appendChild(colorizeLog(entry.msg || ''));
-    return el('div', {class: cls},
+    const row = el('div', {class: cls},
       el('span', {class:'log-time'}, entry.ts || ''),
       msg,
     );
+    // The raw text the filters match against (lowercased match, original here).
+    row.dataset.raw = `${entry.ts || ''} ${entry.msg || ''}`;
+    return row;
+  };
+
+  /* ---- log filters ---- */
+  // Substring filter + one active mode chip. Modes read the row's level class
+  // or well-known tokens; the text input ANDs on top. Rows are hidden, not
+  // dropped, so clearing a filter brings everything back without a refetch.
+  let logFilterText = '';
+  let logFilterMode = 'all';
+  const logRowMatches = row => {
+    if (logFilterMode === 'err') {
+      if (!/\blv-(err|warn)\b/.test(row.className)) return false;
+    } else if (logFilterMode === 'req') {
+      if (!(row.dataset.raw || '').includes('[REQ')) return false;
+    } else if (logFilterMode === 'probe') {
+      const raw = (row.dataset.raw || '').toLowerCase();
+      if (!raw.includes('probe') && !raw.includes('[census')) return false;
+    }
+    if (logFilterText && !(row.dataset.raw || '').toLowerCase().includes(logFilterText)) return false;
+    return true;
+  };
+  const applyLogFilter = row => {
+    const rows = row ? [row] : logLines;
+    rows.forEach(r => { r.style.display = logRowMatches(r) ? '' : 'none'; });
+  };
+  const setLogMode = (mode, btn) => {
+    logFilterMode = logFilterMode === mode ? 'all' : mode;
+    ['logf-all', 'logf-err', 'logf-req', 'logf-probe'].forEach(id => {
+      const b = $(`#${id}`);
+      if (b) b.setAttribute('variant', (b.id === `logf-${logFilterMode}`) ? 'filled' : 'text');
+    });
+    applyLogFilter();
   };
   const connectSSE = () => {
     if (eventSource) return;
@@ -348,6 +382,7 @@
           const old = logLines.shift();
           if (old.parentNode) old.parentNode.removeChild(old);
         }
+        applyLogFilter();
       } catch {}
     });
     eventSource.addEventListener('log', e => {
@@ -362,6 +397,7 @@
           const old = logLines.shift();
           if (old.parentNode) old.parentNode.removeChild(old);
         }
+        applyLogFilter(row);
         if (logLines.length > 10) container.scrollTop = container.scrollHeight;
         throttledRefresh();
       } catch {}
@@ -3409,6 +3445,18 @@
     if (logDownloadBtn) logDownloadBtn.addEventListener('click', downloadLogs);
     const logClearBtn = $('#log-clear');
     if (logClearBtn) logClearBtn.addEventListener('click', clearLogs);
+    const logFilterInput = $('#log-filter');
+    if (logFilterInput) {
+      logFilterInput.addEventListener('input', () => {
+        logFilterText = (logFilterInput.value || '').trim().toLowerCase();
+        applyLogFilter();
+      });
+    }
+    ['all', 'err', 'req', 'probe'].forEach(mode => {
+      const btn = $(`#logf-${mode}`);
+      if (btn) btn.addEventListener('click', () => setLogMode(mode));
+    });
+    applyLogFilter();
 
     const cacheSearch = $('#cache-search');
     if (cacheSearch) cacheSearch.addEventListener('input', () => renderCaches(cacheSearch.value));
