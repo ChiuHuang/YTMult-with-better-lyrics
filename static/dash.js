@@ -1152,6 +1152,53 @@
     });
   };
 
+  /* ---- release channels: every build lands in beta, promote moves stable ---- */
+  const loadChannels = async () => {
+    try {
+      const data = await json('/api/admin/channels');
+      const list = $('#channels-list'); if (!list) return;
+      const chip = $('#channels-stable');
+      if (chip) {
+        chip.textContent = 'stable: ' + (data.stable || 'none yet');
+        chip.className = 'pill ' + (data.stable ? 'pill-ok' : 'pill-mute');
+      }
+      list.innerHTML = '';
+      (data.builds || []).forEach(b => {
+        const isStable = data.stable === b.tag;
+        const ch = b.channel || 'beta';
+        let promoteBtn = null;
+        if (ch !== 'stable') {
+          promoteBtn = el('mdui-button', {variant:'text'}, 'Promote to stable');
+          promoteBtn.addEventListener('click', () => promoteChannel(b.tag));
+        }
+        const row = el('div', {class:'list-row', style:'display:flex; gap:10px; align-items:center; flex-wrap:wrap;'},
+          el('span', {class:'mono', style:'min-width:90px;'}, b.tag),
+          el('span', {class:'pill ' + (ch === 'stable' ? 'pill-ok' : (isStable ? 'pill-ok' : 'pill-warn'))}, ch),
+          el('span', {style:'color:rgb(var(--mdui-color-on-surface-variant)); font-size:12px; flex:1; min-width:140px;'},
+            (b.published_at || '').replace('T', ' ').slice(0, 16) + (b.notes ? ' - ' + b.notes.split('\n')[0].slice(0, 80) : '')),
+          promoteBtn
+        );
+        list.appendChild(row);
+      });
+      if (!(data.builds || []).length) list.appendChild(el('div', {class:'list-row', style:'color:rgb(var(--mdui-color-on-surface-variant));'}, 'No builds recorded yet (the next CI release registers itself as beta).'));
+    } catch {}
+  };
+  const promoteChannel = async tag => {
+    await mdui.confirm({
+      headline: 'Promote ' + tag,
+      description: 'Move this build to STABLE? Devices on /api/app/altstore get it as the update. Remember to flip the GitHub flag too: gh release edit ' + tag + ' --prerelease=false --latest',
+      cancelText: 'Cancel', confirmText: 'Promote',
+      onConfirm: async () => {
+        try {
+          const r = await API('/api/admin/channels/promote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tag})});
+          const d = await r.json();
+          mdui.snackbar({message: d.ok ? ('Stable is now ' + d.stable) : (d.error || 'Promote failed')});
+        } catch (e) { mdui.snackbar({message: 'Promote failed: ' + e.message}); }
+        loadChannels();
+      }
+    });
+  };
+
   /* ---- library (live rows + summaries stream over SSE; page state
       refreshes on navigation, job-done events, and the SSE heartbeat) ---- */
   let rebaseMode = 'cached';
@@ -3173,7 +3220,7 @@
     else if (p==='library') loadLibrary();
     else if (p==='nodes') loadNodes();
     else if (p==='jwt') loadJwt();
-    else if (p==='update') loadUpdate();
+    else if (p==='update') { loadUpdate(); loadChannels(); }
     else if (p==='files') loadFiles();
     else if (p==='crashes') loadCrashes();
     // Settings and App render from the SAME payload (the schema describes every
@@ -3336,6 +3383,8 @@
 
     const updateCheckBtn = $('#update-check');
     if (updateCheckBtn) updateCheckBtn.addEventListener('click', async ()=>{ updateCheckBtn.loading=true; try{await loadUpdate(); mdui.snackbar({message:'Update state refreshed'});}catch{} updateCheckBtn.loading=false; });
+    const channelsRefreshBtn = $('#channels-refresh');
+    if (channelsRefreshBtn) channelsRefreshBtn.addEventListener('click', async ()=>{ channelsRefreshBtn.loading=true; try{await loadChannels();}catch{} channelsRefreshBtn.loading=false; });
     const updatePerformBtn = $('#update-perform');
     if (updatePerformBtn) updatePerformBtn.addEventListener('click', performUpdate);
     const updateConfigBtn = $('#update-config');

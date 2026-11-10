@@ -582,6 +582,25 @@
             <div id="update-kv" class="kv"></div>
           </div>
         </mdui-card>
+        <mdui-card variant="elevated" class="panel" style="margin-top:16px;">
+          <div class="panel-head">
+            <span class="section-title">Release channels</span>
+            <span class="pill pill-mute" id="channels-stable">stable: -</span>
+            <span class="spacer"></span>
+            <mdui-button id="channels-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div style="font-size:12.5px; color:rgb(var(--mdui-color-on-surface-variant)); margin-bottom:10px;">
+              Every CI build lands in BETA. Promote moves a build to STABLE: the
+              AltStore source installed on devices (/api/app/altstore) and
+              /api/update then serve it, GitHub marks it Latest and drops the
+              prerelease flag. Beta has its own source URL
+              (/api/app/altstore-beta). The GitHub-side flag flip is manual:
+              <code>gh release edit build-N --prerelease=false --latest</code>
+            </div>
+            <div id="channels-list" class="list-grid"></div>
+          </div>
+        </mdui-card>
       </section>
 
       <!-- ===================== files ===================== -->
