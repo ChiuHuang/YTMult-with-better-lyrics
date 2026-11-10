@@ -1,155 +1,79 @@
 # YTMusicUltimate (with better lyrics)
 
-[![AltStore](assets/badges/altstore.svg)](https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore)
-[![iOS](assets/badges/ios.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics)
-[![Nightly IPA](assets/badges/release.svg)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
+[![Latest release](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=release)](https://github.com/ChiuHuang/ytmusicultimate/releases)
 [![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 
-![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)
-![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)
-![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks)
-![Nodes online](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=nodes)
+A YouTube Music tweak for iOS that plays lyrics properly: word-by-word
+highlight that follows the music, translations, and an offline-friendly
+downloader. Lyrics are fetched from a small lyrics server, which is included
+here and can be self-hosted.
 
-YouTube Music iOS tweak + a self-hosted (Defaulted public server) lyrics server: synced and
-word-synced lyrics, multi-provider race, translation, and an admin dashboard.
-Open source — forks and pull requests welcome.
+> [!NOTE]
+> You need a **decrypted** YouTube Music IPA to build. It cannot be provided
+> here.
 
-## Download
+## Features
 
-> **Before v1.0:** builds land fast — most pushes to `main` ship a new IPA, so
-> expect the updater to ask you to reinstall often. This settles down after
-> v1.0.
+- Lyrics highlight sweeps word by word, synced to the actual playback time
+- Eight lyric providers raced at once; the best one wins and upgrades in place
+- Translation shown under each line, streamed in as it is translated
+- Provider switcher when you prefer a different source for a song
+- Audio downloads that also play in the app's own player
+- Liquid glass player, landscape lyrics, mini player
+- Every feature is a switch in Settings, nothing is permanent
 
-- **Releases (IPA):** https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases
-  Every push to `main` builds `YTMusicUltimate.ipa` as `build-N`.
+## Install
 
-  [![Latest release](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=release)](https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases)
-
-- **Asia mirror:** prefix any release URL with the proxy (Cloudflare CDN), e.g.
-  `https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-160/YTMusicUltimate.ipa`
-  The in-app updater opens this proxied link automatically. Built IPAs are
-  also mirrored to the Asia file CDN (`https://file.chiuhuang.dev/`).
-
-- **AltStore / SideStore / Feather:** add this source URL (or paste it on altdirect.app):
+- **AltStore / SideStore / Feather:** add this source
   `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
-  The source lists the build twice — the Asia file CDN first, the
-  Cloudflare-proxied GitHub link second — so the second one is a fallback if a
-  host is slow, not a second app to install (same bundle ID, same version).
-- **Jailbreak (.deb):** build locally with Theos (below).
+- **IPA:** download the latest `build-N` from
+  [Releases](https://github.com/ChiuHuang/ytmusicultimate/releases). Every
+  push to `main` builds one.
+- **Jailbreak:** build the `.deb` yourself (below).
 
-You need a **decrypted** YouTube Music IPA as the base (cannot be provided
-here for legal reasons). Upload it somewhere with a direct link
-(filebin.net, Dropbox, or your own file host).
+## Build your own IPA
 
-## Build your own IPA with GitHub Actions
+1. Fork this repo and allow write access for Actions (Settings → Actions →
+   General).
+2. Run the **Build and Release YTMusicUltimate** workflow and paste the URL of
+   your decrypted IPA.
+3. The IPA shows up under your fork's Releases.
 
-1. Fork this repo.
-2. Fork settings → Actions → enable Read and Write permissions.
-3. Actions tab → "Build and Release YTMusicUltimate" → Run workflow,
-   paste your decrypted IPA URL (plus optional app name / bundle ID).
-   Tip: save the URL once as the `BASE_IPA_URL` repo secret (Settings →
-   Secrets and variables → Actions) so pushes build without pasting it
-   every time — and it stays out of logs and the public workflow file.
-4. The IPA appears under your fork's Releases. Each build is also
-   mirrored to the Asia file CDN automatically (see the `Asia mirror:`
-   line in the workflow log); set the optional `FILE_FOLDER_ID` repo
-   secret to group uploads into one folder.
-
-Build troubleshooting: 99% of failures are the base IPA (must be decrypted
-`.ipa`, direct link). If the run is green but you can't find output, append
-`/releases` to your fork URL.
-
-## Build the .deb locally
-
-1. Install [Theos](https://theos.dev/docs/installation).
-2. Clone this repo, then:
-   - `make clean package` — rootful jailbreak
-   - `make clean package ROOTLESS=1` — rootless jailbreak
-   - `make clean package SIDELOADING=1` — for IPA injection
-     (see [Azule](https://github.com/Al4ise/Azule) for injection)
+For a jailbreak package, install [Theos](https://theos.dev/docs/installation)
+and run `make clean package` (add `ROOTLESS=1` for a rootless jailbreak, or
+`SIDELOADING=1` to inject into an IPA).
 
 ## Lyrics server
 
-The tweak fetches lyrics from the included Python server (default
-`https://ytmtranslate.chiuhuang.dev`, changeable in tweak settings).
+The tweak asks a server for lyrics. The public one is
+`https://ytmtranslate.chiuhuang.dev`; you can point the tweak at any other
+endpoint in Settings → Lyrics.
+
+The same server is in this repo:
 
 ```sh
 python proxy_server.py        # listens on :20016
 ```
 
-- Config files are gitignored and created on first use:
-  `config/ai_providers.json` (translation/retitle keys, see
-  `config/ai_providers.example.json`), `config/app_settings.json` (tweak
-  remote config, see `config/app_settings.example.json`),
-  `config/admin_config.json` (dashboard password). The `.example.json` files
-  are templates to read, nothing copies them at startup. Never commit the
-  real files.
-- Extra keys via env: `YTMU_COHERE_KEYS`, `ORCAROUTER_API_KEY`
-  (`YTMU_ORCA_BASE`, `YTMU_ORCA_MODEL`).
-- **Nodes** — dashboard → Nodes → *Generate node*. Three ways to deploy the
-  generated `node.py`:
-  - `deploy.sh` one-liner (bash): installs deps, writes a systemd unit.
-  - **Download node.py** in the dialog: the script itself, for Windows or any
-    host with no shell — then `py -m pip install websocket-client requests`
-    and `py node.py`. It self-updates from then on.
-  - **Download + Windows run.cmd**: the script plus a `.cmd` that makes a
-    venv, installs the deps, and starts the node.
-  Both downloads are creation-time only: the server keeps a hash of each node
-  key, never the key, so it cannot re-render a script later. Keep the key from
-  the dialog, or use the keyed endpoint to refetch:
-  `curl -fsSL "<server>/api/admin/nodes/generate/<id>?key=<key>" -o node.py`.
-- Dashboard (password-gated): live logs, library manager (rebase, bulk
-  refetch, retitle, translate queue), JWT pool, nodes, self-update, crash
-  logs, and the **App** tab (tweak remote config served at
-  `/api/app/settings`).
-- Device debug uploads land in `logs/`; on-device lyrics cache is never
-  poisoned by not-found results.
-- Public read-only endpoints (also what the badges above render):
-  - `/api/app/settings` — tweak remote config, open by design (non-secret
-    values only). Full reference: [`docs/settings-api.md`](docs/settings-api.md).
-  - `/api/app/stats` — JSON usage counter (lyrics served, devices, last song).
-  - `/api/app/badge?type=release|lyrics|devices|tracks|nodes` — MD3 badge
-    SVG, same look as `assets/badges/`. Self-hosters can drop the README
-    image URLs on your own domain.
-  - `/privacy` — the public privacy policy (what this server keeps). See
-    [Privacy](#privacy).
-
-## Tweak features (highlights)
-
-- Apple-Music-style sliding word highlight, 120fps link, extrapolated clock
-- Provider race (Cubey/QQ/KuGou/BiniLyrics/LRCLib/Unison/AMLL/YouTube),
-  per-video provider switcher, probe-and-pick from dashboard
-- Background auto-sync of server translations into the on-device cache
-  (every 6h, toggle in Lyrics settings)
-- Liquid Glass mini-player surface, landscape lyrics, FPS meter
-- In-app update check (Settings → Check for updates) with proxied download
+- Add your own translation keys in `config/ai_providers.json` (there is an
+  `.example.json` to copy). Config files are created on first use and are
+  never committed.
+- The dashboard is password-gated and opens on first run so you can set one.
+- Debug features stay off until you pair a device; a normal install only asks
+  for lyrics and sends one anonymous count ping.
 
 ## Privacy
 
-- **Public instance:** https://ytmtranslate.chiuhuang.dev/privacy — what that
-  server keeps, for how long, and how to make it forget you.
-- **In the app:** Settings → `Privacy policy` opens `<your server>/privacy`,
-  so the page always describes the server this build actually talks to
-  (Lyrics settings → API endpoint).
-- **Self-hosted:** the page is a template — `templates/privacy.html`, served by
-  `server/routes_misc.py` — and it names whatever host is serving it, so a fork
-  does not claim to be someone else's server. Edit the body to match what your
-  deployment actually keeps. If your server has no `/privacy`, that settings
-  row leads nowhere: add the template or drop the row.
-- **In this repo:** [`docs/ownership-and-debug.md`](docs/ownership-and-debug.md)
-  is the written version: the count ping, the debug gate (off until you pair a
-  device), and what a stable install never sends.
+- Public instance: https://ytmtranslate.chiuhuang.dev/privacy
+- In the app: Settings → Privacy policy opens `<your server>/privacy`, so it
+  always describes the server this build actually talks to.
+- Self-hosting: the page is a template (`templates/privacy.html`) and names
+  whatever host serves it, so edit the body to match what your deployment
+  keeps. The written version is
+  [`docs/ownership-and-debug.md`](docs/ownership-and-debug.md).
 
-## Repo layout
+## Credits
 
-- `Source/` — the tweak (Theos/Logos)
-- `server/` — lyrics server (`proxy_server.py` is a thin shim)
-- `static/dash.js`, `templates/index.html` — admin dashboard
-- `tools/jwt-uploader/` — Chrome extension (load unpacked) that pushes a Cubey
-  JWT into the server pool from the browser, on demand or on a timer
-- `.github/workflows/main.yml` — build + release + mirror
-
-Fork of [YTMusicUltimate](https://github.com/ginsudev/YTMusicUltimate)
-by Ginsu and Dayanch96. Lyrics system, server, and dashboard by ChiuHuang.
-Badge icons are [Material Icons](https://fonts.google.com/icons) by Google
-(Apache-2.0).
+Fork of [YTMusicUltimate](https://github.com/ginsudev/YTMusicUltimate) by Ginsu
+and Dayanch96. Lyrics system, server, and dashboard by ChiuHuang. Badge icons
+are [Material Icons](https://fonts.google.com/icons) by Google (Apache-2.0).
