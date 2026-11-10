@@ -571,6 +571,19 @@ NSString *YTMULocalAudioPathForVideoID(NSString *videoID) {
     return nil;
 }
 
+// The NAME a download was saved under ("<author> - <title>"), whether or not
+// the file itself is still there. Offline the app's player response is nil, so
+// this string is the only song identity the device still owns; the lyrics
+// panel splits it. Never a file check here -- this answers "what song is this",
+// not "can I play it".
+NSString *YTMULocalMediaNameForVideoID(NSString *videoID) {
+    if (!videoID.length) return nil;
+    NSDictionary *map = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUDownloads"];
+    if (![map isKindOfClass:[NSDictionary class]]) return nil;
+    id name = map[videoID];
+    return [name isKindOfClass:[NSString class]] ? (NSString *)name : nil;
+}
+
 // The video id a listed file belongs to: the reverse of the vid -> mediaName
 // map the download writes. The Downloads page is handed a file name and
 // nothing else, and the app's player takes an id, not a path.

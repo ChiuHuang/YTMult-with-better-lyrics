@@ -436,6 +436,10 @@ NSString *YTMUDebugDeviceToken(void);
 // Source/Downloading.x reads to feed the file back to the player).
 void YTMURememberDownload(NSString *videoID, NSString *mediaName);
 NSString *YTMULocalAudioPathForVideoID(NSString *videoID);
+// The downloaded file's base name ("<author> - <title>") for a video id, even
+// when the file is gone. Offline the player response is nil, so this is the only
+// song identity the device still has.
+NSString *YTMULocalMediaNameForVideoID(NSString *videoID);
 // The Downloads page lists files, the app's player takes ids: this is the
 // reverse of the vid -> mediaName map, and the entry point that asks the app
 // to play one (NO when this build offers no way in, so the caller can fall

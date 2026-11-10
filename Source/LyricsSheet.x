@@ -2934,6 +2934,30 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     return cleaned.length ? cleaned : raw;
 }
 
+// The download's own file name is "<author> - <title>" (the same join the
+// downloader uses), and offline it is the last identity available. Split at the
+// LAST " - " so an author containing a dash cannot eat the song name; a name
+// with no separator is treated as a title, not fabricate an artist.
+- (void)ytmu_fillFromLocalMediaNameTitle:(NSString * __strong *)title artist:(NSString * __strong *)artist {
+    if (!title || !artist) return;
+    if ((*title).length && (*artist).length) return;
+    NSString *vid = [self ytmu_artworkTargetVideoID];
+    NSString *name = YTMULocalMediaNameForVideoID(vid);
+    if (!name.length) return;
+    // A download whose response carried no title was saved under the video id;
+    // that is an id, not a song name.
+    if ([name isEqualToString:vid]) return;
+    NSRange split = [name rangeOfString:@" - " options:NSBackwardsSearch];
+    if (split.location == NSNotFound) {
+        if (!(*title).length) *title = [self ytmu_cleanVideoTitle:name];
+        return;
+    }
+    NSString *author = [name substringToIndex:split.location];
+    NSString *song = [name substringFromIndex:NSMaxRange(split)];
+    if (!(*title).length && song.length) *title = [self ytmu_cleanVideoTitle:song];
+    if (!(*artist).length && author.length) *artist = [self ytmu_cleanVideoTitle:author];
+}
+
 - (void)ytmu_updateLandscapeMetadata {
     // Safety net for the cover: every path that refreshes this header (the song
     // change, the stream's meta event, a layout pass) also makes sure the new
@@ -2983,16 +3007,24 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
             artist = self.landscapeArtistLabel.text;
         }
     }
+    // Last stop before the header goes nameless: the downloaded file's own
+    // name, "<author> - <title>". Offline this is the ONLY identity left --
+    // playerResponse is nil and the now-playing labels are underneath our
+    // fullscreen panel -- and it is why an offline song used to sit on a
+    // placeholder instead of its name.
+    if (!title.length || !artist.length) {
+        [self ytmu_fillFromLocalMediaNameTitle:&title artist:&artist];
+    }
     // Never blank a known value: playerResponse goes nil mid-transition.
     // Scraped label text is NOT promoted into lastSongTitle/lastSongArtist:
     // that pair is the server's real track metadata and must stay clean (it
     // also decides whether a metadata re-fetch is still needed).
+    // An unknown title stays EMPTY: a generic "Now Playing" reads as a real
+    // title to anyone glancing at the panel, which is worse than a gap.
     if (title.length) {
         if (![self.landscapeTitleLabel.text isEqualToString:title]) {
             self.landscapeTitleLabel.text = title;
         }
-    } else if (!self.landscapeTitleLabel.text.length) {
-        self.landscapeTitleLabel.text = @"Now Playing";
     }
     if (artist.length) {
         if (![self.landscapeArtistLabel.text isEqualToString:artist]) {
