@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <SystemConfiguration/SystemConfiguration.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "FFMpegDownloader.h"
@@ -735,6 +736,26 @@ static NSArray *YTMUPlaySchemes(NSArray *declared) {
         if ([declared containsObject:name]) [out addObject:name];
     }
     return out;
+}
+
+BOOL YTMUIsNetworkReachable(void) {
+    @try {
+        SCNetworkReachabilityRef reach = SCNetworkReachabilityCreateWithName(
+            NULL, "music.youtube.com");
+        if (!reach) return NO;
+        SCNetworkReachabilityFlags flags = 0;
+        BOOL ok = SCNetworkReachabilityGetFlags(reach, &flags);
+        CFRelease(reach);
+        if (!ok) return NO;
+        BOOL reachable = (flags & kSCNetworkReachabilityFlagsReachable) != 0;
+        // A connection that needs a callback before it can carry traffic is
+        // not usable for an immediate metadata fetch.
+        BOOL pending = (flags & kSCNetworkReachabilityFlagsConnectionRequired) != 0
+            || (flags & kSCNetworkReachabilityFlagsInterventionRequired) != 0;
+        return reachable && !pending;
+    } @catch (NSException *e) {
+    }
+    return NO;
 }
 
 BOOL YTMUPlayVideoID(NSString *videoID) {

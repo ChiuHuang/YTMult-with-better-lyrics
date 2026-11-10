@@ -436,6 +436,11 @@ NSString *YTMULocalAudioPathForVideoID(NSString *videoID);
 // back rather than swallow the tap).
 NSString *YTMUVideoIDForMediaName(NSString *mediaName);
 BOOL YTMUPlayVideoID(NSString *videoID);
+// Reachability of the lyrics API host: the app's own player cannot START
+// offline (its metadata fetch is the network round trip the local-file swap
+// sits behind), so a download tap that lands offline must skip straight to
+// the local AVPlayer path -- which needs no network at all.
+BOOL YTMUIsNetworkReachable(void);
 // One-shot sweep: audio files under ANY YTMusicUltimate folder outside the
 // canonical Documents/YTMusicUltimate get MOVED there (container changes after
 // a tweak update leave them strayed). Call sites: the Downloads page reload

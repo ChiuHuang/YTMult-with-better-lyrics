@@ -292,12 +292,14 @@
         // id -> file map already knows which video a listed file is, and the
         // app's player is the one that has the mini player, the queue and the
         // lyrics panel -- and the one whose local-file swap can actually play
-        // the download. The AVPlayerViewController below stays the fallback for
-        // a file with no id (renamed by hand, or older than the map) and for a
-        // build that offers no entry point at all.
+        // the download. OFFLINE the app player cannot start at all: its
+        // metadata fetch IS the network round trip the swap sits behind, and
+        // the chrome (queue, lyrics) needs the network too -- so a tap that
+        // lands offline goes straight to the AVPlayerViewController below,
+        // which plays the local file with no network whatsoever.
         NSString *listedName = [self.audioFiles[indexPath.row] stringByDeletingPathExtension];
         NSString *videoID = YTMUVideoIDForMediaName(listedName);
-        if (videoID.length && YTMUPlayVideoID(videoID)) {
+        if (videoID.length && YTMUIsNetworkReachable() && YTMUPlayVideoID(videoID)) {
             [tableView deselectRowAtIndexPath:indexPath animated:YES];
             return;
         }
