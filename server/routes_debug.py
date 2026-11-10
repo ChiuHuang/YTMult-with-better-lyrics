@@ -324,6 +324,20 @@ def admin_debug_file(device_id):
     return jsonify({'ok': True, 'device': device_id, 'records': records})
 
 
+@app.route('/api/admin/debug/files/<device_id>/download', methods=['GET'])
+@login_required
+def admin_debug_file_download(device_id):
+    """The FULL capture file, untruncated (the view route caps at _TAIL_MAX).
+    device_id is regex-validated by _debug_path, so the join cannot escape
+    the capture directory."""
+    path = _debug_path(device_id)
+    if not path:
+        return jsonify({'ok': False, 'error': 'no such capture file'}), 404
+    from flask import send_file
+    return send_file(path, as_attachment=True,
+                     download_name=f'ytmu-capture-{device_id}.ndjson')
+
+
 @app.route('/api/admin/debug/recent', methods=['GET'])
 @login_required
 def admin_debug_recent():

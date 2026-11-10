@@ -3218,12 +3218,15 @@
     files.forEach(f => {
       const view = el('mdui-button', {variant: 'text', icon: 'subject'}, 'View');
       view.addEventListener('click', () => viewDebugFile(f.device));
+      const dl = el('mdui-button', {variant: 'text', icon: 'download'}, 'Full file');
+      dl.addEventListener('click', () => window.open(`/api/admin/debug/files/${encodeURIComponent(f.device)}/download`, '_blank'));
       list.appendChild(el('div', {class: 'list-row ddfile'},
         el('span', {class: 'mono'}, f.device),
         el('span', {class: 'v'}, String(f.records || 0) + ' rec'),
         el('span', {class: 'v'}, f.size_human || ''),
         el('span', {}, f.modified || ''),
         view,
+        dl,
       ));
     });
   };
