@@ -141,18 +141,42 @@ void YTMUDebugDeviceNoteProbe(NSString *label, NSString *vid, NSDictionary *payl
 
 // Called from the transport hooks only, and cheap by construction: disabled or
 // unenrolled devices pay one NSUserDefaults read per request and nothing else.
-void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method) {
+// `httpBody` is the request's body when the transport handed us one (POST
+// payloads, never the GET audio-segment traffic) -- OWNER-DEBUG ONLY: it
+// rides in the record tagged owner_debug, capped, and no stable install ever
+// calls this path with a body at all.
+static const NSUInteger kYTMUDebugBodyLimit = 8 * 1024;
+void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody) {
     @try {
         if (!YTMUDebugDeviceEnabled() || !YTMUDebugHasToken()) return;
         NSString *full = url.absoluteString;
         if (YTMUDebugSkipURL(full)) return;
         if (full.length > kYTMUDebugURLLimit) full = [full substringToIndex:kYTMUDebugURLLimit];
+        // Bodies are text-ish JSON; a binary (protobuf) body is noise here, so
+        // text passes and binary records nothing. Capped so a giant POST
+        // cannot bloat the capture.
+        NSString *bodyText = nil;
+        if (httpBody.length > 0 && httpBody.length <= 256 * 1024) {
+            NSString *s = [[NSString alloc] initWithData:httpBody encoding:NSUTF8StringEncoding];
+            const char *first = s.UTF8String;
+            BOOL printable = first && ((unsigned char)first[0] >= 0x20 || first[0] == '\t');
+            if (s.length > 2 && printable) {
+                if (s.length > kYTMUDebugBodyLimit) s = [NSString stringWithFormat:@"%@...[truncated %lu bytes]", [s substringToIndex:kYTMUDebugBodyLimit], (unsigned long)httpBody.length];
+                bodyText = s;
+            }
+        }
         NSDictionary *record = @{
             @"t": [NSDate date].description ?: @"",
             @"m": method.length ? method : @"GET",
             @"u": full,
             @"vid": g_currentVideoID ?: @"",
         };
+        if (bodyText) {
+            NSMutableDictionary *r = [record mutableCopy];
+            r[@"owner_debug"] = @YES;
+            r[@"body"] = bodyText;
+            record = r;
+        }
         NSMutableArray *records = YTMUDebugRecords();
         @synchronized(records) {
             [records addObject:record];

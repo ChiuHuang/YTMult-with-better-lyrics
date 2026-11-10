@@ -1343,33 +1343,33 @@ static void YTMUNoteSandboxProbe(NSString *vid) {
 // exists once a device is paired) both read from here. A second file hooking
 // the same selectors would be two chained replacements where one is enough,
 // and the download capture has to run whether or not debug mode is on.
-static void YTMUTransportNote(NSURL *url, NSString *method) {
+static void YTMUTransportNote(NSURL *url, NSString *method, NSData *httpBody) {
     YTMUDownloadCaptureStreamURL(url);
-    YTMUDebugDeviceNoteRequest(url, method);
+    YTMUDebugDeviceNoteRequest(url, method, httpBody);
 }
 
 %hook NSURLSession
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request {
-    YTMUTransportNote(request.URL, request.HTTPMethod);
+    YTMUTransportNote(request.URL, request.HTTPMethod, request.HTTPBody);
     return %orig;
 }
 - (NSURLSessionDataTask *)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
-    YTMUTransportNote(request.URL, request.HTTPMethod);
+    YTMUTransportNote(request.URL, request.HTTPMethod, request.HTTPBody);
     return %orig;
 }
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url {
-    YTMUTransportNote(url, @"GET");
+    YTMUTransportNote(url, @"GET", nil);
     return %orig;
 }
 - (NSURLSessionDataTask *)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completionHandler {
-    YTMUTransportNote(url, @"GET");
+    YTMUTransportNote(url, @"GET", nil);
     return %orig;
 }
 %end
 
 %hook AVURLAsset
 - (instancetype)initWithURL:(NSURL *)URL options:(NSDictionary<NSString *, id> *)options {
-    YTMUTransportNote(URL, @"ASSET");
+    YTMUTransportNote(URL, @"ASSET", nil);
     return %orig;
 }
 %end

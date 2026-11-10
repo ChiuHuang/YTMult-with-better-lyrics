@@ -3182,7 +3182,8 @@
       el('span', {class: 'log-msg'},
         `${rec.m || 'GET'} ${rec.host || ''}${rec.path || ''}`
         + (rec.vid ? `  vid=${rec.vid}` : '')
-        + (rec.device ? `  [${rec.device}]` : '')));
+        + (rec.device ? `  [${rec.device}]` : '')
+        + (rec.owner_debug ? '  [owner-debug]' : '')));
     if (rec.kind === 'probe' && rec.d && rec.d.constructor === Object) {
       // A runtime probe: render the member dump it is actually about.
       const body = Object.entries(rec.d).map(([k, v]) =>
@@ -3190,6 +3191,15 @@
           + (v.items || []).map(m => `\n    ${m}`).join('')).join('\n');
       const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.85;margin:2px 0 8px 22px;font-size:11px;'}, body || '(empty)');
       row.appendChild(pre);
+    }
+    if (rec.body) {
+      // The request body a paired device captured (owner-debug only, capped
+      // by the device at 8KB). Collapsible: it is rarely the thing you want.
+      const pre = el('pre', {style: 'white-space:pre-wrap;opacity:.7;margin:2px 0 8px 22px;font-size:11px;max-height:180px;overflow:auto;'}, rec.body);
+      const d = el('details', {style: 'margin-left:22px; font-size:11.5px;'},
+        el('summary', {style: 'cursor:pointer; opacity:.75;'}, 'request body'),
+        pre);
+      row.appendChild(d);
     }
     return row;
   };

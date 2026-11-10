@@ -416,7 +416,7 @@ void YTMUDebugDeviceEnroll(NSString *otp, void (^done)(BOOL ok, NSString *messag
 // audio-stream capture below (what the download badge copies) and the debug
 // device buffer (which only stores anything once a device is paired).
 void YTMUDownloadCaptureStreamURL(NSURL *url);
-void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method);
+void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody);
 // A runtime probe of the player/watch/now-playing classes (Source/Downloading.x
 // builds the payload on a badge tap whose capture came up empty; the media
 // stack never crosses NSURLSession, so the next hook target must come from
