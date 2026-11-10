@@ -27,6 +27,24 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_censbtn_20261110 | census2 is runnable by hand from the Debug
+  page (its dispatch_once was per PROCESS, so a device paired after its first
+  play could never send one) and the offline fullscreen header names the song
+  from its own download | files: Source/Downloading.x,
+  Source/{LyricsSheet.x,LyricsShared.h},
+  Source/Prefs/DebugSettingsController.m, layout/.../*.lproj/Localizable.strings
+  | next: device check -- Debug > Actions > "Run player census" must post a
+  player-census2 record (Probe chip) on the current song; offline, the
+  landscape title/artist must read the download's "<author> - <title>" instead
+  of a placeholder | does: the census body became YTMUPlayerCensus2Now and the
+  dispatch_once wrapper stayed for the automatic path; YTMULocalMediaNameForVideoID
+  returns the stored media name whether or not the file still exists, and the
+  header splits it at the LAST " - " (a bare video id is rejected). TRAPS:
+  YTMUDebugHasToken is file-local in DebugDeviceMode.x -- callers outside use
+  YTMUDebugDeviceToken().length; the English "Now Playing" placeholder is gone
+  on purpose (an unknown title now renders empty); and the 2-X landscape
+  report is still UNVERIFIED -- the header close is hidden by tag 8889 in
+  landscape, so the second X must be identified from a UI dump before any fix.`
 - `[DONE] ses_logcap_20261110 | the app's own log now uploads (NSLog full text +
   os_log format string) through the paired buffer, the Debug page's capture
   feed got the colouring + a kind-aware filter (Live logs was the wrong
