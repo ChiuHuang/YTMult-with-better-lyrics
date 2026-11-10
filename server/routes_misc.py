@@ -306,17 +306,26 @@ def api_app_release_hook():
     return jsonify({'ok': False, 'error': 'need tag + download_url'}), 400
 
 
+@app.route('/api/app/altstore-beta', methods=['GET'])
 @app.route('/api/app/altstore', methods=['GET'])
 def api_app_altstore():
-    """AltStore source JSON, always pointing at the newest build-N release.
-    Two entries when the Asia file-CDN mirror is known: the mirror first (a
-    direct file host, no GitHub round trip) and the Cloudflare-proxied GitHub
-    URL second as the fallback. Same bundle ID and version on both, which is
-    what makes the second one a mirror rather than a second app to install.
-    One entry otherwise. Submit this URL on altdirect.app for
-    direct-install links."""
-    from .release_info import ALTSTORE_ICON, latest_release, worker_url
-    rel = latest_release()
+    """AltStore source JSON. TWO CHANNELS, two URLs:
+      /api/app/altstore       -> STABLE, the promoted build (what installed
+                                 devices get; also the default when no
+                                 promote has happened yet: GitHub's own
+                                 /releases/latest, prereleases excluded);
+      /api/app/altstore-beta  -> BETA, the newest CI build (every build lands
+                                 here first; /api/app/altstore?channel=beta
+                                 is the same source).
+    Two entries per source when the Asia file-CDN mirror is known: the mirror
+    first (a direct file host, no GitHub round trip) and the Cloudflare-
+    proxied GitHub URL second as the fallback. Same bundle ID and version on
+    both, which is what makes the second one a mirror rather than a second
+    app to install."""
+    from .release_info import ALTSTORE_ICON, channel_release, worker_url
+    channel = 'beta' if (request.path.endswith('-beta')
+                         or request.args.get('channel') == 'beta') else 'stable'
+    rel = channel_release(channel)
     if not rel or not rel.get('download_url'):
         return jsonify({'error': 'No release with an IPA asset found'}), 503
     tag = rel.get('tag') or 'build-?'
@@ -343,12 +352,14 @@ def api_app_altstore():
     if asia and asia != cloudflare:
         # Mirror first: a direct file host beats a proxied GitHub asset.
         apps = [
-            _app('YouTube Music', asia, f'YTMusicUltimate ({tag}) -- Asia CDN'),
+            _app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
+                 asia, f'YTMusicUltimate ({tag}) -- Asia CDN'),
             _app('YouTube Music (Cloudflare CDN)', cloudflare,
                  f'YTMusicUltimate ({tag}) -- GitHub via Cloudflare proxy'),
         ]
     else:
-        apps = [_app('YouTube Music', cloudflare, f'YTMusicUltimate ({tag})')]
+        apps = [_app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
+                     cloudflare, f'YTMusicUltimate ({tag})')]
     payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',

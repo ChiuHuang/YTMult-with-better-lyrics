@@ -108,6 +108,31 @@ def admin_logs_clear():
 
 
 # ---------------------------------------------------------------
+# Release channels: every CI build lands in BETA (webhook records it),
+# promote moves the stable pointer that /api/app/altstore and
+# /api/update serve. The GitHub-side prerelease flag is flipped with
+# the gh CLI on the host (`gh release edit build-N --prerelease=false
+# --latest`) -- this server holds no GitHub token.
+# ---------------------------------------------------------------
+@app.route('/api/admin/channels', methods=['GET'])
+@login_required
+def admin_channels():
+    from .release_info import channels_state
+    return jsonify({'ok': True, **channels_state()})
+
+
+@app.route('/api/admin/channels/promote', methods=['POST'])
+@login_required
+def admin_channels_promote():
+    from .release_info import promote
+    tag = ((request.get_json(silent=True) or {}).get('tag') or '').strip()
+    rec = promote(tag)
+    if not rec:
+        return jsonify({'ok': False, 'error': f'no release found for tag {tag or "?"}'}), 404
+    return jsonify({'ok': True, 'stable': tag})
+
+
+# ---------------------------------------------------------------
 # App settings (tweak remote config): dashboard CRUD, values served
 # publicly at GET /api/app/settings (routes_misc).
 # ---------------------------------------------------------------

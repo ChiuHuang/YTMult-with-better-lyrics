@@ -11,7 +11,7 @@ import time as time_module
 
 import requests
 
-from .paths import MIRROR_FILE
+from .paths import MIRROR_FILE, BUILDS_FILE
 
 GH_REPO = os.environ.get('YTMU_GH_REPO', 'ChiuHuang/YTMult-with-better-lyrics')
 # Stable AltStore icon (Asia file CDN). Release-asset icon.png is preferred
@@ -26,6 +26,162 @@ WORKER_PREFIX = os.environ.get(
 
 _CACHE = {'at': 0.0, 'release': None}
 _TTL = 600
+
+# The channel layer. TWO channels, expressed on BOTH sides:
+#   GitHub   a fresh CI release is born `prerelease: true` (beta); promoting
+#            flips the flag AND Latest (`gh release edit build-N --prerelease
+#            =false --latest`), which also makes /releases/latest answer with
+#            exactly the stable build;
+#   server   the webhook records every build in the builds store as beta, and
+#            an explicit promote moves the stable pointer. The store is the
+#            source of truth for the AltStore sources (it carries the Asia
+#            URL, which the GitHub API can only recover from release bodies).
+# An installed device reads the stable source; the beta source is a separate
+# URL for testers. New builds never reach stable on their own.
+_BUILDS = {'loaded': False, 'builds': {}}
+_STABLE = {'tag': ''}
+
+
+def _load_builds():
+    if _BUILDS['loaded']:
+        return
+    _BUILDS['loaded'] = True
+    try:
+        with open(BUILDS_FILE, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d.get('builds'), dict):
+            _BUILDS['builds'] = d['builds']
+        if isinstance(d.get('stable'), str):
+            _STABLE['tag'] = d['stable']
+    except Exception:
+        pass
+
+
+def _save_builds():
+    try:
+        os.makedirs(os.path.dirname(BUILDS_FILE) or '.', exist_ok=True)
+        tmp = BUILDS_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'builds': _BUILDS['builds'], 'stable': _STABLE['tag']}, f)
+        os.replace(tmp, BUILDS_FILE)
+    except Exception as e:
+        print(f"[Release] [WARN] channel state not persisted: {e}")
+
+
+def _run_number(tag):
+    m = re.search(r'(\d+)$', tag or '')
+    return int(m.group(1)) if m else 0
+
+
+def record_build(payload, channel='beta'):
+    """Webhook/poll entry: remember a build in the channel store. Every build
+    lands as beta; stable changes only through promote()."""
+    tag = (payload or {}).get('tag') or ''
+    if not tag or not payload.get('download_url'):
+        return None
+    _load_builds()
+    prev = _BUILDS['builds'].get(tag) or {}
+    rec = {
+        'tag': tag,
+        'published_at': payload.get('published_at', ''),
+        'size': payload.get('size', 0),
+        'download_url': payload['download_url'],
+        'icon_url': payload.get('icon_url'),
+        'notes': _clean_notes(payload.get('notes', '')),
+        'asia_url': payload.get('asia_url'),
+        'channel': channel if prev.get('channel') not in ('stable',) else 'stable',
+    }
+    _BUILDS['builds'][tag] = rec
+    _save_builds()
+    return rec
+
+
+def _fetch_release_by_tag(tag):
+    """One release from the GitHub API by tag, as a channel record, or None."""
+    try:
+        r = requests.get(
+            f'https://api.github.com/repos/{GH_REPO}/releases/tags/{tag}',
+            headers={'Accept': 'application/vnd.github+json'}, timeout=8)
+        r.raise_for_status()
+        j = r.json()
+        asset = icon = None
+        for a in j.get('assets') or []:
+            name = a.get('name') or ''
+            if name.endswith('.ipa') and not asset:
+                asset = a
+            if name.lower() == 'icon.png':
+                icon = a
+        if not asset:
+            return None
+        t = j.get('tag_name') or tag
+        return {
+            'tag': t,
+            'published_at': j.get('published_at') or '',
+            'size': asset.get('size') or 0,
+            'download_url': asset.get('browser_download_url'),
+            'icon_url': (icon or {}).get('browser_download_url'),
+            'notes': _clean_notes(j.get('body') or ''),
+            'asia_url': asia_url_for(t, j.get('body') or ''),
+            'channel': 'beta',
+        }
+    except Exception:
+        return None
+
+
+def promote(tag):
+    """Move a build to the STABLE channel. A tag the webhook never saw is
+    fetched from GitHub by tag first. Returns the record or None."""
+    if not tag:
+        return None
+    _load_builds()
+    rec = _BUILDS['builds'].get(tag)
+    if not rec:
+        rec = _fetch_release_by_tag(tag)
+        if not rec:
+            return None
+        _BUILDS['builds'][tag] = rec
+    rec['channel'] = 'stable'
+    _STABLE['tag'] = tag
+    _save_builds()
+    print(f"[Release] [OK] promoted {tag} to stable")
+    return rec
+
+
+def channels_state():
+    """What the dashboard shows: the stable pointer plus every recorded
+    build, newest first."""
+    _load_builds()
+    builds = [
+        dict(v, tag=k) for k, v in
+        sorted(_BUILDS['builds'].items(), key=lambda kv: _run_number(kv[0]), reverse=True)
+    ]
+    return {'stable': _STABLE['tag'] or None, 'builds': builds}
+
+
+def latest_release(channel='stable'):
+    """Newest release with an .ipa asset FOR A CHANNEL, webhook push
+    preferred, GitHub API fallback. Returns dict or None. Never raises."""
+    _load_builds()
+    if channel == 'beta':
+        # The newest RECORD (the webhook is instant and carries the Asia
+        # URL); the GitHub listing below is the fallback for a server that
+        # never saw the hook.
+        for tag in sorted(_BUILDS['builds'], key=_run_number, reverse=True):
+            rec = _BUILDS['builds'][tag]
+            if rec.get('download_url'):
+                return rec
+        return _latest_gh(allow_prerelease=True)
+    tag = _STABLE['tag']
+    rec = _BUILDS['builds'].get(tag)
+    if rec and rec.get('download_url'):
+        return rec
+    return _latest_gh(allow_prerelease=False)
+
+
+# The name the routes import. Kept distinct from latest_release so a caller
+# that still imports latest_release gets the channel default (stable) too.
+def channel_release(channel='stable'):
+    return latest_release(channel)
 
 # The Asia file-CDN URL of a build is not derivable: the workflow uploads the
 # IPA, gets an opaque /dl/pub/<uuid>/<hash> path back and hands it to us. It
@@ -106,18 +262,31 @@ def worker_url(url):
         return url
     return prefix + url
 
-def latest_release():
-    """Newest release with an .ipa asset, webhook push preferred, GitHub
-    API fallback. Returns dict or None. Never raises."""
+def _latest_gh(allow_prerelease=False):
+    """GitHub API fallback for a channel: stable reads /releases/latest
+    (prereleases excluded by GitHub itself); beta walks the list endpoint
+    newest-first and takes the first release with an .ipa asset. Returns
+    dict or None. Never raises."""
     now = time_module.time()
     if _CACHE['release'] and now - _CACHE['at'] < _TTL:
         return _CACHE['release']
     try:
-        r = requests.get(
-            f'https://api.github.com/repos/{GH_REPO}/releases/latest',
-            headers={'Accept': 'application/vnd.github+json'}, timeout=8)
+        if allow_prerelease:
+            r = requests.get(
+                f'https://api.github.com/repos/{GH_REPO}/releases?per_page=15',
+                headers={'Accept': 'application/vnd.github+json'}, timeout=8)
+        else:
+            r = requests.get(
+                f'https://api.github.com/repos/{GH_REPO}/releases/latest',
+                headers={'Accept': 'application/vnd.github+json'}, timeout=8)
         r.raise_for_status()
         j = r.json()
+        j = j if not allow_prerelease else next(
+            (one for one in j if any(
+                (a.get('name') or '').endswith('.ipa') for a in one.get('assets') or [])),
+            None)
+        if not j:
+            return _CACHE['release']
         asset = None
         icon_asset = None
         for a in j.get('assets') or []:
@@ -148,7 +317,9 @@ def latest_release():
         return _CACHE['release']
 
 def update_cache(payload=None):
-    """Webhook entry: replace the cached release with Actions data.
+    """Webhook entry: replace the cached release with Actions data, and
+    register the build in the channel store as BETA (every build lands in
+    beta first; stable changes only through promote()).
     Needs {tag, download_url}; returns True when stored."""
     global _CACHE
     if payload and payload.get('tag') and payload.get('download_url'):
@@ -168,6 +339,7 @@ def update_cache(payload=None):
         asia = (payload.get('asia_url') or '').strip()
         if asia:
             _write_mirror(payload['tag'], asia)
+        record_build(payload, channel='beta')
         return True
     _CACHE['at'] = 0.0
     return False

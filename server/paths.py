@@ -40,6 +40,10 @@ RENAME_FILE = os.path.join(DATA_DIR, 'rename.json')
 # after a restart. Deliberately NOT in _MIGRATE_FILES: it is new state, there
 # is no legacy `cache/` copy to rescue.
 MIRROR_FILE = os.path.join(DATA_DIR, 'release_mirror.json')
+# The channel state: every CI build registers here (beta first), the stable
+# pointer moves only through an explicit promote. Served by /api/app/altstore
+# and /api/update, so a restart must not lose it.
+BUILDS_FILE = os.path.join(DATA_DIR, 'release_builds.json')
 PROVIDER_FILE = os.path.join(DATA_DIR, 'provider.json')
 UNLYRICED_FILE = os.path.join(DATA_DIR, 'library_unlyriced.jsonl')
 

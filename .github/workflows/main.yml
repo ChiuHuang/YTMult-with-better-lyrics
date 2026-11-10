@@ -158,6 +158,10 @@ jobs:
             YTMusicUltimate.ipa
             main/Resources/icon.png
           draft: false
+          # TWO CHANNELS: a fresh build is born in BETA (prerelease), so
+          # /releases/latest keeps answering with the promoted stable build.
+          # Promotion moves it over: gh release edit build-N --prerelease=false --latest
+          prerelease: true
           body: |
             <div align="center">
               <img src="https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png" width="128" height="128" alt="YTMusicUltimate Icon">

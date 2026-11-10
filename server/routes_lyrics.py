@@ -115,12 +115,15 @@ def api_update():
     client_commit = (request.args.get('commit') or '').strip().lower()
     if client_commit and not re.fullmatch(r'[0-9a-f]{7,64}', client_commit):
         return jsonify({'error': 'Invalid commit hash'}), 400
+    # Channel: stable is what installed devices get (the promoted build);
+    # a beta opt-in reads the newest CI build instead.
+    channel = 'beta' if request.args.get('channel') == 'beta' else 'stable'
     latest_commit = latest_tweak_commit()
     if not latest_commit:
         return jsonify({'error': 'Update service unavailable'}), 503
     is_current = bool(client_commit) and latest_commit.lower().startswith(client_commit)
-    from .release_info import latest_release, worker_url
-    rel = latest_release()
+    from .release_info import channel_release, worker_url
+    rel = channel_release(channel)
     dl = (rel or {}).get('download_url')
     asia = (rel or {}).get('asia_url')
     return jsonify({
@@ -129,6 +132,7 @@ def api_update():
         'update_available': bool(client_commit) and not is_current,
         'repository': 'https://github.com/ChiuHuang/ytmusicultimate',
         'build': (rel or {}).get('tag'),
+        'channel': channel,
         'download_url': dl,
         'download_url_proxy': worker_url(dl) if dl else None,
         'asia_url': asia,
