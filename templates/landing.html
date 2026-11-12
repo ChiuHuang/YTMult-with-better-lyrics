@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>YTMusicUltimate</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; color: #1d1d1f; line-height: 1.55; background: #fff; }
+    h1 { font-size: 28px; margin: 40px 0 6px; }
+    h2 { font-size: 17px; margin: 28px 0 8px; }
+    p, li { font-size: 14.5px; }
+    .muted { color: #6e6e73; font-size: 13px; }
+    .btns { margin: 24px 0 8px; display: flex; gap: 12px; flex-wrap: wrap; }
+    .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-size: 14.5px; text-decoration: none; border: 1px solid #d2d2d7; color: #1d1d1f; }
+    .btn.primary { background: #1d1d1f; border-color: #1d1d1f; color: #fff; }
+  </style>
+</head>
+<body>
+  <h1>YTMusicUltimate</h1>
+  <p class="muted">A tweak for YouTube Music on iOS, with a companion server.</p>
+
+  <h2>What it does</h2>
+  <ul>
+    <li>Synced lyrics with translations, right inside the YouTube Music app.</li>
+    <li>Song downloads that keep playing when you are offline.</li>
+    <li>Everything is served by this server, privately. See the <a href="/privacy">privacy policy</a>.</li>
+  </ul>
+
+  <h2>Dashboard</h2>
+  <p>The dashboard is where the owner manages the server: lyrics library, logs, updates and device pairing.</p>
+  <div class="btns">
+    <a class="btn primary" href="/login">Open dashboard</a>
+    <a class="btn" href="/privacy">Privacy policy</a>
+  </div>
+
+  <p class="muted">This page describes the server at {{ request.host }} only.</p>
+</body>
+</html>
