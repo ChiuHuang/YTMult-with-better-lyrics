@@ -228,7 +228,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 6;
-    if (section == 1) return 4;
+    if (section == 1) return 3;
     if (section == 2) return 3;
     if (section == 3) return 5;
     return 0;
@@ -282,18 +282,6 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
         return cell;
     }
 
-    if (row == 3) {
-        cell.textLabel.text = LOC(@"DEBUG_APPLOG");
-        cell.detailTextLabel.text = [LOC(@"DEBUG_APPLOG_DESC") stringByAppendingString:@" (Disabled on Sideload / LiveContainer)"];
-        cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
-        cell.imageView.image = [UIImage systemImageNamed:@"text.bubble"];
-        UISwitch *sw = [[UISwitch alloc] init];
-        sw.accessibilityIdentifier = @"sendAppLogCapture";
-        sw.on = NO;
-        sw.enabled = NO;
-        cell.accessoryView = sw;
-        return cell;
-    }
 
     NSString *key = row == 1 ? @"sendDebugLogsToServer" : @"sendLyricsScreenshotDebug";
     NSString *title = row == 1 ? LOC(@"DEBUG_SEND") : LOC(@"DEBUG_SCREENSHOT");
