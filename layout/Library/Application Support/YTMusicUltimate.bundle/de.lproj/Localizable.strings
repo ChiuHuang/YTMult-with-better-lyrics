@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Debug-Events an den Liedtext-Server hochladen, im Dashboard lesbar";
 "DEBUG_SCREENSHOT" = "Debug-Daten zum Screenshot senden";
 "DEBUG_SCREENSHOT_DESC" = "Die UI-Hierarchie nur hochladen, nachdem du einen Screenshot gemacht hast";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Aktionen";
 "DEBUG_COPY" = "Diagnose kopieren";
 "DEBUG_TEST_LOG" = "Testlog senden";

@@ -171,6 +171,9 @@
 "DEBUG_SCREENSHOT" = "傳送截圖除錯資料";
 
 "DEBUG_SCREENSHOT_DESC" = "只有在你截圖時才上傳 UI 層級資料";
+"DEBUG_APPLOG" = "應用程式日誌擷取";
+
+"DEBUG_APPLOG_DESC" = "上傳 App 自己的日誌行（NSLog 與 os_log 文字）。respring 後生效";
 
 "DEBUG_ACTIONS" = "操作";
 

@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "デバッグイベントを歌詞サーバーに送信し、ダッショウドで確認できます";
 "DEBUG_SCREENSHOT" = "スクリーンショットのデバッグ情報を送信";
 "DEBUG_SCREENSHOT_DESC" = "スクリーンショットを揍った後にのみ UI 階層を送信します";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "アクション";
 "DEBUG_COPY" = "診断情報をコピー";
 "DEBUG_TEST_LOG" = "テストログを送信";

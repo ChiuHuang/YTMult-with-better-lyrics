@@ -171,6 +171,9 @@
 "DEBUG_SCREENSHOT" = "发送截图调试数据";
 
 "DEBUG_SCREENSHOT_DESC" = "只有在你截图时才上传 UI 层级数据";
+"DEBUG_APPLOG" = "应用日志捕获";
+
+"DEBUG_APPLOG_DESC" = "上传 App 自身的日志行（NSLog 与 os_log 文本）。respring 后生效";
 
 "DEBUG_ACTIONS" = "操作";
 

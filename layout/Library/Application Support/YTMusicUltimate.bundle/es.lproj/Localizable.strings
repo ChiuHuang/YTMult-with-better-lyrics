@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Sube los eventos de depuración al servidor de letras, legibles en el panel";
 "DEBUG_SCREENSHOT" = "Enviar datos de depuración de la captura";
 "DEBUG_SCREENSHOT_DESC" = "Sube la jerarquía de la interfaz solo después de hacer una captura";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Acciones";
 "DEBUG_COPY" = "Copiar diagnóstico";
 "DEBUG_TEST_LOG" = "Enviar registro de prueba";

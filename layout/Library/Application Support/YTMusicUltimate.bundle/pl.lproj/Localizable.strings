@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Wysyłaj zdarzenia diagnostyczne do serwera tekstów, widoczne w pulpicie";
 "DEBUG_SCREENSHOT" = "Wyślij dane diagnostyczne zrzutu ekranu";
 "DEBUG_SCREENSHOT_DESC" = "Wysyłaj hierarchię UI tylko po zrobieniu zrzutu ekranu";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Akcje";
 "DEBUG_COPY" = "Kopiuj diagnostykę";
 "DEBUG_TEST_LOG" = "Wyślij dziennik testowy";

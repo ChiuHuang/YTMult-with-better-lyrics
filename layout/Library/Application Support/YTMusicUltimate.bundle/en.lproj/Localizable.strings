@@ -172,6 +172,10 @@
 
 "DEBUG_SCREENSHOT_DESC" = "Upload a UI hierarchy only after you take a screenshot";
 
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+
 "DEBUG_ACTIONS" = "Actions";
 
 "DEBUG_COPY" = "Copy diagnostics";

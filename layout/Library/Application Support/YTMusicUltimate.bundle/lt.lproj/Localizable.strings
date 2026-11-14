@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Siųsti derinimo įvykius į dainos žodžių serverį, matomus skydelyje";
 "DEBUG_SCREENSHOT" = "Siųsti ekrano nuotraukos derinimą";
 "DEBUG_SCREENSHOT_DESC" = "Siųsti UI hierarchiją tik po ekrano nuotraukos";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Veiksmai";
 "DEBUG_COPY" = "Kopijuoti diagnostiką";
 "DEBUG_TEST_LOG" = "Siųsti testo žurnalą";

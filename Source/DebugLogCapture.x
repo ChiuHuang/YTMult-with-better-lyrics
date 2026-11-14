@@ -17,6 +17,12 @@
 // FORMAT STRING because the packed argument buffer is a private encoding, not
 // text -- the class/endpoint names in that string are the point, the values
 // are usually a video id we already have.
+//
+// INSTALL-TIME GATE: the hooks are only installed when the pref is on
+// (Debug page > App log capture). They wrap two functions the app calls from
+// launch on, from every thread it has, so a stable install must never pay
+// for them -- and a bisect of the on-open crash starts by NOT installing.
+// A respring applies the toggle, same as every other launch-time setting.
 // ---------------------------------------------------------------------------
 
 // libsystem_trace, no public header: every app that uses the os_log() macro
@@ -52,6 +58,8 @@ static void YTMUCaptureAppLog(NSString *src, NSString *text) {
     g_ytmuLogInCapture = NO;
 }
 
+%group YTMULogCapture
+
 // NSLog(format, ...) is a thin wrapper over NSLogv, so the hook formats the
 // line itself and hands the original variadic list to NSLogv -- %orig cannot
 // forward `...`, and calling NSLogv (not the hooked symbol) is not recursion.
@@ -74,4 +82,15 @@ static void YTMUCaptureAppLog(NSString *src, NSString *text) {
         if (text.length) YTMUCaptureAppLog([NSString stringWithUTF8String:YTMUOSLogTypeName(type)], text);
     }
     %orig;
+}
+
+%end
+
+// Install only when the pref says so. Missing key = off: a build that gains
+// this file must not change the behaviour of installs that never asked.
+%ctor {
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    if ([d[@"sendAppLogCapture"] boolValue]) {
+        %init(YTMULogCapture);
+    }
 }

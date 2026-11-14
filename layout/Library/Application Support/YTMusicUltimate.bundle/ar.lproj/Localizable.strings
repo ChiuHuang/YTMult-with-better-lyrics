@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "ارفع أحداث التنقيح إلى خادم الكلمات لتظهر في لوحة المعلومات";
 "DEBUG_SCREENSHOT" = "إرسال بيانات تنقيح لقطة الشاشة";
 "DEBUG_SCREENSHOT_DESC" = "ارفع تسلسل واجهة المستخدم فقط بعد التقاط لقطة شاشة";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "الأفعال";
 "DEBUG_COPY" = "نسخ التشخيص";
 "DEBUG_TEST_LOG" = "إرسال سجل الاختبار";

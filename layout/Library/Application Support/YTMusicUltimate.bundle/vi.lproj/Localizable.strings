@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Tải sự kiện gỡ lỗi lên máy chủ lời bài hát, xem được trong bảng điều khiển";
 "DEBUG_SCREENSHOT" = "Gửi dữ liệu gỡ lỗi ảnh chụp màn hình";
 "DEBUG_SCREENSHOT_DESC" = "Chỉ tải lên cấu trúc phân cấp UI sau khi bạn chụp màn hình";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Tác vụ";
 "DEBUG_COPY" = "Sao chép chẩn đoán";
 "DEBUG_TEST_LOG" = "Gửi nhật ký kiểm thử";

@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "Hata ayıklama olaylarını şarkı sözleri sunucusuna yükle, panelde okunur";
 "DEBUG_SCREENSHOT" = "Ekran görüntüsü hata ayıklaması gönder";
 "DEBUG_SCREENSHOT_DESC" = "UI hiyerarşisini yalnızca ekran görüntüsü aldıktan sonra yükle";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Eylemler";
 "DEBUG_COPY" = "Tanılamayı kopyala";
 "DEBUG_TEST_LOG" = "Test günlüğünü gönder";

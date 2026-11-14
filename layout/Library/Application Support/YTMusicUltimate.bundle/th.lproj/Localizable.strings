@@ -147,6 +147,9 @@
 "DEBUG_SEND_DESC" = "อัปโหลดเหตุการณ์ดีบักไปยังเซิร์ฟเวอร์เนื้อเพลง ดูได้ในแดชบอร์ด";
 "DEBUG_SCREENSHOT" = "ส่งข้อมูลดีบักภาพหน้าจอ";
 "DEBUG_SCREENSHOT_DESC" = "อัปโหลดโครงสร้าง UI เฉพาะหลังคุณถ่ายภาพหน้าจอ";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "การทำงาน";
 "DEBUG_COPY" = "คัดลอกข้อมูลวินิจฉัย";
 "DEBUG_TEST_LOG" = "ส่งบันทึกการทดสอบ";

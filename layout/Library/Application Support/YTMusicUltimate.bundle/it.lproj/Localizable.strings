@@ -146,6 +146,9 @@
 "DEBUG_SEND_DESC" = "Carica gli eventi di debug sul server dei testi, leggibili nella dashboard";
 "DEBUG_SCREENSHOT" = "Invia dati di debug dello screenshot";
 "DEBUG_SCREENSHOT_DESC" = "Carica la gerarchia della UI solo dopo aver fatto uno screenshot";
+"DEBUG_APPLOG" = "App log capture";
+
+"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
 "DEBUG_ACTIONS" = "Azioni";
 "DEBUG_COPY" = "Copia diagnostica";
 "DEBUG_TEST_LOG" = "Invia log di prova";
