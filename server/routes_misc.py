@@ -314,6 +314,8 @@ def api_app_altstore():
                                  devices get; also the default when no
                                  promote has happened yet: GitHub's own
                                  /releases/latest, prereleases excluded);
+                                 this source ALSO lists the beta build as a
+                                 second app, so one added source shows both;
       /api/app/altstore-beta  -> BETA, the newest CI build (every build lands
                                  here first; /api/app/altstore?channel=beta
                                  is the same source).
@@ -321,7 +323,8 @@ def api_app_altstore():
     first (a direct file host, no GitHub round trip) and the Cloudflare-
     proxied GitHub URL second as the fallback. Same bundle ID and version on
     both, which is what makes the second one a mirror rather than a second
-    app to install."""
+    app to install; the beta entries share the bundle ID too but carry a
+    DIFFERENT version, which is what makes them a second app."""
     from .release_info import ALTSTORE_ICON, channel_release, worker_url
     channel = 'beta' if (request.path.endswith('-beta')
                          or request.args.get('channel') == 'beta') else 'stable'
@@ -335,40 +338,53 @@ def api_app_altstore():
     # = the repo's raw icon.png, 200 image/png) is the durable second. The
     # Asia CDN "stable" icon 403'd -- those opaque /dl/pub/<uuid>/<hash> URLs
     # rotate per upload, which is exactly how the icon got "forgotten".
-    icon_url = (rel.get('icon_url') or ALTSTORE_ICON
-                or 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
-    asia = (rel.get('asia_url') or '').strip()
-    cloudflare = worker_url(rel['download_url'])
+    default_icon = (ALTSTORE_ICON
+                    or 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
 
-    def _app(name, dl, desc):
+    def _entry(r, ver, name, dl, desc):
         return {
             'name': name,
             'bundleIdentifier': 'com.google.ios.youtubemusic',
             'developerName': 'ChiuHuang',
-            'version': version,
-            'versionDate': rel.get('published_at') or '',
+            'version': ver,
+            'versionDate': r.get('published_at') or '',
             'versionDescription': desc,
             'downloadURL': dl,
             'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
-            'iconURL': icon_url,
-            'size': rel.get('size') or 0,
+            'iconURL': r.get('icon_url') or default_icon,
+            'size': r.get('size') or 0,
         }
+
+    def _channel_apps(r, ctag, cname, note):
+        """Mirror pair for one channel: Asia CDN first when known, the
+        Cloudflare-proxied GitHub URL second as the fallback."""
+        asia = (r.get('asia_url') or '').strip()
+        cf = worker_url(r['download_url'])
+        if asia and asia != cf:
+            return [_entry(r, ctag, cname, asia,
+                           f'YTMusicUltimate ({ctag}, {note}) -- Asia CDN'),
+                    _entry(r, ctag, f'{cname} (Cloudflare CDN)', cf,
+                           f'YTMusicUltimate ({ctag}, {note}) -- GitHub via Cloudflare proxy')]
+        return [_entry(r, ctag, cname, cf, f'YTMusicUltimate ({ctag}, {note})')]
 
     # The channel is a LABEL on the same packed binary: debug features are
     # runtime-gated to the paired owner device in every build, so a stable
     # install never sees them. The wording tells the user what they hold.
     stable_note = 'stable -- debug disabled' if channel == 'stable' else 'beta -- owner/debug build'
-    if asia and asia != cloudflare:
-        # Mirror first: a direct file host beats a proxied GitHub asset.
-        apps = [
-            _app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
-                 asia, f'YTMusicUltimate ({tag}, {stable_note}) -- Asia CDN'),
-            _app('YouTube Music (Cloudflare CDN)', cloudflare,
-                 f'YTMusicUltimate ({tag}, {stable_note}) -- GitHub via Cloudflare proxy'),
-        ]
-    else:
-        apps = [_app('YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)',
-                     cloudflare, f'YTMusicUltimate ({tag}, {stable_note})')]
+    cname = 'YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)'
+    apps = _channel_apps(rel, version, cname, stable_note)
+
+    # The stable source also lists the newest beta build as a second app
+    # (same bundle ID, different version), so users who added ONE source see
+    # both. Redundant when the promoted build IS the newest build.
+    if channel == 'stable':
+        beta = channel_release('beta')
+        if beta and beta.get('download_url'):
+            btag = beta.get('tag') or 'build-?'
+            if btag != tag:
+                bver = btag[6:] if btag.startswith('build-') else btag
+                apps += _channel_apps(beta, bver, 'YouTube Music (Beta)',
+                                      'beta -- owner/debug build')
     payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',

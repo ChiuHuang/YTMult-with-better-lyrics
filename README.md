@@ -29,8 +29,11 @@ here and can be self-hosted.
 
 ## Install
 
-- **AltStore / SideStore / Feather:** add this source
-  `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
+- **AltStore / SideStore / Feather:** add this source —
+  [one-tap add via AltDirect](https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore)
+  or paste the URL:
+  - Stable (promoted builds): `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
+  - Beta (every push, newest build first): `https://ytmtranslate.chiuhuang.dev/api/app/altstore-beta`
 - **IPA:** download the latest `build-N` from
   [Releases](https://github.com/ChiuHuang/ytmusicultimate/releases). Every
   push to `main` builds one.
