@@ -58,39 +58,8 @@ static void YTMUCaptureAppLog(NSString *src, NSString *text) {
     g_ytmuLogInCapture = NO;
 }
 
-%group YTMULogCapture
-
-// NSLog(format, ...) is a thin wrapper over NSLogv, so the hook formats the
-// line itself and hands the original variadic list to NSLogv -- %orig cannot
-// forward `...`, and calling NSLogv (not the hooked symbol) is not recursion.
-%hookf(void, NSLog, NSString *format, ...) {
-    va_list args, forward;
-    va_start(args, format);
-    va_copy(forward, args);
-    NSString *text = [[NSString alloc] initWithFormat:format ?: @"" arguments:args];
-    va_end(args);
-    if (text.length) YTMUCaptureAppLog(@"nslog", text);
-    g_ytmuLogForwarding = YES;
-    NSLogv(format, forward);
-    g_ytmuLogForwarding = NO;
-    va_end(forward);
-}
-
-%hookf(void, _os_log_impl, void *dso, void *log, unsigned char type, const char *format, void *buf, unsigned int size) {
-    if (!g_ytmuLogForwarding && format) {
-        NSString *text = [NSString stringWithUTF8String:format];
-        if (text.length) YTMUCaptureAppLog([NSString stringWithUTF8String:YTMUOSLogTypeName(type)], text);
-    }
-    %orig;
-}
-
-%end
-
-// Under sideloaded/LiveContainer execution, system frameworks (Foundation,
+// %hookf on C symbols like NSLog / _os_log_impl is disabled because
+// under sideloaded/LiveContainer execution, system frameworks (Foundation,
 // libsystem_trace) have code signing write protections enforced by kernel.
-// Attempting %hookf on C functions like NSLog or _os_log_impl causes
-// KERN_PROTECTION_FAILURE / CODESIGNING 2 SIGKILL crash on launch.
-// Never install these function hooks in sideloading environments.
-%ctor {
-    // Disabled: %hookf on C symbols triggers CODESIGNING 2 SIGKILL in sideloaded/LiveContainer apps.
-}
+// Attempting %hookf on C functions causes KERN_PROTECTION_FAILURE / CODESIGNING 2
+// SIGKILL crash on launch (verified by crash1.ips).
