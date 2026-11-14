@@ -16,6 +16,7 @@
 #import "Headers/YTIFormatStream.h"
 #import "Headers/YTAlertView.h"
 #import "Headers/ELMNodeController.h"
+#import "Headers/YTMUBulkHook.h"
 #import "LyricsShared.h"
 
 static BOOL YTMU(NSString *key) {
@@ -955,12 +956,236 @@ static void YTMUPlayerCensus2Now(NSString *videoID) {
 
 // Manual run from the Debug settings page: the operator is looking at the
 // dashboard, so the pair gate is the only requirement.
+static void YTMUInstallPlayerTraceHooks(void);  // defined below, next to the trace hooks
+
 void YTMURunPlayerCensus2Manually(void) {
     // YTMUDebugHasToken is file-local in DebugDeviceMode.x; the exported token
     // accessor answers the same question from here.
     if (!YTMUDebugDeviceEnabled() || !YTMUDebugDeviceToken().length) return;
     NSString *vid = g_currentVideoID.length ? g_currentVideoID : YTMUResolveCurrentVideoID();
     YTMUPlayerCensus2Now(vid ?: @"");
+    YTMUInstallPlayerTraceHooks();  // defined below; arms the player-trace pass
+}
+
+// ---------------------------------------------------------------------------
+// PLAYER TRACE (census3). census2 named the classes; this records WHICH of
+// them the playback pipeline actually touches, online and offline, so the
+// offline injection lands on a measured point instead of a name. Four hooks,
+// each a pass-through that only writes records:
+//   loader-promise    -[YTPlaybackDataLoader playbackDataPromise] -- the fetch
+//                     layer; the promise class, the request class, and
+//                     whether YT itself holds an overridden player-response
+//                     promise.
+//   content-data      -[YTCorePlaybackController contentPlaybackData] -- the
+//                     playback stack's current data and the response inside.
+//   state             -[YTPlayerStallController playerViewController:
+//                     didChangeToState:] -- the state machine; where an
+//                     offline play dies is where the injection goes.
+//   offline-provider  -[YTOfflineVideoPlayerResponseProvider
+//                     offlinePlayerResponseForPlayableVideoWithID:
+//                     responseBlock:errorBlock:] -- YT's OWN offline response
+//                     source, recorded WITH the raw block type encodings, so
+//                     the injection can call the response block correctly.
+// Everything is owner-debug gated and pass-through: a wrong read loses a
+// record, it never breaks playback. Installed with the census (once per
+// process), so traces cover exactly the download-tap flow they serve.
+// ---------------------------------------------------------------------------
+
+static NSString *YTMUResponseVideoID(id response);
+
+// Raw args must be classified before any message send: an enum passed as an
+// int is a pointer we must never dereference. Heap objects on iOS live high;
+// enums/BOOLs are small; tagged pointers carry the high bit and remain safe
+// to introspect.
+static NSString *YTMUTraceArg(id v) {
+    uintptr_t p = (uintptr_t)v;
+    if (!p) return @"nil";
+    if (p < 0x1000000ULL) return [NSString stringWithFormat:@"int %ld", (long)p];
+    @try {
+        return [NSString stringWithFormat:@"%@ (%@)", NSStringFromClass(object_getClass(v)), [v description]];
+    } @catch (NSException *e) {
+        return @"(unprintable)";
+    }
+}
+
+// The block type encoding ("@?@@"...), straight out of the block descriptor.
+// clang blocks carry it; the injection needs it to call the provider's
+// response block with the right shape. Genuine clang blocks are validated by
+// their isa class first, so a foreign blob reads as unknown instead of
+// dereferencing garbage.
+static NSString *YTMUTraceBlockSignature(id block) {
+    if (!block) return nil;
+    struct YTMUBlockDesc {
+        unsigned long reserved;
+        unsigned long size;
+        const void *copy;
+        const void *dispose;
+        const char *signature;
+    };
+    struct YTMUBlockLit {
+        void *isa;
+        int flags;
+        int reserved;
+        void *invoke;
+        struct YTMUBlockDesc *descriptor;
+    };
+    @try {
+        NSString *isaName = NSStringFromClass(object_getClass(block));
+        if (![isaName hasPrefix:@"_NSConcrete"]) return nil;
+        struct YTMUBlockLit *lit = (__bridge struct YTMUBlockLit *)block;
+        const int kHasSignature = (1 << 30);
+        const int kHasCopyDispose = (1 << 25);
+        if (!(lit->flags & kHasSignature)) return @"(no signature)";
+        const char *sig = (lit->flags & kHasCopyDispose)
+            ? lit->descriptor->signature
+            : ((const char **)lit->descriptor)[2];
+        return sig ? @(sig) : nil;
+    } @catch (NSException *e) {
+        return @"(unreadable)";
+    }
+}
+
+static void YTMUTraceNote(NSString *point, NSString *vid, NSArray *lines) {
+    if (!YTMUDebugDeviceEnabled()) return;
+    @try {
+        YTMUDebugDeviceNoteProbe(@"player-trace", vid ?: @"",
+                                 @{ @"evt": @{@"cls": @"evt", @"items": lines} });
+    } @catch (NSException *e) {
+    }
+}
+
+// First-touch dedup: getters fire several times per song and one record each
+// is the fact we want. Keyed by point+vid, reset naturally by the next song.
+static BOOL YTMUTraceFirst(NSString *point, NSString *vid) {
+    static NSMutableSet *seen;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ seen = [NSMutableSet set]; });
+    NSString *key = [NSString stringWithFormat:@"%@|%@", point, vid ?: @"-"];
+    @synchronized(seen) {
+        if ([seen containsObject:key]) return NO;
+        [seen addObject:key];
+        return YES;
+    }
+}
+
+// Pass-through always; the record is written only on the first call per song.
+static id YTMUTraceLoaderPromise(id self, SEL _cmd) {
+    id ret = nil;
+    @try {
+        IMP orig = YTMUOrigIMPFor(self, _cmd);
+        if (orig) ret = ((id (*)(id, SEL))orig)(self, _cmd);
+    } @catch (NSException *e) {
+        return ret;
+    }
+    @try {
+        if (!YTMUTraceFirst(@"loader-promise", g_currentVideoID)) return ret;
+        NSMutableArray *lines = [NSMutableArray array];
+        [lines addObject:[NSString stringWithFormat:@"promiseClass=%@",
+            ret ? NSStringFromClass(object_getClass(ret)) : @"(nil)"]];
+        id req = nil;
+        @try { req = [self valueForKey:@"playbackRequest"]; } @catch (NSException *e) { req = nil; }
+        [lines addObject:[NSString stringWithFormat:@"req=%@", YTMUTraceArg(req)]];
+        id ovr = nil;
+        @try { ovr = [self valueForKey:@"overriddenPlayerResponsePromise"]; } @catch (NSException *e) { ovr = nil; }
+        [lines addObject:[NSString stringWithFormat:@"overridePromise=%@ (%@)",
+            ovr ? @"set" : @"nil", ovr ? NSStringFromClass(object_getClass(ovr)) : @"-"]];
+        YTMUTraceNote(@"loader-promise", g_currentVideoID, lines);
+    } @catch (NSException *e) {
+    }
+    return ret;
+}
+
+static id YTMUTraceContentData(id self, SEL _cmd) {
+    id ret = nil;
+    @try {
+        IMP orig = YTMUOrigIMPFor(self, _cmd);
+        if (orig) ret = ((id (*)(id, SEL))orig)(self, _cmd);
+    } @catch (NSException *e) {
+        return ret;
+    }
+    @try {
+        if (!YTMUTraceFirst(@"content-data", g_currentVideoID)) return ret;
+        NSMutableArray *lines = [NSMutableArray array];
+        [lines addObject:[NSString stringWithFormat:@"data=%@",
+            ret ? NSStringFromClass(object_getClass(ret)) : @"(nil)"]];
+        id pr = nil;
+        @try {
+            if (ret && [ret respondsToSelector:@selector(playerResponse)])
+                pr = ((id (*)(id, SEL))objc_msgSend)(ret, @selector(playerResponse));
+        } @catch (NSException *e) { pr = nil; }
+        [lines addObject:[NSString stringWithFormat:@"responseVid=%@",
+            pr ? (YTMUResponseVideoID(pr) ?: @"(no videoDetails)") : @"(no response)"]];
+        YTMUTraceNote(@"content-data", g_currentVideoID, lines);
+    } @catch (NSException *e) {
+    }
+    return ret;
+}
+
+// The state machine is recorded on EVERY transition (deduped by state+song):
+// the SEQUENCE is the diagnosis -- the last state an offline play reaches is
+// where the injection has to feed data.
+static void YTMUTraceStateChanged(id self, SEL _cmd, id playerVC, id state) {
+    @try {
+        IMP orig = YTMUOrigIMPFor(self, _cmd);
+        if (orig) ((void (*)(id, SEL, id, id))orig)(self, _cmd, playerVC, state);
+    } @catch (NSException *e) {
+        return;
+    }
+    @try {
+        NSString *desc = YTMUTraceArg(state);
+        NSString *key = [NSString stringWithFormat:@"state=%@|%@", desc, g_currentVideoID ?: @"-"];
+        if (!YTMUTraceFirst(key, @"")) return;
+        YTMUTraceNote(@"state", g_currentVideoID, @[ [NSString stringWithFormat:@"%@ %@", desc,
+            playerVC ? NSStringFromClass(object_getClass(playerVC)) : @"(nil vc)"] ]);
+    } @catch (NSException *e) {
+    }
+}
+
+static id YTMUTraceOfflineProvider(id self, SEL _cmd, id videoID, id responseBlock, id errorBlock) {
+    id ret = nil;
+    @try {
+        IMP orig = YTMUOrigIMPFor(self, _cmd);
+        if (orig) ret = ((id (*)(id, SEL, id, id, id))orig)(self, _cmd, videoID, responseBlock, errorBlock);
+    } @catch (NSException *e) {
+        return ret;
+    }
+    @try {
+        if (!YTMUTraceFirst(@"offline-provider", g_currentVideoID)) return ret;
+        NSMutableArray *lines = [NSMutableArray array];
+        [lines addObject:[NSString stringWithFormat:@"vidArg=%@", YTMUTraceArg(videoID)]];
+        [lines addObject:[NSString stringWithFormat:@"responseBlockSig=%@",
+            YTMUTraceBlockSignature(responseBlock) ?: @"?"]];
+        [lines addObject:[NSString stringWithFormat:@"errorBlockSig=%@",
+            YTMUTraceBlockSignature(errorBlock) ?: @"?"]];
+        [lines addObject:[NSString stringWithFormat:@"returned=%@",
+            ret ? NSStringFromClass(object_getClass(ret)) : @"(nil)"]];
+        YTMUTraceNote(@"offline-provider", g_currentVideoID, lines);
+    } @catch (NSException *e) {
+    }
+    return ret;
+}
+
+// Installed once per process next to the census: same owner gate, same
+// download-tap trigger. YTLocalPlaybackController is a protocol name in some
+// builds -- NSClassFromString answers nil for it and the loop skips it.
+static void YTMUInstallPlayerTraceHooks(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        @try {
+            YTMUBulkHook(@[@"YTPlaybackDataLoader"],
+                         @selector(playbackDataPromise), (IMP)YTMUTraceLoaderPromise);
+            YTMUBulkHook(@[@"YTCorePlaybackController", @"YTLocalPlaybackController"],
+                         @selector(contentPlaybackData), (IMP)YTMUTraceContentData);
+            YTMUBulkHook(@[@"YTPlayerStallController"],
+                         @selector(playerViewController:didChangeToState:), (IMP)YTMUTraceStateChanged);
+            YTMUBulkHook(@[@"YTOfflineVideoPlayerResponseProvider"],
+                         @selector(offlinePlayerResponseForPlayableVideoWithID:responseBlock:errorBlock:),
+                         (IMP)YTMUTraceOfflineProvider);
+            NSLog(@"[YTMU-DL] player trace hooks installed");
+        } @catch (NSException *e) {
+            NSLog(@"[YTMU-DL] player trace install failed: %@", e.reason ?: @"?");
+        }
+    });
 }
 
 static void YTMUTakePlayerCensus2(NSString *videoID) {
@@ -968,6 +1193,7 @@ static void YTMUTakePlayerCensus2(NSString *videoID) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         YTMUPlayerCensus2Now(videoID);
+        YTMUInstallPlayerTraceHooks();
     });
 }
 
