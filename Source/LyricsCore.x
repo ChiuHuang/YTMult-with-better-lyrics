@@ -943,8 +943,8 @@ static BOOL YTMUAutoSyncPullOne(NSString *videoID, NSString *lang, BOOL autoZh) 
 
 // The server->device half: ask what the server holds, then download the songs
 // this device does NOT have yet. Serial on purpose -- one at a time keeps the
-// request rate flat and makes the budget exact. Runs on whatever queue the
-// caller chose; YTMUAutoSyncIfDue is called from a background one.
+// request rate flat and makes the budget exact. Runs on the utility queue
+// YTMUAutoSyncIfDue hops to before reaching this; never the main thread.
 static void YTMUAutoSyncPullIfDue(NSString *lang, BOOL autoZh, NSInteger budget) {
     if (budget <= 0) return;
     NSString *listStr = [NSString stringWithFormat:@"%@/api/cache/list?limit=%ld&lang=%@",
@@ -996,11 +996,20 @@ void YTMUAutoSyncIfDue(void) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - [ud doubleForKey:@"YTMUAutoSyncAt"] < 6 * 3600) return;
     [ud setDouble:now forKey:@"YTMUAutoSyncAt"];
-    NSString *lang = YTMUTargetLang();
-    BOOL autoZh = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
+    // Everything below blocks on network semaphores -- up to 20s per request
+    // and per pulled song. Both call sites are MAIN-thread (launch +2s and the
+    // foreground observers), and a slow server pinned the main thread past the
+    // scene-create watchdog allowance: iOS killed the app 0x8BADF00D
+    // (LiveContainer-2026-10-16 .ips: YTMUAutoSyncIfDue ->
+    // _dispatch_semaphore_wait_slow at 19.65s wall clock). The cheap guard
+    // above stays on the caller's thread; everything network-shaped waits on
+    // a queue that is allowed to.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSString *lang = YTMUTargetLang();
+        BOOL autoZh = YTMULyricsPreference(@"lyricsAutoZhConvert", YES);
 
-    NSArray *cacheEntries = YTMULyricsCacheEntries();
-    if (cacheEntries.count) {
+        NSArray *cacheEntries = YTMULyricsCacheEntries();
+        if (cacheEntries.count) {
         NSMutableArray *entries = [NSMutableArray array];
         for (NSDictionary *e in cacheEntries) {
             NSString *vid = e[@"video_id"];
@@ -1046,8 +1055,9 @@ void YTMUAutoSyncIfDue(void) {
                 }
             }
         }
-    }
-    YTMUAutoSyncPullIfDue(lang, autoZh, YTMUAutoSyncPullMax());
+        }
+        YTMUAutoSyncPullIfDue(lang, autoZh, YTMUAutoSyncPullMax());
+    });
 }
 
 // ============================================================
