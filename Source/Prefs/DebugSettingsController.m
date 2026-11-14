@@ -283,17 +283,14 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     }
 
     if (row == 3) {
-        // The log hooks wrap two functions the app calls from launch on, so
-        // they install at the NEXT respring, not live. Off by default on
-        // purpose: a stable install must never pay for them.
         cell.textLabel.text = LOC(@"DEBUG_APPLOG");
-        cell.detailTextLabel.text = LOC(@"DEBUG_APPLOG_DESC");
+        cell.detailTextLabel.text = [LOC(@"DEBUG_APPLOG_DESC") stringByAppendingString:@" (Disabled on Sideload / LiveContainer)"];
         cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
         cell.imageView.image = [UIImage systemImageNamed:@"text.bubble"];
         UISwitch *sw = [[UISwitch alloc] init];
         sw.accessibilityIdentifier = @"sendAppLogCapture";
-        sw.on = [dict[@"sendAppLogCapture"] boolValue];
-        [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
+        sw.on = NO;
+        sw.enabled = NO;
         cell.accessoryView = sw;
         return cell;
     }

@@ -86,11 +86,11 @@ static void YTMUCaptureAppLog(NSString *src, NSString *text) {
 
 %end
 
-// Install only when the pref says so. Missing key = off: a build that gains
-// this file must not change the behaviour of installs that never asked.
+// Under sideloaded/LiveContainer execution, system frameworks (Foundation,
+// libsystem_trace) have code signing write protections enforced by kernel.
+// Attempting %hookf on C functions like NSLog or _os_log_impl causes
+// KERN_PROTECTION_FAILURE / CODESIGNING 2 SIGKILL crash on launch.
+// Never install these function hooks in sideloading environments.
 %ctor {
-    NSDictionary *d = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
-    if ([d[@"sendAppLogCapture"] boolValue]) {
-        %init(YTMULogCapture);
-    }
+    // Disabled: %hookf on C symbols triggers CODESIGNING 2 SIGKILL in sideloaded/LiveContainer apps.
 }

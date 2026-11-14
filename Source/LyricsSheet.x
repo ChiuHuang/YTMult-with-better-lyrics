@@ -1441,7 +1441,7 @@ static void YTMUBuildSweepRows(NSArray *parts, NSArray *rects, BOOL rtl, CGFloat
         if (i < n && (CGRectIsNull(r) || CGRectIsEmpty(r))) continue;   // textless part
         if ([curRects count] == 0) {
             startsNewRow = YES;
-        } else if (i >= n || fabs(CGRectGetMinY(r) - rowMinY) > 0.5) {
+        } else if (i >= n || fabs(CGRectGetMinY(r) - rowMinY) > 10.0) {
             startsNewRow = YES;
         }
         if (startsNewRow && [curRects count] > 0) {
@@ -5929,7 +5929,7 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
         CGRect b = [[rects objectAtIndex:(NSUInteger)i] CGRectValue];
         if (CGRectIsNull(b) || CGRectIsEmpty(b)) continue;
         if (rtl) b = CGRectMake(width - CGRectGetMaxX(b), CGRectGetMinY(b), b.size.width, b.size.height);
-        if (haveEdge && fabs(CGRectGetMinY(b) - lineY) > 0.5) haveEdge = NO;
+        if (haveEdge && fabs(CGRectGetMinY(b) - lineY) > 10.0) haveEdge = NO;
         if (!haveEdge) { edge = CGRectGetMinX(b); haveEdge = YES; }
         else {
             CGFloat gap = CGRectGetMinX(b) - edge;
