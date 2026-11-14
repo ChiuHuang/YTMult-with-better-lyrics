@@ -79,6 +79,7 @@
 // line itself, 0.0 five lines out. A multiplier on top of the inactive ink, so
 // the existing colour maths is untouched.
 @property (nonatomic, assign) CGFloat distanceAlpha;
+@property (nonatomic, assign) NSInteger lastHapticPartIndex;
 // Horizontal alignment for this row, decided by the per-line voice: the lead
 // stays natural, a second singer goes right, a group sits centred.
 @property (nonatomic, assign) NSTextAlignment ytmu_textAlign;
@@ -498,6 +499,12 @@ BOOL YTMUIsInterfaceLandscape(void);
 UIColor *YTMUAdaptiveInk(CGFloat darkAlpha, CGFloat lightAlpha);
 UIColor *YTMUAdaptiveFill(void);
 UIColor *YTMUAdaptiveShadow(void);
+
+// Music Haptics (iOS 18+ MediaAccessibility & CoreHaptics)
+void YTMUTriggerSyllableHaptic(double durationSec);
+void YTMUTriggerBeatHaptic(void);
+void YTMUUpdateNowPlayingISRC(NSString *isrc);
+BOOL YTMUIsSystemMusicHapticsActive(void);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
 #ifdef __cplusplus

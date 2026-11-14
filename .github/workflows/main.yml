@@ -114,6 +114,13 @@ jobs:
       - name: Inject tweak into provided IPA
         run: cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -n "${{ env.DISPLAY_NAME }}" -b ${{ env.BUNDLE_ID }}
 
+      - name: Enable iOS 18 Music Haptics in Info.plist
+        run: |
+          unzip -q -o YTMusicUltimate.ipa "Payload/*.app/Info.plist"
+          python3 -c "import plistlib, glob; p = glob.glob('Payload/*.app/Info.plist')[0]; d = plistlib.load(open(p, 'rb')); d['MusicHapticsSupported'] = True; plistlib.dump(d, open(p, 'wb'), fmt=plistlib.FMT_BINARY)"
+          zip -u YTMusicUltimate.ipa Payload/*.app/Info.plist
+          rm -rf Payload
+
       - name: Mirror IPA to file host
         id: mirror
         env:

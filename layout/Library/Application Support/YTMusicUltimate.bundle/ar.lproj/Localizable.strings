@@ -223,3 +223,11 @@
 "LYRICS_DUET_LABEL" = "محطباة";
 "LYRICS_PINYIN" = "Pinyin";
 "LYRICS_PINYIN_DESC" = "Show the romanization under a line when the lyrics carry one";
+
+"MUSIC_HAPTICS" = "Music Haptics";
+"MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
+"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
+"MUSIC_HAPTICS_LIGHT" = "Light";
+"MUSIC_HAPTICS_MEDIUM" = "Medium";
+"MUSIC_HAPTICS_STRONG" = "Strong";

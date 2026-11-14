@@ -27,7 +27,7 @@
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return 5;
+    return 6;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -39,6 +39,8 @@
         return 2;
     } if (section == 4) {
         return 1;
+    } if (section == 5) {
+        return 2;
     } else {
         return 1;
     }
@@ -50,6 +52,9 @@
     }
     if (section == 4) {
         return LOC(@"ANIM_FPS_FOOTER");
+    }
+    if (section == 5) {
+        return LOC(@"MUSIC_HAPTICS_FOOTER");
     }
 
     return nil;
@@ -241,6 +246,42 @@
         return cell;
     }
 
+    if (indexPath.section == 5) {
+        if (indexPath.row == 0) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"hapticsBoolCell"];
+            cell.textLabel.text = LOC(@"MUSIC_HAPTICS");
+            cell.textLabel.adjustsFontSizeToFitWidth = YES;
+            cell.detailTextLabel.text = LOC(@"MUSIC_HAPTICS_DESC");
+            cell.detailTextLabel.numberOfLines = 0;
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+            ABCSwitch *switchControl = [[NSClassFromString(@"ABCSwitch") alloc] init];
+            switchControl.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
+            [switchControl addTarget:self action:@selector(toggleHapticsSwitch:) forControlEvents:UIControlEventValueChanged];
+            switchControl.on = [YTMUltimateDict[@"musicHaptics"] boolValue];
+            cell.accessoryView = switchControl;
+
+            return cell;
+        }
+
+        if (indexPath.row == 1) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"hapticsIntensityCell"];
+            cell.textLabel.text = LOC(@"MUSIC_HAPTICS_INTENSITY");
+
+            UISegmentedControl *control = [[UISegmentedControl alloc] initWithItems:@[
+                LOC(@"MUSIC_HAPTICS_LIGHT"),
+                LOC(@"MUSIC_HAPTICS_MEDIUM"),
+                LOC(@"MUSIC_HAPTICS_STRONG")
+            ]];
+            id val = YTMUltimateDict[@"musicHapticsIntensity"];
+            control.selectedSegmentIndex = val ? [val integerValue] : 1;
+            [control addTarget:self action:@selector(controlHapticsIntensitySelect:) forControlEvents:UIControlEventValueChanged];
+            cell.accessoryView = control;
+
+            return cell;
+        }
+    }
+
     return cell;
 }
 
@@ -354,6 +395,24 @@
     [toolbar setItems:@[flexibleSpace, hideKeyboardButton]];
 
     return toolbar;
+}
+
+- (void)toggleHapticsSwitch:(ABCSwitch *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *YTMUltimateDict = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    [YTMUltimateDict setObject:@(sender.isOn) forKey:@"musicHaptics"];
+    [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+    if (sender.isOn) {
+        YTMUTriggerBeatHaptic();
+    }
+}
+
+- (void)controlHapticsIntensitySelect:(UISegmentedControl *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *YTMUltimateDict = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    [YTMUltimateDict setObject:@(sender.selectedSegmentIndex) forKey:@"musicHapticsIntensity"];
+    [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+    YTMUTriggerBeatHaptic();
 }
 
 - (void)hideKeyboard {

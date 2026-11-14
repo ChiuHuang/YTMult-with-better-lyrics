@@ -368,3 +368,11 @@
 "PREVIEW_EMPTY_TITLE" = "還沒有快取歌詞";
 "PREVIEW_EMPTY_PLAY" = "播放歌曲即可快取歌詞";
 "PREVIEW_EMPTY_FILE" = "快取檔案是空的";
+
+"MUSIC_HAPTICS" = "音樂觸覺回饋";
+"MUSIC_HAPTICS_DESC" = "隨節奏與逐字歌詞提供震動回饋";
+"MUSIC_HAPTICS_FOOTER" = "隨節奏與逐字歌詞即時同步震動。在支援的裝置與 iOS 18+ 上支援 Apple 原生音樂觸覺回饋 (Music Haptics)。";
+"MUSIC_HAPTICS_INTENSITY" = "觸覺震動強度";
+"MUSIC_HAPTICS_LIGHT" = "輕柔";
+"MUSIC_HAPTICS_MEDIUM" = "適中";
+"MUSIC_HAPTICS_STRONG" = "強烈";

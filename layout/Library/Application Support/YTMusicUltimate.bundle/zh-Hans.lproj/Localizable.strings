@@ -368,3 +368,11 @@
 "PREVIEW_EMPTY_TITLE" = "还没有缓存歌词";
 "PREVIEW_EMPTY_PLAY" = "播放歌曲即可缓存歌词";
 "PREVIEW_EMPTY_FILE" = "缓存文件是空的";
+
+"MUSIC_HAPTICS" = "音乐触觉反馈";
+"MUSIC_HAPTICS_DESC" = "随节奏与逐字歌词提供触觉震动";
+"MUSIC_HAPTICS_FOOTER" = "将触觉震动与歌曲节奏及逐字歌词实时同步。在 iOS 18+ 上支持 Apple 原生音乐触觉反馈 (Music Haptics)。";
+"MUSIC_HAPTICS_INTENSITY" = "触觉震动强度";
+"MUSIC_HAPTICS_LIGHT" = "轻柔";
+"MUSIC_HAPTICS_MEDIUM" = "适中";
+"MUSIC_HAPTICS_STRONG" = "强烈";

@@ -5366,6 +5366,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
                 [self configureCell:newCell atIndex:(NSInteger)i isActive:YES currentTime:currentTime];
                 NSDictionary *nl = self.lyrics[i];
                 BOOL wordSynced = [nl[@"wordSynced"] boolValue] && [(NSArray *)nl[@"parts"] count] > 0;
+                if (!wordSynced) {
+                    YTMUTriggerBeatHaptic();
+                }
                 // The arrival motion, and it differs by payload the way braccato's
                 // own themes differ:
                 //   word-synced -> NO pop. The row's arrival gesture is the
@@ -5962,6 +5965,17 @@ static CGFloat YTMUAppendRevealedWords(UIBezierPath *path, NSArray *rects, NSInt
     double curFrac = 1.0;
     NSInteger curWord = YTMUWordCursor(parts, nowMs, &curFrac);
     if (curWord < 0) curWord = partCount;
+    if (curWord >= 0 && curWord < partCount) {
+        if (curWord != cell.lastHapticPartIndex) {
+            cell.lastHapticPartIndex = curWord;
+            NSDictionary *p = parts[curWord];
+            double dur = 0.2;
+            if (p[@"startTimeMs"] && p[@"endTimeMs"]) {
+                dur = ([p[@"endTimeMs"] doubleValue] - [p[@"startTimeMs"] doubleValue]) / 1000.0;
+            }
+            YTMUTriggerSyllableHaptic(dur);
+        }
+    }
     // The cue goes FIRST and on its own clock, before anything the vocal line
     // does. It cannot ride this method's cursor: an LRC [bg:] cue carries parts
     // on a LINE-synced row, which never reaches the rest of this method at all.

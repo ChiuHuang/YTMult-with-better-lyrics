@@ -369,3 +369,11 @@
 "PREVIEW_EMPTY_TITLE" = "No cached lyrics yet";
 "PREVIEW_EMPTY_PLAY" = "Play a song to cache lyrics";
 "PREVIEW_EMPTY_FILE" = "Empty cache file";
+
+"MUSIC_HAPTICS" = "Music Haptics";
+"MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
+"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
+"MUSIC_HAPTICS_LIGHT" = "Light";
+"MUSIC_HAPTICS_MEDIUM" = "Medium";
+"MUSIC_HAPTICS_STRONG" = "Strong";
