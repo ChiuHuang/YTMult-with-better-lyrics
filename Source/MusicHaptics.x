@@ -45,6 +45,15 @@ static void YTMULogISRC(NSString *message) {
     sendDebugLog([@"[ISRC] " stringByAppendingString:message]);
 }
 
+// Both the player metadata hook and asynchronous lookup must use the same key;
+// otherwise each Now Playing refresh can make an in-flight result look stale.
+static NSString *YTMUISRCTrackKey(NSString *title, NSString *artist, NSString *videoID) {
+    return [NSString stringWithFormat:@"v2|%@|%@|%@",
+            [title.lowercaseString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet],
+            [artist.lowercaseString stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet],
+            videoID ?: @""];
+}
+
 static void YTMUReportISRCStatus(NSString *videoID, NSString *title, NSString *artist,
                                  NSString *source, NSString *state, NSString *isrc) {
     if (!title.length && !artist.length && !videoID.length) return;
@@ -299,8 +308,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
     // Bump local lookup cache so prior provider misses do not suppress the
     // new Playgeet-first lookup.
-    NSString *key = [NSString stringWithFormat:@"v2|%@|%@|%@",
-                     [title lowercaseString], [artist lowercaseString], videoID ?: @""];
+    NSString *key = YTMUISRCTrackKey(title, artist, videoID);
     self.currentLookupKey = key;
 
     if ([key isEqualToString:self.lastQueriedKey]) return;
@@ -725,7 +733,7 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 
     if (title.length && artist.length) {
         YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
-        NSString *trackKey = [NSString stringWithFormat:@"%@|%@|%@", [title lowercaseString], [artist lowercaseString], videoID ?: @""];
+        NSString *trackKey = YTMUISRCTrackKey(title, artist, videoID);
         BOOL audioTrackChanged = ![mgr.currentTitle isEqualToString:title] || ![mgr.currentArtist isEqualToString:artist];
         BOOL playbackISRCChanged = ![mgr.lastISRCTrackKey isEqualToString:trackKey] || ![mgr.currentISRC isEqualToString:existing];
         if (audioTrackChanged) {
