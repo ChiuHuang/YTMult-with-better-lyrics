@@ -1,7 +1,6 @@
 # YTMusicUltimate (with better lyrics)
 
 [![Latest release](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=release)](https://github.com/ChiuHuang/ytmusicultimate/releases)
-<a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200" alt="Add to AltStore"></a>
 [![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 ![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)
 ![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)
@@ -12,6 +11,10 @@ A YouTube Music tweak for iOS that plays lyrics properly: word-by-word
 highlight that follows the music, translations, and an offline-friendly
 downloader. Lyrics are fetched from a small lyrics server, which is included
 here and can be self-hosted.
+
+
+
+<a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200" alt="Add to AltStore"></a>
 
 ### Stats
 <div align="center">
