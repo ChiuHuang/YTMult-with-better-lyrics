@@ -2,8 +2,6 @@
 #import <Foundation/Foundation.h>
 #import <CoreHaptics/CoreHaptics.h>
 #import <MediaPlayer/MediaPlayer.h>
-#import <AudioToolbox/AudioToolbox.h>
-#import <substrate.h>
 #import <stdatomic.h>
 #import <math.h>
 #import <stdint.h>
@@ -12,61 +10,10 @@
 #import "LyricsShared.h"
 
 static NSMutableArray<NSString *> *YTMUISRCRecentLogLines;
-static atomic_bool YTMUAudioCaptureEnabled;
 static atomic_uint_fast64_t YTMUAudioLastHostTime;
 static atomic_uint_fast32_t YTMUAudioOnsetSequence;
-static atomic_uint_fast32_t YTMUAudioRMSBits;
 static atomic_uint_fast32_t YTMUAudioPeakBits;
-static atomic_uint_fast32_t YTMUAudioPreviousRMSBits;
-static atomic_uint_fast32_t YTMUAudioNoiseFloorBits;
 static mach_timebase_info_data_t YTMUHostTimebase;
-static atomic_uintptr_t YTMUMusicOutputUnits[8];
-static atomic_uint YTMUMusicOutputBuses[8];
-static OSStatus (*YTMUOriginalAudioUnitRender)(AudioUnit, AudioUnitRenderActionFlags *,
-                                               const AudioTimeStamp *, UInt32, UInt32,
-                                               AudioBufferList *);
-
-static BOOL YTMUAudioUnitDescription(AudioUnit unit, AudioComponentDescription *description) {
-    if (!unit || !description) return NO;
-    AudioComponent component = AudioComponentInstanceGetComponent(unit);
-    if (!component) return NO;
-    memset(description, 0, sizeof(*description));
-    return AudioComponentGetDescription(component, description) == noErr;
-}
-
-static BOOL YTMUIsPlayerMixerUnit(AudioUnit unit) {
-    AudioComponentDescription desc = {0};
-    if (!YTMUAudioUnitDescription(unit, &desc) || desc.componentType != kAudioUnitType_Mixer) return NO;
-    return desc.componentSubType == kAudioUnitSubType_MultiChannelMixer ||
-           desc.componentSubType == kAudioUnitSubType_MatrixMixer;
-}
-
-void YTMUMusicHapticsRegisterMixer(AudioUnit sourceUnit, UInt32 sourceOutputBus) {
-    if (!sourceUnit || !YTMUIsPlayerMixerUnit(sourceUnit)) return;
-    uintptr_t source = (uintptr_t)sourceUnit;
-    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
-        if (atomic_load_explicit(&YTMUMusicOutputUnits[i], memory_order_acquire) == source &&
-            atomic_load_explicit(&YTMUMusicOutputBuses[i], memory_order_relaxed) == sourceOutputBus) return;
-    }
-    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
-        uintptr_t empty = 0;
-        if (atomic_compare_exchange_strong_explicit(&YTMUMusicOutputUnits[i], &empty, source,
-                                                    memory_order_acq_rel, memory_order_relaxed)) {
-            atomic_store_explicit(&YTMUMusicOutputBuses[i], sourceOutputBus, memory_order_release);
-            return;
-        }
-    }
-}
-
-static BOOL YTMUIsTrackedPlayerMixer(AudioUnit unit, UInt32 outputBus) {
-    uintptr_t candidate = (uintptr_t)unit;
-    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
-        if (atomic_load_explicit(&YTMUMusicOutputUnits[i], memory_order_acquire) == candidate &&
-            atomic_load_explicit(&YTMUMusicOutputBuses[i], memory_order_relaxed) == outputBus) return YES;
-    }
-    return NO;
-}
-
 static uint64_t YTMUHostTimeNow(void) {
     return mach_absolute_time();
 }
@@ -75,84 +22,10 @@ static uint64_t YTMUHostTicksToNanos(uint64_t ticks) {
     return YTMUHostTimebase.denom ? (ticks * YTMUHostTimebase.numer) / YTMUHostTimebase.denom : 0;
 }
 
-static uint32_t YTMUFloatBits(float value) {
-    union { float f; uint32_t u; } bits = {.f = value};
-    return bits.u;
-}
-
 static float YTMUFloatFromBits(uint32_t value) {
     union { float f; uint32_t u; } bits = {.u = value};
     return bits.f;
 }
-
-// This hook only measures the final PCM render buffers. It does no allocation,
-// locking, logging, UIKit, or haptic work on Core Audio's render thread.
-static void YTMUObserveRenderedAudio(AudioBufferList *buffers, UInt32 frameCount) {
-    if (!buffers || !frameCount) return;
-    double squareSum = 0.0;
-    float peak = 0.0f;
-    uint64_t sampleCount = 0;
-    for (UInt32 b = 0; b < buffers->mNumberBuffers; b++) {
-        AudioBuffer *buffer = &buffers->mBuffers[b];
-        if (!buffer->mData || !buffer->mDataByteSize) continue;
-        uint32_t channels = buffer->mNumberChannels ? buffer->mNumberChannels : 1;
-        uint64_t expected = (uint64_t)frameCount * channels;
-        uint32_t bytesPerSample = (uint32_t)(buffer->mDataByteSize / expected);
-        if (bytesPerSample == 4) {
-            const float *samples = (const float *)buffer->mData;
-            uint64_t count = MIN(expected, buffer->mDataByteSize / sizeof(float));
-            for (uint64_t i = 0; i < count; i++) {
-                float value = samples[i];
-                if (!isfinite(value)) continue;
-                float magnitude = fabsf(value);
-                squareSum += (double)value * value;
-                peak = MAX(peak, magnitude);
-                sampleCount++;
-            }
-        } else if (bytesPerSample == 2) {
-            const int16_t *samples = (const int16_t *)buffer->mData;
-            uint64_t count = MIN(expected, buffer->mDataByteSize / sizeof(int16_t));
-            for (uint64_t i = 0; i < count; i++) {
-                float value = (float)samples[i] / 32768.0f;
-                float magnitude = fabsf(value);
-                squareSum += (double)value * value;
-                peak = MAX(peak, magnitude);
-                sampleCount++;
-            }
-        }
-    }
-    if (!sampleCount) return;
-    float rms = sqrtf((float)(squareSum / (double)sampleCount));
-    atomic_store_explicit(&YTMUAudioRMSBits, YTMUFloatBits(rms), memory_order_relaxed);
-    atomic_store_explicit(&YTMUAudioPeakBits, YTMUFloatBits(peak), memory_order_relaxed);
-    atomic_store_explicit(&YTMUAudioLastHostTime, YTMUHostTimeNow(), memory_order_release);
-    if (!atomic_load_explicit(&YTMUAudioCaptureEnabled, memory_order_relaxed)) return;
-
-    float previous = YTMUFloatFromBits(atomic_load_explicit(&YTMUAudioPreviousRMSBits, memory_order_relaxed));
-    float floor = YTMUFloatFromBits(atomic_load_explicit(&YTMUAudioNoiseFloorBits, memory_order_relaxed));
-    if (!isfinite(previous)) previous = 0.0f;
-    if (!isfinite(floor)) floor = 0.0f;
-    float threshold = MAX(0.018f, floor * 1.45f);
-    if (rms > threshold && previous <= threshold && peak > 0.035f) {
-        atomic_fetch_add_explicit(&YTMUAudioOnsetSequence, 1, memory_order_relaxed);
-    }
-    // Slow envelope tracking makes the transient detector adapt to song level.
-    float nextFloor = floor + (rms - floor) * (rms < floor ? 0.08f : 0.008f);
-    atomic_store_explicit(&YTMUAudioNoiseFloorBits, YTMUFloatBits(nextFloor), memory_order_relaxed);
-    atomic_store_explicit(&YTMUAudioPreviousRMSBits, YTMUFloatBits(rms), memory_order_relaxed);
-}
-
-static OSStatus YTMUAudioUnitRenderHook(AudioUnit unit, AudioUnitRenderActionFlags *flags,
-                                        const AudioTimeStamp *timeStamp, UInt32 outputBus,
-                                        UInt32 frameCount, AudioBufferList *ioData) {
-    OSStatus status = YTMUOriginalAudioUnitRender(unit, flags, timeStamp, outputBus, frameCount, ioData);
-    if (status == noErr && YTMUIsTrackedPlayerMixer(unit, outputBus) &&
-        atomic_load_explicit(&YTMUAudioCaptureEnabled, memory_order_relaxed)) {
-        YTMUObserveRenderedAudio(ioData, frameCount);
-    }
-    return status;
-}
-
 
 static void YTMULogISRC(NSString *message) {
     if (!message.length) return;
@@ -692,7 +565,6 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
 - (void)audioHapticsMonitorTick {
     BOOL shouldCapture = self.currentTitle.length > 0 && YTMU(@"musicHaptics");
-    atomic_store_explicit(&YTMUAudioCaptureEnabled, shouldCapture, memory_order_relaxed);
     if (!shouldCapture) {
         self.audioTapReadable = NO;
         self.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
@@ -734,7 +606,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     if (!YTMU(@"musicHaptics")) return;
     if ([self shouldUseNativeMusicHaptics]) return;
     // Lyric timing remains the fallback only when no live player PCM reaches
-    // AudioUnitRender. Once the tap is readable, the audio envelope owns cues.
+    // A live audio tap may own cues when the platform provides one safely.
     if (self.audioTapReadable) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
@@ -838,7 +710,6 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)nowPlayingInfo {
     if (!nowPlayingInfo) {
-        atomic_store_explicit(&YTMUAudioCaptureEnabled, false, memory_order_relaxed);
         %orig(nil);
         return;
     }
@@ -857,8 +728,6 @@ void YTMUTestHapticPulse(NSInteger intensity) {
         if (audioTrackChanged) {
             mgr.audioTapReadable = NO;
             mgr.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
-            atomic_store_explicit(&YTMUAudioPreviousRMSBits, YTMUFloatBits(0.0f), memory_order_relaxed);
-            atomic_store_explicit(&YTMUAudioNoiseFloorBits, YTMUFloatBits(0.0f), memory_order_relaxed);
         }
         mgr.currentLookupKey = trackKey;
         if (existing.length && mgr.lastISRCTrackKey.length &&
@@ -916,7 +785,5 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 
 %ctor {
     mach_timebase_info(&YTMUHostTimebase);
-    MSHookFunction((void *)AudioUnitRender, (void *)YTMUAudioUnitRenderHook,
-                   (void **)&YTMUOriginalAudioUnitRender);
     %init;
 }

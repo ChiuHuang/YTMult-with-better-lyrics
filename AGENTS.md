@@ -28,7 +28,7 @@
 
 Current:
 - `[DONE] ses_served_badge_20261115 | Lyrics served now uses the persistent cumulative counter; README Stats also shows cached tracks; retained log count remains diagnostic only | files: server/routes_misc.py, server/badge_stats.py, README.md`
-- `[ACTIVE] ses_sing_pipeline_20261115 | Remove unsafe AudioUnit connection probing after recurring iOS 27 Core Audio crashes; continue Sing without the probe | files: Source/MusicHaptics.x, Source/Prefs/YTMDownloads.m, Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m} | next: build, mark the no-probe fix latest, then verify on device`
+- `[ACTIVE] ses_sing_pipeline_20261115 | Disable all player AudioUnit hooks for a controlled LiveContainer/iOS 27 Core Audio crash isolation build | files: Source/MusicHaptics.x, Source/Prefs/YTMDownloads.m, Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m} | next: build, mark the no-AudioUnit-hook build latest, then verify on device`
 - `[DONE] ses_readme_features_20261115 | Document current features and reserve a screenshot/GIF showcase area | files: README.md, docs/media/.gitkeep`
 - `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
 - [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own

@@ -509,7 +509,6 @@ BOOL YTMUIsSystemMusicHapticsActive(void);
 NSString *YTMUCurrentNowPlayingISRC(void);
 NSString *YTMUCurrentNowPlayingTitle(void);
 NSString *YTMUCurrentNowPlayingArtist(void);
-void YTMUMusicHapticsRegisterMixer(AudioUnit sourceUnit, UInt32 sourceOutputBus);
 void YTMUTestHapticPulse(NSInteger intensity);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
