@@ -25,19 +25,81 @@ here and can be self-hosted.
 
 </div>
 
+## Screenshots & demo
+
+Add screenshots or short screen recordings under `docs/media/`, then replace
+the placeholders below. GIFs work well for lyric timing and player controls.
+
+<div align="center">
+<table>
+<tr>
+<td align="center"><strong>Synced lyrics</strong><br><em>Screenshot / GIF coming soon</em></td>
+<td align="center"><strong>Player & downloads</strong><br><em>Screenshot / GIF coming soon</em></td>
+<td align="center"><strong>Liquid Glass</strong><br><em>Screenshot / GIF coming soon</em></td>
+</tr>
+</table>
+</div>
+
+<!-- Example showcase asset: <img src="docs/media/lyrics-sync.gif" width="320" alt="Word-by-word synced lyrics"> -->
+
 > [!NOTE]
 > You need a **decrypted** YouTube Music IPA to build. It cannot be provided
 > here.
 
 ## Features
 
-- Lyrics highlight sweeps word by word, synced to the actual playback time
-- Eight lyric providers raced at once; the best one wins and upgrades in place
-- Translation shown under each line, streamed in as it is translated
-- Provider switcher when you prefer a different source for a song
-- Audio downloads that also play in the app's own player
-- Liquid glass player, landscape lyrics, mini player
-- Every feature is a switch in Settings, nothing is permanent
+### Lyrics
+
+- Word-by-word highlighting follows the current playback position.
+- Translations stream in beneath the lyrics; choose a target language or use
+  automatic language selection.
+- Eight lyric providers race in parallel. The best result is served first and
+  can upgrade the cache when a better synced version arrives.
+- Switch lyric provider for a track, adjust its timing, and choose how duet
+  lines, romanization, and typewriter reveal are displayed.
+- Keep lyrics available with the on-device cache, queue prefetch, playlist
+  sync, and optional automatic updates.
+- Selectable lyric text, landscape lyrics, and automatic full-screen lyrics
+  are available as settings.
+
+### Player & downloads
+
+- Download audio and cover art; downloaded audio can play in YouTube Music's
+  own player.
+- Add playback-rate and seek controls, a volume bar, and audio/video playback
+  mode selection.
+- Skip non-music sections with SponsorBlock, with configurable skip or prompt
+  behavior.
+- Optional background playback, ad hiding, and playback warning controls.
+
+### Appearance & navigation
+
+- Liquid Glass styling for the player, lyrics, queue, home, search, library,
+  downloads, and other supported screens.
+- Song artwork can theme the player or the wider app; OLED and low-contrast
+  display options are available.
+- Customize startup tab, tab labels, visible tabs, and navigation buttons.
+- Mini-player and landscape layouts adapt lyrics and controls to the screen.
+
+### Haptics & Sing
+
+- Core Haptics can follow live player audio, with lyric-timed cues as a
+  fallback; ISRC lookup can enable native Music Haptics when a matching track
+  is available.
+- **Sing is in progress:** download and load the MDX23C model and choose
+  vocals-only, original mix, or background-only. Separated audio is not yet
+  routed into playback.
+
+### Server & dashboard
+
+- The included self-hostable lyrics server races providers, caches results,
+  and serves lyrics to the tweak.
+- The web dashboard manages providers, cached tracks, library data, and
+  connected nodes, and includes live logs, optional device diagnostics, and
+  ISRC lookup status.
+- Point the tweak at a different lyrics server from Settings → Lyrics.
+
+Most features can be enabled or adjusted in Settings.
 
 ## Install
 
