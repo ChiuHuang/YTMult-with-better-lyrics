@@ -38,7 +38,7 @@ static BOOL YTMUIsPlayerMixerUnit(AudioUnit unit) {
     AudioComponentDescription desc = {0};
     if (!YTMUAudioUnitDescription(unit, &desc) || desc.componentType != kAudioUnitType_Mixer) return NO;
     return desc.componentSubType == kAudioUnitSubType_MultiChannelMixer ||
-           desc.componentSubType == kAudioUnitSubType_StereoMixer;
+           desc.componentSubType == kAudioUnitSubType_MatrixMixer;
 }
 
 void YTMUMusicHapticsRegisterMixer(AudioUnit sourceUnit, UInt32 sourceOutputBus) {
