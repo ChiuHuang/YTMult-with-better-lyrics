@@ -242,7 +242,6 @@
         }];
 
     // Observe progress via KVO
-    __weak NSURLSessionDownloadTask *weakTask = task;
     [task addObserver:self forKeyPath:@"countOfBytesReceived" options:NSKeyValueObservingOptionNew context:NULL];
     [task addObserver:self forKeyPath:@"countOfBytesExpectedToReceive" options:NSKeyValueObservingOptionNew context:NULL];
 
