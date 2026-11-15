@@ -162,6 +162,27 @@ def _fetch_release_by_tag(tag):
         return None
 
 
+def _ensure_ipa_metadata(tag, record):
+    """Backfill IPA plist values for channel records created before metadata
+    was added to the webhook. The release body is the durable source."""
+    keys = ('ipa_bundle_id', 'ipa_version', 'ipa_build_version')
+    if all(record.get(key) for key in keys):
+        return record
+    fetched = _fetch_release_by_tag(tag)
+    if not fetched:
+        return record
+    changed = False
+    for key in keys:
+        value = fetched.get(key)
+        if value and not record.get(key):
+            record[key] = value
+            changed = True
+    if changed:
+        _BUILDS['builds'][tag] = record
+        _save_builds()
+    return record
+
+
 def promote(tag):
     """Move a build to the STABLE channel. A tag the webhook never saw is
     fetched from GitHub by tag first. Returns the record or None."""
@@ -203,12 +224,12 @@ def latest_release(channel='stable'):
         for tag in sorted(_BUILDS['builds'], key=_run_number, reverse=True):
             rec = _BUILDS['builds'][tag]
             if rec.get('download_url'):
-                return rec
+                return _ensure_ipa_metadata(tag, rec)
         return _latest_gh(allow_prerelease=True)
     tag = _STABLE['tag']
     rec = _BUILDS['builds'].get(tag)
     if rec and rec.get('download_url'):
-        return rec
+        return _ensure_ipa_metadata(tag, rec)
     return _latest_gh(allow_prerelease=False)
 
 
