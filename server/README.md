@@ -20,12 +20,22 @@ the code wins and this file gets fixed.
 
 ### Soundcharts ISRC lookup
 
-Set `YTMU_SOUNDCHARTS_CREDENTIALS_JSON` as a server-side environment secret to
-enable one or more Soundcharts credential pairs, for example
-`[{"app_id":"<app-id>","api_key":"<api-key>"}]`. For a single pair,
-`YTMU_SOUNDCHARTS_APP_ID` plus `YTMU_SOUNDCHARTS_API_KEY` remains supported.
-Never put credentials in the tweak, source tree, or a public settings
-response. The server rotates the starting pair between uncached lookups and
+Credentials can also live in the gitignored `config/admin_config.json` under
+`soundcharts_credentials`, for example:
+
+```json
+{
+  "soundcharts_credentials": [
+    {"app_id": "<app-id>", "api_key": "<api-key>"}
+  ]
+}
+```
+
+The server environment setting `YTMU_SOUNDCHARTS_CREDENTIALS_JSON` takes
+precedence and accepts the same JSON array. The legacy single-pair environment
+variables `YTMU_SOUNDCHARTS_APP_ID` plus `YTMU_SOUNDCHARTS_API_KEY` are also
+supported and override the file. Never commit credentials or put them in the
+tweak or a public settings response. The server rotates the starting pair between uncached lookups and
 tries another pair on HTTP 401, 403, or 429. The public app endpoint
 accepts a YouTube `video_id`; the server stores positive results for 30 days,
 misses for 12 hours, and transient failures for 60 seconds in

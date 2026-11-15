@@ -107,26 +107,53 @@ def _consume_client_budget(client_id):
 
 
 def _credentials():
-    """Load paired credentials from one server-side JSON secret or legacy envs."""
+    """Load paired credentials, preferring server env over admin_config."""
     raw = (os.environ.get('YTMU_SOUNDCHARTS_CREDENTIALS_JSON') or '').strip()
     if raw:
         try:
             import json
             entries = json.loads(raw)
             if isinstance(entries, list):
-                return [
-                    {'app_id': item['app_id'].strip(), 'api_key': item['api_key'].strip()}
-                    for item in entries
-                    if isinstance(item, dict)
-                    and isinstance(item.get('app_id'), str) and item['app_id'].strip()
-                    and isinstance(item.get('api_key'), str) and item['api_key'].strip()
-                ]
+                return _clean_credentials(entries)
         except (ValueError, TypeError, KeyError):
             print('[ISRC] Soundcharts credential list is invalid JSON')
             return []
+
+    # Keep the older single-pair environment variables as an override too.
     app_id = (os.environ.get('YTMU_SOUNDCHARTS_APP_ID') or '').strip()
     api_key = (os.environ.get('YTMU_SOUNDCHARTS_API_KEY') or '').strip()
-    return [{'app_id': app_id, 'api_key': api_key}] if app_id and api_key else []
+    if app_id or api_key:
+        return [{'app_id': app_id, 'api_key': api_key}] if app_id and api_key else []
+
+    # admin_config is gitignored runtime secret storage. Import lazily so this
+    # module remains safe to import while app.py is still initializing.
+    try:
+        from .app import _admin_cfg
+        entries = _admin_cfg.get('soundcharts_credentials', [])
+    except Exception as exc:
+        print(f'[ISRC] admin config read failed ({type(exc).__name__})')
+        return []
+    if isinstance(entries, str):
+        try:
+            import json
+            entries = json.loads(entries)
+        except (ValueError, TypeError):
+            print('[ISRC] Soundcharts credentials in admin_config are invalid JSON')
+            return []
+    if not isinstance(entries, list):
+        return []
+    return _clean_credentials(entries)
+
+
+def _clean_credentials(entries):
+    """Keep only non-empty app/key pairs from an untrusted config value."""
+    return [
+        {'app_id': item['app_id'].strip(), 'api_key': item['api_key'].strip()}
+        for item in entries
+        if isinstance(item, dict)
+        and isinstance(item.get('app_id'), str) and item['app_id'].strip()
+        and isinstance(item.get('api_key'), str) and item['api_key'].strip()
+    ]
 
 
 def _credential_order(credentials):
