@@ -21,7 +21,7 @@ here and can be self-hosted.
 
 | Lyrics served | Devices | Last song |
 |---|---|---|
-| **2,021** | **86** | Attention - Charlie Puth `wbw` via QQ |
+| ![Live lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics) | ![Live devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices) | ![Last song served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=now) |
 
 </div>
 

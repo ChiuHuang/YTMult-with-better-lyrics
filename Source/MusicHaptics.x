@@ -31,6 +31,28 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     return val ? [val integerValue] : dflt;
 }
 
+static NSString *YTMUNormalizedMusicText(NSString *value) {
+    NSString *lower = [[value lowercaseString] stringByFoldingWithOptions:NSDiacriticInsensitiveSearch
+                                                                    locale:[NSLocale currentLocale]];
+    NSArray *parts = [lower componentsSeparatedByCharactersInSet:
+                      [[NSCharacterSet alphanumericCharacterSet] invertedSet]];
+    return [[parts filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]]
+            componentsJoinedByString:@" "];
+}
+
+static NSString *YTMUArtistCredit(NSDictionary *recording) {
+    NSMutableArray *names = [NSMutableArray array];
+    for (id entry in [recording[@"artist-credit"] isKindOfClass:[NSArray class]] ? recording[@"artist-credit"] : @[]) {
+        if ([entry isKindOfClass:[NSDictionary class]]) {
+            NSString *name = entry[@"name"];
+            NSDictionary *artist = [entry[@"artist"] isKindOfClass:[NSDictionary class]] ? entry[@"artist"] : nil;
+            if (!name.length) name = artist[@"name"];
+            if (name.length) [names addObject:name];
+        }
+    }
+    return [names componentsJoinedByString:@" "];
+}
+
 // ---- Manager ----
 @interface YTMUMusicHapticsManager : NSObject
 @property (nonatomic, strong) CHHapticEngine *engine;
@@ -41,6 +63,7 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 @property (nonatomic, assign) NSTimeInterval lastTriggerTime;
 @property (nonatomic, assign) BOOL systemHasTrackForCurrentSong;
 @property (nonatomic, copy)   NSString *lastQueriedKey;
+@property (nonatomic, copy)   NSString *currentLookupKey;
 @property (nonatomic, strong) NSMutableDictionary *isrcCache;
 @property (nonatomic, assign) BOOL lookupInFlight;
 + (instancetype)sharedInstance;
@@ -201,14 +224,19 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     self.systemHasTrackForCurrentSong = NO;
     self.currentISRC = nil;
 
-    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
-    NSString *encTitle  = [title  stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-    NSString *encArtist = [artist stringByAddingPercentEncodingWithAllowedCharacters:allowed];
-
-    NSString *query = [NSString stringWithFormat:
-        @"https://musicbrainz.org/ws/2/recording/?query=recording:%%22%@%%22+AND+artist:%%22%@%%22&inc=isrcs&limit=3&fmt=json",
-        encTitle, encArtist];
-    NSURL *url = [NSURL URLWithString:query];
+    // Artist strings from YouTube Music frequently combine featured artists
+    // differently from MusicBrainz (e.g. "X, Y" vs "X feat. Y"). Search by
+    // exact recording title, then rank candidates against every credited artist.
+    NSString *safeTitle = [[title stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                           stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSURLComponents *components = [NSURLComponents componentsWithString:@"https://musicbrainz.org/ws/2/recording/"];
+    components.queryItems = @[
+        [NSURLQueryItem queryItemWithName:@"query" value:[NSString stringWithFormat:@"recording:\"%@\"", safeTitle]],
+        [NSURLQueryItem queryItemWithName:@"inc" value:@"isrcs"],
+        [NSURLQueryItem queryItemWithName:@"limit" value:@"25"],
+        [NSURLQueryItem queryItemWithName:@"fmt" value:@"json"]
+    ];
+    NSURL *url = components.URL;
 
     NSLog(@"[YTMU-Haptics] Querying MusicBrainz for '%@' by '%@'", title, artist);
     sendDebugLog([NSString stringWithFormat:@"[Haptics] Querying MusicBrainz for '%@' - '%@'", title, artist]);
@@ -243,14 +271,32 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
                 return;
             }
 
-            NSArray *recordings = json[@"recordings"];
+            NSArray *recordings = [json[@"recordings"] isKindOfClass:[NSArray class]] ? json[@"recordings"] : @[];
+            NSString *wantedTitle = YTMUNormalizedMusicText(title);
+            NSString *wantedArtist = YTMUNormalizedMusicText(artist);
             NSString *foundISRC = nil;
-
+            NSInteger bestScore = NSIntegerMin;
             for (NSDictionary *rec in recordings) {
-                NSArray *isrcs = rec[@"isrcs"];
-                if ([isrcs isKindOfClass:[NSArray class]] && isrcs.count > 0) {
-                    foundISRC = isrcs[0];
-                    break;
+                NSArray *isrcs = [rec[@"isrcs"] isKindOfClass:[NSArray class]] ? rec[@"isrcs"] : @[];
+                if (!isrcs.count) continue;
+                NSString *candidateTitle = YTMUNormalizedMusicText([rec[@"title"] isKindOfClass:[NSString class]] ? rec[@"title"] : @"");
+                NSString *candidateArtist = YTMUNormalizedMusicText(YTMUArtistCredit(rec) ?: @"");
+                if (!candidateTitle.length || !wantedTitle.length) continue;
+                NSInteger score = [candidateTitle isEqualToString:wantedTitle] ? 100 :
+                                  ([candidateTitle containsString:wantedTitle] || [wantedTitle containsString:candidateTitle] ? 40 : 0);
+                BOOL artistMatch = NO;
+                if ([candidateArtist isEqualToString:wantedArtist]) { score += 80; artistMatch = YES; }
+                else if (wantedArtist.length && ([candidateArtist containsString:wantedArtist] || [wantedArtist containsString:candidateArtist])) { score += 50; artistMatch = YES; }
+                else {
+                    for (NSString *part in [wantedArtist componentsSeparatedByString:@" "]) {
+                        if (part.length > 2 && [candidateArtist containsString:part]) { score += 8; artistMatch = YES; }
+                    }
+                }
+                if (!artistMatch) continue;
+                score += [rec[@"score"] integerValue] / 10;
+                if (score > bestScore) {
+                    bestScore = score;
+                    foundISRC = [isrcs.firstObject isKindOfClass:[NSString class]] ? isrcs.firstObject : nil;
                 }
             }
 
@@ -258,7 +304,7 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
             NSLog(@"[YTMU-Haptics] MusicBrainz result for '%@': ISRC=%@", key, foundISRC ?: @"(none)");
             sendDebugLog([NSString stringWithFormat:@"[Haptics] MusicBrainz ISRC result: %@", foundISRC ?: @"(none)"]);
 
-            if (foundISRC.length) {
+            if (foundISRC.length && [s.currentLookupKey isEqualToString:key]) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [s updateISRC:foundISRC];
                 });
@@ -298,8 +344,8 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     self.lastTriggerTime = now;
 
     NSInteger intensity = YTMUInt(@"musicHapticsIntensity", 1);
-    float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 0.85f : 0.55f);
-    float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.75f : 0.60f);
+    float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 1.00f : 0.55f);
+    float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 1.00f : 0.60f);
     if (duration > 0.4) fi = MIN(1.0f, fi + 0.15f);
 
     NSLog(@"[YTMU-Haptics] Trigger syllable haptic (dur=%.2f, intensity=%.2f)", duration, fi);
@@ -314,8 +360,8 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     self.lastTriggerTime = now;
 
     NSInteger intensity = YTMUInt(@"musicHapticsIntensity", 1);
-    float fi = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.90f : 0.65f);
-    float fs = (intensity == 0) ? 0.50f : ((intensity == 2) ? 0.80f : 0.65f);
+    float fi = (intensity == 0) ? 0.45f : ((intensity == 2) ? 1.00f : 0.65f);
+    float fs = (intensity == 0) ? 0.50f : ((intensity == 2) ? 1.00f : 0.65f);
 
     NSLog(@"[YTMU-Haptics] Trigger beat haptic (intensity=%.2f)", fi);
     [self playTransientWithIntensity:fi sharpness:fs];
@@ -330,7 +376,7 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
                     CHHapticPatternKeyEvent: @{
                         CHHapticPatternKeyEventType:      CHHapticEventTypeHapticTransient,
                         CHHapticPatternKeyTime:            @(0.0),
-                        CHHapticPatternKeyEventDuration:   @(0.04),
+                        CHHapticPatternKeyEventDuration:   @(intensity >= 0.95f ? 0.08 : 0.04),
                         CHHapticPatternKeyEventParameters: @[
                             @{ CHHapticPatternKeyParameterID:    CHHapticEventParameterIDHapticIntensity,
                                CHHapticPatternKeyParameterValue: @(intensity) },
@@ -383,8 +429,8 @@ NSString *YTMUCurrentNowPlayingArtist(void) {
     return [YTMUMusicHapticsManager sharedInstance].currentArtist;
 }
 void YTMUTestHapticPulse(NSInteger intensity) {
-    float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 0.90f : 0.65f);
-    float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.80f : 0.65f);
+    float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 1.00f : 0.65f);
+    float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 1.00f : 0.65f);
     [[YTMUMusicHapticsManager sharedInstance] playTransientWithIntensity:fi sharpness:fs];
 }
 
@@ -395,16 +441,30 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 
     NSString *title  = nowPlayingInfo[@"title"]  ?: nowPlayingInfo[@"MPMediaItemPropertyTitle"];
     NSString *artist = nowPlayingInfo[@"artist"] ?: nowPlayingInfo[@"MPMediaItemPropertyArtist"];
+    NSString *existing = nowPlayingInfo[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
 
     if (title.length && artist.length) {
         YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
+        NSString *trackKey = [NSString stringWithFormat:@"%@|%@", [title lowercaseString], [artist lowercaseString]];
+        mgr.currentLookupKey = trackKey;
+        if (mgr.lastQueriedKey.length && ![mgr.lastQueriedKey isEqualToString:trackKey]) {
+            // Never attach the previous song's ISRC while this track is being resolved.
+            mgr.currentISRC = nil;
+            mgr.systemHasTrackForCurrentSong = NO;
+        }
         mgr.currentTitle = title;
         mgr.currentArtist = artist;
-        [mgr lookupISRCForTitle:title artist:artist];
+        if (existing.length) {
+            // Prefer an ISRC supplied by the playback service, as Vitrine does
+            // with Spotify's own track metadata; MusicBrainz is the fallback.
+            mgr.lastQueriedKey = trackKey;
+            [mgr updateISRC:existing];
+        } else {
+            [mgr lookupISRCForTitle:title artist:artist];
+        }
     }
 
     NSString *isrc = [YTMUMusicHapticsManager sharedInstance].currentISRC;
-    NSString *existing = nowPlayingInfo[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
 
     if (isrc.length && !existing.length) {
         NSMutableDictionary *mut = [nowPlayingInfo mutableCopy];

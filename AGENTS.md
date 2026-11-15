@@ -27,7 +27,9 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
+- `[ACTIVE] ses_vocalbar_20261115 | Add an animated, normally closed vocal separation bar to the player and verify ISRC source assumptions | files: Source/VocalSeparation.x, player hooks | next: inspect untracked implementation and player layout hooks`
+- `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
+- [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
   privacy page, and the policy page now names the host that serves it | files:
   Source/Prefs/YTMUltimateSettingsController.m, layout/.../*.lproj/Localizable.strings,
   templates/privacy.html, README.md | next: device check -- Settings row 6 of the
@@ -382,6 +384,7 @@ Current:
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
+- `unreleased` — ISRC resolution prefers playback metadata, searches MusicBrainz by title and ranks title/artist credits; strong haptics reach full intensity; README stats read live badge endpoints. Trap: Vitrine uses Spotify-private track metadata, which YouTube Music does not expose through the same interface.
 - `716b99d` + `5e9b141` — the wipe is ONE continuous sweep (knots {ms,x,slope} per
   VISUAL row, fixed-width feather strip, Fritsch-Carlson) and the distance ladder
   keeps its anchor through inter-line gaps; server: opencc self-heals at import +
