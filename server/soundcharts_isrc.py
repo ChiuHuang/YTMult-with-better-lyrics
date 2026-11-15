@@ -1,8 +1,8 @@
-"""Server-side Soundcharts ISRC lookup with a durable, shared response cache.
+"""Server-side Playgeet-first ISRC lookup with a durable, shared response cache.
 
-API credentials are read only from the server environment. The tweak never
+Soundcharts API credentials are read only from the server environment. The tweak never
 receives or stores them. Positive results live for 30 days; a missing song or
-ISRC is retried after 12 hours so Soundcharts can populate newly added data.
+ISRC is retried after 12 hours so providers can populate newly added data.
 """
 import hashlib
 import os
@@ -84,9 +84,16 @@ def _db():
     conn.execute('''CREATE TABLE IF NOT EXISTS soundcharts_isrc_cache (
         video_id TEXT PRIMARY KEY,
         isrc TEXT,
+        source TEXT NOT NULL DEFAULT 'soundcharts',
         expires_at REAL NOT NULL,
         updated_at REAL NOT NULL
     )''')
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(soundcharts_isrc_cache)')}
+    if 'source' not in columns:
+        conn.execute("ALTER TABLE soundcharts_isrc_cache ADD COLUMN source TEXT NOT NULL DEFAULT 'soundcharts'")
+        # Old negative entries only represent a Soundcharts miss. Let Playgeet
+        # search those songs instead of honoring stale misses for another 12h.
+        conn.execute("DELETE FROM soundcharts_isrc_cache WHERE isrc IS NULL OR isrc = ''")
     conn.execute('''CREATE TABLE IF NOT EXISTS soundcharts_isrc_client_budget (
         client_key TEXT NOT NULL,
         hour INTEGER NOT NULL,
@@ -101,11 +108,11 @@ def _read_cache(video_id):
     try:
         with closing(_db()) as conn:
             row = conn.execute(
-                'SELECT isrc, expires_at FROM soundcharts_isrc_cache WHERE video_id=?',
+                'SELECT isrc, source, expires_at FROM soundcharts_isrc_cache WHERE video_id=?',
                 (video_id,),
             ).fetchone()
-        if row and row[1] > time.time():
-            return {'isrc': row[0] or None, 'source': 'cache'}
+        if row and row[2] > time.time():
+            return {'isrc': row[0] or None, 'source': f"{row[1] or 'unknown'} cache"}
         if row:
             with closing(_db()) as conn, conn:
                 conn.execute('DELETE FROM soundcharts_isrc_cache WHERE video_id=?', (video_id,))
@@ -114,15 +121,16 @@ def _read_cache(video_id):
     return None
 
 
-def _write_cache(video_id, isrc, ttl):
+def _write_cache(video_id, isrc, ttl, source='soundcharts'):
     now = time.time()
     try:
         with closing(_db()) as conn, conn:
             conn.execute(
-                '''INSERT INTO soundcharts_isrc_cache(video_id,isrc,expires_at,updated_at)
-                   VALUES(?,?,?,?) ON CONFLICT(video_id) DO UPDATE SET
-                   isrc=excluded.isrc, expires_at=excluded.expires_at, updated_at=excluded.updated_at''',
-                (video_id, isrc or '', now + ttl, now),
+                '''INSERT INTO soundcharts_isrc_cache(video_id,isrc,source,expires_at,updated_at)
+                   VALUES(?,?,?,?,?) ON CONFLICT(video_id) DO UPDATE SET
+                   isrc=excluded.isrc, source=excluded.source,
+                   expires_at=excluded.expires_at, updated_at=excluded.updated_at''',
+                (video_id, isrc or '', source, now + ttl, now),
             )
     except Exception as exc:
         print(f'[ISRC] cache write failed ({type(exc).__name__})')
@@ -214,8 +222,60 @@ def _credential_order(credentials):
     return credentials[start:] + credentials[:start]
 
 
+def _playgeet_isrc(title, artist):
+    """Search Playgeet's Spotify-backed index and return a confident ISRC."""
+    if not title or not artist:
+        return None, True
+    from urllib.parse import urlencode
+    query = f'{title.strip()} by {artist.strip()}'
+    try:
+        response = requests.get(
+            'https://playgeet.com/api/isrc-search?' + urlencode({'q': query}),
+            headers={'Accept': 'application/json'}, timeout=(2.5, 5.0),
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        print(f'[ISRC] Playgeet request failed ({type(exc).__name__})')
+        return None, False
+    results = body.get('results', []) if isinstance(body, dict) else []
+    if not isinstance(results, list):
+        return None, False
+
+    def norm(value):
+        value = (value or '').casefold()
+        return re.sub(r'[^\w]', '', value, flags=re.UNICODE)
+
+    wanted_title, wanted_artist = norm(title), norm(artist)
+    exact = []
+    artist_matches = []
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+        candidate = item.get('isrc')
+        candidate = candidate.strip().upper() if isinstance(candidate, str) else ''
+        if not _ISRC.fullmatch(candidate):
+            continue
+        candidate_title = norm(item.get('name'))
+        if not candidate_title or candidate_title != wanted_title:
+            continue
+        exact.append(candidate)
+        candidates = item.get('artists', [])
+        if isinstance(candidates, list) and any(
+            isinstance(name, str) and wanted_artist and
+            (wanted_artist in norm(name) or norm(name) in wanted_artist)
+            for name in candidates
+        ):
+            artist_matches.append(candidate)
+    # Prefer artist-matched exact-title records. If localized artist spelling
+    # differs, accept an exact-title result only when all such results agree.
+    preferred = artist_matches or exact
+    unique = set(preferred)
+    return (next(iter(unique)), True) if len(unique) == 1 else (None, True)
+
+
 def lookup(video_id, client_id=None, title='', artist=''):
-    """Return a Soundcharts ISRC, using shared persistent cache first."""
+    """Return a Playgeet-first ISRC, using the shared persistent cache."""
     video_id = (video_id or '').strip()
     if not _VIDEO_ID.fullmatch(video_id):
         record_diagnostic(video_id, title, artist, 'server', 'invalid video ID')
@@ -242,14 +302,27 @@ def lookup(video_id, client_id=None, title='', artist=''):
         return result
 
     try:
-        record_diagnostic(video_id, title, artist, 'Soundcharts', 'lookup started')
+        record_diagnostic(video_id, title, artist, 'Playgeet', 'lookup started')
+        if not _consume_client_budget(client_id):
+            record_diagnostic(video_id, title, artist, 'Playgeet', 'client rate limited')
+            return {'isrc': None, 'source': 'rate_limited'}
+
+        # Playgeet searches Spotify catalog metadata directly from title and
+        # artist, which also covers songs Soundcharts cannot resolve by YouTube ID.
+        record_diagnostic(video_id, title, artist, 'Playgeet', 'searching catalog')
+        playgeet_isrc, playgeet_searched = _playgeet_isrc(title, artist)
+        if playgeet_isrc:
+            _write_cache(video_id, playgeet_isrc, _POSITIVE_TTL, 'playgeet')
+            record_diagnostic(video_id, title, artist, 'Playgeet', 'ISRC found', playgeet_isrc)
+            return {'isrc': playgeet_isrc, 'source': 'playgeet'}
+        record_diagnostic(video_id, title, artist, 'Playgeet', 'no exact confident match; trying Soundcharts')
+
         credentials = _credentials()
         if not credentials:
+            ttl = _NEGATIVE_TTL if playgeet_searched else _ERROR_TTL
+            _write_cache(video_id, None, ttl, 'playgeet')
             record_diagnostic(video_id, title, artist, 'Soundcharts', 'not configured')
-            return {'isrc': None, 'source': 'unconfigured'}
-        if not _consume_client_budget(client_id):
-            record_diagnostic(video_id, title, artist, 'Soundcharts', 'client rate limited')
-            return {'isrc': None, 'source': 'rate_limited'}
+            return {'isrc': None, 'source': 'no_isrc'}
         url = f'https://customer.api.soundcharts.com/api/v2.25/song/by-platform/youtube/{video_id}'
         response = None
         for credential in _credential_order(credentials):

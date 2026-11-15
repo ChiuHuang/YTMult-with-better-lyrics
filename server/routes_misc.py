@@ -106,7 +106,7 @@ def api_app_stats():
 
 @app.route('/api/isrc/lookup', methods=['POST'])
 def api_isrc_lookup():
-    """Resolve a YouTube video ID to an ISRC via Soundcharts.
+    """Resolve a YouTube video ID via Playgeet, then Soundcharts.
 
     Credentials stay in server-side environment or admin config. Results and misses are shared in SQLite under
     database/ so a track costs one provider request per cache lifetime.
@@ -150,12 +150,12 @@ def api_isrc_report():
         return jsonify({'ok': False, 'error': 'invalid video_id'}), 400
     if not all(isinstance(value, str) for value in (title, artist, source, state)):
         return jsonify({'ok': False, 'error': 'invalid fields'}), 400
-    if source not in {'playback', 'soundcharts', 'soundcharts cache', 'musicbrainz',
+    if source not in {'playback', 'playgeet', 'playgeet cache', 'soundcharts', 'soundcharts cache', 'musicbrainz',
                       'musicbrainz cache', 'none', 'error'}:
         return jsonify({'ok': False, 'error': 'invalid source'}), 400
     if state not in {'client lookup started', 'looking up MusicBrainz', 'resolved',
                      'no ISRC found', 'lookup failed', 'playback ISRC available',
-                     'waiting for Soundcharts', 'waiting for previous lookup'}:
+                     'waiting for Playgeet', 'waiting for Soundcharts', 'waiting for previous lookup'}:
         return jsonify({'ok': False, 'error': 'invalid state'}), 400
     if isrc is not None and (not isinstance(isrc, str) or not re.fullmatch(r'[A-Z]{2}[A-Z0-9]{3}[0-9]{7}', isrc)):
         return jsonify({'ok': False, 'error': 'invalid isrc'}), 400

@@ -289,7 +289,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     }
 }
 
-// ---- Soundcharts first, then our independent MusicBrainz matcher ----
+// ---- Playgeet first, server-cached by video ID, then MusicBrainz ----
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID {
     if (!title.length || !artist.length) return;
 
@@ -297,7 +297,9 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     self.currentArtist = artist;
     self.currentVideoID = videoID ?: @"";
 
-    NSString *key = [NSString stringWithFormat:@"%@|%@|%@",
+    // Bump local lookup cache so prior provider misses do not suppress the
+    // new Playgeet-first lookup.
+    NSString *key = [NSString stringWithFormat:@"v2|%@|%@|%@",
                      [title lowercaseString], [artist lowercaseString], videoID ?: @""];
     self.currentLookupKey = key;
 
@@ -306,19 +308,19 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     NSString *cached = self.isrcCache[key];
     if (cached) {
         self.lastQueriedKey = key;
-        self.isrcSource = @"MusicBrainz cache";
+        self.isrcSource = @"ISRC cache";
         self.isrcLookupState = cached.length ? @"Resolved from cache" : @"No ISRC in cache";
         [self updateISRC:cached];
-        YTMULogISRC([NSString stringWithFormat:@"MusicBrainz cache %@ for %@", cached.length ? @"hit" : @"miss", videoID.length ? videoID : key]);
-        YTMUReportISRCStatus(videoID, title, artist, @"musicbrainz cache",
+        YTMULogISRC([NSString stringWithFormat:@"ISRC cache %@ for %@", cached.length ? @"hit" : @"miss", videoID.length ? videoID : key]);
+        YTMUReportISRCStatus(videoID, title, artist, @"playgeet cache",
                              cached.length ? @"resolved" : @"no ISRC found", cached);
         return;
     }
 
     if ([self.isrcCache objectForKey:key] != nil) {
-        self.isrcSource = @"MusicBrainz cache";
+        self.isrcSource = @"ISRC cache";
         self.isrcLookupState = @"No ISRC in cache";
-        YTMUReportISRCStatus(videoID, title, artist, @"musicbrainz cache", @"no ISRC found", nil);
+        YTMUReportISRCStatus(videoID, title, artist, @"playgeet cache", @"no ISRC found", nil);
         return; // previous miss
     }
 
@@ -328,7 +330,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
         self.pendingISRCRequest = @{@"title": [title copy], @"artist": [artist copy],
                                    @"videoID": [videoID copy] ?: @"", @"key": key};
         YTMUReportISRCStatus(videoID, title, artist,
-                             videoID.length == 11 ? @"soundcharts" : @"musicbrainz",
+                             videoID.length == 11 ? @"playgeet" : @"musicbrainz",
                              @"waiting for previous lookup", nil);
         return;
     }
@@ -338,8 +340,8 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
     self.systemHasTrackForCurrentSong = NO;
     self.currentISRC = nil;
-    self.isrcSource = videoID.length == 11 ? @"Soundcharts → MusicBrainz" : @"MusicBrainz";
-    self.isrcLookupState = videoID.length == 11 ? @"Looking up Soundcharts" : @"Looking up MusicBrainz (no video ID)";
+    self.isrcSource = videoID.length == 11 ? @"Playgeet → Soundcharts → MusicBrainz" : @"MusicBrainz";
+    self.isrcLookupState = videoID.length == 11 ? @"Looking up Playgeet" : @"Looking up MusicBrainz (no video ID)";
     YTMULogISRC([NSString stringWithFormat:@"Lookup started videoID=%@ source=%@",
                  videoID.length ? videoID : @"(none)", self.isrcSource]);
     YTMUReportISRCStatus(videoID, title, artist,
@@ -360,12 +362,12 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                                                            options:0 error:&bodyError];
         if (bodyError || !request.HTTPBody) {
             self.lookupInFlight = NO;
-            self.isrcLookupState = @"Could not create Soundcharts request; trying MusicBrainz";
-            YTMULogISRC([NSString stringWithFormat:@"Soundcharts request serialization failed (%@)", bodyError.localizedDescription ?: @"unknown error"]);
+            self.isrcLookupState = @"Could not create ISRC lookup; trying MusicBrainz";
+            YTMULogISRC([NSString stringWithFormat:@"ISRC request serialization failed (%@)", bodyError.localizedDescription ?: @"unknown error"]);
             [self lookupMusicBrainzForTitle:title artist:artist key:key];
             return;
         }
-        self.isrcLookupState = @"Looking up Soundcharts";
+        self.isrcLookupState = @"Looking up Playgeet (Soundcharts fallback)";
         __weak typeof(self) weakSelf = self;
         [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -375,11 +377,12 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
             if (isrc.length != 12) isrc = nil;
             if (isrc.length) {
                 strongSelf.isrcCache[key] = isrc;
-                YTMULogISRC([NSString stringWithFormat:@"Soundcharts resolved videoID=%@ ISRC=%@", videoID, isrc]);
+                NSString *source = [json[@"source"] isKindOfClass:[NSString class]] ? json[@"source"] : @"unknown";
+                YTMULogISRC([NSString stringWithFormat:@"%@ resolved videoID=%@ ISRC=%@", source, videoID, isrc]);
                 if ([strongSelf.currentLookupKey isEqualToString:key]) {
-                    strongSelf.isrcSource = @"Soundcharts";
+                    strongSelf.isrcSource = source;
                     strongSelf.isrcLookupState = @"Resolved";
-                    YTMUReportISRCStatus(videoID, title, artist, @"soundcharts", @"resolved", isrc);
+                    YTMUReportISRCStatus(videoID, title, artist, [source containsString:@"playgeet"] ? @"playgeet" : @"soundcharts", @"resolved", isrc);
                     dispatch_async(dispatch_get_main_queue(), ^{
                         if ([strongSelf.currentLookupKey isEqualToString:key]) [strongSelf updateISRC:isrc];
                     });
@@ -388,11 +391,11 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                 return;
             }
             NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)response).statusCode : 0;
-            YTMULogISRC([NSString stringWithFormat:@"Soundcharts returned no ISRC (HTTP %ld, %@); falling back to MusicBrainz",
+            YTMULogISRC([NSString stringWithFormat:@"Playgeet/Soundcharts returned no ISRC (HTTP %ld, %@); falling back to MusicBrainz",
                          (long)status, error.localizedDescription ?: @"no transport error"]);
             if ([strongSelf.currentLookupKey isEqualToString:key]) {
-                strongSelf.isrcLookupState = error ? @"Soundcharts request failed; trying MusicBrainz" : @"Soundcharts had no ISRC; trying MusicBrainz";
-                YTMUReportISRCStatus(videoID, title, artist, @"soundcharts", @"waiting for Soundcharts", nil);
+                strongSelf.isrcLookupState = error ? @"ISRC lookup failed; trying MusicBrainz" : @"No ISRC from Playgeet/Soundcharts; trying MusicBrainz";
+                YTMUReportISRCStatus(videoID, title, artist, @"playgeet", @"waiting for Playgeet", nil);
                 [strongSelf lookupMusicBrainzForTitle:title artist:artist key:key];
             } else {
                 [strongSelf completeISRCRequest];

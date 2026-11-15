@@ -15,12 +15,28 @@ the code wins and this file gets fixed.
 | `GET /api/app/altstore` | AltStore source, STABLE channel |
 | `GET /api/app/altstore-beta` | AltStore source, BETA channel (`?channel=beta` equivalent) |
 | `GET /api/app/settings` | tweak remote config (public half of app_settings) |
-| `POST /api/isrc/lookup` | Soundcharts lookup by YouTube video ID; cached server-side |
+| `POST /api/isrc/lookup` | Playgeet-first title/artist lookup, then Soundcharts by YouTube ID; cached server-side |
 | `GET /privacy` | the privacy policy page |
 
-### Soundcharts ISRC lookup
+### ISRC lookup
 
-Credentials can also live in the gitignored `config/admin_config.json` under
+The tweak sends the current YouTube title, artist, and video ID to this server
+endpoint. The server queries the unauthenticated Playgeet search API first
+(`https://playgeet.com/api/isrc-search?q=...`), matches an exact track title,
+and prefers matching artist metadata. If localized artist spellings differ,
+it accepts the exact-title result only when all exact-title results agree on a
+single ISRC. Soundcharts by YouTube ID is the server-side fallback; the tweak
+then tries its MusicBrainz matcher if the server has no ISRC.
+
+The SQLite cache remains shared across clients: positive results live 30 days,
+misses 12 hours, and transient provider errors 60 seconds. Cache entries keep
+the provider name for the admin lookup log. Existing Soundcharts-only negative
+cache entries are invalidated during the source-column migration so Playgeet
+gets a chance to resolve those tracks. Uncached requests are limited to 90 per
+client per hour. The Playgeet endpoint needs no API key; no Spotify bearer
+token is used or stored.
+
+Soundcharts fallback credentials can also live in the gitignored `config/admin_config.json` under
 `soundcharts_credentials`, for example:
 
 ```json
@@ -36,13 +52,9 @@ precedence and accepts the same JSON array. The legacy single-pair environment
 variables `YTMU_SOUNDCHARTS_APP_ID` plus `YTMU_SOUNDCHARTS_API_KEY` are also
 supported and override the file. Never commit credentials or put them in the
 tweak or a public settings response. The server rotates the starting pair between uncached lookups and
-tries another pair on HTTP 401, 403, or 429. The public app endpoint
-accepts a YouTube `video_id`; the server stores positive results for 30 days,
-misses for 12 hours, and transient failures for 60 seconds in
-`database/soundcharts_isrc.sqlite3`. Uncached lookups are limited to 90 per
-client per hour. If Soundcharts is unconfigured, has no ISRC, or fails, the
-tweak falls back to its MusicBrainz matcher and then its own CoreHaptics pulses
-when iOS has no native haptic track.
+tries another pair on HTTP 401, 403, or 429. The cache is stored in
+`database/soundcharts_isrc.sqlite3`. The tweak uses its own CoreHaptics pulses
+when iOS has no native haptic track for the resolved ISRC.
 
 ## OWNER-KEY — a shared secret, not a session
 
