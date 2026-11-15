@@ -18,6 +18,8 @@ typedef struct {
 } YTMUZipLocalHeader;
 #pragma pack(pop)
 
+#define YTMU_ZIP_BUF_SIZE 65536
+
 @implementation YTMUZipExtractor
 
 + (BOOL)unzipFileAtPath:(NSString *)zipPath toDestination:(NSString *)destDir error:(NSError **)outError {
@@ -31,9 +33,8 @@ typedef struct {
 
     [[NSFileManager defaultManager] createDirectoryAtPath:destDir withIntermediateDirectories:YES attributes:nil error:nil];
 
-    const size_t bufSize = 65536;
-    uint8_t inBuf[bufSize];
-    uint8_t outBuf[bufSize];
+    uint8_t inBuf[YTMU_ZIP_BUF_SIZE];
+    uint8_t outBuf[YTMU_ZIP_BUF_SIZE];
 
     BOOL ok = YES;
     while (!feof(f)) {
@@ -89,7 +90,7 @@ typedef struct {
             // Stored
             uint32_t remaining = hdr.uncompressedSize;
             while (remaining > 0) {
-                size_t toRead = (remaining < bufSize) ? remaining : bufSize;
+                size_t toRead = (remaining < YTMU_ZIP_BUF_SIZE) ? remaining : YTMU_ZIP_BUF_SIZE;
                 size_t readBytes = fread(inBuf, 1, toRead, f);
                 if (readBytes == 0) break;
                 fwrite(inBuf, 1, readBytes, outF);
@@ -109,7 +110,7 @@ typedef struct {
             uint32_t compRemaining = hdr.compressedSize;
             int ret = Z_OK;
             while (compRemaining > 0 && ret != Z_STREAM_END) {
-                size_t toRead = (compRemaining < bufSize) ? compRemaining : bufSize;
+                size_t toRead = (compRemaining < YTMU_ZIP_BUF_SIZE) ? compRemaining : YTMU_ZIP_BUF_SIZE;
                 size_t readBytes = fread(inBuf, 1, toRead, f);
                 if (readBytes == 0) break;
                 compRemaining -= readBytes;
@@ -118,13 +119,13 @@ typedef struct {
                 strm.next_in = inBuf;
 
                 do {
-                    strm.avail_out = (uInt)bufSize;
+                    strm.avail_out = (uInt)YTMU_ZIP_BUF_SIZE;
                     strm.next_out = outBuf;
                     ret = inflate(&strm, Z_NO_FLUSH);
                     if (ret == Z_STREAM_ERROR || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
                         break;
                     }
-                    size_t have = bufSize - strm.avail_out;
+                    size_t have = YTMU_ZIP_BUF_SIZE - strm.avail_out;
                     if (have > 0) {
                         fwrite(outBuf, 1, have, outF);
                     }
