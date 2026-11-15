@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <CoreML/CoreML.h>
+#import "YTMUMDXSeparator.h"
 
 typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     YTMUVocalSeparationModeVocalOnly = 0,
@@ -9,13 +10,14 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
 
 @interface YTMUVocalSeparationManager : NSObject
 @property (atomic, strong, readonly) MLModel *coreMLModel;
+@property (atomic, strong, readonly) YTMUMDXSeparator *separator;
 @property (atomic, assign, readonly) BOOL isModelReady;
 @property (atomic, assign, readonly) BOOL isModelLoading;
 @property (atomic, strong, readonly) NSError *modelLoadError;
-@property (nonatomic, assign) float vocalVolume;
-@property (nonatomic, assign) float backgroundVolume;
-@property (nonatomic, assign, readonly) BOOL isSingEnabled;
-@property (nonatomic, assign) YTMUVocalSeparationMode selectedMode;
+@property (atomic, assign) float vocalVolume;
+@property (atomic, assign) float backgroundVolume;
+@property (atomic, assign, readonly) BOOL isSingEnabled;
+@property (atomic, assign) YTMUVocalSeparationMode selectedMode;
 
 + (instancetype)sharedInstance;
 - (NSString *)modelPackagePath;

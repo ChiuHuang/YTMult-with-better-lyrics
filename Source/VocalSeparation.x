@@ -12,9 +12,11 @@
 // GPL-3.0); this YTMusic implementation is independently written. This
 // repository's GPL-3.0 license applies to this file as well.
 static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparationModelDidChange";
+static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationModeDidChange";
 
 @interface YTMUVocalSeparationManager ()
 @property (atomic, strong, readwrite) MLModel *coreMLModel;
+@property (atomic, strong, readwrite) YTMUMDXSeparator *separator;
 @property (atomic, assign, readwrite) BOOL isModelReady;
 @property (atomic, assign, readwrite) BOOL isModelLoading;
 @property (atomic, strong, readwrite) NSError *modelLoadError;
@@ -45,12 +47,15 @@ static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparation
 }
 
 - (void)setSelectedMode:(YTMUVocalSeparationMode)selectedMode {
-    _selectedMode = (YTMUVocalSeparationMode)MIN(2, MAX(0, selectedMode));
+    YTMUVocalSeparationMode nextMode = (YTMUVocalSeparationMode)MIN(2, MAX(0, selectedMode));
+    BOOL changed = _selectedMode != nextMode;
+    _selectedMode = nextMode;
     // These gains are consumed by the separator's output mix once the player
     // audio stage is attached: vocals-only, original, background-only.
     self.vocalVolume = _selectedMode == YTMUVocalSeparationModeBackgroundOnly ? 0.0f : 1.0f;
     self.backgroundVolume = _selectedMode == YTMUVocalSeparationModeVocalOnly ? 0.0f : 1.0f;
     [[NSUserDefaults standardUserDefaults] setInteger:_selectedMode forKey:@"YTMUVocalSeparationMode"];
+    if (changed) [[NSNotificationCenter defaultCenter] postNotificationName:YTMUVocalSeparationModeDidChange object:self];
 }
 
 - (BOOL)isSingEnabled {
@@ -111,10 +116,16 @@ static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparation
         MLModelConfiguration *config = [[MLModelConfiguration alloc] init];
         config.computeUnits = MLComputeUnitsAll; // Use ANE + GPU + CPU
         MLModel *model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
-        if (model) self.coreMLModel = model;
+        if (model) {
+            YTMUMDXSeparator *separator = [[YTMUMDXSeparator alloc] initWithModel:model error:&error];
+            if (separator) {
+                self.coreMLModel = model;
+                self.separator = separator;
+            }
+        }
     }
     if (loadError) *loadError = error;
-    self.isModelReady = (self.coreMLModel != nil);
+    self.isModelReady = (self.separator != nil);
     return self.isModelReady;
 }
 
@@ -212,6 +223,8 @@ static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparation
     [self addSubview:_handle];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelDidChange:)
                                                  name:YTMUVocalSeparationModelDidChange object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelDidChange:)
+                                                 name:YTMUVocalSeparationModeDidChange object:nil];
     [self refreshSelection];
     return self;
 }
@@ -288,6 +301,7 @@ static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparation
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self name:YTMUVocalSeparationModelDidChange object:nil];
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:YTMUVocalSeparationModeDidChange object:nil];
 }
 @end
 

@@ -27,7 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[ACTIVE] ses_sing_pipeline_20261115 | Connect the downloaded CoreML vocal separator to player audio while preserving GPLv3 boundaries | files: Source/VocalSeparation.{h,x}, Source/Prefs/SingSettingsController.m | next: implement MDX23C's fixed 44.1 kHz spectrogram I/O and identify the player output stage to tap`
+- `[ACTIVE] ses_sing_pipeline_20261115 | Connect the downloaded CoreML vocal separator to player audio while preserving GPLv3 boundaries | files: Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m}, Source/Prefs/SingSettingsController.m | next: add a read-ahead render stage and identify YT Music's audio output and clock interfaces`
 - `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
 - [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
   privacy page, and the policy page now names the host that serves it | files:
