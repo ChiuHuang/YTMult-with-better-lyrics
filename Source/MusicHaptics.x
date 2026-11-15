@@ -3,6 +3,7 @@
 #import <CoreHaptics/CoreHaptics.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <substrate.h>
 #import <stdatomic.h>
 #import <math.h>
 #import <stdint.h>
@@ -21,6 +22,9 @@ static atomic_uint_fast32_t YTMUAudioNoiseFloorBits;
 static mach_timebase_info_data_t YTMUHostTimebase;
 static atomic_uintptr_t YTMUMusicOutputUnits[8];
 static atomic_uint YTMUMusicOutputBuses[8];
+static OSStatus (*YTMUOriginalAudioUnitRender)(AudioUnit, AudioUnitRenderActionFlags *,
+                                               const AudioTimeStamp *, UInt32, UInt32,
+                                               AudioBufferList *);
 
 static BOOL YTMUAudioUnitDescription(AudioUnit unit, AudioComponentDescription *description) {
     if (!unit || !description) return NO;
@@ -138,9 +142,10 @@ static void YTMUObserveRenderedAudio(AudioBufferList *buffers, UInt32 frameCount
     atomic_store_explicit(&YTMUAudioPreviousRMSBits, YTMUFloatBits(rms), memory_order_relaxed);
 }
 
-%hookf(OSStatus, AudioUnitRender, AudioUnit unit, AudioUnitRenderActionFlags *flags,
-       const AudioTimeStamp *timeStamp, UInt32 outputBus, UInt32 frameCount, AudioBufferList *ioData) {
-    OSStatus status = %orig(unit, flags, timeStamp, outputBus, frameCount, ioData);
+static OSStatus YTMUAudioUnitRenderHook(AudioUnit unit, AudioUnitRenderActionFlags *flags,
+                                        const AudioTimeStamp *timeStamp, UInt32 outputBus,
+                                        UInt32 frameCount, AudioBufferList *ioData) {
+    OSStatus status = YTMUOriginalAudioUnitRender(unit, flags, timeStamp, outputBus, frameCount, ioData);
     if (status == noErr && YTMUIsTrackedPlayerMixer(unit, outputBus) &&
         atomic_load_explicit(&YTMUAudioCaptureEnabled, memory_order_relaxed)) {
         YTMUObserveRenderedAudio(ioData, frameCount);
@@ -911,5 +916,7 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 
 %ctor {
     mach_timebase_info(&YTMUHostTimebase);
+    MSHookFunction((void *)AudioUnitRender, (void *)YTMUAudioUnitRenderHook,
+                   (void **)&YTMUOriginalAudioUnitRender);
     %init;
 }
