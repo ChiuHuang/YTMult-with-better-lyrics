@@ -28,11 +28,16 @@
 
 - (void)maybeShowEmptyState {
     if (self.audioFiles.count == 0) {
+        UIView *emptyStateView = [[UIView alloc] initWithFrame:self.tableView.bounds];
+        emptyStateView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        emptyStateView.backgroundColor = UIColor.clearColor;
+        self.tableView.backgroundView = emptyStateView;
+
         self.imageView = [[UIImageView alloc] initWithImage:[UIImage imageNamed:@"yt_outline_audio_48pt" inBundle:[NSBundle mainBundle] compatibleWithTraitCollection:nil]];
         self.imageView.contentMode = UIViewContentModeScaleAspectFit;
         self.imageView.tintColor = [[UIColor whiteColor] colorWithAlphaComponent:0.8];
         self.imageView.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.tableView addSubview:self.imageView];
+        [emptyStateView addSubview:self.imageView];
 
         self.label = [[UILabel alloc] initWithFrame:CGRectZero];
         self.label.text = LOC(@"EMPTY");
@@ -42,18 +47,18 @@
         self.label.textAlignment = NSTextAlignmentCenter;
         self.label.translatesAutoresizingMaskIntoConstraints = NO;
         [self.label sizeToFit];
-        [self.tableView addSubview:self.label];
+        [emptyStateView addSubview:self.label];
 
         [NSLayoutConstraint activateConstraints:@[
-            [self.imageView.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
-            [self.imageView.bottomAnchor constraintEqualToAnchor:self.tableView.centerYAnchor constant:-30],
+            [self.imageView.centerXAnchor constraintEqualToAnchor:emptyStateView.centerXAnchor],
+            [self.imageView.bottomAnchor constraintEqualToAnchor:emptyStateView.centerYAnchor constant:-30],
             [self.imageView.widthAnchor constraintEqualToConstant:48],
             [self.imageView.heightAnchor constraintEqualToConstant:48],
 
-            [self.label.centerXAnchor constraintEqualToAnchor:self.tableView.centerXAnchor],
+            [self.label.centerXAnchor constraintEqualToAnchor:emptyStateView.centerXAnchor],
             [self.label.topAnchor constraintEqualToAnchor:self.imageView.bottomAnchor constant:20],
-            [self.label.leadingAnchor constraintEqualToAnchor:self.tableView.leadingAnchor constant:20],
-            [self.label.trailingAnchor constraintEqualToAnchor:self.tableView.trailingAnchor constant:-20],
+            [self.label.leadingAnchor constraintEqualToAnchor:emptyStateView.leadingAnchor constant:20],
+            [self.label.trailingAnchor constraintEqualToAnchor:emptyStateView.trailingAnchor constant:-20],
         ]];
     }
 }
