@@ -505,6 +505,10 @@ void YTMUTriggerSyllableHaptic(double durationSec);
 void YTMUTriggerBeatHaptic(void);
 void YTMUUpdateNowPlayingISRC(NSString *isrc);
 BOOL YTMUIsSystemMusicHapticsActive(void);
+NSString *YTMUCurrentNowPlayingISRC(void);
+NSString *YTMUCurrentNowPlayingTitle(void);
+NSString *YTMUCurrentNowPlayingArtist(void);
+void YTMUTestHapticPulse(NSInteger intensity);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
 #ifdef __cplusplus

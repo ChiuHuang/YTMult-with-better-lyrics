@@ -1,13 +1,14 @@
 #import "SingSettingsController.h"
 #import "../LyricsShared.h"
 #import "../Headers/Localization.h"
-
-// YTMUTriggerBeatHaptic / YTMUTriggerSyllableHaptic are declared in LyricsShared.h.
+#import "../Utils/YTMUZipExtractor.h"
 
 @interface SingSettingsController ()
 @property (nonatomic, strong) UIProgressView *downloadProgressView;
 @property (nonatomic, strong) UILabel *downloadStatusLabel;
 @property (nonatomic, strong) NSURLSessionDownloadTask *activeDownloadTask;
+@property (nonatomic, copy)   NSString *downloadStatusText;
+@property (nonatomic, strong) NSTimer *refreshTimer;
 @end
 
 @implementation SingSettingsController
@@ -30,6 +31,21 @@
     ]];
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.tableView reloadData];
+    __weak typeof(self) ws = self;
+    self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.5 repeats:YES block:^(NSTimer * _Nonnull timer) {
+        [ws.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+    }];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self.refreshTimer invalidate];
+    self.refreshTimer = nil;
+}
+
 #pragma mark - Table view data source
 
 - (CGFloat)tableView:(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -39,24 +55,28 @@
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     // Section 0: Music Haptics
     // Section 1: Sing / Vocal Separation
-    return 2;
+    // Section 2: Diagnostics & Test
+    return 3;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 2; // toggle + intensity
     if (section == 1) return 2; // sing toggle + model download
+    if (section == 2) return 4; // Now Playing, ISRC, System Haptics, Test Motor
     return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return LOC(@"MUSIC_HAPTICS");
     if (section == 1) return LOC(@"SING_SECTION_HEADER");
+    if (section == 2) return @"Diagnostics & Test";
     return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return LOC(@"MUSIC_HAPTICS_FOOTER");
     if (section == 1) return LOC(@"SING_FOOTER");
+    if (section == 2) return @"Tap 'Test Haptic Pulse' to verify device vibration motor.";
     return nil;
 }
 
@@ -82,7 +102,8 @@
             ABCSwitch *sw = [[NSClassFromString(@"ABCSwitch") alloc] init];
             sw.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
             [sw addTarget:self action:@selector(toggleHapticsSwitch:) forControlEvents:UIControlEventValueChanged];
-            sw.on = [YTMUltimateDict[@"musicHaptics"] boolValue];
+            id val = YTMUltimateDict[@"musicHaptics"];
+            sw.on = (val != nil) ? [val boolValue] : YES; // Default ON
             cell.accessoryView = sw;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             return cell;
@@ -124,9 +145,7 @@
             [sw addTarget:self action:@selector(toggleSingSwitch:) forControlEvents:UIControlEventValueChanged];
             sw.on = modelReady && [YTMUltimateDict[@"singEnabled"] boolValue];
             sw.enabled = modelReady;
-            if (!modelReady) {
-                sw.alpha = 0.4;
-            }
+            sw.alpha = modelReady ? 1.0 : 0.4;
             cell.accessoryView = sw;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             return cell;
@@ -140,16 +159,16 @@
             if (modelReady) {
                 cell.textLabel.text = LOC(@"SING_MODEL_READY");
                 cell.textLabel.textColor = [UIColor systemGreenColor];
-                cell.detailTextLabel.text = nil;
+                cell.detailTextLabel.text = @"mdx23c_instvoc_hq.mlpackage (Ready)";
+                cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.accessoryType = UITableViewCellAccessoryCheckmark;
                 cell.selectionStyle = UITableViewCellSelectionStyleNone;
             } else if (downloading) {
-                cell.textLabel.text = LOC(@"SING_MODEL_DOWNLOADING");
+                cell.textLabel.text = self.downloadStatusText ?: LOC(@"SING_MODEL_DOWNLOADING");
                 cell.textLabel.textColor = [UIColor secondaryLabelColor];
                 cell.detailTextLabel.text = nil;
                 cell.accessoryType = UITableViewCellAccessoryNone;
 
-                // Progress view in accessory area
                 UIProgressView *pv = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
                 pv.frame = CGRectMake(0, 0, 100, 10);
                 pv.progress = 0.0;
@@ -159,10 +178,50 @@
             } else {
                 cell.textLabel.text = LOC(@"SING_MODEL_DOWNLOAD");
                 cell.textLabel.textColor = [UIColor systemBlueColor];
-                cell.detailTextLabel.text = nil;
+                cell.detailTextLabel.text = self.downloadStatusText ?: @"Tap to download AI model (~42 MB compressed)";
+                cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.accessoryType = UITableViewCellAccessoryNone;
                 cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             }
+            return cell;
+        }
+    }
+
+    // ---- Section 2: Diagnostics & Test ----
+    if (indexPath.section == 2) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleValue1 reuseIdentifier:@"diagCell"];
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Now Playing";
+            NSString *title = YTMUCurrentNowPlayingTitle();
+            NSString *artist = YTMUCurrentNowPlayingArtist();
+            if (title.length) {
+                cell.detailTextLabel.text = artist.length ? [NSString stringWithFormat:@"%@ - %@", artist, title] : title;
+            } else {
+                cell.detailTextLabel.text = @"(No track)";
+            }
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+        if (indexPath.row == 1) {
+            cell.textLabel.text = @"ISRC Code";
+            NSString *isrc = YTMUCurrentNowPlayingISRC();
+            cell.detailTextLabel.text = isrc.length ? isrc : @"(None / Looking up)";
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+        if (indexPath.row == 2) {
+            cell.textLabel.text = @"iOS 18 System Haptics";
+            BOOL active = YTMUIsSystemMusicHapticsActive();
+            cell.detailTextLabel.text = active ? @"Active" : @"Inactive";
+            cell.detailTextLabel.textColor = active ? [UIColor systemGreenColor] : [UIColor secondaryLabelColor];
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+        if (indexPath.row == 3) {
+            cell.textLabel.text = @"Test Haptic Pulse";
+            cell.textLabel.textColor = [UIColor systemBlueColor];
+            cell.detailTextLabel.text = @"Tap to test motor";
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             return cell;
         }
     }
@@ -177,6 +236,17 @@
         if (![self isSingModelReady] && self.activeDownloadTask == nil) {
             [self startModelDownload];
         }
+    }
+
+    if (indexPath.section == 2 && indexPath.row == 3) {
+        // Test haptic pulses sequentially
+        YTMUTestHapticPulse(0); // light
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            YTMUTestHapticPulse(1); // medium
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.50 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            YTMUTestHapticPulse(2); // strong
+        });
     }
 }
 
@@ -193,18 +263,23 @@
 
 - (void)startModelDownload {
     self.activeDownloadTask = nil;
+    self.downloadStatusText = @"Starting download...";
     [self.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:1]]
                           withRowAnimation:UITableViewRowAnimationAutomatic];
 
     NSURL *url = [NSURL URLWithString:@"https://chiuhuang.dev/mdx23c_instvoc_hq"];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" forHTTPHeaderField:@"User-Agent"];
+
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg delegate:nil delegateQueue:[NSOperationQueue mainQueue]];
 
     __weak typeof(self) weakSelf = self;
-    NSURLSessionDownloadTask *task = [session downloadTaskWithURL:url
+    NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:req
         completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
             if (error || !location) {
                 weakSelf.activeDownloadTask = nil;
+                weakSelf.downloadStatusText = [NSString stringWithFormat:@"Download failed: %@", error.localizedDescription];
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [weakSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:1]]
                                               withRowAnimation:UITableViewRowAnimationAutomatic];
@@ -217,31 +292,42 @@
                 return;
             }
 
-            // Move the downloaded ZIP; extraction is handled by VocalSeparation on first use
-            NSString *dest = [weakSelf singModelPath];
-            NSString *destDir = [dest stringByDeletingLastPathComponent];
-            NSError *mkdirErr = nil;
-            [[NSFileManager defaultManager] createDirectoryAtPath:destDir
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:&mkdirErr];
-
-            NSString *zipPath = [destDir stringByAppendingPathComponent:@"mdx23c_instvoc_hq.zip"];
-            [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
-            [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
-
-            // Notify VocalSeparation to extract the ZIP on next access
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"YTMUSingModelZIPReady"
-                                                                object:zipPath];
-
-            weakSelf.activeDownloadTask = nil;
+            weakSelf.downloadStatusText = @"Extracting model files...";
             dispatch_async(dispatch_get_main_queue(), ^{
-                [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
-                                  withRowAnimation:UITableViewRowAnimationAutomatic];
+                [weakSelf.tableView reloadRowsAtIndexPaths:@[[NSIndexPath indexPathForRow:1 inSection:1]]
+                                          withRowAnimation:UITableViewRowAnimationNone];
+            });
+
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                NSString *dest = [weakSelf singModelPath];
+                NSString *destDir = [dest stringByDeletingLastPathComponent];
+                NSError *mkdirErr = nil;
+                [[NSFileManager defaultManager] createDirectoryAtPath:destDir
+                                          withIntermediateDirectories:YES
+                                                           attributes:nil
+                                                                error:&mkdirErr];
+
+                NSString *zipPath = [destDir stringByAppendingPathComponent:@"mdx23c_instvoc_hq.zip"];
+                [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+                [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
+
+                // Extract ZIP using YTMUZipExtractor
+                NSError *unzipErr = nil;
+                BOOL unzipped = [YTMUZipExtractor unzipFileAtPath:zipPath toDestination:destDir error:&unzipErr];
+                NSLog(@"[YTMU-Sing] Model unzip result: %d, err: %@", unzipped, unzipErr);
+
+                // Clean up zip file
+                [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    weakSelf.activeDownloadTask = nil;
+                    weakSelf.downloadStatusText = unzipped ? nil : @"Extraction failed";
+                    [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
+                                      withRowAnimation:UITableViewRowAnimationAutomatic];
+                });
             });
         }];
 
-    // Observe progress via KVO
     [task addObserver:self forKeyPath:@"countOfBytesReceived" options:NSKeyValueObservingOptionNew context:NULL];
     [task addObserver:self forKeyPath:@"countOfBytesExpectedToReceive" options:NSKeyValueObservingOptionNew context:NULL];
 
@@ -255,10 +341,15 @@
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if ([keyPath isEqualToString:@"countOfBytesReceived"] || [keyPath isEqualToString:@"countOfBytesExpectedToReceive"]) {
         NSURLSessionDownloadTask *t = self.activeDownloadTask;
-        if (t && t.countOfBytesExpectedToReceive > 0) {
-            float progress = (float)t.countOfBytesReceived / (float)t.countOfBytesExpectedToReceive;
+        if (t) {
+            float progress = 0.0;
+            if (t.countOfBytesExpectedToReceive > 0) {
+                progress = (float)t.countOfBytesReceived / (float)t.countOfBytesExpectedToReceive;
+            }
+            double mbReceived = (double)t.countOfBytesReceived / (1024.0 * 1024.0);
             dispatch_async(dispatch_get_main_queue(), ^{
                 self.downloadProgressView.progress = progress;
+                self.downloadStatusText = [NSString stringWithFormat:@"Downloading... (%.1f MB)", mbReceived];
             });
         }
     }
@@ -278,6 +369,7 @@
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
     d[@"musicHaptics"] = @(sender.isOn);
     [defaults setObject:d forKey:@"YTMUltimate"];
+    NSLog(@"[YTMU-Haptics] User toggled musicHaptics: %d", sender.isOn);
     if (sender.isOn) {
         YTMUTriggerBeatHaptic();
     }
@@ -288,6 +380,7 @@
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
     d[@"musicHapticsIntensity"] = @(sender.selectedSegmentIndex);
     [defaults setObject:d forKey:@"YTMUltimate"];
+    NSLog(@"[YTMU-Haptics] User set intensity: %ld", (long)sender.selectedSegmentIndex);
     YTMUTriggerBeatHaptic();
 }
 

@@ -6,7 +6,8 @@
 
 // MAMusicHapticsManager — MediaAccessibility (iOS 18+)
 // System drives haptic playback automatically via ISRC lookup on Apple servers.
-// We supply the ISRC by querying MusicBrainz on each song change.
+// We supply the ISRC by querying MusicBrainz on each song change, while our
+// own CoreHaptics engine provides real-time syllable and beat haptics.
 @interface MAMusicHapticsManager : NSObject
 + (instancetype)sharedManager;
 @property (nonatomic, readonly) BOOL isActive;
@@ -17,7 +18,12 @@
 // ---- Preference helpers ----
 static BOOL YTMU(NSString *key) {
     NSDictionary *dict = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
-    return [dict[key] boolValue];
+    // Default musicHaptics to YES if not set yet
+    if (dict && dict[key] != nil) {
+        return [dict[key] boolValue];
+    }
+    if ([key isEqualToString:@"musicHaptics"]) return YES;
+    return NO;
 }
 static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     NSDictionary *dict = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
@@ -30,11 +36,12 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 @property (nonatomic, strong) CHHapticEngine *engine;
 @property (nonatomic, assign) BOOL isEngineRunning;
 @property (nonatomic, copy)   NSString *currentISRC;
+@property (nonatomic, copy)   NSString *currentTitle;
+@property (nonatomic, copy)   NSString *currentArtist;
 @property (nonatomic, assign) NSTimeInterval lastTriggerTime;
 @property (nonatomic, assign) BOOL systemHasTrackForCurrentSong;
-// MusicBrainz ISRC lookup state
-@property (nonatomic, copy)   NSString *lastQueriedKey;   // "title|artist"
-@property (nonatomic, strong) NSMutableDictionary *isrcCache; // key -> ISRC string
+@property (nonatomic, copy)   NSString *lastQueriedKey;
+@property (nonatomic, strong) NSMutableDictionary *isrcCache;
 @property (nonatomic, assign) BOOL lookupInFlight;
 + (instancetype)sharedInstance;
 - (BOOL)isSystemMusicHapticsActive;
@@ -42,6 +49,7 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 - (void)triggerBeatHaptic;
 - (void)updateISRC:(NSString *)isrc;
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist;
+- (void)playTransientWithIntensity:(float)intensity sharpness:(float)sharpness;
 @end
 
 @implementation YTMUMusicHapticsManager
@@ -66,22 +74,29 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     return self;
 }
 
-// ---- CoreHaptics setup (fallback for songs with no Apple haptic track) ----
+// ---- CoreHaptics setup ----
 - (void)setupCoreHaptics {
-    if (![CHHapticEngine capabilitiesForHardware].supportsHaptics) return;
+    if (![CHHapticEngine capabilitiesForHardware].supportsHaptics) {
+        NSLog(@"[YTMU-Haptics] Device hardware does not support CoreHaptics");
+        return;
+    }
     NSError *err = nil;
     self.engine = [[CHHapticEngine alloc] initAndReturnError:&err];
-    if (err || !self.engine) { self.engine = nil; return; }
-    // Do NOT set playsHapticsOnly — it can interfere with MAMusicHapticsManager output
+    if (err || !self.engine) {
+        NSLog(@"[YTMU-Haptics] Failed to init CHHapticEngine: %@", err);
+        self.engine = nil;
+        return;
+    }
     __weak typeof(self) ws = self;
     self.engine.resetHandler = ^{
+        NSLog(@"[YTMU-Haptics] CHHapticEngine reset handler triggered");
         [ws startEngineIfNeeded];
     };
     self.engine.stoppedHandler = ^(CHHapticEngineStoppedReason r) {
+        NSLog(@"[YTMU-Haptics] CHHapticEngine stopped (reason %ld)", (long)r);
         __strong typeof(ws) s = ws;
         if (s) s.isEngineRunning = NO;
     };
-    // Lazy start: engine starts only when first fallback haptic fires
 }
 
 - (void)startEngineIfNeeded {
@@ -89,6 +104,11 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     NSError *err = nil;
     [self.engine startAndReturnError:&err];
     self.isEngineRunning = (err == nil);
+    if (err) {
+        NSLog(@"[YTMU-Haptics] CHHapticEngine start failed: %@", err);
+    } else {
+        NSLog(@"[YTMU-Haptics] CHHapticEngine started successfully");
+    }
 }
 
 // ---- System Music Haptics observation ----
@@ -103,7 +123,9 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
                                                object:nil];
 }
 
-- (void)systemHapticsStatusChanged:(NSNotification *)note {}
+- (void)systemHapticsStatusChanged:(NSNotification *)note {
+    NSLog(@"[YTMU-Haptics] System Music Haptics active status changed: active=%d", [self isSystemMusicHapticsActive]);
+}
 
 - (void)appDidBecomeActive:(NSNotification *)note {
     if (self.currentISRC.length) {
@@ -135,7 +157,10 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
             __weak typeof(self) ws = self;
             void (^cb)(BOOL) = ^(BOOL avail) {
                 __strong typeof(ws) s = ws;
-                if (s) s.systemHasTrackForCurrentSong = avail;
+                if (s) {
+                    s.systemHasTrackForCurrentSong = avail;
+                    NSLog(@"[YTMU-Haptics] checkHapticTrackAvailability for %@: %d", isrc, avail);
+                }
             };
             NSMethodSignature *sig = [mgr methodSignatureForSelector:sel];
             NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
@@ -144,9 +169,6 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
             [inv setArgument:&isrc atIndex:2];
             [inv setArgument:&cb atIndex:3];
             [inv invoke];
-        } else {
-            // iOS 18.0/18.1: no availability check — assume YES if system is active
-            self.systemHasTrackForCurrentSong = [self isSystemMusicHapticsActive];
         }
     } @catch (__unused NSException *e) {
         self.systemHasTrackForCurrentSong = NO;
@@ -157,47 +179,43 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist {
     if (!title.length || !artist.length) return;
 
-    // Build cache key
     NSString *key = [NSString stringWithFormat:@"%@|%@",
                      [title lowercaseString], [artist lowercaseString]];
 
-    // Already queried this song?
     if ([key isEqualToString:self.lastQueriedKey]) return;
 
-    // Cache hit?
     NSString *cached = self.isrcCache[key];
     if (cached) {
         self.lastQueriedKey = key;
         [self updateISRC:cached];
+        NSLog(@"[YTMU-Haptics] MusicBrainz ISRC cache hit for '%@': %@", key, cached);
         return;
     }
 
-    // Cache miss: empty string means we already tried and found nothing
-    if ([self.isrcCache objectForKey:key] != nil) return;
+    if ([self.isrcCache objectForKey:key] != nil) return; // previous miss
 
     if (self.lookupInFlight) return;
     self.lastQueriedKey = key;
     self.lookupInFlight = YES;
 
-    // Reset system track flag while lookup is in flight
     self.systemHasTrackForCurrentSong = NO;
     self.currentISRC = nil;
 
-    // Percent-encode for URL
     NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
     NSString *encTitle  = [title  stringByAddingPercentEncodingWithAllowedCharacters:allowed];
     NSString *encArtist = [artist stringByAddingPercentEncodingWithAllowedCharacters:allowed];
 
-    // MusicBrainz recording search with ISRC include
     NSString *query = [NSString stringWithFormat:
         @"https://musicbrainz.org/ws/2/recording/?query=recording:%%22%@%%22+AND+artist:%%22%@%%22&inc=isrcs&limit=3&fmt=json",
         encTitle, encArtist];
     NSURL *url = [NSURL URLWithString:query];
 
+    NSLog(@"[YTMU-Haptics] Querying MusicBrainz for '%@' by '%@'", title, artist);
+    sendDebugLog([NSString stringWithFormat:@"[Haptics] Querying MusicBrainz for '%@' - '%@'", title, artist]);
+
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
                                                        cachePolicy:NSURLRequestReturnCacheDataElseLoad
                                                    timeoutInterval:8.0];
-    // MusicBrainz REQUIRES a proper User-Agent or returns 403
     [req setValue:@"YTMusicUltimate/1.0 (ct@chiuhuang.dev)" forHTTPHeaderField:@"User-Agent"];
 
     NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
@@ -211,13 +229,19 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 
             s.lookupInFlight = NO;
 
-            if (err || !data) return;
+            if (err || !data) {
+                NSLog(@"[YTMU-Haptics] MusicBrainz query failed: %@", err);
+                return;
+            }
 
             NSError *jsonErr = nil;
             NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data
                                                                  options:0
                                                                    error:&jsonErr];
-            if (jsonErr || !json) return;
+            if (jsonErr || !json) {
+                NSLog(@"[YTMU-Haptics] MusicBrainz JSON parse failed: %@", jsonErr);
+                return;
+            }
 
             NSArray *recordings = json[@"recordings"];
             NSString *foundISRC = nil;
@@ -230,8 +254,9 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
                 }
             }
 
-            // Store in cache (empty string = "tried, nothing found")
             s.isrcCache[key] = foundISRC ?: @"";
+            NSLog(@"[YTMU-Haptics] MusicBrainz result for '%@': ISRC=%@", key, foundISRC ?: @"(none)");
+            sendDebugLog([NSString stringWithFormat:@"[Haptics] MusicBrainz ISRC result: %@", foundISRC ?: @"(none)"]);
 
             if (foundISRC.length) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -250,7 +275,7 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
 
     if (!isrc.length) return;
 
-    // Inject into live NowPlayingInfo so system can fetch haptic track
+    NSLog(@"[YTMU-Haptics] Updating NowPlayingInfo with ISRC: %@", isrc);
     dispatch_async(dispatch_get_main_queue(), ^{
         MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
         NSDictionary *now = center.nowPlayingInfo;
@@ -264,15 +289,9 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     [self checkSystemTrackAvailabilityForISRC:isrc];
 }
 
-// ---- Decide whether to defer to system ----
-- (BOOL)shouldDeferToSystem {
-    return [self isSystemMusicHapticsActive] && self.systemHasTrackForCurrentSong;
-}
-
-// ---- Haptic triggers (fallback only) ----
+// ---- Haptic triggers ----
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration {
     if (!YTMU(@"musicHaptics")) return;
-    if ([self shouldDeferToSystem]) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.070) return;
@@ -282,12 +301,13 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 0.85f : 0.55f);
     float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.75f : 0.60f);
     if (duration > 0.4) fi = MIN(1.0f, fi + 0.15f);
+
+    NSLog(@"[YTMU-Haptics] Trigger syllable haptic (dur=%.2f, intensity=%.2f)", duration, fi);
     [self playTransientWithIntensity:fi sharpness:fs];
 }
 
 - (void)triggerBeatHaptic {
     if (!YTMU(@"musicHaptics")) return;
-    if ([self shouldDeferToSystem]) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.100) return;
@@ -296,6 +316,8 @@ static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
     NSInteger intensity = YTMUInt(@"musicHapticsIntensity", 1);
     float fi = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.90f : 0.65f);
     float fs = (intensity == 0) ? 0.50f : ((intensity == 2) ? 0.80f : 0.65f);
+
+    NSLog(@"[YTMU-Haptics] Trigger beat haptic (intensity=%.2f)", fi);
     [self playTransientWithIntensity:fi sharpness:fs];
 }
 
@@ -351,11 +373,22 @@ void YTMUUpdateNowPlayingISRC(NSString *isrc) {
 BOOL YTMUIsSystemMusicHapticsActive(void) {
     return [[YTMUMusicHapticsManager sharedInstance] isSystemMusicHapticsActive];
 }
+NSString *YTMUCurrentNowPlayingISRC(void) {
+    return [YTMUMusicHapticsManager sharedInstance].currentISRC;
+}
+NSString *YTMUCurrentNowPlayingTitle(void) {
+    return [YTMUMusicHapticsManager sharedInstance].currentTitle;
+}
+NSString *YTMUCurrentNowPlayingArtist(void) {
+    return [YTMUMusicHapticsManager sharedInstance].currentArtist;
+}
+void YTMUTestHapticPulse(NSInteger intensity) {
+    float fi = (intensity == 0) ? 0.40f : ((intensity == 2) ? 0.90f : 0.65f);
+    float fs = (intensity == 0) ? 0.45f : ((intensity == 2) ? 0.80f : 0.65f);
+    [[YTMUMusicHapticsManager sharedInstance] playTransientWithIntensity:fi sharpness:fs];
+}
 
 // ---- Hook: intercept every setNowPlayingInfo: call ----
-// YTM calls this frequently; we:
-//   1. Detect title/artist change → trigger MusicBrainz ISRC lookup
-//   2. Inject ISRC into the dict before passing to system
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)nowPlayingInfo {
     if (!nowPlayingInfo) { %orig(nil); return; }
@@ -363,13 +396,13 @@ BOOL YTMUIsSystemMusicHapticsActive(void) {
     NSString *title  = nowPlayingInfo[@"title"]  ?: nowPlayingInfo[@"MPMediaItemPropertyTitle"];
     NSString *artist = nowPlayingInfo[@"artist"] ?: nowPlayingInfo[@"MPMediaItemPropertyArtist"];
 
-    // Kick off MusicBrainz lookup whenever title/artist is present
-    // (the method itself debounces duplicate queries)
     if (title.length && artist.length) {
-        [[YTMUMusicHapticsManager sharedInstance] lookupISRCForTitle:title artist:artist];
+        YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
+        mgr.currentTitle = title;
+        mgr.currentArtist = artist;
+        [mgr lookupISRCForTitle:title artist:artist];
     }
 
-    // Inject ISRC if we already have one
     NSString *isrc = [YTMUMusicHapticsManager sharedInstance].currentISRC;
     NSString *existing = nowPlayingInfo[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
 
@@ -380,7 +413,6 @@ BOOL YTMUIsSystemMusicHapticsActive(void) {
         return;
     }
 
-    // If YTM itself ever provides an ISRC, store it
     if (existing.length) {
         [[YTMUMusicHapticsManager sharedInstance] updateISRC:existing];
     }
