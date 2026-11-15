@@ -78,6 +78,8 @@ static AudioStreamBasicDescription YTMUSingAudioFormat(AudioUnit unit, AudioUnit
     return format;
 }
 
+static void YTMUSingInspectConnection(AudioUnit unit, AudioUnit sourceUnit, AudioUnitElement sourceBus);
+
 static UInt32 YTMUSingMaximumFramesPerSlice(AudioUnit unit) {
     UInt32 frames = 0, size = sizeof(frames);
     if (!unit || AudioUnitGetProperty(unit, kAudioUnitProperty_MaximumFramesPerSlice,
@@ -103,34 +105,46 @@ static OSStatus YTMUAudioUnitSetPropertyProbe(AudioUnit unit, AudioUnitPropertyI
     OSStatus status = YTMUOriginalAudioUnitSetProperty(unit, property, scope, element, data, dataSize);
     if (status != noErr || !isConnection || !connection.sourceAudioUnit) return status;
 
+    // AudioUnitSetProperty is called while Core Audio is configuring its graph.
+    // Querying stream formats or adding a render notify from inside this hook
+    // can re-enter AudioToolbox's converter registry during that setup. Defer
+    // discovery work off the hook stack and past the graph's setup call.
+    AudioUnit outputUnit = unit;
+    AudioUnit sourceUnit = connection.sourceAudioUnit;
+    AudioUnitElement sourceBus = connection.sourceOutputNumber;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(100 * NSEC_PER_MSEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        YTMUSingInspectConnection(outputUnit, sourceUnit, sourceBus);
+    });
+    return status;
+}
+
+static void YTMUSingInspectConnection(AudioUnit unit, AudioUnit sourceUnit, AudioUnitElement sourceBus) {
     AudioComponentDescription destination = {0}, source = {0};
     if (!YTMUSingAudioDescription(unit, &destination) || destination.componentType != kAudioUnitType_Output ||
         (destination.componentSubType != kAudioUnitSubType_RemoteIO &&
          destination.componentSubType != kAudioUnitSubType_VoiceProcessingIO) ||
-        !YTMUSingAudioDescription(connection.sourceAudioUnit, &source)) return status;
+        !YTMUSingAudioDescription(sourceUnit, &source)) return;
 
     // Share the exact player mixer/output-bus pair with Music Haptics. Its
     // AudioUnitRender hook then ignores Core Haptics and unrelated audio units.
-    YTMUMusicHapticsRegisterMixer(connection.sourceAudioUnit, connection.sourceOutputNumber);
+    YTMUMusicHapticsRegisterMixer(sourceUnit, sourceBus);
 
     unsigned int number = atomic_fetch_add_explicit(&YTMUSingAudioProbeCount, 1, memory_order_relaxed);
-    if (number >= YTMUSingAudioProbeLimit) return status;
-    AudioStreamBasicDescription sourceFormat = YTMUSingAudioFormat(connection.sourceAudioUnit,
+    if (number >= YTMUSingAudioProbeLimit) return;
+    AudioStreamBasicDescription sourceFormat = YTMUSingAudioFormat(sourceUnit,
                                                                     kAudioUnitScope_Output,
-                                                                    connection.sourceOutputNumber);
+                                                                    sourceBus);
     AudioStreamBasicDescription outputInputFormat = YTMUSingAudioFormat(unit, kAudioUnitScope_Input, 0);
     NSString *message = [NSString stringWithFormat:
         @"[YTMU-Sing-Audio] connection %u: source=%p type=%08x subtype=%08x bus=%u format=%@ -> output=%p subtype=%08x input=%@ maxFrames=%u",
-        number + 1, connection.sourceAudioUnit, (unsigned)source.componentType, (unsigned)source.componentSubType,
-        (unsigned)connection.sourceOutputNumber, YTMUSingAudioFormatText(sourceFormat), unit,
+        number + 1, sourceUnit, (unsigned)source.componentType, (unsigned)source.componentSubType,
+        (unsigned)sourceBus, YTMUSingAudioFormatText(sourceFormat), unit,
         (unsigned)destination.componentSubType, YTMUSingAudioFormatText(outputInputFormat),
         (unsigned)YTMUSingMaximumFramesPerSlice(unit)];
     YTMUSingObserveOutput(unit);
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSLog(@"%@", message);
-        sendDebugLog(message);
-    });
-    return status;
+    NSLog(@"%@", message);
+    sendDebugLog(message);
 }
 
 __attribute__((constructor)) static void YTMUInstallAudioUnitProbe(void) {

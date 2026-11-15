@@ -28,7 +28,7 @@
 
 Current:
 - `[DONE] ses_served_badge_20261115 | Lyrics served now uses the persistent cumulative counter; README Stats also shows cached tracks; retained log count remains diagnostic only | files: server/routes_misc.py, server/badge_stats.py, README.md`
-- `[ACTIVE] ses_sing_pipeline_20261115 | Connect the downloaded CoreML vocal separator to player audio while preserving GPLv3 boundaries | files: Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m}, Source/Prefs/SingSettingsController.m, Source/VocalAudioProbe.m, Source/MusicHaptics.x | next: collect a probe log from Build 440, then implement format-gated audio routing`
+- `[ACTIVE] ses_sing_pipeline_20261115 | Connect the downloaded CoreML vocal separator to player audio while preserving GPLv3 boundaries | files: Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m}, Source/Prefs/SingSettingsController.m, Source/VocalAudioProbe.m, Source/MusicHaptics.x | next: confirm the deferred Core Audio probe avoids the Build 440 startup crash, then continue format-gated audio routing`
 - `[DONE] ses_readme_features_20261115 | Document current features and reserve a screenshot/GIF showcase area | files: README.md, docs/media/.gitkeep`
 - `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
 - [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
