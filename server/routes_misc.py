@@ -105,6 +105,32 @@ def api_app_stats():
     return jsonify({'ok': True, **snap})
 
 
+@app.route('/api/isrc/lookup', methods=['POST'])
+def api_isrc_lookup():
+    """Resolve a YouTube video ID to an ISRC via Soundcharts.
+
+    Credentials stay in server environment variables. Results and misses are shared in SQLite under
+    database/ so a track costs one provider request per cache lifetime.
+    """
+    body = request.get_json(silent=True) or {}
+    video_id = (body.get('video_id') or '').strip() if isinstance(body, dict) else ''
+    client_id = (request.headers.get('CF-Connecting-IP') or request.remote_addr or 'unknown').strip()
+    from .soundcharts_isrc import lookup
+    result = lookup(video_id, client_id=client_id)
+    if result.get('source') == 'invalid':
+        response = jsonify({'ok': False, 'error': 'invalid video_id', 'isrc': None})
+        response.status_code = 400
+    elif result.get('source') == 'rate_limited':
+        response = jsonify({'ok': False, 'error': 'rate limited', 'isrc': None,
+                            'source': result['source']})
+        response.status_code = 429
+    else:
+        response = jsonify({'ok': True, 'isrc': result.get('isrc'),
+                            'source': result.get('source', 'unknown')})
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 # ------------------------------------------------------------
 # MD3 badge renderer (same look as assets/badges/*.svg)
 # ------------------------------------------------------------

@@ -94,7 +94,10 @@ def _text_width(text, px=13.0):
             total += 13.0            # CJK and friends
         else:
             total += 7.0
-    return total * px / 13.0
+    # The width table is for Roboto, but renderers may substitute Segoe UI,
+    # Arial, or a platform sans-serif. Leave a little slack so the fallback
+    # font cannot push the final glyphs into the rounded edge of the card.
+    return total * px / 13.0 * 1.12
 
 
 def _shrink(raw):
@@ -238,7 +241,7 @@ def _np_svg(last, art=True, reveal_ms=1400):
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{_NP_H}" '
         f'viewBox="0 0 {w} {_NP_H}" role="img" aria-label="{_esc(aria)}">',
         '<style>.bg{fill:#D3E3FD}.fg{fill:#041E49}.sub{fill:#3F4A5A;opacity:.85}'
-        "font-family:Roboto,-apple-system,'Segoe UI',sans-serif}",
+        "text{font-family:Roboto,-apple-system,'Segoe UI',sans-serif}",
         f'.t{{font-size:{_NP_TITLE_PX}px;font-weight:500}}',
         f'.a{{font-size:{_NP_ARTIST_PX}px;font-weight:400}}',
         '@media (prefers-color-scheme: dark){.bg{fill:#004A77}.fg{fill:#D3E3FD}'

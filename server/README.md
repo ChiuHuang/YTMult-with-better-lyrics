@@ -15,7 +15,24 @@ the code wins and this file gets fixed.
 | `GET /api/app/altstore` | AltStore source, STABLE channel |
 | `GET /api/app/altstore-beta` | AltStore source, BETA channel (`?channel=beta` equivalent) |
 | `GET /api/app/settings` | tweak remote config (public half of app_settings) |
+| `POST /api/isrc/lookup` | Soundcharts lookup by YouTube video ID; cached server-side |
 | `GET /privacy` | the privacy policy page |
+
+### Soundcharts ISRC lookup
+
+Set `YTMU_SOUNDCHARTS_CREDENTIALS_JSON` as a server-side environment secret to
+enable one or more Soundcharts credential pairs, for example
+`[{"app_id":"<app-id>","api_key":"<api-key>"}]`. For a single pair,
+`YTMU_SOUNDCHARTS_APP_ID` plus `YTMU_SOUNDCHARTS_API_KEY` remains supported.
+Never put credentials in the tweak, source tree, or a public settings
+response. The server rotates the starting pair between uncached lookups and
+tries another pair on HTTP 401, 403, or 429. The public app endpoint
+accepts a YouTube `video_id`; the server stores positive results for 30 days,
+misses for 12 hours, and transient failures for 60 seconds in
+`database/soundcharts_isrc.sqlite3`. Uncached lookups are limited to 90 per
+client per hour. If Soundcharts is unconfigured, has no ISRC, or fails, the
+tweak falls back to its MusicBrainz matcher and then its own CoreHaptics pulses
+when iOS has no native haptic track.
 
 ## OWNER-KEY — a shared secret, not a session
 

@@ -58,6 +58,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 @property (nonatomic, strong) CHHapticEngine *engine;
 @property (nonatomic, assign) BOOL isEngineRunning;
 @property (nonatomic, copy)   NSString *currentISRC;
+@property (nonatomic, copy)   NSString *lastISRCTrackKey;
 @property (nonatomic, copy)   NSString *currentTitle;
 @property (nonatomic, copy)   NSString *currentArtist;
 @property (nonatomic, assign) NSTimeInterval lastTriggerTime;
@@ -71,7 +72,9 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration;
 - (void)triggerBeatHaptic;
 - (void)updateISRC:(NSString *)isrc;
-- (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist;
+- (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID;
+- (void)lookupMusicBrainzForTitle:(NSString *)title artist:(NSString *)artist key:(NSString *)key;
+- (BOOL)shouldUseNativeMusicHaptics;
 - (void)playTransientWithIntensity:(float)intensity sharpness:(float)sharpness;
 @end
 
@@ -198,12 +201,12 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     }
 }
 
-// ---- MusicBrainz ISRC lookup ----
-- (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist {
+// ---- Soundcharts first, then our independent MusicBrainz matcher ----
+- (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID {
     if (!title.length || !artist.length) return;
 
-    NSString *key = [NSString stringWithFormat:@"%@|%@",
-                     [title lowercaseString], [artist lowercaseString]];
+    NSString *key = [NSString stringWithFormat:@"%@|%@|%@",
+                     [title lowercaseString], [artist lowercaseString], videoID ?: @""];
 
     if ([key isEqualToString:self.lastQueriedKey]) return;
 
@@ -219,11 +222,55 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
     if (self.lookupInFlight) return;
     self.lastQueriedKey = key;
+    self.currentLookupKey = key;
     self.lookupInFlight = YES;
 
     self.systemHasTrackForCurrentSong = NO;
     self.currentISRC = nil;
 
+    if (videoID.length == 11) {
+        NSString *urlString = [NSString stringWithFormat:@"%@/api/isrc/lookup", YTMUApiBase()];
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]
+                                                               cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                           timeoutInterval:5.0];
+        request.HTTPMethod = @"POST";
+        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        NSError *bodyError = nil;
+        request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"video_id": videoID}
+                                                           options:0 error:&bodyError];
+        if (bodyError || !request.HTTPBody) {
+            self.lookupInFlight = NO;
+            [self lookupMusicBrainzForTitle:title artist:artist key:key];
+            return;
+        }
+        NSLog(@"[YTMU-Haptics] Looking up Soundcharts ISRC for YouTube video %@", videoID);
+        __weak typeof(self) weakSelf = self;
+        [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+            NSDictionary *json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            NSString *isrc = [json[@"isrc"] isKindOfClass:[NSString class]] ? [json[@"isrc"] uppercaseString] : nil;
+            if (isrc.length != 12) isrc = nil;
+            if (isrc.length) {
+                strongSelf.lookupInFlight = NO;
+                strongSelf.isrcCache[key] = isrc;
+                NSLog(@"[YTMU-Haptics] Soundcharts resolved ISRC %@ for %@", isrc, videoID);
+                if ([strongSelf.currentLookupKey isEqualToString:key]) {
+                    dispatch_async(dispatch_get_main_queue(), ^{ [strongSelf updateISRC:isrc]; });
+                }
+                return;
+            }
+            NSLog(@"[YTMU-Haptics] Soundcharts returned no ISRC; trying MusicBrainz (HTTP %@)",
+                  response ? @(((NSHTTPURLResponse *)response).statusCode) : (error ? @"error" : @"no response"));
+            [strongSelf lookupMusicBrainzForTitle:title artist:artist key:key];
+        }] resume];
+        return;
+    }
+
+    [self lookupMusicBrainzForTitle:title artist:artist key:key];
+}
+
+- (void)lookupMusicBrainzForTitle:(NSString *)title artist:(NSString *)artist key:(NSString *)key {
     // Artist strings from YouTube Music frequently combine featured artists
     // differently from MusicBrainz (e.g. "X, Y" vs "X feat. Y"). Search by
     // exact recording title, then rank candidates against every credited artist.
@@ -317,6 +364,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)updateISRC:(NSString *)isrc {
     if ([isrc isEqualToString:self.currentISRC]) return;
     self.currentISRC = isrc;
+    self.lastISRCTrackKey = self.currentLookupKey;
     self.systemHasTrackForCurrentSong = NO;
 
     if (!isrc.length) return;
@@ -335,9 +383,17 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     [self checkSystemTrackAvailabilityForISRC:isrc];
 }
 
+- (BOOL)shouldUseNativeMusicHaptics {
+    // Defer only when iOS confirms an exact native haptic track for this ISRC.
+    // Merely having Music Haptics enabled must never silence our fallback.
+    return self.currentISRC.length > 0 && self.systemHasTrackForCurrentSong &&
+           [self isSystemMusicHapticsActive];
+}
+
 // ---- Haptic triggers ----
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration {
     if (!YTMU(@"musicHaptics")) return;
+    if ([self shouldUseNativeMusicHaptics]) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.070) return;
@@ -354,6 +410,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
 - (void)triggerBeatHaptic {
     if (!YTMU(@"musicHaptics")) return;
+    if ([self shouldUseNativeMusicHaptics]) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.100) return;
@@ -441,12 +498,23 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 
     NSString *title  = nowPlayingInfo[@"title"]  ?: nowPlayingInfo[@"MPMediaItemPropertyTitle"];
     NSString *artist = nowPlayingInfo[@"artist"] ?: nowPlayingInfo[@"MPMediaItemPropertyArtist"];
+    NSString *videoID = YTMUResolveCurrentVideoID();
     NSString *existing = nowPlayingInfo[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
+    NSDictionary *infoToSend = nowPlayingInfo;
 
     if (title.length && artist.length) {
         YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
-        NSString *trackKey = [NSString stringWithFormat:@"%@|%@", [title lowercaseString], [artist lowercaseString]];
+        NSString *trackKey = [NSString stringWithFormat:@"%@|%@|%@", [title lowercaseString], [artist lowercaseString], videoID ?: @""];
         mgr.currentLookupKey = trackKey;
+        if (existing.length && mgr.lastISRCTrackKey.length &&
+            ![mgr.lastISRCTrackKey isEqualToString:trackKey] &&
+            [existing isEqualToString:mgr.currentISRC]) {
+            // The prior song's ISRC can survive if the player copies its info dictionary.
+            existing = nil;
+            NSMutableDictionary *clean = [nowPlayingInfo mutableCopy];
+            [clean removeObjectForKey:@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
+            infoToSend = clean;
+        }
         if (mgr.lastQueriedKey.length && ![mgr.lastQueriedKey isEqualToString:trackKey]) {
             // Never attach the previous song's ISRC while this track is being resolved.
             mgr.currentISRC = nil;
@@ -455,19 +523,19 @@ void YTMUTestHapticPulse(NSInteger intensity) {
         mgr.currentTitle = title;
         mgr.currentArtist = artist;
         if (existing.length) {
-            // Prefer an ISRC supplied by the playback service, as Vitrine does
-            // with Spotify's own track metadata; MusicBrainz is the fallback.
+            // Prefer an ISRC if the playback service supplied one; otherwise
+            // resolve by YouTube ID via the server and then MusicBrainz.
             mgr.lastQueriedKey = trackKey;
             [mgr updateISRC:existing];
         } else {
-            [mgr lookupISRCForTitle:title artist:artist];
+            [mgr lookupISRCForTitle:title artist:artist videoID:videoID];
         }
     }
 
     NSString *isrc = [YTMUMusicHapticsManager sharedInstance].currentISRC;
 
     if (isrc.length && !existing.length) {
-        NSMutableDictionary *mut = [nowPlayingInfo mutableCopy];
+        NSMutableDictionary *mut = [infoToSend mutableCopy];
         mut[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"] = isrc;
         %orig(mut);
         return;
@@ -477,6 +545,6 @@ void YTMUTestHapticPulse(NSInteger intensity) {
         [[YTMUMusicHapticsManager sharedInstance] updateISRC:existing];
     }
 
-    %orig(nowPlayingInfo);
+    %orig(infoToSend);
 }
 %end
