@@ -1,13 +1,14 @@
-# Serving counter for the public badges, without re-reading the whole log.
+# Diagnostic serving count reconstructed from the retained logs. This is not
+# the lifetime total used by the public Lyrics served badge.
 #
-# Why this file exists: the badge needs "lyrics served" and the only durable
-# record of a serve is a line in logs/server.log. The first implementation
-# re-read the ENTIRE log (server.log + server.log.1) every 30 seconds. That
+# Why this file exists: retained-log diagnostics can report how many serves
+# are still represented in server.log and server.log.1. The first
+# implementation re-read the ENTIRE log every 30 seconds. That
 # log is ~6 MB, so a badge on a README re-read 6 MB of disk every 30 s --
 # about 767 MB/hr to produce one integer, and a restart or a redeploy paid it
 # again from byte 0.
 #
-# Instead: count ONCE, remember the byte offset reached, and thereafter read
+# Count ONCE, remember the byte offset reached, and thereafter read
 # only the bytes appended since. The total is the sum of the per-file counts,
 # so it is a plain sum of small numbers and never needs the log again.
 #
@@ -23,10 +24,11 @@
 # total drops its contribution -- exactly what the old re-read-the-world
 # version did too. The number is not monotonic across log generations, by
 # design: it is a count of the serves still recorded on disk, not a lifetime
-# ledger. usage_stats.json is the process-lifetime counter and is used as the
-# fallback when there is no log at all.
+# ledger. usage_stats.json is the canonical persistent counter for the badge.
 #
-# State file: database/badge_stats.json (database/ is gitignored).
+# State file: database/badge_stats.json (database/ is gitignored). This is
+# useful for diagnosing retained logs, but can decrease when old generations
+# are overwritten; usage_stats.json is the canonical cumulative counter.
 import json
 import os
 import threading

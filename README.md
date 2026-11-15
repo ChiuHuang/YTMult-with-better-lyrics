@@ -19,9 +19,9 @@ here and can be self-hosted.
 ### Stats
 <div align="center">
 
-| Lyrics served | Devices | Last song |
-|---|---|---|
-| ![Live lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics) | ![Live devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices) | ![Last song served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=now) |
+| Lyrics served | Tracks cached | Devices | Last song |
+|---|---|---|---|
+| ![Live lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics) | ![Tracks cached](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=tracks) | ![Live devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices) | ![Last song served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=now) |
 
 </div>
 

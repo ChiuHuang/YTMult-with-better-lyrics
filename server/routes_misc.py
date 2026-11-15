@@ -87,10 +87,9 @@ def api_app_stats():
     """Public usage counter: lyrics served, devices, last song + status.
     Actions embeds it into release notes.
 
-    `served` is the PROCESS-lifetime counter (resets on redeploy, so it reads
-    low). `log_stats` is the durable one the badge shows: the byte offset and
-    per-file count reached in each log generation, so the numbers can be seen
-    without re-reading the log. See server/badge_stats.py.
+    `served` is the persistent count of successful lyric responses. `served_log`
+    is a diagnostic count reconstructed from the current and one rotated log;
+    older log generations can be overwritten, so it is not a lifetime total.
     """
     from .usage_stats import snapshot
     from . import badge_stats
@@ -283,17 +282,6 @@ def _badge_tracks_cached():
     return len(keys)
 
 
-# Serving counters live in cache/usage_stats.json, which only counts what this
-# process instance served since it started -- it reads low after a restart or
-# a redeploy. The log file has every serve the box ever did (plus one rotated
-# generation), so count from that instead. badge_stats owns the counting: it
-# reads the log ONCE, remembers the byte offset, and afterwards reads only
-# what was appended. This used to re-read the whole ~6MB log every 30s.
-def _served_from_logs():
-    from .badge_stats import served_count
-    return served_count()
-
-
 def _badge_nodes_online():
     from .nodes import connected_nodes, _connected_nodes_lock
     with _connected_nodes_lock:
@@ -310,10 +298,10 @@ def _badge_text(btype):
             tag = 'unknown'
         return f'Download Last Build: {tag[:24]}'
     if btype == 'lyrics':
-        served = _served_from_logs()
-        if served <= 0:                      # no log yet -> usage counter
-            from .usage_stats import snapshot
-            served = int(snapshot().get('served', 0))
+        # usage_stats.json is the cumulative successful-response counter. The
+        # log-derived count drops older generations when server.log.1 rotates.
+        from .usage_stats import snapshot
+        served = int(snapshot().get('served', 0))
         return f'Lyrics served {served:,}'
     if btype == 'devices':
         from .usage_stats import snapshot
