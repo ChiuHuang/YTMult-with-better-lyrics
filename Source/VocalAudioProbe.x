@@ -87,9 +87,8 @@ static NSString *YTMUSingAudioFormatText(AudioStreamBasicDescription format) {
             (unsigned)format.mChannelsPerFrame, (unsigned)format.mBitsPerChannel, (unsigned)format.mFormatFlags];
 }
 
-%hookf(OSStatus, AudioUnitSetProperty,
-       AudioUnit unit, AudioUnitPropertyID property, AudioUnitScope scope, AudioUnitElement element,
-       const void *data, UInt32 dataSize) {
+%hookf(OSStatus, AudioUnitSetProperty, AudioUnit unit, AudioUnitPropertyID property,
+       AudioUnitScope scope, AudioUnitElement element, const void *data, UInt32 dataSize) {
     AudioUnitConnection connection = {0};
     BOOL isConnection = property == kAudioUnitProperty_MakeConnection &&
                        scope == kAudioUnitScope_Input && element == 0 && data &&
