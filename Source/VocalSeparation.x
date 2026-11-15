@@ -20,6 +20,7 @@ static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationM
 @property (atomic, assign, readwrite) BOOL isModelReady;
 @property (atomic, assign, readwrite) BOOL isModelLoading;
 @property (atomic, strong, readwrite) NSError *modelLoadError;
+@property (nonatomic, strong) NSMutableArray *pendingModelCompletions;
 @end
 
 @implementation YTMUVocalSeparationManager
@@ -40,6 +41,7 @@ static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationM
         _backgroundVolume = 1.0f;
         NSNumber *savedMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"YTMUVocalSeparationMode"];
         _selectedMode = savedMode ? (YTMUVocalSeparationMode)MIN(2, MAX(0, savedMode.integerValue)) : YTMUVocalSeparationModeNormal;
+        _pendingModelCompletions = [NSMutableArray array];
         [self setSelectedMode:_selectedMode];
         [self checkModelStatus];
     }
@@ -130,17 +132,34 @@ static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationM
 }
 
 - (void)loadModelIfAvailableWithCompletion:(void (^)(BOOL ready, NSError *error))completion {
-    if (self.isModelLoading) return;
-    self.isModelLoading = YES;
-    self.modelLoadError = nil;
+    @synchronized (self) {
+        if (completion) [self.pendingModelCompletions addObject:[completion copy]];
+        if (self.isModelReady) {
+            NSArray *completions = [self.pendingModelCompletions copy];
+            [self.pendingModelCompletions removeAllObjects];
+            NSError *error = self.modelLoadError;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                for (void (^callback)(BOOL, NSError *) in completions) callback(YES, error);
+            });
+            return;
+        }
+        if (self.isModelLoading) return;
+        self.isModelLoading = YES;
+        self.modelLoadError = nil;
+    }
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSError *error = nil;
         BOOL ready = [self loadOrCompileModel:&error];
-        self.modelLoadError = error;
-        self.isModelLoading = NO;
+        NSArray *completions = nil;
+        @synchronized (self) {
+            self.modelLoadError = error;
+            self.isModelLoading = NO;
+            completions = [self.pendingModelCompletions copy];
+            [self.pendingModelCompletions removeAllObjects];
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter] postNotificationName:YTMUVocalSeparationModelDidChange object:self];
-            if (completion) completion(ready, error);
+            for (void (^callback)(BOOL, NSError *) in completions) callback(ready, error);
         });
     });
 }
