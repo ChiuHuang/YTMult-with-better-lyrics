@@ -6,7 +6,56 @@
 #import "LyricsShared.h"
 
 static atomic_uint YTMUSingAudioProbeCount;
+typedef struct {
+    _Atomic(uintptr_t) unit;
+    atomic_uint logged;
+} YTMUSingObservedOutput;
+static YTMUSingObservedOutput YTMUSingObservedOutputs[4];
 static const unsigned int YTMUSingAudioProbeLimit = 16;
+
+static OSStatus YTMUSingOutputNotify(void *context, AudioUnitRenderActionFlags *flags,
+                                     const AudioTimeStamp *timestamp, UInt32 bus,
+                                     UInt32 frames, AudioBufferList *data) {
+    (void)timestamp;
+    if (!flags || !(*flags & kAudioUnitRenderAction_PostRender) || !data) return noErr;
+    YTMUSingObservedOutput *probe = context;
+    if (!probe || atomic_exchange_explicit(&probe->logged, 1, memory_order_relaxed)) return noErr;
+    NSMutableString *shape = [NSMutableString stringWithFormat:
+        @"[YTMU-Sing-Audio] output render: bus=%u frames=%u buffers=%u silence=%d",
+        (unsigned)bus, (unsigned)frames, (unsigned)data->mNumberBuffers,
+        ((*flags & kAudioUnitRenderAction_OutputIsSilence) != 0)];
+    for (UInt32 i = 0; i < data->mNumberBuffers; i++) {
+        const AudioBuffer *buffer = &data->mBuffers[i];
+        [shape appendFormat:@" b%u=%uch/%uB", (unsigned)i, (unsigned)buffer->mNumberChannels,
+         (unsigned)buffer->mDataByteSize];
+    }
+    NSString *message = [shape copy];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSLog(@"%@", message);
+        sendDebugLog(message);
+    });
+    return noErr;
+}
+
+static void YTMUSingObserveOutput(AudioUnit output) {
+    if (!output) return;
+    for (NSUInteger i = 0; i < sizeof(YTMUSingObservedOutputs) / sizeof(YTMUSingObservedOutputs[0]); i++) {
+        uintptr_t expected = 0;
+        if (atomic_compare_exchange_strong_explicit(&YTMUSingObservedOutputs[i].unit, &expected,
+                (uintptr_t)output, memory_order_relaxed, memory_order_relaxed)) {
+            OSStatus status = AudioUnitAddRenderNotify(output, YTMUSingOutputNotify,
+                                                       &YTMUSingObservedOutputs[i]);
+            if (status != noErr) {
+                atomic_store_explicit(&YTMUSingObservedOutputs[i].unit, 0, memory_order_relaxed);
+                NSString *message = [NSString stringWithFormat:
+                    @"[YTMU-Sing-Audio] could not attach output format probe (status=%d)", (int)status];
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ sendDebugLog(message); });
+            }
+            return;
+        }
+        if (expected == (uintptr_t)output) return;
+    }
+}
 
 static BOOL YTMUSingAudioDescription(AudioUnit unit, AudioComponentDescription *description) {
     if (!unit || !description) return NO;
@@ -68,6 +117,7 @@ static NSString *YTMUSingAudioFormatText(AudioStreamBasicDescription format) {
         (unsigned)connection.sourceOutputNumber, YTMUSingAudioFormatText(sourceFormat), unit,
         (unsigned)destination.componentSubType, YTMUSingAudioFormatText(outputInputFormat),
         (unsigned)YTMUSingMaximumFramesPerSlice(unit)];
+    YTMUSingObserveOutput(unit);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSLog(@"%@", message);
         sendDebugLog(message);
