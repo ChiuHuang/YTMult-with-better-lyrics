@@ -136,6 +136,8 @@ html.mdui-theme-dark .log-row.ddg-probe { --log-c: rgb(204,167,0); }
 .list-row.cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; }
 .list-row.file { grid-template-columns: 1fr 90px 160px 44px; }
 .list-row.node { grid-template-columns: 1fr 120px 120px 90px 80px 36px; }
+.list-row.isrc-log { grid-template-columns: 150px 120px minmax(140px,1fr) minmax(160px,1fr) 110px; }
+.list-row.isrc-log .isrc-track { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .list-row.jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 80px 100px 36px; }
 .list-row.ddbg { grid-template-columns: 100px 1fr 80px 70px 70px 130px 40px; }
 .list-row.ddfile { grid-template-columns: 120px 80px 80px 170px 40px; }
@@ -144,6 +146,7 @@ html.mdui-theme-dark .log-row.ddg-probe { --log-c: rgb(204,167,0); }
 .list-head.lh-cache { grid-template-columns: 1fr 70px 60px 50px 70px 40px 36px 36px; display:grid; gap:10px; }
 .list-head.lh-file { grid-template-columns: 1fr 90px 160px 44px; display:grid; gap:10px; }
 .list-head.lh-node { grid-template-columns: 1fr 120px 120px 90px 36px; display:grid; gap:10px; }
+.list-head.isrc-log-head { grid-template-columns: 150px 120px minmax(140px,1fr) minmax(160px,1fr) 110px; display:grid; gap:10px; }
 .list-head.lh-jwt { grid-template-columns: 1fr 90px 80px 80px 80px 110px 80px 100px 36px; display:grid; gap:10px; }
 
 /* ---- lyrics latency widget ----
@@ -297,6 +300,10 @@ html.mdui-theme-dark .log-row.ddg-probe { --log-c: rgb(204,167,0); }
   .list-row.lat > :nth-child(7),
   .list-head.lh-lat > :nth-child(6),
   .list-head.lh-lat > :nth-child(7) { display:none; }
+  .list-row.isrc-log { grid-template-columns: 80px 1fr 105px 85px; }
+  .list-row.isrc-log > :first-child,
+  .list-head.isrc-log-head > :first-child { display:none; }
+  .list-head.isrc-log-head { grid-template-columns: 80px 1fr 105px 85px; }
   /* a phone keeps the id and the two counters that mean something (uploads,
      records); build and last-seen go */
   .list-row.ddbg { grid-template-columns: 1fr 70px 70px 40px; }

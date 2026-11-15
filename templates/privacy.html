@@ -22,7 +22,7 @@
 
   <h2>The short version</h2>
   <ul>
-    <li>A normal install sends: lyrics requests (the songs you fetch lyrics for) and one anonymous count ping. Nothing else.</li>
+    <li>A normal install sends lyrics requests, YouTube video IDs for ISRC matching, and one anonymous count ping. ISRC diagnostics also send the current title, artist, lookup state, and result to this server.</li>
     <li>The count ping contains a random id your device generated. The server stores a <b>salted hash</b> of it, never the raw id.</li>
     <li>Debug features are off until you (the owner) turn them on and pair the device. No debug data leaves a device you have not paired.</li>
   </ul>
@@ -31,13 +31,14 @@
   <table>
     <tr><th>Data</th><th>What it is</th><th>Kept for</th></tr>
     <tr><td>Lyrics cache</td><td>The synced-lyrics text for songs fetched through the tweak, plus provider snapshots. Content is song lyrics, not your activity: entries are keyed by video id.</td><td>Until cache limits evict them</td></tr>
+    <tr><td>ISRC lookup</td><td>YouTube video ID and ISRC result for Soundcharts matching. The ISRC diagnostics dashboard also receives the current title, artist, source, state, and result; its recent trace is kept in memory only and is visible to the server operator.</td><td>ISRC cache: up to 30 days for matches and 12 hours for misses. Diagnostics: latest 100 events until server restart</td></tr>
     <tr><td>Count ping</td><td>Salted hash of a random device-generated id, the channel label (stable / debug), first-seen and last-seen timestamps. Used only to answer "how many installs".</td><td>As long as the device keeps pinging; stale entries age out</td></tr>
     <tr><td>Crash logs</td><td>Server-side crash traces of the lyrics server itself (not your device).</td><td>Rotated with the logs</td></tr>
     <tr><td>Debug captures</td><td>Structured probe records from devices you explicitly paired (class lists, playback outcomes, capped request bodies). Every record is tagged owner_debug.</td><td>Until you revoke the pairing or delete the file</td></tr>
   </table>
 
-  <h2>What a stable install never sends</h2>
-  <p>No logs, no UI dumps, no request bodies, no crash reports, no analytics events. The debug probes on the device are gated before they run: without the pairing and the toggle, they do not execute at all.</p>
+  <h2>Debug data</h2>
+  <p>Debug logs, UI dumps, and paired-device probes stay off until the owner enables and pairs a device. ISRC lookups are separate from debug mode because they provide Music Haptics matching and update the operator-only diagnostics page.</p>
 
   <h2>Channels are labels</h2>
   <p>Stable and beta are the same binary with different labels. What differs is what the owner turns on: debug features exist in both but stay off until the device is paired.</p>

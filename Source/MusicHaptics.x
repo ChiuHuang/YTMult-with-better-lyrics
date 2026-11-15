@@ -2,7 +2,188 @@
 #import <Foundation/Foundation.h>
 #import <CoreHaptics/CoreHaptics.h>
 #import <MediaPlayer/MediaPlayer.h>
+#import <AudioToolbox/AudioToolbox.h>
+#import <stdatomic.h>
+#import <math.h>
+#import <stdint.h>
+#import <mach/mach_time.h>
+#import <string.h>
 #import "LyricsShared.h"
+
+static NSMutableArray<NSString *> *YTMUISRCRecentLogLines;
+static atomic_bool YTMUAudioCaptureEnabled;
+static atomic_uint_fast64_t YTMUAudioLastHostTime;
+static atomic_uint_fast32_t YTMUAudioOnsetSequence;
+static atomic_uint_fast32_t YTMUAudioRMSBits;
+static atomic_uint_fast32_t YTMUAudioPeakBits;
+static atomic_uint_fast32_t YTMUAudioPreviousRMSBits;
+static atomic_uint_fast32_t YTMUAudioNoiseFloorBits;
+static mach_timebase_info_data_t YTMUHostTimebase;
+static atomic_uintptr_t YTMUMusicOutputUnits[8];
+static atomic_uint YTMUMusicOutputBuses[8];
+
+static BOOL YTMUAudioUnitDescription(AudioUnit unit, AudioComponentDescription *description) {
+    if (!unit || !description) return NO;
+    AudioComponent component = AudioComponentInstanceGetComponent(unit);
+    if (!component) return NO;
+    memset(description, 0, sizeof(*description));
+    return AudioComponentGetDescription(component, description) == noErr;
+}
+
+static BOOL YTMUIsPlayerMixerUnit(AudioUnit unit) {
+    AudioComponentDescription desc = {0};
+    if (!YTMUAudioUnitDescription(unit, &desc) || desc.componentType != kAudioUnitType_Mixer) return NO;
+    return desc.componentSubType == kAudioUnitSubType_MultiChannelMixer ||
+           desc.componentSubType == kAudioUnitSubType_StereoMixer;
+}
+
+void YTMUMusicHapticsRegisterMixer(AudioUnit sourceUnit, UInt32 sourceOutputBus) {
+    if (!sourceUnit || !YTMUIsPlayerMixerUnit(sourceUnit)) return;
+    uintptr_t source = (uintptr_t)sourceUnit;
+    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
+        if (atomic_load_explicit(&YTMUMusicOutputUnits[i], memory_order_acquire) == source &&
+            atomic_load_explicit(&YTMUMusicOutputBuses[i], memory_order_relaxed) == sourceOutputBus) return;
+    }
+    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
+        uintptr_t empty = 0;
+        if (atomic_compare_exchange_strong_explicit(&YTMUMusicOutputUnits[i], &empty, source,
+                                                    memory_order_acq_rel, memory_order_relaxed)) {
+            atomic_store_explicit(&YTMUMusicOutputBuses[i], sourceOutputBus, memory_order_release);
+            return;
+        }
+    }
+}
+
+static BOOL YTMUIsTrackedPlayerMixer(AudioUnit unit, UInt32 outputBus) {
+    uintptr_t candidate = (uintptr_t)unit;
+    for (NSUInteger i = 0; i < sizeof(YTMUMusicOutputUnits) / sizeof(YTMUMusicOutputUnits[0]); i++) {
+        if (atomic_load_explicit(&YTMUMusicOutputUnits[i], memory_order_acquire) == candidate &&
+            atomic_load_explicit(&YTMUMusicOutputBuses[i], memory_order_relaxed) == outputBus) return YES;
+    }
+    return NO;
+}
+
+static uint64_t YTMUHostTimeNow(void) {
+    return mach_absolute_time();
+}
+
+static uint64_t YTMUHostTicksToNanos(uint64_t ticks) {
+    return YTMUHostTimebase.denom ? (ticks * YTMUHostTimebase.numer) / YTMUHostTimebase.denom : 0;
+}
+
+static uint32_t YTMUFloatBits(float value) {
+    union { float f; uint32_t u; } bits = {.f = value};
+    return bits.u;
+}
+
+static float YTMUFloatFromBits(uint32_t value) {
+    union { float f; uint32_t u; } bits = {.u = value};
+    return bits.f;
+}
+
+// This hook only measures the final PCM render buffers. It does no allocation,
+// locking, logging, UIKit, or haptic work on Core Audio's render thread.
+static void YTMUObserveRenderedAudio(AudioBufferList *buffers, UInt32 frameCount) {
+    if (!buffers || !frameCount) return;
+    double squareSum = 0.0;
+    float peak = 0.0f;
+    uint64_t sampleCount = 0;
+    for (UInt32 b = 0; b < buffers->mNumberBuffers; b++) {
+        AudioBuffer *buffer = &buffers->mBuffers[b];
+        if (!buffer->mData || !buffer->mDataByteSize) continue;
+        uint32_t channels = buffer->mNumberChannels ? buffer->mNumberChannels : 1;
+        uint64_t expected = (uint64_t)frameCount * channels;
+        uint32_t bytesPerSample = (uint32_t)(buffer->mDataByteSize / expected);
+        if (bytesPerSample == 4) {
+            const float *samples = (const float *)buffer->mData;
+            uint64_t count = MIN(expected, buffer->mDataByteSize / sizeof(float));
+            for (uint64_t i = 0; i < count; i++) {
+                float value = samples[i];
+                if (!isfinite(value)) continue;
+                float magnitude = fabsf(value);
+                squareSum += (double)value * value;
+                peak = MAX(peak, magnitude);
+                sampleCount++;
+            }
+        } else if (bytesPerSample == 2) {
+            const int16_t *samples = (const int16_t *)buffer->mData;
+            uint64_t count = MIN(expected, buffer->mDataByteSize / sizeof(int16_t));
+            for (uint64_t i = 0; i < count; i++) {
+                float value = (float)samples[i] / 32768.0f;
+                float magnitude = fabsf(value);
+                squareSum += (double)value * value;
+                peak = MAX(peak, magnitude);
+                sampleCount++;
+            }
+        }
+    }
+    if (!sampleCount) return;
+    float rms = sqrtf((float)(squareSum / (double)sampleCount));
+    atomic_store_explicit(&YTMUAudioRMSBits, YTMUFloatBits(rms), memory_order_relaxed);
+    atomic_store_explicit(&YTMUAudioPeakBits, YTMUFloatBits(peak), memory_order_relaxed);
+    atomic_store_explicit(&YTMUAudioLastHostTime, YTMUHostTimeNow(), memory_order_release);
+    if (!atomic_load_explicit(&YTMUAudioCaptureEnabled, memory_order_relaxed)) return;
+
+    float previous = YTMUFloatFromBits(atomic_load_explicit(&YTMUAudioPreviousRMSBits, memory_order_relaxed));
+    float floor = YTMUFloatFromBits(atomic_load_explicit(&YTMUAudioNoiseFloorBits, memory_order_relaxed));
+    if (!isfinite(previous)) previous = 0.0f;
+    if (!isfinite(floor)) floor = 0.0f;
+    float threshold = MAX(0.018f, floor * 1.45f);
+    if (rms > threshold && previous <= threshold && peak > 0.035f) {
+        atomic_fetch_add_explicit(&YTMUAudioOnsetSequence, 1, memory_order_relaxed);
+    }
+    // Slow envelope tracking makes the transient detector adapt to song level.
+    float nextFloor = floor + (rms - floor) * (rms < floor ? 0.08f : 0.008f);
+    atomic_store_explicit(&YTMUAudioNoiseFloorBits, YTMUFloatBits(nextFloor), memory_order_relaxed);
+    atomic_store_explicit(&YTMUAudioPreviousRMSBits, YTMUFloatBits(rms), memory_order_relaxed);
+}
+
+%hookf(OSStatus, AudioUnitRender, AudioUnit unit, AudioUnitRenderActionFlags *flags,
+       const AudioTimeStamp *timeStamp, UInt32 outputBus, UInt32 frameCount, AudioBufferList *ioData) {
+    OSStatus status = %orig(unit, flags, timeStamp, outputBus, frameCount, ioData);
+    if (status == noErr && YTMUIsTrackedPlayerMixer(unit, outputBus) &&
+        atomic_load_explicit(&YTMUAudioCaptureEnabled, memory_order_relaxed)) {
+        YTMUObserveRenderedAudio(ioData, frameCount);
+    }
+    return status;
+}
+
+
+static void YTMULogISRC(NSString *message) {
+    if (!message.length) return;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ YTMUISRCRecentLogLines = [NSMutableArray array]; });
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm:ss";
+    NSString *line = [NSString stringWithFormat:@"%@ %@",
+                      [formatter stringFromDate:[NSDate date]], message];
+    @synchronized (YTMUISRCRecentLogLines) {
+        [YTMUISRCRecentLogLines addObject:line];
+        if (YTMUISRCRecentLogLines.count > 60) {
+            [YTMUISRCRecentLogLines removeObjectsInRange:NSMakeRange(0, YTMUISRCRecentLogLines.count - 60)];
+        }
+    }
+    NSLog(@"[YTMU-ISRC] %@", message);
+    sendDebugLog([@"[ISRC] " stringByAppendingString:message]);
+}
+
+static void YTMUReportISRCStatus(NSString *videoID, NSString *title, NSString *artist,
+                                 NSString *source, NSString *state, NSString *isrc) {
+    if (!title.length && !artist.length && !videoID.length) return;
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"%@/api/isrc/report", YTMUApiBase()]];
+    if (!url) return;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+                                                          cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                      timeoutInterval:3.0];
+    request.HTTPMethod = @"POST";
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    NSMutableDictionary *body = [@{@"video_id": videoID ?: @"", @"title": title ?: @"",
+                                   @"artist": artist ?: @"", @"source": source ?: @"none",
+                                   @"state": state ?: @"lookup failed"} mutableCopy];
+    if (isrc.length) body[@"isrc"] = [isrc uppercaseString];
+    request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    if (request.HTTPBody) [[[NSURLSession sharedSession] dataTaskWithRequest:request] resume];
+}
 
 // MAMusicHapticsManager — MediaAccessibility (iOS 18+)
 // System drives haptic playback automatically via ISRC lookup on Apple servers.
@@ -61,12 +242,19 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 @property (nonatomic, copy)   NSString *lastISRCTrackKey;
 @property (nonatomic, copy)   NSString *currentTitle;
 @property (nonatomic, copy)   NSString *currentArtist;
+@property (nonatomic, copy)   NSString *currentVideoID;
+@property (nonatomic, copy)   NSString *isrcSource;
+@property (nonatomic, copy)   NSString *isrcLookupState;
 @property (nonatomic, assign) NSTimeInterval lastTriggerTime;
 @property (nonatomic, assign) BOOL systemHasTrackForCurrentSong;
 @property (nonatomic, copy)   NSString *lastQueriedKey;
 @property (nonatomic, copy)   NSString *currentLookupKey;
 @property (nonatomic, strong) NSMutableDictionary *isrcCache;
 @property (nonatomic, assign) BOOL lookupInFlight;
+@property (nonatomic, copy) NSDictionary *pendingISRCRequest;
+@property (nonatomic, strong) NSTimer *audioHapticsTimer;
+@property (nonatomic, assign) uint32_t lastAudioOnsetSequence;
+@property (nonatomic, assign) BOOL audioTapReadable;
 + (instancetype)sharedInstance;
 - (BOOL)isSystemMusicHapticsActive;
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration;
@@ -75,6 +263,10 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID;
 - (void)lookupMusicBrainzForTitle:(NSString *)title artist:(NSString *)artist key:(NSString *)key;
 - (BOOL)shouldUseNativeMusicHaptics;
+- (void)setupAudioHapticsMonitor;
+- (void)audioHapticsMonitorTick;
+- (void)triggerAudioTransientWithPeak:(float)peak;
+- (void)completeISRCRequest;
 - (void)playTransientWithIntensity:(float)intensity sharpness:(float)sharpness;
 @end
 
@@ -96,6 +288,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
         _isrcCache = [NSMutableDictionary dictionary];
         [self setupCoreHaptics];
         [self observeSystemHaptics];
+        dispatch_async(dispatch_get_main_queue(), ^{ [self setupAudioHapticsMonitor]; });
     }
     return self;
 }
@@ -172,6 +365,23 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     return NO;
 }
 
+- (void)completeISRCRequest {
+    self.lookupInFlight = NO;
+    NSDictionary *pending = self.pendingISRCRequest;
+    if (!pending) return;
+    if (![self.currentLookupKey isEqualToString:pending[@"key"]]) {
+        self.pendingISRCRequest = nil;
+        return;
+    }
+    self.pendingISRCRequest = nil;
+    NSString *title = pending[@"title"];
+    NSString *artist = pending[@"artist"];
+    NSString *videoID = pending[@"videoID"];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self lookupISRCForTitle:title artist:artist videoID:videoID];
+    });
+}
+
 - (void)checkSystemTrackAvailabilityForISRC:(NSString *)isrc {
     if (!isrc.length) { self.systemHasTrackForCurrentSong = NO; return; }
     Class cls = NSClassFromString(@"MAMusicHapticsManager");
@@ -205,28 +415,58 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID {
     if (!title.length || !artist.length) return;
 
+    self.currentTitle = title;
+    self.currentArtist = artist;
+    self.currentVideoID = videoID ?: @"";
+
     NSString *key = [NSString stringWithFormat:@"%@|%@|%@",
                      [title lowercaseString], [artist lowercaseString], videoID ?: @""];
+    self.currentLookupKey = key;
 
     if ([key isEqualToString:self.lastQueriedKey]) return;
 
     NSString *cached = self.isrcCache[key];
     if (cached) {
         self.lastQueriedKey = key;
+        self.isrcSource = @"MusicBrainz cache";
+        self.isrcLookupState = cached.length ? @"Resolved from cache" : @"No ISRC in cache";
         [self updateISRC:cached];
-        NSLog(@"[YTMU-Haptics] MusicBrainz ISRC cache hit for '%@': %@", key, cached);
+        YTMULogISRC([NSString stringWithFormat:@"MusicBrainz cache %@ for %@", cached.length ? @"hit" : @"miss", videoID.length ? videoID : key]);
+        YTMUReportISRCStatus(videoID, title, artist, @"musicbrainz cache",
+                             cached.length ? @"resolved" : @"no ISRC found", cached);
         return;
     }
 
-    if ([self.isrcCache objectForKey:key] != nil) return; // previous miss
+    if ([self.isrcCache objectForKey:key] != nil) {
+        self.isrcSource = @"MusicBrainz cache";
+        self.isrcLookupState = @"No ISRC in cache";
+        YTMUReportISRCStatus(videoID, title, artist, @"musicbrainz cache", @"no ISRC found", nil);
+        return; // previous miss
+    }
 
-    if (self.lookupInFlight) return;
+    if (self.lookupInFlight) {
+        self.isrcLookupState = @"Waiting for previous lookup";
+        YTMULogISRC([NSString stringWithFormat:@"Skipped %@; another lookup is still running", videoID.length ? videoID : key]);
+        self.pendingISRCRequest = @{@"title": [title copy], @"artist": [artist copy],
+                                   @"videoID": [videoID copy] ?: @"", @"key": key};
+        YTMUReportISRCStatus(videoID, title, artist,
+                             videoID.length == 11 ? @"soundcharts" : @"musicbrainz",
+                             @"waiting for previous lookup", nil);
+        return;
+    }
     self.lastQueriedKey = key;
     self.currentLookupKey = key;
     self.lookupInFlight = YES;
 
     self.systemHasTrackForCurrentSong = NO;
     self.currentISRC = nil;
+    self.isrcSource = videoID.length == 11 ? @"Soundcharts → MusicBrainz" : @"MusicBrainz";
+    self.isrcLookupState = videoID.length == 11 ? @"Looking up Soundcharts" : @"Looking up MusicBrainz (no video ID)";
+    YTMULogISRC([NSString stringWithFormat:@"Lookup started videoID=%@ source=%@",
+                 videoID.length ? videoID : @"(none)", self.isrcSource]);
+    YTMUReportISRCStatus(videoID, title, artist,
+                         videoID.length == 11 ? @"soundcharts" : @"musicbrainz",
+                         videoID.length == 11 ? @"client lookup started" : @"looking up MusicBrainz", nil);
 
     if (videoID.length == 11) {
         NSString *urlString = [NSString stringWithFormat:@"%@/api/isrc/lookup", YTMUApiBase()];
@@ -240,10 +480,12 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                                                            options:0 error:&bodyError];
         if (bodyError || !request.HTTPBody) {
             self.lookupInFlight = NO;
+            self.isrcLookupState = @"Could not create Soundcharts request; trying MusicBrainz";
+            YTMULogISRC([NSString stringWithFormat:@"Soundcharts request serialization failed (%@)", bodyError.localizedDescription ?: @"unknown error"]);
             [self lookupMusicBrainzForTitle:title artist:artist key:key];
             return;
         }
-        NSLog(@"[YTMU-Haptics] Looking up Soundcharts ISRC for YouTube video %@", videoID);
+        self.isrcLookupState = @"Looking up Soundcharts";
         __weak typeof(self) weakSelf = self;
         [[[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
@@ -252,17 +494,29 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
             NSString *isrc = [json[@"isrc"] isKindOfClass:[NSString class]] ? [json[@"isrc"] uppercaseString] : nil;
             if (isrc.length != 12) isrc = nil;
             if (isrc.length) {
-                strongSelf.lookupInFlight = NO;
                 strongSelf.isrcCache[key] = isrc;
-                NSLog(@"[YTMU-Haptics] Soundcharts resolved ISRC %@ for %@", isrc, videoID);
+                YTMULogISRC([NSString stringWithFormat:@"Soundcharts resolved videoID=%@ ISRC=%@", videoID, isrc]);
                 if ([strongSelf.currentLookupKey isEqualToString:key]) {
-                    dispatch_async(dispatch_get_main_queue(), ^{ [strongSelf updateISRC:isrc]; });
+                    strongSelf.isrcSource = @"Soundcharts";
+                    strongSelf.isrcLookupState = @"Resolved";
+                    YTMUReportISRCStatus(videoID, title, artist, @"soundcharts", @"resolved", isrc);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if ([strongSelf.currentLookupKey isEqualToString:key]) [strongSelf updateISRC:isrc];
+                    });
                 }
+                [strongSelf completeISRCRequest];
                 return;
             }
-            NSLog(@"[YTMU-Haptics] Soundcharts returned no ISRC; trying MusicBrainz (HTTP %@)",
-                  response ? @(((NSHTTPURLResponse *)response).statusCode) : (error ? @"error" : @"no response"));
-            [strongSelf lookupMusicBrainzForTitle:title artist:artist key:key];
+            NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+            YTMULogISRC([NSString stringWithFormat:@"Soundcharts returned no ISRC (HTTP %ld, %@); falling back to MusicBrainz",
+                         (long)status, error.localizedDescription ?: @"no transport error"]);
+            if ([strongSelf.currentLookupKey isEqualToString:key]) {
+                strongSelf.isrcLookupState = error ? @"Soundcharts request failed; trying MusicBrainz" : @"Soundcharts had no ISRC; trying MusicBrainz";
+                YTMUReportISRCStatus(videoID, title, artist, @"soundcharts", @"waiting for Soundcharts", nil);
+                [strongSelf lookupMusicBrainzForTitle:title artist:artist key:key];
+            } else {
+                [strongSelf completeISRCRequest];
+            }
         }] resume];
         return;
     }
@@ -276,6 +530,11 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     // exact recording title, then rank candidates against every credited artist.
     NSString *safeTitle = [[title stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
                            stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+    NSString *requestTitle = [title copy] ?: @"";
+    NSString *requestArtist = [artist copy] ?: @"";
+    NSString *requestVideoID = [self.currentVideoID copy] ?: @"";
+    NSString *requestKey = [key copy] ?: @"";
+    BOOL requestIsCurrent = [self.currentLookupKey isEqualToString:requestKey];
     NSURLComponents *components = [NSURLComponents componentsWithString:@"https://musicbrainz.org/ws/2/recording/"];
     components.queryItems = @[
         [NSURLQueryItem queryItemWithName:@"query" value:[NSString stringWithFormat:@"recording:\"%@\"", safeTitle]],
@@ -285,8 +544,14 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     ];
     NSURL *url = components.URL;
 
-    NSLog(@"[YTMU-Haptics] Querying MusicBrainz for '%@' by '%@'", title, artist);
-    sendDebugLog([NSString stringWithFormat:@"[Haptics] Querying MusicBrainz for '%@' - '%@'", title, artist]);
+    if (requestIsCurrent) {
+        self.isrcSource = @"MusicBrainz";
+        self.isrcLookupState = @"Looking up MusicBrainz";
+        YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist,
+                             @"musicbrainz", @"looking up MusicBrainz", nil);
+    }
+    YTMULogISRC([NSString stringWithFormat:@"Trying MusicBrainz videoID=%@",
+                 requestVideoID.length ? requestVideoID : @"(none)"]);
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
                                                        cachePolicy:NSURLRequestReturnCacheDataElseLoad
@@ -302,10 +567,14 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
             __strong typeof(ws) s = ws;
             if (!s) return;
 
-            s.lookupInFlight = NO;
-
             if (err || !data) {
                 NSLog(@"[YTMU-Haptics] MusicBrainz query failed: %@", err);
+                if ([s.currentLookupKey isEqualToString:requestKey]) {
+                    s.isrcLookupState = [NSString stringWithFormat:@"MusicBrainz request failed: %@", err.localizedDescription ?: @"no response"];
+                    YTMULogISRC(s.isrcLookupState);
+                    YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist, @"error", @"lookup failed", nil);
+                }
+                [s completeISRCRequest];
                 return;
             }
 
@@ -315,12 +584,18 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                                                                    error:&jsonErr];
             if (jsonErr || !json) {
                 NSLog(@"[YTMU-Haptics] MusicBrainz JSON parse failed: %@", jsonErr);
+                if ([s.currentLookupKey isEqualToString:requestKey]) {
+                    s.isrcLookupState = [NSString stringWithFormat:@"MusicBrainz response parse failed: %@", jsonErr.localizedDescription ?: @"invalid JSON"];
+                    YTMULogISRC(s.isrcLookupState);
+                    YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist, @"error", @"lookup failed", nil);
+                }
+                [s completeISRCRequest];
                 return;
             }
 
             NSArray *recordings = [json[@"recordings"] isKindOfClass:[NSArray class]] ? json[@"recordings"] : @[];
-            NSString *wantedTitle = YTMUNormalizedMusicText(title);
-            NSString *wantedArtist = YTMUNormalizedMusicText(artist);
+            NSString *wantedTitle = YTMUNormalizedMusicText(requestTitle);
+            NSString *wantedArtist = YTMUNormalizedMusicText(requestArtist);
             NSString *foundISRC = nil;
             NSInteger bestScore = NSIntegerMin;
             for (NSDictionary *rec in recordings) {
@@ -347,15 +622,23 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                 }
             }
 
-            s.isrcCache[key] = foundISRC ?: @"";
-            NSLog(@"[YTMU-Haptics] MusicBrainz result for '%@': ISRC=%@", key, foundISRC ?: @"(none)");
-            sendDebugLog([NSString stringWithFormat:@"[Haptics] MusicBrainz ISRC result: %@", foundISRC ?: @"(none)"]);
+            s.isrcCache[requestKey] = foundISRC ?: @"";
+            BOOL resultStillCurrent = [s.currentLookupKey isEqualToString:requestKey];
+            if (resultStillCurrent) {
+                s.isrcSource = @"MusicBrainz";
+                s.isrcLookupState = foundISRC.length ? @"Resolved" : @"No ISRC found";
+                YTMULogISRC([NSString stringWithFormat:@"MusicBrainz result videoID=%@ ISRC=%@",
+                             requestVideoID.length ? requestVideoID : @"(none)", foundISRC ?: @"(none)"]);
+                YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist, @"musicbrainz",
+                                     foundISRC.length ? @"resolved" : @"no ISRC found", foundISRC);
+            }
 
-            if (foundISRC.length && [s.currentLookupKey isEqualToString:key]) {
+            if (foundISRC.length && resultStillCurrent) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [s updateISRC:foundISRC];
+                    if ([s.currentLookupKey isEqualToString:requestKey]) [s updateISRC:foundISRC];
                 });
             }
+            [s completeISRCRequest];
         }];
     [task resume];
 }
@@ -390,10 +673,62 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
            [self isSystemMusicHapticsActive];
 }
 
+- (void)setupAudioHapticsMonitor {
+    if (self.audioHapticsTimer) return;
+    self.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
+    __weak typeof(self) weakSelf = self;
+    self.audioHapticsTimer = [NSTimer timerWithTimeInterval:0.025 repeats:YES block:^(__unused NSTimer *timer) {
+        [weakSelf audioHapticsMonitorTick];
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:self.audioHapticsTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)audioHapticsMonitorTick {
+    BOOL shouldCapture = self.currentTitle.length > 0 && YTMU(@"musicHaptics");
+    atomic_store_explicit(&YTMUAudioCaptureEnabled, shouldCapture, memory_order_relaxed);
+    if (!shouldCapture) {
+        self.audioTapReadable = NO;
+        self.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
+        return;
+    }
+
+    uint64_t lastHostTime = atomic_load_explicit(&YTMUAudioLastHostTime, memory_order_acquire);
+    uint64_t now = YTMUHostTimeNow();
+    self.audioTapReadable = lastHostTime && now >= lastHostTime &&
+        YTMUHostTicksToNanos(now - lastHostTime) < 1500000000ULL;
+    if (!self.audioTapReadable) return;
+
+    uint32_t sequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
+    if (sequence == self.lastAudioOnsetSequence) return;
+    self.lastAudioOnsetSequence = sequence;
+    if ([self shouldUseNativeMusicHaptics]) return;
+    float peak = YTMUFloatFromBits(atomic_load_explicit(&YTMUAudioPeakBits, memory_order_relaxed));
+    [self triggerAudioTransientWithPeak:peak];
+}
+
+- (void)triggerAudioTransientWithPeak:(float)peak {
+    if (!YTMU(@"musicHaptics") || [self shouldUseNativeMusicHaptics]) return;
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (now - self.lastTriggerTime < 0.105) return;
+    self.lastTriggerTime = now;
+
+    NSInteger intensity = YTMUInt(@"musicHapticsIntensity", 1);
+    float base = intensity == 0 ? 0.40f : (intensity == 2 ? 1.0f : 0.65f);
+    float sharpness = intensity == 0 ? 0.45f : (intensity == 2 ? 1.0f : 0.65f);
+    float energyScale = MIN(1.0f, MAX(0.72f, peak * 1.65f));
+    // Preserve the user's strongest setting at full actuator intensity;
+    // energy scaling only softens the Light and Medium profiles.
+    float finalIntensity = intensity == 2 ? 1.0f : MIN(1.0f, base * energyScale);
+    [self playTransientWithIntensity:finalIntensity sharpness:sharpness];
+}
+
 // ---- Haptic triggers ----
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration {
     if (!YTMU(@"musicHaptics")) return;
     if ([self shouldUseNativeMusicHaptics]) return;
+    // Lyric timing remains the fallback only when no live player PCM reaches
+    // AudioUnitRender. Once the tap is readable, the audio envelope owns cues.
+    if (self.audioTapReadable) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.070) return;
@@ -411,6 +746,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)triggerBeatHaptic {
     if (!YTMU(@"musicHaptics")) return;
     if ([self shouldUseNativeMusicHaptics]) return;
+    if (self.audioTapReadable) return;
 
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.100) return;
@@ -494,7 +830,11 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 // ---- Hook: intercept every setNowPlayingInfo: call ----
 %hook MPNowPlayingInfoCenter
 - (void)setNowPlayingInfo:(NSDictionary *)nowPlayingInfo {
-    if (!nowPlayingInfo) { %orig(nil); return; }
+    if (!nowPlayingInfo) {
+        atomic_store_explicit(&YTMUAudioCaptureEnabled, false, memory_order_relaxed);
+        %orig(nil);
+        return;
+    }
 
     NSString *title  = nowPlayingInfo[@"title"]  ?: nowPlayingInfo[@"MPMediaItemPropertyTitle"];
     NSString *artist = nowPlayingInfo[@"artist"] ?: nowPlayingInfo[@"MPMediaItemPropertyArtist"];
@@ -505,6 +845,14 @@ void YTMUTestHapticPulse(NSInteger intensity) {
     if (title.length && artist.length) {
         YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
         NSString *trackKey = [NSString stringWithFormat:@"%@|%@|%@", [title lowercaseString], [artist lowercaseString], videoID ?: @""];
+        BOOL audioTrackChanged = ![mgr.currentTitle isEqualToString:title] || ![mgr.currentArtist isEqualToString:artist];
+        BOOL playbackISRCChanged = ![mgr.lastISRCTrackKey isEqualToString:trackKey] || ![mgr.currentISRC isEqualToString:existing];
+        if (audioTrackChanged) {
+            mgr.audioTapReadable = NO;
+            mgr.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
+            atomic_store_explicit(&YTMUAudioPreviousRMSBits, YTMUFloatBits(0.0f), memory_order_relaxed);
+            atomic_store_explicit(&YTMUAudioNoiseFloorBits, YTMUFloatBits(0.0f), memory_order_relaxed);
+        }
         mgr.currentLookupKey = trackKey;
         if (existing.length && mgr.lastISRCTrackKey.length &&
             ![mgr.lastISRCTrackKey isEqualToString:trackKey] &&
@@ -522,11 +870,21 @@ void YTMUTestHapticPulse(NSInteger intensity) {
         }
         mgr.currentTitle = title;
         mgr.currentArtist = artist;
+        mgr.currentVideoID = videoID ?: @"";
         if (existing.length) {
             // Prefer an ISRC if the playback service supplied one; otherwise
             // resolve by YouTube ID via the server and then MusicBrainz.
             mgr.lastQueriedKey = trackKey;
+            mgr.pendingISRCRequest = nil;
+            mgr.isrcSource = @"Playback metadata";
+            mgr.isrcLookupState = @"Playback ISRC available";
             [mgr updateISRC:existing];
+            mgr.lastISRCTrackKey = trackKey;
+            if (playbackISRCChanged) {
+                YTMULogISRC([NSString stringWithFormat:@"Playback supplied ISRC videoID=%@ ISRC=%@",
+                             videoID.length ? videoID : @"(none)", existing]);
+                YTMUReportISRCStatus(videoID, title, artist, @"playback", @"playback ISRC available", existing);
+            }
         } else {
             [mgr lookupISRCForTitle:title artist:artist videoID:videoID];
         }
@@ -548,3 +906,8 @@ void YTMUTestHapticPulse(NSInteger intensity) {
     %orig(infoToSend);
 }
 %end
+
+%ctor {
+    mach_timebase_info(&YTMUHostTimebase);
+    %init;
+}

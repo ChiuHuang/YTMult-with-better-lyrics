@@ -10,7 +10,9 @@ import re
 import sqlite3
 import threading
 import time
+from collections import deque
 from contextlib import closing
+from datetime import datetime, timezone
 
 import requests
 
@@ -27,6 +29,44 @@ _LOCK = threading.Lock()
 _IN_FLIGHT = {}
 _CREDENTIAL_LOCK = threading.Lock()
 _CREDENTIAL_CURSOR = 0
+_DIAGNOSTIC_LOCK = threading.Lock()
+_DIAGNOSTIC_LOGS = deque(maxlen=100)
+_DIAGNOSTIC_CURRENT = None
+
+
+def record_diagnostic(video_id, title='', artist='', source='unknown', state='unknown', isrc=None):
+    """Keep a bounded, in-memory ISRC trace for the authenticated dashboard."""
+    global _DIAGNOSTIC_CURRENT
+    entry = {
+        'at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'video_id': (video_id or '')[:32] if isinstance(video_id, str) else '',
+        'title': (title or '')[:180] if isinstance(title, str) else '',
+        'artist': (artist or '')[:180] if isinstance(artist, str) else '',
+        'source': (source or 'unknown')[:48] if isinstance(source, str) else 'unknown',
+        'state': (state or 'unknown')[:120] if isinstance(state, str) else 'unknown',
+        'isrc': isrc if isinstance(isrc, str) and _ISRC.fullmatch(isrc) else None,
+    }
+    with _DIAGNOSTIC_LOCK:
+        _DIAGNOSTIC_LOGS.append(entry)
+        if (_DIAGNOSTIC_CURRENT and entry['video_id'] and
+                entry['video_id'] == _DIAGNOSTIC_CURRENT.get('video_id')):
+            entry['title'] = entry['title'] or _DIAGNOSTIC_CURRENT.get('title', '')
+            entry['artist'] = entry['artist'] or _DIAGNOSTIC_CURRENT.get('artist', '')
+        if (_DIAGNOSTIC_CURRENT is None or
+                entry['state'] == 'lookup started' or
+                entry['state'] == 'client lookup started' or
+                entry['state'] == 'playback ISRC available' or
+                not entry['video_id'] or
+                entry['video_id'] == _DIAGNOSTIC_CURRENT.get('video_id')):
+            _DIAGNOSTIC_CURRENT = entry
+
+
+def diagnostics_snapshot():
+    with _DIAGNOSTIC_LOCK:
+        return {
+            'current': dict(_DIAGNOSTIC_CURRENT) if _DIAGNOSTIC_CURRENT else None,
+            'logs': [dict(entry) for entry in _DIAGNOSTIC_LOGS],
+        }
 
 
 def _db():
@@ -165,14 +205,17 @@ def _credential_order(credentials):
     return credentials[start:] + credentials[:start]
 
 
-def lookup(video_id, client_id=None):
+def lookup(video_id, client_id=None, title='', artist=''):
     """Return a Soundcharts ISRC, using shared persistent cache first."""
     video_id = (video_id or '').strip()
     if not _VIDEO_ID.fullmatch(video_id):
+        record_diagnostic(video_id, title, artist, 'server', 'invalid video ID')
         return {'isrc': None, 'source': 'invalid'}
 
     cached = _read_cache(video_id)
     if cached:
+        record_diagnostic(video_id, title, artist, 'server cache',
+                          'cache hit' if cached.get('isrc') else 'cached miss', cached.get('isrc'))
         return cached
 
     # Coalesce simultaneous requests for the same uncached track in this worker.
@@ -184,13 +227,19 @@ def lookup(video_id, client_id=None):
             _IN_FLIGHT[video_id] = event
     if not owner:
         event.wait(7.0)
-        return _read_cache(video_id) or {'isrc': None, 'source': 'busy'}
+        result = _read_cache(video_id) or {'isrc': None, 'source': 'busy'}
+        record_diagnostic(video_id, title, artist, result.get('source', 'server'),
+                          'coalesced result' if result.get('isrc') else 'request still in flight', result.get('isrc'))
+        return result
 
     try:
+        record_diagnostic(video_id, title, artist, 'Soundcharts', 'lookup started')
         credentials = _credentials()
         if not credentials:
+            record_diagnostic(video_id, title, artist, 'Soundcharts', 'not configured')
             return {'isrc': None, 'source': 'unconfigured'}
         if not _consume_client_budget(client_id):
+            record_diagnostic(video_id, title, artist, 'Soundcharts', 'client rate limited')
             return {'isrc': None, 'source': 'rate_limited'}
         url = f'https://customer.api.soundcharts.com/api/v2.25/song/by-platform/youtube/{video_id}'
         response = None
@@ -208,6 +257,7 @@ def lookup(video_id, client_id=None):
             except requests.RequestException as exc:
                 print(f'[ISRC] Soundcharts request failed ({type(exc).__name__})')
                 _write_cache(video_id, None, _ERROR_TTL)
+                record_diagnostic(video_id, title, artist, 'Soundcharts', f'request failed ({type(exc).__name__})')
                 return {'isrc': None, 'source': 'error'}
             if response.status_code not in (401, 403, 429):
                 break
@@ -215,19 +265,23 @@ def lookup(video_id, client_id=None):
 
         if response is None:
             _write_cache(video_id, None, _ERROR_TTL)
+            record_diagnostic(video_id, title, artist, 'Soundcharts', 'no provider response')
             return {'isrc': None, 'source': 'error'}
         if response.status_code == 404:
             _write_cache(video_id, None, _NEGATIVE_TTL)
+            record_diagnostic(video_id, title, artist, 'Soundcharts', 'song not found')
             return {'isrc': None, 'source': 'not_found'}
         if response.status_code != 200:
             print(f'[ISRC] Soundcharts credentials unavailable (HTTP {response.status_code})')
             _write_cache(video_id, None, _ERROR_TTL)
+            record_diagnostic(video_id, title, artist, 'Soundcharts', f'HTTP {response.status_code}')
             return {'isrc': None, 'source': 'error'}
 
         try:
             body = response.json()
         except ValueError:
             _write_cache(video_id, None, _ERROR_TTL)
+            record_diagnostic(video_id, title, artist, 'Soundcharts', 'invalid JSON response')
             return {'isrc': None, 'source': 'error'}
         item = body.get('object') if isinstance(body, dict) else None
         isrc_obj = item.get('isrc') if isinstance(item, dict) else None
@@ -236,6 +290,7 @@ def lookup(video_id, client_id=None):
         if isrc and not _ISRC.fullmatch(isrc):
             isrc = None
         _write_cache(video_id, isrc, _POSITIVE_TTL if isrc else _NEGATIVE_TTL)
+        record_diagnostic(video_id, title, artist, 'Soundcharts', 'ISRC found' if isrc else 'no ISRC in response', isrc)
         return {'isrc': isrc, 'source': 'soundcharts' if isrc else 'no_isrc'}
     finally:
         with _LOCK:

@@ -108,6 +108,15 @@ def admin_logs_clear():
     return jsonify({'ok': True})
 
 
+@app.route('/api/admin/isrc/diagnostics', methods=['GET'])
+@login_required
+def admin_isrc_diagnostics():
+    from .soundcharts_isrc import diagnostics_snapshot
+    response = jsonify(diagnostics_snapshot())
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 # ---------------------------------------------------------------
 # Release channels: every CI build lands in BETA (webhook records it),
 # promote moves the stable pointer that /api/app/altstore and

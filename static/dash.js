@@ -3363,17 +3363,63 @@
     } catch (e) { mdui.snackbar({message: 'Open failed: ' + e.message}); }
   };
 
+  /* ---- ISRC lookup diagnostics ---- */
+  const renderISRC = data => {
+    const current = data && data.current;
+    const box = $('#isrc-current');
+    const logList = $('#isrc-log-list');
+    if (!box || !logList) return;
+    box.innerHTML = '';
+    const values = current ? [
+      ['Song', [current.artist, current.title].filter(Boolean).join(' — ') || '(unknown)'],
+      ['YouTube video ID', current.video_id || '(none)'],
+      ['Lookup source', current.source || '(unknown)'],
+      ['Lookup state', current.state || '(unknown)'],
+      ['ISRC', current.isrc || '(none)'],
+      ['Updated', current.at || '(unknown)'],
+    ] : [
+      ['Song', 'No lookup received yet'], ['YouTube video ID', '(none)'],
+      ['Lookup source', '(none)'], ['Lookup state', 'Waiting for a device lookup'],
+      ['ISRC', '(none)'], ['Updated', '(none)'],
+    ];
+    values.forEach(([key, value]) => {
+      box.appendChild(el('div', {class:'k'}, key));
+      box.appendChild(el('div', {class:'v mono'}, value));
+    });
+    const logs = Array.isArray(data && data.logs) ? data.logs.slice().reverse() : [];
+    logList.innerHTML = '';
+    if (!logs.length) logList.appendChild(el('div', {class:'list-row'}, 'No ISRC lookup log entries yet.'));
+    logs.forEach(entry => {
+      const track = [entry.artist, entry.title].filter(Boolean).join(' — ') || '(unknown track)';
+      logList.appendChild(el('div', {class:'list-row isrc-log'},
+        el('span', {class:'mono'}, (entry.at || '').replace('T',' ').replace('+00:00','')),
+        el('span', {class:'mono'}, entry.video_id || '(none)'),
+        el('span', {class:'isrc-track'}, track),
+        el('span', {}, `${entry.source || 'unknown'} / ${entry.state || 'unknown'}`),
+        el('span', {class:'mono'}, entry.isrc || '—')));
+    });
+    setVal('#isrc-updated', current && current.at ? `updated ${ago(current.at)}` : 'waiting for lookups');
+    setVal('#isrc-log-count', `${logs.length} entr${logs.length === 1 ? 'y' : 'ies'}`);
+  };
+  const loadISRC = async () => {
+    try { renderISRC(await json('/api/admin/isrc/diagnostics')); }
+    catch (e) { console.warn('ISRC diagnostics load failed', e); }
+  };
+
   /* ---- nav (hash-routed: each tab is its own URL, middle-click / duplicate-tab safe) ---- */
-  const pages = ['overview','logs','debug','caches','library','nodes','jwt','update','files','crashes','settings','app'];
+  const pages = ['overview','logs','isrc','debug','caches','library','nodes','jwt','update','files','crashes','settings','app'];
+  let isrcRefreshTimer = null;
   const pageFromHash = () => (location.hash || '').replace(/^#\/?/, '');
   const switchPage = p => {
     if (!pages.includes(p)) return;
+    if (isrcRefreshTimer) { clearInterval(isrcRefreshTimer); isrcRefreshTimer = null; }
     activePage = p;
     if (pageFromHash() !== p) history.replaceState(null, '', '#/' + p);
     $$('.page').forEach(sec => sec.classList.toggle('active', sec.id === `page-${p}`));
     $$('#nav-list mdui-list-item').forEach(item => { item.active = (item.dataset.page === p); });
     if (p==='overview') loadOverview();
     else if (p==='logs') connectSSE();
+    else if (p==='isrc') { loadISRC(); isrcRefreshTimer = setInterval(loadISRC, 3000); }
     else if (p==='debug') { loadDebugDevices(); loadDebugFiles(); loadDebugRecent(); }
     else if (p==='caches') loadCaches();
     else if (p==='library') loadLibrary();
@@ -3453,6 +3499,9 @@
 
     const debugOtpBtn = $('#ddbg-otp');
     if (debugOtpBtn) debugOtpBtn.addEventListener('click', generateDebugOtp);
+
+    const isrcRefreshBtn = $('#isrc-refresh');
+    if (isrcRefreshBtn) isrcRefreshBtn.addEventListener('click', loadISRC);
 
     const ddgPauseBtn = $('#ddlive-pause');
     if (ddgPauseBtn) ddgPauseBtn.addEventListener('click', () => {

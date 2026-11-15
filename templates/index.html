@@ -40,6 +40,7 @@
     <mdui-list id="nav-list">
       <mdui-list-item icon="dashboard" active data-page="overview" href="#/overview">Overview</mdui-list-item>
       <mdui-list-item icon="terminal" data-page="logs" href="#/logs">Live Logs</mdui-list-item>
+      <mdui-list-item icon="album" data-page="isrc" href="#/isrc">ISRC Diagnostics</mdui-list-item>
       <mdui-list-item icon="developer_mode" data-page="debug" href="#/debug">Debug Devices</mdui-list-item>
       <mdui-list-item icon="storage" data-page="caches" href="#/caches">Caches</mdui-list-item>
       <mdui-list-item icon="library_music" data-page="library" href="#/library">Library</mdui-list-item>
@@ -171,6 +172,31 @@
             <mdui-button id="log-clear" variant="text" icon="delete">Clear</mdui-button>
           </div>
           <div id="log-list" class="log-list"></div>
+        </mdui-card>
+      </section>
+
+      <!-- ===================== ISRC diagnostics ===================== -->
+      <section id="page-isrc" class="page">
+        <mdui-card variant="elevated" class="panel">
+          <div class="panel-head">
+            <span class="section-title">ISRC diagnostics</span>
+            <span class="pill pill-mute" id="isrc-updated">waiting for lookups</span>
+            <span class="spacer"></span>
+            <mdui-button id="isrc-refresh" variant="text" icon="refresh">Refresh</mdui-button>
+          </div>
+          <div class="panel-body">
+            <div class="kv" id="isrc-current"></div>
+          </div>
+        </mdui-card>
+        <mdui-card variant="elevated" class="panel" style="margin-top:16px;">
+          <div class="panel-head">
+            <span class="section-title">Recent lookup log</span>
+            <span class="pill" id="isrc-log-count">0 entries</span>
+          </div>
+          <div class="panel-body">
+            <div class="list-head isrc-log-head"><span>Time</span><span>Video ID</span><span>Track</span><span>Source / state</span><span>ISRC</span></div>
+            <div id="isrc-log-list" class="list-grid"></div>
+          </div>
         </mdui-card>
       </section>
 

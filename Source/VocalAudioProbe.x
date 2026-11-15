@@ -105,6 +105,10 @@ static NSString *YTMUSingAudioFormatText(AudioStreamBasicDescription format) {
          destination.componentSubType != kAudioUnitSubType_VoiceProcessingIO) ||
         !YTMUSingAudioDescription(connection.sourceAudioUnit, &source)) return status;
 
+    // Share the exact player mixer/output-bus pair with Music Haptics. Its
+    // AudioUnitRender hook then ignores Core Haptics and unrelated audio units.
+    YTMUMusicHapticsRegisterMixer(connection.sourceAudioUnit, connection.sourceOutputNumber);
+
     unsigned int number = atomic_fetch_add_explicit(&YTMUSingAudioProbeCount, 1, memory_order_relaxed);
     if (number >= YTMUSingAudioProbeLimit) return status;
     AudioStreamBasicDescription sourceFormat = YTMUSingAudioFormat(connection.sourceAudioUnit,

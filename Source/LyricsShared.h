@@ -2,6 +2,7 @@
 #define LyricsShared_h
 
 #import <UIKit/UIKit.h>
+#import <AudioToolbox/AudioToolbox.h>
 #import <objc/runtime.h>
 #import "YTMUTurnstileManager.h"
 #import "Headers/YTPlayerViewController.h"
@@ -508,6 +509,7 @@ BOOL YTMUIsSystemMusicHapticsActive(void);
 NSString *YTMUCurrentNowPlayingISRC(void);
 NSString *YTMUCurrentNowPlayingTitle(void);
 NSString *YTMUCurrentNowPlayingArtist(void);
+void YTMUMusicHapticsRegisterMixer(AudioUnit sourceUnit, UInt32 sourceOutputBus);
 void YTMUTestHapticPulse(NSInteger intensity);
 BOOL YTMUInterfaceIsLight(UIView *v);
 

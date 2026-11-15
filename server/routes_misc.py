@@ -109,14 +109,18 @@ def api_app_stats():
 def api_isrc_lookup():
     """Resolve a YouTube video ID to an ISRC via Soundcharts.
 
-    Credentials stay in server environment variables. Results and misses are shared in SQLite under
+    Credentials stay in server-side environment or admin config. Results and misses are shared in SQLite under
     database/ so a track costs one provider request per cache lifetime.
     """
     body = request.get_json(silent=True) or {}
-    video_id = (body.get('video_id') or '').strip() if isinstance(body, dict) else ''
+    if not isinstance(body, dict):
+        body = {}
+    video_id = (body.get('video_id') or '').strip()
     client_id = (request.headers.get('CF-Connecting-IP') or request.remote_addr or 'unknown').strip()
+    title = body.get('title', '') if isinstance(body.get('title', ''), str) else ''
+    artist = body.get('artist', '') if isinstance(body.get('artist', ''), str) else ''
     from .soundcharts_isrc import lookup
-    result = lookup(video_id, client_id=client_id)
+    result = lookup(video_id, client_id=client_id, title=title[:180], artist=artist[:180])
     if result.get('source') == 'invalid':
         response = jsonify({'ok': False, 'error': 'invalid video_id', 'isrc': None})
         response.status_code = 400
@@ -127,6 +131,38 @@ def api_isrc_lookup():
     else:
         response = jsonify({'ok': True, 'isrc': result.get('isrc'),
                             'source': result.get('source', 'unknown')})
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/api/isrc/report', methods=['POST'])
+def api_isrc_report():
+    """Receive the device's final ISRC matcher state for the admin trace."""
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({'ok': False, 'error': 'invalid body'}), 400
+    video_id = body.get('video_id', '')
+    title = body.get('title', '')
+    artist = body.get('artist', '')
+    source = body.get('source', '')
+    state = body.get('state', '')
+    isrc = body.get('isrc')
+    if not isinstance(video_id, str) or (video_id and not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id)):
+        return jsonify({'ok': False, 'error': 'invalid video_id'}), 400
+    if not all(isinstance(value, str) for value in (title, artist, source, state)):
+        return jsonify({'ok': False, 'error': 'invalid fields'}), 400
+    if source not in {'playback', 'soundcharts', 'soundcharts cache', 'musicbrainz',
+                      'musicbrainz cache', 'none', 'error'}:
+        return jsonify({'ok': False, 'error': 'invalid source'}), 400
+    if state not in {'client lookup started', 'looking up MusicBrainz', 'resolved',
+                     'no ISRC found', 'lookup failed', 'playback ISRC available',
+                     'waiting for Soundcharts', 'waiting for previous lookup'}:
+        return jsonify({'ok': False, 'error': 'invalid state'}), 400
+    if isrc is not None and (not isinstance(isrc, str) or not re.fullmatch(r'[A-Z]{2}[A-Z0-9]{3}[0-9]{7}', isrc)):
+        return jsonify({'ok': False, 'error': 'invalid isrc'}), 400
+    from .soundcharts_isrc import record_diagnostic
+    record_diagnostic(video_id, title[:180], artist[:180], source, state, isrc)
+    response = jsonify({'ok': True})
     response.headers['Cache-Control'] = 'no-store'
     return response
 
