@@ -27,7 +27,7 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
-- `[ACTIVE] ses_isrc_soundcharts_20261115 | Add Soundcharts lookup with durable server cache and use native haptics only when an exact track exists; otherwise CoreHaptics | files: Source/MusicHaptics.x, server/soundcharts_isrc.py, server/routes_misc.py | next: configure fresh server secrets and build/device verify`
+- `[ACTIVE] ses_sing_pipeline_20261115 | Connect the downloaded CoreML vocal separator to player audio while preserving GPLv3 boundaries | files: Source/VocalSeparation.x, Source/Prefs/SingSettingsController.m, Makefile | next: inspect Vitrine's licensed Sing implementation and identify a viable YouTube Music audio insertion point`
 - `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
 - [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
   privacy page, and the policy page now names the host that serves it | files:
