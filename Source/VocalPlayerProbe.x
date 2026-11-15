@@ -48,7 +48,10 @@ static void YTMURecordSingPlayer(AVPlayer *player, NSString *event) {
                             (unsigned long)inputCount, (long)item.status];
         NSData *payloadData = [NSJSONSerialization dataWithJSONObject:details options:0 error:nil];
         NSString *payloadText = payloadData ? [[NSString alloc] initWithData:payloadData encoding:NSUTF8StringEncoding] : @"{}";
-        NSString *debugLine = [NSString stringWithFormat:@"[YTMU-Sing-Probe] %@ payload=%@", message, payloadText];
+        // The owner-debug uploader drops [YTMU...] lines to avoid recursively
+        // uploading its own diagnostics, so keep this user-facing probe line
+        // outside that reserved prefix while retaining the manual opt-in gate.
+        NSString *debugLine = [NSString stringWithFormat:@"Sing player probe: %@ payload=%@", message, payloadText];
         NSLog(@"%@", debugLine);
         // The general /log uploader is intentionally Off by default. Route
         // this single, low-volume discovery event through the existing paired
