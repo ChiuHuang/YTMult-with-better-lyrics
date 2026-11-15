@@ -46,7 +46,15 @@ static void YTMURecordSingPlayer(AVPlayer *player, NSString *event) {
                             event, details[@"playerClass"], details[@"itemClass"],
                             details[@"assetClass"], details[@"audioMixClass"],
                             (unsigned long)inputCount, (long)item.status];
-        NSLog(@"[YTMU-Sing-Probe] %@", message);
+        NSData *payloadData = [NSJSONSerialization dataWithJSONObject:details options:0 error:nil];
+        NSString *payloadText = payloadData ? [[NSString alloc] initWithData:payloadData encoding:NSUTF8StringEncoding] : @"{}";
+        NSString *debugLine = [NSString stringWithFormat:@"[YTMU-Sing-Probe] %@ payload=%@", message, payloadText];
+        NSLog(@"%@", debugLine);
+        // The general /log uploader is intentionally Off by default. Route
+        // this single, low-volume discovery event through the existing paired
+        // owner-debug capture too; that channel still enforces its own opt-in,
+        // pairing token, budget, and line cap before sending anything.
+        YTMUDebugDeviceNoteLog(@"sing-player-path", debugLine);
         sendDebugLogWithPayload(@"sing-player-path", message, details);
     });
 }

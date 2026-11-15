@@ -28,7 +28,7 @@
 
 Current:
 - `[DONE] ses_served_badge_20261115 | Lyrics served now uses the persistent cumulative counter; README Stats also shows cached tracks; retained log count remains diagnostic only | files: server/routes_misc.py, server/badge_stats.py, README.md`
-- `[ACTIVE] ses_sing_pipeline_20261115 | Add AVPlayer-only path discovery for Sing without AudioUnit hooks or audio mutation | files: Source/VocalPlayerProbe.x, Source/VocalSeparation.{h,x}, Source/YTMUMDXSeparator.{h,m} | next: build and inspect owner-debug player-path events before choosing a live audio tap`
+- `[ACTIVE] ses_sing_pipeline_20261115 | Route the targeted AVPlayer Sing probe through the paired owner-debug web capture while preserving the generic log opt-in | files: Source/VocalPlayerProbe.x, Source/DebugDeviceMode.x, Source/VocalSeparation.{h,x} | next: build and inspect one sing-player-path event from the device`
 - `[DONE] ses_readme_features_20261115 | Document current features and reserve a screenshot/GIF showcase area | files: README.md, docs/media/.gitkeep`
 - `[DONE] ses_isrc_stats_20261115 | ISRC lookup ranks exact title and credited artists with playback ISRC preferred; Strong is full intensity; README Stats use live badges | files: Source/MusicHaptics.x, README.md`
 - [DONE] ses_privlink_20261110 | Settings links this fork and the SERVER's own
