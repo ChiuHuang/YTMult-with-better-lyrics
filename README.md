@@ -1,7 +1,7 @@
 # YTMusicUltimate (with better lyrics)
 
 [![Latest release](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=release)](https://github.com/ChiuHuang/ytmusicultimate/releases)
-[![Add to AltStore](https://altdirect.app/assets/svg/AltSource_Blue.svg)](https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore)
+<a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200" alt="Add to AltStore"></a>
 [![Lyrics API](assets/badges/server.svg)](https://ytmtranslate.chiuhuang.dev)
 ![Lyrics served](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=lyrics)
 ![Devices](https://ytmtranslate.chiuhuang.dev/api/app/badge?type=devices)
@@ -12,6 +12,15 @@ A YouTube Music tweak for iOS that plays lyrics properly: word-by-word
 highlight that follows the music, translations, and an offline-friendly
 downloader. Lyrics are fetched from a small lyrics server, which is included
 here and can be self-hosted.
+
+### Stats
+<div align="center">
+
+| Lyrics served | Devices | Last song |
+|---|---|---|
+| **2,021** | **86** | Attention - Charlie Puth `wbw` via QQ |
+
+</div>
 
 > [!NOTE]
 > You need a **decrypted** YouTube Music IPA to build. It cannot be provided
@@ -29,8 +38,8 @@ here and can be self-hosted.
 
 ## Install
 
-- **AltStore / SideStore / Feather:** add this source —
-  [one-tap add via AltDirect](https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore)
+- **AltStore / SideStore / Feather:** add this source —  
+  <a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200" alt="Add to AltStore"></a>  
   or paste the URL:
   - Stable (promoted builds): `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
   - Beta (every push, newest build first): `https://ytmtranslate.chiuhuang.dev/api/app/altstore-beta`
