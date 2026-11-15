@@ -41,9 +41,8 @@ here and can be self-hosted.
 
 ## Install
 
-- **AltStore / SideStore / Feather:** add this source —  
-  <a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200" alt="Add to AltStore"></a>  
-  or paste the URL:
+- **AltStore / SideStore / Feather:**
+  paste the URL:
   - Stable (promoted builds): `https://ytmtranslate.chiuhuang.dev/api/app/altstore`
   - Beta (every push, newest build first): `https://ytmtranslate.chiuhuang.dev/api/app/altstore-beta`
 - **IPA:** download the latest `build-N` from
