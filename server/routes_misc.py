@@ -342,12 +342,16 @@ def api_app_altstore():
                     or 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
 
     def _entry(r, ver, name, dl, desc):
+        vdate = (r.get('published_at') or '').strip()
+        if not vdate:
+            import datetime
+            vdate = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         return {
             'name': name,
             'bundleIdentifier': 'com.google.ios.youtubemusic',
             'developerName': 'ChiuHuang',
             'version': ver,
-            'versionDate': r.get('published_at') or '',
+            'versionDate': vdate,
             'versionDescription': desc,
             'downloadURL': dl,
             'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',

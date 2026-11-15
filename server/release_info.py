@@ -7,11 +7,15 @@
 import json
 import os
 import re
+import datetime
 import time as time_module
 
 import requests
 
 from .paths import MIRROR_FILE, BUILDS_FILE
+
+def _now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
 GH_REPO = os.environ.get('YTMU_GH_REPO', 'ChiuHuang/YTMult-with-better-lyrics')
 # Stable AltStore icon. The release asset icon.png is preferred when present
@@ -54,6 +58,13 @@ def _load_builds():
             d = json.load(f)
         if isinstance(d.get('builds'), dict):
             _BUILDS['builds'] = d['builds']
+            dirty = False
+            for btag, bentry in _BUILDS['builds'].items():
+                if isinstance(bentry, dict) and not (bentry.get('published_at') or '').strip():
+                    bentry['published_at'] = _now_iso()
+                    dirty = True
+            if dirty:
+                _save_builds()
         if isinstance(d.get('stable'), str):
             _STABLE['tag'] = d['stable']
     except Exception:
@@ -86,7 +97,7 @@ def record_build(payload, channel='beta'):
     prev = _BUILDS['builds'].get(tag) or {}
     rec = {
         'tag': tag,
-        'published_at': payload.get('published_at', ''),
+        'published_at': payload.get('published_at') or prev.get('published_at') or _now_iso(),
         'size': payload.get('size', 0),
         'download_url': payload['download_url'],
         'icon_url': payload.get('icon_url'),
@@ -119,7 +130,7 @@ def _fetch_release_by_tag(tag):
         t = j.get('tag_name') or tag
         return {
             'tag': t,
-            'published_at': j.get('published_at') or '',
+            'published_at': j.get('published_at') or _now_iso(),
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
             'icon_url': (icon or {}).get('browser_download_url'),
@@ -304,7 +315,7 @@ def _latest_gh(allow_prerelease=False):
         tag = j.get('tag_name') or ''
         rel = {
             'tag': tag,
-            'published_at': j.get('published_at') or '',
+            'published_at': j.get('published_at') or _now_iso(),
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
             'icon_url': (icon_asset or {}).get('browser_download_url'),
@@ -328,7 +339,7 @@ def update_cache(payload=None):
     if payload and payload.get('tag') and payload.get('download_url'):
         _CACHE['release'] = {
             'tag': payload['tag'],
-            'published_at': payload.get('published_at', ''),
+            'published_at': payload.get('published_at') or _now_iso(),
             'size': payload.get('size', 0),
             'download_url': payload['download_url'],
             'icon_url': payload.get('icon_url'),

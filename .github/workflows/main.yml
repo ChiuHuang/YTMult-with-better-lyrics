@@ -206,12 +206,13 @@ jobs:
             exit 0
           fi
           IPA_SIZE=$(stat -f%z YTMusicUltimate.ipa 2>/dev/null || stat -c%s YTMusicUltimate.ipa)
-          python3 -c "import json,os; print(json.dumps({
+          python3 -c "import json,os,datetime; print(json.dumps({
             'tag': 'build-${{ github.run_number }}',
             'download_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa',
             'asia_url': os.environ.get('MIRROR_URL') or None,
             'size': int('$IPA_SIZE'),
             'icon_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png',
+            'published_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
           }))" > hook.json
           curl -sL -X POST "$SERVER_HOOK_URL" \
             -H "X-YTMU-Hook: $HOOK_SECRET" \
