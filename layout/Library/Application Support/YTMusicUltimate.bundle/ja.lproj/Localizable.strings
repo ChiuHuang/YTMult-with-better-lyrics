@@ -231,3 +231,14 @@
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
 "MUSIC_HAPTICS_STRONG" = "Strong";
+
+// Sing & Haptics settings
+"SING_SETTINGS" = "歌唱 & ハプティクス";
+"SING_SECTION_HEADER" = "歌唱モード";
+"SING_ENABLED" = "歌唱モード";
+"SING_ENABLED_DESC" = "任意の楽曲からボーカルまたはインストゥルメンタルをリアルタイムで分離";
+"SING_MODEL_DOWNLOAD" = "AI モデルをダウンロード";
+"SING_MODEL_DOWNLOADING" = "ダウンロード中...";
+"SING_MODEL_READY" = "モデル準備完了";
+"SING_DOWNLOAD_FAILED" = "ダウンロード失敗";
+"SING_FOOTER" = "歌唱モードはデバイス上の AI モデルを使用してボーカルを分離します。モデル（約 90 MB）は一度だけダウンロードされます。";

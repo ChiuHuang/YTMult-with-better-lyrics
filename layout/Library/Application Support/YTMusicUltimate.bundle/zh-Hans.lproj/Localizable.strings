@@ -376,3 +376,14 @@
 "MUSIC_HAPTICS_LIGHT" = "轻柔";
 "MUSIC_HAPTICS_MEDIUM" = "适中";
 "MUSIC_HAPTICS_STRONG" = "强烈";
+
+// Sing & Haptics settings
+"SING_SETTINGS" = "伴唱与触觉反馈";
+"SING_SECTION_HEADER" = "伴唱模式";
+"SING_ENABLED" = "伴唱模式";
+"SING_ENABLED_DESC" = "实时分离任何歌曲的人声或伴奏";
+"SING_MODEL_DOWNLOAD" = "下载 AI 模型";
+"SING_MODEL_DOWNLOADING" = "下载中...";
+"SING_MODEL_READY" = "模型已就绪";
+"SING_DOWNLOAD_FAILED" = "下载失败";
+"SING_FOOTER" = "伴唱模式使用设备端 AI 模型实时分离人声与伴奏，模型约 90 MB，仅需下载一次。";

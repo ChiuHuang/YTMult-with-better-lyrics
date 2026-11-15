@@ -1,6 +1,7 @@
 #import "YTMUltimateSettingsController.h"
 #import "LyricsSettingsController.h"
 #import "DebugSettingsController.h"
+#import "SingSettingsController.h"
 #import "../LyricsShared.h"
 #import "../Headers/Localization.h"
 
@@ -130,7 +131,7 @@
         case 1:
             // The Debug entry appears only while the debug toggle is on;
             // the owner door (long-press on the build footer) is always there.
-            return YTMUDebugDeviceEnabled() ? 7 : 6;
+            return YTMUDebugDeviceEnabled() ? 8 : 7;
         case 2:
             return 1;
         case 3:
@@ -186,6 +187,7 @@
             @{@"title": LOC(@"NAVBAR_SETTINGS"), @"image": @"sidebar.trailing"},
             @{@"title": LOC(@"TABBAR_SETTINGS"), @"image": @"dock.rectangle"},
             @{@"title": @"Lyrics System", @"image": @"music.note.list"},
+            @{@"title": LOC(@"SING_SETTINGS"), @"image": @"waveform.and.mic"},
         ]];
         if (YTMUDebugDeviceEnabled()) {
             [settingsData addObject:@{@"title": LOC(@"DEBUG_SETTINGS"), @"image": @"ladybug"}];
@@ -286,7 +288,8 @@
                                  [ThemeSettingsController class],
                                  [NavBarSettingsController class],
                                  [OtherSettingsController class],
-                                 [LyricsSettingsController class]]];
+                                 [LyricsSettingsController class],
+                                 [SingSettingsController class]]];
         if (YTMUDebugDeviceEnabled()) {
             [controllers addObject:[DebugSettingsController class]];
         }
