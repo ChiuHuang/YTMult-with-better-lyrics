@@ -476,7 +476,9 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
         request.HTTPMethod = @"POST";
         [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
         NSError *bodyError = nil;
-        request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"video_id": videoID}
+        request.HTTPBody = [NSJSONSerialization dataWithJSONObject:@{@"video_id": videoID,
+                                                                      @"title": title ?: @"",
+                                                                      @"artist": artist ?: @""}
                                                            options:0 error:&bodyError];
         if (bodyError || !request.HTTPBody) {
             self.lookupInFlight = NO;

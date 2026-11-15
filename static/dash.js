@@ -3390,12 +3390,19 @@
     logList.innerHTML = '';
     if (!logs.length) logList.appendChild(el('div', {class:'list-row'}, 'No ISRC lookup log entries yet.'));
     logs.forEach(entry => {
-      const track = [entry.artist, entry.title].filter(Boolean).join(' — ') || '(unknown track)';
+      const title = entry.title || '(unknown title)';
+      const artist = entry.artist || '(unknown artist)';
+      const state = entry.state || 'unknown';
+      const source = entry.source || 'unknown source';
       logList.appendChild(el('div', {class:'list-row isrc-log'},
         el('span', {class:'mono'}, (entry.at || '').replace('T',' ').replace('+00:00','')),
         el('span', {class:'mono'}, entry.video_id || '(none)'),
-        el('span', {class:'isrc-track'}, track),
-        el('span', {}, `${entry.source || 'unknown'} / ${entry.state || 'unknown'}`),
+        el('span', {class:'isrc-track'},
+          el('strong', {class:'isrc-track-title'}, title),
+          el('small', {class:'isrc-track-artist'}, artist)),
+        el('span', {class:'isrc-progress', title:`${source} / ${state}`},
+          el('strong', {}, state),
+          el('small', {}, source)),
         el('span', {class:'mono'}, entry.isrc || '—')));
     });
     setVal('#isrc-updated', current && current.at ? `updated ${ago(current.at)}` : 'waiting for lookups');

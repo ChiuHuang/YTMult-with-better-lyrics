@@ -52,6 +52,15 @@ def record_diagnostic(video_id, title='', artist='', source='unknown', state='un
                 entry['video_id'] == _DIAGNOSTIC_CURRENT.get('video_id')):
             entry['title'] = entry['title'] or _DIAGNOSTIC_CURRENT.get('title', '')
             entry['artist'] = entry['artist'] or _DIAGNOSTIC_CURRENT.get('artist', '')
+        # The device reports track metadata as soon as the asynchronous
+        # lookup starts, while the server cache/provider events may arrive
+        # first with only a video ID. Backfill those recent rows so the web
+        # trace stays identifiable instead of showing "unknown track".
+        if entry['video_id'] and (entry['title'] or entry['artist']):
+            for previous in _DIAGNOSTIC_LOGS:
+                if previous['video_id'] == entry['video_id']:
+                    previous['title'] = previous['title'] or entry['title']
+                    previous['artist'] = previous['artist'] or entry['artist']
         if (_DIAGNOSTIC_CURRENT is None or
                 entry['state'] == 'lookup started' or
                 entry['state'] == 'client lookup started' or
