@@ -1,6 +1,7 @@
 // Temporary read-only discovery hook for Sing. It records the app's mixer to
 // hardware-output connections without replacing or editing any audio buffers.
 #import <AudioToolbox/AudioToolbox.h>
+#import <substrate.h>
 #import <stdatomic.h>
 #import <string.h>
 #import "LyricsShared.h"
@@ -12,6 +13,9 @@ typedef struct {
 } YTMUSingObservedOutput;
 static YTMUSingObservedOutput YTMUSingObservedOutputs[4];
 static const unsigned int YTMUSingAudioProbeLimit = 16;
+static OSStatus (*YTMUOriginalAudioUnitSetProperty)(AudioUnit, AudioUnitPropertyID,
+                                                    AudioUnitScope, AudioUnitElement,
+                                                    const void *, UInt32);
 
 static OSStatus YTMUSingOutputNotify(void *context, AudioUnitRenderActionFlags *flags,
                                      const AudioTimeStamp *timestamp, UInt32 bus,
@@ -87,15 +91,16 @@ static NSString *YTMUSingAudioFormatText(AudioStreamBasicDescription format) {
             (unsigned)format.mChannelsPerFrame, (unsigned)format.mBitsPerChannel, (unsigned)format.mFormatFlags];
 }
 
-%hookf(OSStatus, AudioUnitSetProperty, AudioUnit unit, AudioUnitPropertyID property,
-       AudioUnitScope scope, AudioUnitElement element, const void *data, UInt32 dataSize) {
+static OSStatus YTMUAudioUnitSetPropertyProbe(AudioUnit unit, AudioUnitPropertyID property,
+                                             AudioUnitScope scope, AudioUnitElement element,
+                                             const void *data, UInt32 dataSize) {
     AudioUnitConnection connection = {0};
     BOOL isConnection = property == kAudioUnitProperty_MakeConnection &&
                        scope == kAudioUnitScope_Input && element == 0 && data &&
                        dataSize >= sizeof(connection);
     if (isConnection) memcpy(&connection, data, sizeof(connection));
 
-    OSStatus status = %orig(unit, property, scope, element, data, dataSize);
+    OSStatus status = YTMUOriginalAudioUnitSetProperty(unit, property, scope, element, data, dataSize);
     if (status != noErr || !isConnection || !connection.sourceAudioUnit) return status;
 
     AudioComponentDescription destination = {0}, source = {0};
@@ -128,6 +133,7 @@ static NSString *YTMUSingAudioFormatText(AudioStreamBasicDescription format) {
     return status;
 }
 
-%ctor {
-    %init;
+__attribute__((constructor)) static void YTMUInstallAudioUnitProbe(void) {
+    MSHookFunction((void *)AudioUnitSetProperty, (void *)YTMUAudioUnitSetPropertyProbe,
+                   (void **)&YTMUOriginalAudioUnitSetProperty);
 }
