@@ -17,7 +17,7 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
 @property (atomic, assign) float vocalVolume;
 @property (atomic, assign) float backgroundVolume;
 @property (atomic, assign, readonly) BOOL isSingEnabled;
-@property (atomic, assign) YTMUVocalSeparationMode selectedMode;
+@property (nonatomic, assign) YTMUVocalSeparationMode selectedMode;
 
 + (instancetype)sharedInstance;
 - (NSString *)modelPackagePath;
