@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <CoreML/CoreML.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 // One fixed MDX23C window: 5.92 seconds at 44.1 kHz.
 enum {
     YTMUMDXSampleRate = 44100,
@@ -12,7 +14,7 @@ enum {
 };
 
 @interface YTMUMDXSeparator : NSObject
-- (nullable instancetype)initWithModel:(MLModel *)model error:(NSError **)error;
+- (nullable instancetype)initWithModel:(MLModel *)model error:(NSError * _Nullable * _Nullable)error;
 
 // Model inference is deliberately an off-render-thread operation. `input` is
 // interleaved stereo PCM at 44.1 kHz; the four outputs are planar stems.
@@ -22,5 +24,7 @@ enum {
                        vocalsRight:(float *)vocalsRight
                   instrumentalLeft:(float *)instrumentalLeft
                  instrumentalRight:(float *)instrumentalRight
-                             error:(NSError **)error;
+                             error:(NSError * _Nullable * _Nullable)error;
 @end
+
+NS_ASSUME_NONNULL_END
