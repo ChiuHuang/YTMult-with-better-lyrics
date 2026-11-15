@@ -359,22 +359,16 @@ def api_app_release_hook():
 @app.route('/api/app/altstore-beta', methods=['GET'])
 @app.route('/api/app/altstore', methods=['GET'])
 def api_app_altstore():
-    """AltStore source JSON. TWO CHANNELS, two URLs:
+    """AltStore source JSON. TWO CHANNELS:
       /api/app/altstore       -> STABLE, the promoted build (what installed
                                  devices get; also the default when no
                                  promote has happened yet: GitHub's own
                                  /releases/latest, prereleases excluded);
-                                 this source ALSO lists the beta build as a
-                                 second app, so one added source shows both;
       /api/app/altstore-beta  -> BETA, the newest CI build (every build lands
                                  here first; /api/app/altstore?channel=beta
                                  is the same source).
-    Two entries per source when the Asia file-CDN mirror is known: the mirror
-    first (a direct file host, no GitHub round trip) and the Cloudflare-
-    proxied GitHub URL second as the fallback. Same bundle ID and version on
-    both, which is what makes the second one a mirror rather than a second
-    app to install; the beta entries share the bundle ID too but carry a
-    DIFFERENT version, which is what makes them a second app."""
+    Each source contains one app object for one channel. The IPA's actual
+    bundle identifier and versions are read from its embedded metadata."""
     from .release_info import ALTSTORE_ICON, channel_release, worker_url
     channel = 'beta' if (request.path.endswith('-beta')
                          or request.args.get('channel') == 'beta') else 'stable'
@@ -382,7 +376,7 @@ def api_app_altstore():
     if not rel or not rel.get('download_url'):
         return jsonify({'error': 'No release with an IPA asset found'}), 503
     tag = rel.get('tag') or 'build-?'
-    version = tag[6:] if tag.startswith('build-') else tag
+    build_id = tag[6:] if tag.startswith('build-') else tag
     # Icon fallback order (probed 2026-11-10): the release asset icon.png is
     # 200 but arrives as application/octet-stream; ALTSTORE_ICON (default now
     # = the repo's raw icon.png, 200 image/png) is the durable second. The
@@ -391,54 +385,42 @@ def api_app_altstore():
     default_icon = (ALTSTORE_ICON
                     or 'https://raw.githubusercontent.com/ChiuHuang/YTMult-with-better-lyrics/main/Resources/icon.png')
 
-    def _entry(r, ver, name, dl, desc):
-        vdate = (r.get('published_at') or '').strip()
-        if not vdate:
-            import datetime
-            vdate = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        return {
-            'name': name,
-            'bundleIdentifier': 'com.google.ios.youtubemusic',
-            'developerName': 'ChiuHuang',
-            'version': ver,
-            'versionDate': vdate,
-            'versionDescription': desc,
-            'downloadURL': dl,
-            'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
-            'iconURL': r.get('icon_url') or default_icon,
-            'size': r.get('size') or 0,
-        }
+    version = rel.get('ipa_version') or build_id
+    build_version = rel.get('ipa_build_version') or build_id
+    bundle_id = rel.get('ipa_bundle_id') or 'com.google.ios.youtubemusic'
+    vdate = (rel.get('published_at') or '').strip()
+    if not vdate:
+        import datetime
+        vdate = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
-    def _channel_apps(r, ctag, cname, note):
-        """Mirror pair for one channel: Asia CDN first when known, the
-        Cloudflare-proxied GitHub URL second as the fallback."""
-        asia = (r.get('asia_url') or '').strip()
-        cf = worker_url(r['download_url'])
-        if asia and asia != cf:
-            return [_entry(r, ctag, cname, asia,
-                           f'YTMusicUltimate ({ctag}, {note}) -- Asia CDN'),
-                    _entry(r, ctag, f'{cname} (Cloudflare CDN)', cf,
-                           f'YTMusicUltimate ({ctag}, {note}) -- GitHub via Cloudflare proxy')]
-        return [_entry(r, ctag, cname, cf, f'YTMusicUltimate ({ctag}, {note})')]
-
-    # The channel is a LABEL on the same packed binary: debug features are
-    # runtime-gated to the paired owner device in every build, so a stable
-    # install never sees them. The wording tells the user what they hold.
-    stable_note = 'stable -- debug disabled' if channel == 'stable' else 'beta -- owner/debug build'
-    cname = 'YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)'
-    apps = _channel_apps(rel, version, cname, stable_note)
-
-    # The stable source also lists the newest beta build as a second app
-    # (same bundle ID, different version), so users who added ONE source see
-    # both. Redundant when the promoted build IS the newest build.
-    if channel == 'stable':
-        beta = channel_release('beta')
-        if beta and beta.get('download_url'):
-            btag = beta.get('tag') or 'build-?'
-            if btag != tag:
-                bver = btag[6:] if btag.startswith('build-') else btag
-                apps += _channel_apps(beta, bver, 'YouTube Music (Beta)',
-                                      'beta -- owner/debug build')
+    # AltStore/SideStore require one app object per bundle ID, with versions
+    # nested under `versions`. The build ID belongs in the visible title and
+    # marketingVersion; `version` and `buildVersion` must match the IPA plist.
+    # Prefer the direct mirror when available; a source entry can only have
+    # one downloadURL per app version.
+    download_url = (rel.get('asia_url') or '').strip() or worker_url(rel['download_url'])
+    app_name = 'YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)'
+    build_title = f'{app_name} (Build {build_id})'
+    app = {
+        'name': build_title,
+        'bundleIdentifier': bundle_id,
+        'developerName': 'ChiuHuang',
+        'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
+        'iconURL': rel.get('icon_url') or default_icon,
+        'versions': [{
+            'version': version,
+            'buildVersion': build_version,
+            'marketingVersion': f'Build {build_id}',
+            'date': vdate,
+            'localizedDescription': (
+                'Stable release -- debug disabled' if channel == 'stable'
+                else 'Beta release -- owner/debug build'
+            ),
+            'downloadURL': download_url,
+            'size': rel.get('size') or 0,
+        }],
+    }
+    apps = [app]
     payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',

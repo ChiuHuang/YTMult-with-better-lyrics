@@ -115,9 +115,29 @@ jobs:
         run: cyan -i ytm.ipa -o YTMusicUltimate.ipa -uwsf ytmult.deb -n "${{ env.DISPLAY_NAME }}" -b ${{ env.BUNDLE_ID }}
 
       - name: Enable iOS 18 Music Haptics in Info.plist
+        id: ipa_metadata
         run: |
           unzip -q -o YTMusicUltimate.ipa "Payload/*.app/Info.plist"
-          python3 -c "import plistlib, glob; p = glob.glob('Payload/*.app/Info.plist')[0]; d = plistlib.load(open(p, 'rb')); d['MusicHapticsSupported'] = True; plistlib.dump(d, open(p, 'wb'), fmt=plistlib.FMT_BINARY)"
+          python3 - <<'PY'
+          import glob, os, plistlib
+          path = glob.glob('Payload/*.app/Info.plist')[0]
+          with open(path, 'rb') as f:
+              info = plistlib.load(f)
+          info['MusicHapticsSupported'] = True
+          with open(path, 'wb') as f:
+              plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
+          required = {
+              'ipa_bundle_id': info.get('CFBundleIdentifier'),
+              'ipa_version': info.get('CFBundleShortVersionString'),
+              'ipa_build_version': info.get('CFBundleVersion'),
+          }
+          if not all(isinstance(value, str) and value.strip() for value in required.values()):
+              raise SystemExit('IPA is missing CFBundleIdentifier, CFBundleShortVersionString, or CFBundleVersion')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              for key, value in required.items():
+                  output.write(f'{key}={value.strip()}\n')
+          print('IPA metadata: ' + ', '.join(f'{key}={value}' for key, value in required.items()))
+          PY
           zip -u YTMusicUltimate.ipa Payload/*.app/Info.plist
           rm -rf Payload
 
@@ -167,6 +187,8 @@ jobs:
             - **[Cloudflare CDN](https://proxy.chiuhuang.dev/https://github.com/ChiuHuang/YTMult-with-better-lyrics/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa)**
             ${{ steps.mirror.outputs.url != '' && format('- **[Asia Mirror]({0})**', steps.mirror.outputs.url) || '' }}
 
+            IPA metadata: `CFBundleIdentifier=${{ steps.ipa_metadata.outputs.ipa_bundle_id }}`, `CFBundleShortVersionString=${{ steps.ipa_metadata.outputs.ipa_version }}`, `CFBundleVersion=${{ steps.ipa_metadata.outputs.ipa_build_version }}`
+
             ### 📡 Sideload
             <h3 align="center">
             <a href="https://altdirect.app/?url=https://ytmtranslate.chiuhuang.dev/api/app/altstore"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" width="200"></a>
@@ -182,6 +204,9 @@ jobs:
           SERVER_HOOK_URL: ${{ secrets.SERVER_HOOK_URL }}
           HOOK_SECRET: ${{ secrets.HOOK_SECRET }}
           MIRROR_URL: ${{ steps.mirror.outputs.url }}
+          IPA_BUNDLE_ID: ${{ steps.ipa_metadata.outputs.ipa_bundle_id }}
+          IPA_VERSION: ${{ steps.ipa_metadata.outputs.ipa_version }}
+          IPA_BUILD_VERSION: ${{ steps.ipa_metadata.outputs.ipa_build_version }}
         run: |
           if [ -z "$SERVER_HOOK_URL" ] || [ -z "$HOOK_SECRET" ]; then
             echo "::warning::SERVER_HOOK_URL/HOOK_SECRET not set, skipping webhook (server falls back to GitHub API polling)"
@@ -193,6 +218,9 @@ jobs:
             'download_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/YTMusicUltimate.ipa',
             'asia_url': os.environ.get('MIRROR_URL') or None,
             'size': int('$IPA_SIZE'),
+            'ipa_bundle_id': os.environ['IPA_BUNDLE_ID'],
+            'ipa_version': os.environ['IPA_VERSION'],
+            'ipa_build_version': os.environ['IPA_BUILD_VERSION'],
             'icon_url': 'https://github.com/${{ github.repository }}/releases/download/build-${{ github.run_number }}/icon.png',
             'published_at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
           }))" > hook.json

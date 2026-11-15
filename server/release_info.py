@@ -87,6 +87,21 @@ def _run_number(tag):
     return int(m.group(1)) if m else 0
 
 
+def _ipa_metadata_from_notes(notes):
+    """Read the embedded IPA identifiers written into each release body."""
+    text = notes or ''
+    fields = {
+        'ipa_bundle_id': 'CFBundleIdentifier',
+        'ipa_version': 'CFBundleShortVersionString',
+        'ipa_build_version': 'CFBundleVersion',
+    }
+    return {
+        key: match.group(1)
+        for key, label in fields.items()
+        if (match := re.search(rf'{label}=([^`\s,]+)', text))
+    }
+
+
 def record_build(payload, channel='beta'):
     """Webhook/poll entry: remember a build in the channel store. Every build
     lands as beta; stable changes only through promote()."""
@@ -101,6 +116,9 @@ def record_build(payload, channel='beta'):
         'size': payload.get('size', 0),
         'download_url': payload['download_url'],
         'icon_url': payload.get('icon_url'),
+        'ipa_bundle_id': payload.get('ipa_bundle_id') or prev.get('ipa_bundle_id'),
+        'ipa_version': payload.get('ipa_version') or prev.get('ipa_version'),
+        'ipa_build_version': payload.get('ipa_build_version') or prev.get('ipa_build_version'),
         'notes': _clean_notes(payload.get('notes', '')),
         'asia_url': payload.get('asia_url'),
         'channel': channel if prev.get('channel') not in ('stable',) else 'stable',
@@ -128,12 +146,14 @@ def _fetch_release_by_tag(tag):
         if not asset:
             return None
         t = j.get('tag_name') or tag
+        ipa_metadata = _ipa_metadata_from_notes(j.get('body') or '')
         return {
             'tag': t,
             'published_at': j.get('published_at') or _now_iso(),
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
             'icon_url': (icon or {}).get('browser_download_url'),
+            **ipa_metadata,
             'notes': _clean_notes(j.get('body') or ''),
             'asia_url': asia_url_for(t, j.get('body') or ''),
             'channel': 'beta',
@@ -313,12 +333,14 @@ def _latest_gh(allow_prerelease=False):
             return None
 
         tag = j.get('tag_name') or ''
+        ipa_metadata = _ipa_metadata_from_notes(j.get('body') or '')
         rel = {
             'tag': tag,
             'published_at': j.get('published_at') or _now_iso(),
             'size': asset.get('size') or 0,
             'download_url': asset.get('browser_download_url'),
             'icon_url': (icon_asset or {}).get('browser_download_url'),
+            **ipa_metadata,
             'notes': _clean_notes(j.get('body') or ''),
             # From the body, not the webhook: this is the path that runs on
             # every restart, and it is the only one that is on disk forever.
@@ -343,6 +365,9 @@ def update_cache(payload=None):
             'size': payload.get('size', 0),
             'download_url': payload['download_url'],
             'icon_url': payload.get('icon_url'),
+            'ipa_bundle_id': payload.get('ipa_bundle_id'),
+            'ipa_version': payload.get('ipa_version'),
+            'ipa_build_version': payload.get('ipa_build_version'),
             'notes': _clean_notes(payload.get('notes', '')),
             'asia_url': payload.get('asia_url'),
         }
