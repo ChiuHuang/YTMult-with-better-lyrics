@@ -2,6 +2,7 @@
 #import "../LyricsShared.h"
 #import "../Headers/Localization.h"
 #import "../Utils/YTMUZipExtractor.h"
+#import "../VocalSeparation.h"
 
 @interface SingSettingsController ()
 @property (nonatomic, strong) UIProgressView *downloadProgressView;
@@ -36,7 +37,7 @@
     [self.tableView reloadData];
     __weak typeof(self) ws = self;
     self.refreshTimer = [NSTimer scheduledTimerWithTimeInterval:1.5 repeats:YES block:^(NSTimer * _Nonnull timer) {
-        [ws.tableView reloadSections:[NSIndexSet indexSetWithIndex:2] withRowAnimation:UITableViewRowAnimationNone];
+        [ws.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(1, 2)] withRowAnimation:UITableViewRowAnimationNone];
     }];
 }
 
@@ -143,7 +144,7 @@
             ABCSwitch *sw = [[NSClassFromString(@"ABCSwitch") alloc] init];
             sw.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
             [sw addTarget:self action:@selector(toggleSingSwitch:) forControlEvents:UIControlEventValueChanged];
-            sw.on = modelReady && [YTMUltimateDict[@"singEnabled"] boolValue];
+            sw.on = modelReady && [YTMUVocalSeparationManager sharedInstance].isSingEnabled;
             sw.enabled = modelReady;
             sw.alpha = modelReady ? 1.0 : 0.4;
             cell.accessoryView = sw;
@@ -154,6 +155,7 @@
         if (indexPath.row == 1) {
             cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"singDownloadCell"];
             BOOL modelReady = [self isSingModelReady];
+            BOOL modelLoading = [YTMUVocalSeparationManager sharedInstance].isModelLoading;
             BOOL downloading = (self.activeDownloadTask != nil);
 
             if (modelReady) {
@@ -175,6 +177,20 @@
                 self.downloadProgressView = pv;
                 cell.accessoryView = pv;
                 cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            } else if (modelLoading) {
+                cell.textLabel.text = @"Preparing AI model…";
+                cell.detailTextLabel.text = @"Core ML is loading the downloaded model.";
+                cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+                cell.accessoryView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+                [(UIActivityIndicatorView *)cell.accessoryView startAnimating];
+                cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            } else if ([[YTMUVocalSeparationManager sharedInstance] hasModelOnDisk]) {
+                NSError *loadError = [YTMUVocalSeparationManager sharedInstance].modelLoadError;
+                cell.textLabel.text = loadError ? @"Retry loading AI model" : @"Load downloaded AI model";
+                cell.textLabel.textColor = [UIColor systemBlueColor];
+                cell.detailTextLabel.text = loadError.localizedDescription ?: @"The model is downloaded but has not been loaded.";
+                cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+                cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             } else {
                 cell.textLabel.text = LOC(@"SING_MODEL_DOWNLOAD");
                 cell.textLabel.textColor = [UIColor systemBlueColor];
@@ -234,7 +250,16 @@
 
     if (indexPath.section == 1 && indexPath.row == 1) {
         if (![self isSingModelReady] && self.activeDownloadTask == nil) {
-            [self startModelDownload];
+            YTMUVocalSeparationManager *manager = [YTMUVocalSeparationManager sharedInstance];
+            if (manager.hasModelOnDisk) {
+                [manager loadModelIfAvailableWithCompletion:^(BOOL ready, NSError *error) {
+                    self.downloadStatusText = ready ? nil : [NSString stringWithFormat:@"Model load failed: %@", error.localizedDescription ?: @"Core ML rejected the package"];
+                    [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
+                                  withRowAnimation:UITableViewRowAnimationAutomatic];
+                }];
+            } else {
+                [self startModelDownload];
+            }
         }
     }
 
@@ -253,12 +278,11 @@
 #pragma mark - Model helpers
 
 - (NSString *)singModelPath {
-    NSString *appSupport = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    return [appSupport stringByAppendingPathComponent:@"YTMUltimate/mdx23c_instvoc_hq.mlpackage"];
+    return [[YTMUVocalSeparationManager sharedInstance] modelPackagePath];
 }
 
 - (BOOL)isSingModelReady {
-    return [[NSFileManager defaultManager] fileExistsAtPath:[self singModelPath]];
+    return [YTMUVocalSeparationManager sharedInstance].isModelReady;
 }
 
 - (void)startModelDownload {
@@ -319,12 +343,21 @@
                 // Clean up zip file
                 [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
 
-                dispatch_async(dispatch_get_main_queue(), ^{
+                if (!unzipped) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        weakSelf.activeDownloadTask = nil;
+                        weakSelf.downloadStatusText = [NSString stringWithFormat:@"Extraction failed: %@", unzipErr.localizedDescription ?: @"invalid model archive"];
+                        [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
+                                          withRowAnimation:UITableViewRowAnimationAutomatic];
+                    });
+                    return;
+                }
+                [[YTMUVocalSeparationManager sharedInstance] loadModelIfAvailableWithCompletion:^(BOOL ready, NSError *loadError) {
                     weakSelf.activeDownloadTask = nil;
-                    weakSelf.downloadStatusText = unzipped ? nil : @"Extraction failed";
+                    weakSelf.downloadStatusText = ready ? nil : [NSString stringWithFormat:@"Model load failed: %@", loadError.localizedDescription ?: @"Core ML rejected the package"];
                     [weakSelf.tableView reloadSections:[NSIndexSet indexSetWithIndex:1]
                                       withRowAnimation:UITableViewRowAnimationAutomatic];
-                });
+                }];
             });
         }];
 
@@ -387,6 +420,12 @@
 - (void)toggleSingSwitch:(ABCSwitch *)sender {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    YTMUVocalSeparationManager *manager = [YTMUVocalSeparationManager sharedInstance];
+    if (sender.isOn && manager.selectedMode == YTMUVocalSeparationModeNormal) {
+        manager.selectedMode = YTMUVocalSeparationModeVocalOnly;
+    } else if (!sender.isOn) {
+        manager.selectedMode = YTMUVocalSeparationModeNormal;
+    }
     d[@"singEnabled"] = @(sender.isOn);
     [defaults setObject:d forKey:@"YTMUltimate"];
 }

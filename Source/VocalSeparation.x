@@ -6,25 +6,18 @@
 #import <objc/runtime.h>
 #import "LyricsShared.h"
 #import "Headers/YTMNowPlayingView.h"
+#import "VocalSeparation.h"
 
-typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
-    YTMUVocalSeparationModeVocalOnly = 0,
-    YTMUVocalSeparationModeNormal = 1,
-    YTMUVocalSeparationModeBackgroundOnly = 2,
-};
+// The audio-stage architecture is informed by Vitrine (Clone5030/vitrine,
+// GPL-3.0); this YTMusic implementation is independently written. This
+// repository's GPL-3.0 license applies to this file as well.
+static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparationModelDidChange";
 
-@interface YTMUVocalSeparationManager : NSObject
-@property (nonatomic, strong) MLModel *coreMLModel;
-@property (nonatomic, assign) BOOL isModelReady;
-@property (nonatomic, assign) BOOL isDownloading;
-@property (nonatomic, assign) float downloadProgress;
-@property (nonatomic, assign) float vocalVolume; // 0.0 (mute vocal) to 1.0 (original)
-@property (nonatomic, assign) float backgroundVolume;
-@property (nonatomic, assign) BOOL isSingEnabled;
-@property (nonatomic, assign) YTMUVocalSeparationMode selectedMode;
-+ (instancetype)sharedInstance;
-- (void)startModelDownloadWithCompletion:(void (^)(BOOL success, NSError *error))completion;
-- (BOOL)hasModelOnDisk;
+@interface YTMUVocalSeparationManager ()
+@property (atomic, strong, readwrite) MLModel *coreMLModel;
+@property (atomic, assign, readwrite) BOOL isModelReady;
+@property (atomic, assign, readwrite) BOOL isModelLoading;
+@property (atomic, strong, readwrite) NSError *modelLoadError;
 @end
 
 @implementation YTMUVocalSeparationManager
@@ -43,8 +36,6 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     if (self) {
         _vocalVolume = 1.0f;
         _backgroundVolume = 1.0f;
-        _isSingEnabled = NO;
-        _downloadProgress = 0.0f;
         NSNumber *savedMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"YTMUVocalSeparationMode"];
         _selectedMode = savedMode ? (YTMUVocalSeparationMode)MIN(2, MAX(0, savedMode.integerValue)) : YTMUVocalSeparationModeNormal;
         [self setSelectedMode:_selectedMode];
@@ -59,14 +50,17 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     // audio stage is attached: vocals-only, original, background-only.
     self.vocalVolume = _selectedMode == YTMUVocalSeparationModeBackgroundOnly ? 0.0f : 1.0f;
     self.backgroundVolume = _selectedMode == YTMUVocalSeparationModeVocalOnly ? 0.0f : 1.0f;
-    self.isSingEnabled = _selectedMode != YTMUVocalSeparationModeNormal;
     [[NSUserDefaults standardUserDefaults] setInteger:_selectedMode forKey:@"YTMUVocalSeparationMode"];
 }
 
+- (BOOL)isSingEnabled {
+    return self.isModelReady && self.selectedMode != YTMUVocalSeparationModeNormal;
+}
+
 - (NSString *)modelDirectoryPath {
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
     NSString *base = [paths firstObject];
-    NSString *dir = [base stringByAppendingPathComponent:@"YTMusicUltimate/Models"];
+    NSString *dir = [base stringByAppendingPathComponent:@"YTMUltimate"];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
     return dir;
 }
@@ -88,12 +82,10 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
 
 - (void)checkModelStatus {
     if (![self hasModelOnDisk]) return;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        [self loadOrCompileModel];
-    });
+    [self loadModelIfAvailableWithCompletion:nil];
 }
 
-- (void)loadOrCompileModel {
+- (BOOL)loadOrCompileModel:(NSError **)loadError {
     NSString *compiled = [self compiledModelPath];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSError *error = nil;
@@ -110,7 +102,7 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
                 NSURL *destURL = [NSURL fileURLWithPath:compiled];
                 [fm removeItemAtURL:destURL error:nil];
                 [fm moveItemAtURL:tempCompiledURL toURL:destURL error:&error];
-                modelURL = destURL;
+                if (!error) modelURL = destURL;
             }
         }
     }
@@ -118,56 +110,28 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     if (modelURL) {
         MLModelConfiguration *config = [[MLModelConfiguration alloc] init];
         config.computeUnits = MLComputeUnitsAll; // Use ANE + GPU + CPU
-        self.coreMLModel = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
-        self.isModelReady = (self.coreMLModel != nil);
+        MLModel *model = [MLModel modelWithContentsOfURL:modelURL configuration:config error:&error];
+        if (model) self.coreMLModel = model;
     }
+    if (loadError) *loadError = error;
+    self.isModelReady = (self.coreMLModel != nil);
+    return self.isModelReady;
 }
 
-- (void)startModelDownloadWithCompletion:(void (^)(BOOL success, NSError *error))completion {
-    if (self.isDownloading) return;
-    self.isDownloading = YES;
-    self.downloadProgress = 0.0f;
-
-    NSURL *url = [NSURL URLWithString:@"https://chiuhuang.dev/mdx23c_instvoc_hq"];
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    [request setValue:@"Mozilla/5.0" forHTTPHeaderField:@"User-Agent"];
-
-    NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig];
-
-    NSURLSessionDownloadTask *task = [session downloadTaskWithRequest:request
-        completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {
-            self.isDownloading = NO;
-            if (error || !location) {
-                if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, error); });
-                return;
-            }
-
-            // Unzip to modelDirectoryPath
-            NSString *zipPath = [[self modelDirectoryPath] stringByAppendingPathComponent:@"model.zip"];
-            NSFileManager *fm = [NSFileManager defaultManager];
-            [fm removeItemAtPath:zipPath error:nil];
-            [fm moveItemAtURL:location toURL:[NSURL fileURLWithPath:zipPath] error:nil];
-
-            // Extract zip
-            NSString *dest = [self modelDirectoryPath];
-            // Call unzip via system or extract
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                [self extractAndCompileZip:zipPath destination:dest completion:completion];
-            });
-        }];
-    [task resume];
-}
-
-- (void)extractAndCompileZip:(NSString *)zipPath destination:(NSString *)dest completion:(void (^)(BOOL success, NSError *error))completion {
-    // Perform extraction
-    // Use NSTask / unzip or Foundation
-    [self loadOrCompileModel];
-    if (completion) {
+- (void)loadModelIfAvailableWithCompletion:(void (^)(BOOL ready, NSError *error))completion {
+    if (self.isModelLoading) return;
+    self.isModelLoading = YES;
+    self.modelLoadError = nil;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *error = nil;
+        BOOL ready = [self loadOrCompileModel:&error];
+        self.modelLoadError = error;
+        self.isModelLoading = NO;
         dispatch_async(dispatch_get_main_queue(), ^{
-            completion(self.isModelReady, nil);
+            [[NSNotificationCenter defaultCenter] postNotificationName:YTMUVocalSeparationModelDidChange object:self];
+            if (completion) completion(ready, error);
         });
-    }
+    });
 }
 
 @end
@@ -246,6 +210,8 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     _handle.layer.shadowOffset = CGSizeMake(0, 4);
     [_handle addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventTouchUpInside];
     [self addSubview:_handle];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelDidChange:)
+                                                 name:YTMUVocalSeparationModelDidChange object:nil];
     [self refreshSelection];
     return self;
 }
@@ -262,6 +228,11 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
     for (NSUInteger i = 0; i < _modeButtons.count; i++) {
         _modeButtons[i].frame = CGRectMake(10, 43 + (CGFloat)i * 40, width - 20, 36);
     }
+    [self refreshSelection];
+}
+
+- (void)modelDidChange:(NSNotification * __unused)notification {
+    [self refreshSelection];
 }
 
 - (void)toggle:(UIButton *)sender {
@@ -302,12 +273,21 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
 }
 
 - (void)refreshSelection {
-    NSInteger selected = [YTMUVocalSeparationManager sharedInstance].selectedMode;
+    YTMUVocalSeparationManager *manager = [YTMUVocalSeparationManager sharedInstance];
+    NSInteger selected = manager.selectedMode;
+    _title.text = manager.isModelReady ? @"SING" : @"MODEL NEEDED";
     for (UIButton *button in _modeButtons) {
         BOOL active = button.tag == selected;
+        button.enabled = manager.isModelReady;
         button.backgroundColor = active ? [UIColor colorWithRed:0.66 green:0.90 blue:0.20 alpha:0.95] : UIColor.clearColor;
         [button setTitleColor:active ? [UIColor colorWithWhite:0.06 alpha:1] : [UIColor colorWithWhite:1 alpha:0.76] forState:UIControlStateNormal];
+        if (!manager.isModelReady) button.alpha = 0.45;
+        else button.alpha = 1;
     }
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self name:YTMUVocalSeparationModelDidChange object:nil];
 }
 @end
 
