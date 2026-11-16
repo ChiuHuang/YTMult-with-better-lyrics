@@ -148,6 +148,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 - (void)triggerBeatHaptic;
 - (void)updateISRC:(NSString *)isrc;
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID;
+- (void)scheduleISRCLookupForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID;
 - (void)lookupMusicBrainzForTitle:(NSString *)title artist:(NSString *)artist key:(NSString *)key;
 - (BOOL)shouldUseNativeMusicHaptics;
 - (void)setupAudioHapticsMonitor;
@@ -299,6 +300,30 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 // ---- Playgeet first, server-cached by video ID, then MusicBrainz ----
+// setNowPlayingInfo can fire during a song change with the NEW title while the
+// player still reports the PREVIOUS song's video id (YTMUResolveCurrentVideoID
+// lags the now-playing dict by about a second on every transition -- the
+// 2026-11-16 capture shows each song's first report under the previous vid).
+// A lookup started on that pair asks the server about the wrong video id, and
+// the server's video-id cache answers with the previous song's ISRC, which the
+// device then attaches to this song. Debounce instead: fire the lookup a
+// second later and re-read the manager's CURRENT title/artist/vid, which the
+// corrected setNowPlayingInfo call has settled by then.
+- (void)scheduleISRCLookupForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.currentTitle = title;
+        self.currentArtist = artist;
+        self.currentVideoID = videoID ?: @"";
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NSString *t = self.currentTitle;
+            NSString *a = self.currentArtist;
+            NSString *v = self.currentVideoID;
+            if (!t.length || !a.length) return;
+            [self lookupISRCForTitle:t artist:a videoID:v];
+        });
+    });
+}
+
 - (void)lookupISRCForTitle:(NSString *)title artist:(NSString *)artist videoID:(NSString *)videoID {
     if (!title.length || !artist.length) return;
 
@@ -384,17 +409,26 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
             NSString *isrc = [json[@"isrc"] isKindOfClass:[NSString class]] ? [json[@"isrc"] uppercaseString] : nil;
             if (isrc.length != 12) isrc = nil;
             if (isrc.length) {
-                strongSelf.isrcCache[key] = isrc;
                 NSString *source = [json[@"source"] isKindOfClass:[NSString class]] ? json[@"source"] : @"unknown";
                 YTMULogISRC([NSString stringWithFormat:@"%@ resolved videoID=%@ ISRC=%@", source, videoID, isrc]);
-                if ([strongSelf.currentLookupKey isEqualToString:key]) {
-                    strongSelf.isrcSource = source;
-                    strongSelf.isrcLookupState = @"Resolved";
-                    YTMUReportISRCStatus(videoID, title, artist, [source containsString:@"playgeet"] ? @"playgeet" : @"soundcharts", @"resolved", isrc);
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        if ([strongSelf.currentLookupKey isEqualToString:key]) [strongSelf updateISRC:isrc];
-                    });
-                }
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    // The video id that started this lookup can be stale: during
+                    // a song change the now-playing dict names the new track
+                    // while the player still reports the previous vid, and the
+                    // server's cache is keyed by video id -- such a request
+                    // answers with the PREVIOUS song's ISRC. Only cache and
+                    // attach when the player still names the video this
+                    // lookup asked about.
+                    NSString *vidNow = YTMUResolveCurrentVideoID() ?: @"";
+                    BOOL vidStillCurrent = videoID.length != 11 || [vidNow isEqualToString:videoID];
+                    if (vidStillCurrent) strongSelf.isrcCache[key] = isrc;
+                    if (vidStillCurrent && [strongSelf.currentLookupKey isEqualToString:key]) {
+                        strongSelf.isrcSource = source;
+                        strongSelf.isrcLookupState = @"Resolved";
+                        YTMUReportISRCStatus(videoID, title, artist, [source containsString:@"playgeet"] ? @"playgeet" : @"soundcharts", @"resolved", isrc);
+                        [strongSelf updateISRC:isrc];
+                    }
+                });
                 [strongSelf completeISRCRequest];
                 return;
             }
@@ -513,23 +547,29 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
                 }
             }
 
-            s.isrcCache[requestKey] = foundISRC ?: @"";
-            BOOL resultStillCurrent = [s.currentLookupKey isEqualToString:requestKey];
-            if (resultStillCurrent) {
-                s.isrcSource = @"MusicBrainz";
-                s.isrcLookupState = foundISRC.length ? @"Resolved" : @"No ISRC found";
-                YTMULogISRC([NSString stringWithFormat:@"MusicBrainz result videoID=%@ ISRC=%@",
-                             requestVideoID.length ? requestVideoID : @"(none)", foundISRC ?: @"(none)"]);
-                YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist, @"musicbrainz",
-                                     foundISRC.length ? @"resolved" : @"no ISRC found", foundISRC);
-            }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // Same stale-vid guard as the Playgeet path: a lookup that
+                // started under the PREVIOUS song's video id (the now-playing
+                // dict leads the player's reported vid by about a second on a
+                // song change) must not cache or attach anything.
+                NSString *vidNow = YTMUResolveCurrentVideoID() ?: @"";
+                BOOL vidStillCurrent = requestVideoID.length != 11 || [vidNow isEqualToString:requestVideoID];
+                if (vidStillCurrent) s.isrcCache[requestKey] = foundISRC ?: @"";
+                BOOL resultStillCurrent = [s.currentLookupKey isEqualToString:requestKey];
+                if (resultStillCurrent) {
+                    s.isrcSource = @"MusicBrainz";
+                    s.isrcLookupState = foundISRC.length ? @"Resolved" : @"No ISRC found";
+                    YTMULogISRC([NSString stringWithFormat:@"MusicBrainz result videoID=%@ ISRC=%@",
+                                 requestVideoID.length ? requestVideoID : @"(none)", foundISRC ?: @"(none)"]);
+                    YTMUReportISRCStatus(requestVideoID, requestTitle, requestArtist, @"musicbrainz",
+                                         foundISRC.length ? @"resolved" : @"no ISRC found", foundISRC);
+                }
 
-            if (foundISRC.length && resultStillCurrent) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if ([s.currentLookupKey isEqualToString:requestKey]) [s updateISRC:foundISRC];
-                });
-            }
-            [s completeISRCRequest];
+                if (foundISRC.length && vidStillCurrent && resultStillCurrent) {
+                    [s updateISRC:foundISRC];
+                }
+                [s completeISRCRequest];
+            });
         }];
     [task resume];
 }
@@ -544,7 +584,14 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
     if (!isrc.length) return;
 
     NSLog(@"[YTMU-Haptics] Updating NowPlayingInfo with ISRC: %@", isrc);
+    // A lookup that started under the previous song's key can still be in
+    // flight when the now-playing dict moves on. Re-verify at fire time that
+    // this ISRC still belongs to the track being published -- the system
+    // now-playing dict is what the lock screen reads, and a stale write is
+    // how the previous song's ISRC ends up on it.
+    NSString *keyAtResolve = [self.currentLookupKey copy];
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (keyAtResolve.length && ![self.currentLookupKey isEqualToString:keyAtResolve]) return;
         MPNowPlayingInfoCenter *center = [MPNowPlayingInfoCenter defaultCenter];
         NSDictionary *now = center.nowPlayingInfo;
         if (now) {
@@ -730,10 +777,11 @@ void YTMUTestHapticPulse(NSInteger intensity) {
     NSString *videoID = YTMUResolveCurrentVideoID();
     NSString *existing = nowPlayingInfo[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"];
     NSDictionary *infoToSend = nowPlayingInfo;
+    __block NSString *trackKey = nil;
 
     if (title.length && artist.length) {
         YTMUMusicHapticsManager *mgr = [YTMUMusicHapticsManager sharedInstance];
-        NSString *trackKey = YTMUISRCTrackKey(title, artist, videoID);
+        trackKey = YTMUISRCTrackKey(title, artist, videoID);
         BOOL audioTrackChanged = ![mgr.currentTitle isEqualToString:title] || ![mgr.currentArtist isEqualToString:artist];
         BOOL playbackISRCChanged = ![mgr.lastISRCTrackKey isEqualToString:trackKey] || ![mgr.currentISRC isEqualToString:existing];
         if (audioTrackChanged) {
@@ -773,13 +821,20 @@ void YTMUTestHapticPulse(NSInteger intensity) {
                 YTMUReportISRCStatus(videoID, title, artist, @"playback", @"playback ISRC available", existing);
             }
         } else {
-            [mgr lookupISRCForTitle:title artist:artist videoID:videoID];
+            [mgr scheduleISRCLookupForTitle:title artist:artist videoID:videoID];
         }
     }
 
-    NSString *isrc = [YTMUMusicHapticsManager sharedInstance].currentISRC;
+    YTMUMusicHapticsManager *isrcMgr = [YTMUMusicHapticsManager sharedInstance];
+    NSString *isrc = isrcMgr.currentISRC;
 
-    if (isrc.length && !existing.length) {
+    // Inject our own resolved ISRC only while it belongs to the track this
+    // call publishes. lastISRCTrackKey names the track the last ISRC was
+    // injected FOR and is deliberately NOT reset when currentISRC is cleared
+    // above on a song change -- it still names the previous song there, which
+    // is what keeps a residual currentISRC out of the system now-playing dict
+    // until the new track's lookup resolves and updateISRC re-stamps it.
+    if (isrc.length && trackKey.length && [isrcMgr.lastISRCTrackKey isEqualToString:trackKey] && !existing.length) {
         NSMutableDictionary *mut = [infoToSend mutableCopy];
         mut[@"MPNowPlayingInfoPropertyInternationalStandardRecordingCode"] = isrc;
         %orig(mut);
