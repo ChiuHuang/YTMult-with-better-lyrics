@@ -124,6 +124,21 @@ jobs:
           with open(path, 'rb') as f:
               info = plistlib.load(f)
           info['MusicHapticsSupported'] = True
+          # Stamp the CI build into the IPA's own version ("9.26.2.455"): the
+          # fourth segment is the tweak build, so SideStore can tell builds
+          # apart and prompt an update without trusting the source alone.
+          # Both keys get the same value; SideStore's InstalledApp.matches()
+          # compares the installed plist's short version AND build version
+          # against the source entry, so they must move together. "9.26.2.455"
+          # is not valid semver, which is fine: SideStore then falls back to a
+          # plain string comparison (InstalledApp.hasUpdate) and still detects
+          # the next build.
+          run_number = os.environ.get('GITHUB_RUN_NUMBER', '').strip()
+          version = str(info.get('CFBundleShortVersionString') or '').strip()
+          if run_number and version and not version.endswith('.' + run_number):
+              version = f'{version}.{run_number}'
+              info['CFBundleShortVersionString'] = version
+              info['CFBundleVersion'] = version
           with open(path, 'wb') as f:
               plistlib.dump(info, f, fmt=plistlib.FMT_BINARY)
           required = {

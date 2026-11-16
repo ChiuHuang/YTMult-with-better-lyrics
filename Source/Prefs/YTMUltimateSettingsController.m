@@ -90,9 +90,16 @@
         // "9.26.2.313": the YouTube Music app the tweak is running against,
         // plus the tweak's own CI build as the fourth segment. One string a
         // screenshot can carry -- no guessing between "latest" and "the one
-        // I actually installed".
-        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@.%@\nBuild: %@",
-                appVersion, @OS_STRINGIFY(TWEAK_BUILD), @TWEAK_GIT_COMMIT];
+        // I actually installed". Since the CI stamps the build into the IPA's
+        // own CFBundleShortVersionString ("9.26.2.455"), only append when the
+        // build segment is not already the last one -- otherwise a stamped
+        // IPA would read 9.26.2.455.455.
+        NSString *buildSuffix = [NSString stringWithFormat:@".%@", @OS_STRINGIFY(TWEAK_BUILD)];
+        if (![appVersion hasSuffix:buildSuffix]) {
+            appVersion = [appVersion stringByAppendingString:buildSuffix];
+        }
+        return [NSString stringWithFormat:@"\nYouTubeMusic: v%@\nBuild: %@",
+                appVersion, @TWEAK_GIT_COMMIT];
     }
 
     return nil;
