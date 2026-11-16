@@ -367,8 +367,12 @@ def api_app_altstore():
       /api/app/altstore-beta  -> BETA, the newest CI build (every build lands
                                  here first; /api/app/altstore?channel=beta
                                  is the same source).
-    Each source contains one app object for one channel. The IPA's actual
-    bundle identifier and versions are read from its embedded metadata."""
+    Two entries per source when the Asia file-CDN mirror is known: the mirror
+    first (a direct file host, no GitHub round trip) and the Cloudflare-
+    proxied GitHub URL second as the fallback. Same bundle ID, version and
+    buildVersion on both -- the REAL IPA metadata (SideStore validates those
+    against the plist, which is why 9710066 replaced the build number here) --
+    which is what makes the second one a mirror rather than a second app."""
     from .release_info import ALTSTORE_ICON, channel_release, worker_url
     channel = 'beta' if (request.path.endswith('-beta')
                          or request.args.get('channel') == 'beta') else 'stable'
@@ -396,31 +400,41 @@ def api_app_altstore():
     # AltStore/SideStore require one app object per bundle ID, with versions
     # nested under `versions`. The build ID belongs in the visible title and
     # marketingVersion; `version` and `buildVersion` must match the IPA plist.
-    # Prefer the direct mirror when available; a source entry can only have
-    # one downloadURL per app version.
-    download_url = (rel.get('asia_url') or '').strip() or worker_url(rel['download_url'])
+    def _app_for(name, dl, desc):
+        return {
+            'name': name,
+            'bundleIdentifier': bundle_id,
+            'developerName': 'ChiuHuang',
+            'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
+            'iconURL': rel.get('icon_url') or default_icon,
+            'versions': [{
+                'version': version,
+                'buildVersion': build_version,
+                'marketingVersion': f'Build {build_id}',
+                'date': vdate,
+                'localizedDescription': desc,
+                'downloadURL': dl,
+                'size': rel.get('size') or 0,
+            }],
+        }
+
     app_name = 'YouTube Music' if channel == 'stable' else 'YouTube Music (Beta)'
-    build_title = f'{app_name} (Build {build_id})'
-    app = {
-        'name': build_title,
-        'bundleIdentifier': bundle_id,
-        'developerName': 'ChiuHuang',
-        'localizedDescription': 'YouTube Music with Ultimate tweak + synced lyrics.',
-        'iconURL': rel.get('icon_url') or default_icon,
-        'versions': [{
-            'version': version,
-            'buildVersion': build_version,
-            'marketingVersion': f'Build {build_id}',
-            'date': vdate,
-            'localizedDescription': (
-                'Stable release -- debug disabled' if channel == 'stable'
-                else 'Beta release -- owner/debug build'
-            ),
-            'downloadURL': download_url,
-            'size': rel.get('size') or 0,
-        }],
-    }
-    apps = [app]
+    base_desc = ('Stable release -- debug disabled' if channel == 'stable'
+                 else 'Beta release -- owner/debug build')
+    github_url = worker_url(rel['download_url'])
+    asia = (rel.get('asia_url') or '').strip()
+    if asia and asia != github_url:
+        # Mirror pair: the Asia file CDN first (direct, no GitHub round trip),
+        # the Cloudflare-proxied GitHub URL second as the fallback. Identical
+        # bundle ID + version + buildVersion on both, so clients that merge
+        # duplicates treat the second as a mirror, not a second app.
+        apps = [
+            _app_for(f'{app_name} (Build {build_id})', asia, base_desc + ' -- Asia CDN'),
+            _app_for(f'{app_name} (Build {build_id}) (Cloudflare CDN)', github_url,
+                     base_desc + ' -- GitHub via Cloudflare proxy'),
+        ]
+    else:
+        apps = [_app_for(f'{app_name} (Build {build_id})', github_url, base_desc)]
     payload = {
         'name': 'YTMusicUltimate',
         'identifier': 'dev.chiuhuang.ytmult',
