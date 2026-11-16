@@ -61,7 +61,7 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 2; // toggle + intensity
+    if (section == 0) return 3; // toggle + intensity + fallback toggle
     if (section == 1) return 2; // sing toggle + model download
     if (section == 2) return 4; // Now Playing, ISRC, System Haptics, Test Motor
     return 0;
@@ -124,6 +124,24 @@
             ctrl.selectedSegmentIndex = val ? [val integerValue] : 1;
             [ctrl addTarget:self action:@selector(controlHapticsIntensitySelect:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = ctrl;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+
+        if (indexPath.row == 2) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"hapticsFallbackCell"];
+            cell.textLabel.text = LOC(@"MUSIC_HAPTICS_FALLBACK");
+            cell.textLabel.adjustsFontSizeToFitWidth = YES;
+            cell.detailTextLabel.text = LOC(@"MUSIC_HAPTICS_FALLBACK_DESC");
+            cell.detailTextLabel.numberOfLines = 0;
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+            ABCSwitch *sw = [[NSClassFromString(@"ABCSwitch") alloc] init];
+            sw.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
+            [sw addTarget:self action:@selector(toggleFallbackSwitch:) forControlEvents:UIControlEventValueChanged];
+            id val = YTMUltimateDict[@"musicHapticsFallback"];
+            sw.on = (val != nil) ? [val boolValue] : YES; // Default ON
+            cell.accessoryView = sw;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             return cell;
         }
@@ -228,7 +246,10 @@
         if (indexPath.row == 2) {
             cell.textLabel.text = @"iOS 18 System Haptics";
             BOOL active = YTMUIsSystemMusicHapticsActive();
-            cell.detailTextLabel.text = active ? @"Active" : @"Inactive";
+            BOOL track = YTMUHasSystemHapticTrack();
+            cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ (system track: %@)",
+                                         active ? @"Active" : @"Inactive",
+                                         track ? @"yes" : @"no"];
             cell.detailTextLabel.textColor = active ? [UIColor systemGreenColor] : [UIColor secondaryLabelColor];
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
             return cell;
@@ -415,6 +436,17 @@
     [defaults setObject:d forKey:@"YTMUltimate"];
     NSLog(@"[YTMU-Haptics] User set intensity: %ld", (long)sender.selectedSegmentIndex);
     YTMUTriggerBeatHaptic();
+}
+
+- (void)toggleFallbackSwitch:(ABCSwitch *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    d[@"musicHapticsFallback"] = @(sender.isOn);
+    [defaults setObject:d forKey:@"YTMUltimate"];
+    NSLog(@"[YTMU-Haptics] User toggled haptic fallback: %d", sender.isOn);
+    if (sender.isOn) {
+        YTMUTriggerBeatHaptic();
+    }
 }
 
 - (void)toggleSingSwitch:(ABCSwitch *)sender {

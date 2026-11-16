@@ -506,6 +506,7 @@ void YTMUTriggerSyllableHaptic(double durationSec);
 void YTMUTriggerBeatHaptic(void);
 void YTMUUpdateNowPlayingISRC(NSString *isrc);
 BOOL YTMUIsSystemMusicHapticsActive(void);
+BOOL YTMUHasSystemHapticTrack(void);
 NSString *YTMUCurrentNowPlayingISRC(void);
 NSString *YTMUCurrentNowPlayingTitle(void);
 NSString *YTMUCurrentNowPlayingArtist(void);

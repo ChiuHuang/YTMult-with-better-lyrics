@@ -371,6 +371,8 @@
 
 "MUSIC_HAPTICS" = "音樂觸覺回饋";
 "MUSIC_HAPTICS_DESC" = "隨節奏與逐字歌詞提供震動回饋";
+"MUSIC_HAPTICS_FALLBACK" = "自訂觸覺回退";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "我們的 CoreHaptics 引擎跟著節奏與歌詞觸發。關閉後只測試 iOS 18 系統的音樂觸覺——我們的引擎會靜音，節奏（若 iOS 對這首歌有提供）改由系統供應。";
 "MUSIC_HAPTICS_FOOTER" = "隨節奏與逐字歌詞即時同步震動。在支援的裝置與 iOS 18+ 上支援 Apple 原生音樂觸覺回饋 (Music Haptics)。";
 "MUSIC_HAPTICS_INTENSITY" = "觸覺震動強度";
 "MUSIC_HAPTICS_LIGHT" = "輕柔";

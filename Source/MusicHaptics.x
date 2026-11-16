@@ -91,6 +91,9 @@ static BOOL YTMU(NSString *key) {
         return [dict[key] boolValue];
     }
     if ([key isEqualToString:@"musicHaptics"]) return YES;
+    // Our CoreHaptics fallback is ON until the user turns it off so the
+    // system's own Music Haptics (iOS 18) can be tested as the only source.
+    if ([key isEqualToString:@"musicHapticsFallback"]) return YES;
     return NO;
 }
 static NSInteger YTMUInt(NSString *key, NSInteger dflt) {
@@ -622,7 +625,10 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 - (void)audioHapticsMonitorTick {
-    BOOL shouldCapture = self.currentTitle.length > 0 && YTMU(@"musicHaptics");
+    // With the fallback off the audio tap has no consumer -- stop capturing
+    // so the 40 Hz timer neither works nor wakes the CPU.
+    BOOL shouldCapture = self.currentTitle.length > 0 && YTMU(@"musicHaptics") &&
+        YTMU(@"musicHapticsFallback");
     if (!shouldCapture) {
         self.audioTapReadable = NO;
         self.lastAudioOnsetSequence = atomic_load_explicit(&YTMUAudioOnsetSequence, memory_order_relaxed);
@@ -644,7 +650,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 - (void)triggerAudioTransientWithPeak:(float)peak {
-    if (!YTMU(@"musicHaptics") || [self shouldUseNativeMusicHaptics]) return;
+    if (!YTMU(@"musicHaptics") || !YTMU(@"musicHapticsFallback") || [self shouldUseNativeMusicHaptics]) return;
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (now - self.lastTriggerTime < 0.105) return;
     self.lastTriggerTime = now;
@@ -661,7 +667,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 
 // ---- Haptic triggers ----
 - (void)triggerSyllableHapticWithDuration:(NSTimeInterval)duration {
-    if (!YTMU(@"musicHaptics")) return;
+    if (!YTMU(@"musicHaptics") || !YTMU(@"musicHapticsFallback")) return;
     if ([self shouldUseNativeMusicHaptics]) return;
     // Lyric timing remains the fallback only when no live player PCM reaches
     // A live audio tap may own cues when the platform provides one safely.
@@ -681,7 +687,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 - (void)triggerBeatHaptic {
-    if (!YTMU(@"musicHaptics")) return;
+    if (!YTMU(@"musicHaptics") || !YTMU(@"musicHapticsFallback")) return;
     if ([self shouldUseNativeMusicHaptics]) return;
     if (self.audioTapReadable) return;
 
@@ -748,6 +754,9 @@ void YTMUUpdateNowPlayingISRC(NSString *isrc) {
 }
 BOOL YTMUIsSystemMusicHapticsActive(void) {
     return [[YTMUMusicHapticsManager sharedInstance] isSystemMusicHapticsActive];
+}
+BOOL YTMUHasSystemHapticTrack(void) {
+    return [YTMUMusicHapticsManager sharedInstance].systemHasTrackForCurrentSong;
 }
 NSString *YTMUCurrentNowPlayingISRC(void) {
     return [YTMUMusicHapticsManager sharedInstance].currentISRC;
