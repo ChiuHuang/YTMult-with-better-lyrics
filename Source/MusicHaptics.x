@@ -898,7 +898,7 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
             if (!self.tapticResourceRegistered) {
                 NSURL *url = [NSURL fileURLWithPath:[self tapticCAPathForVid:theVid]];
                 NSError *rerr = nil;
-                CHHapticAudioResourceID rid = [self.engine registerAudioResource:url options:nil error:&rerr];
+                CHHapticAudioResourceID rid = [self.engine registerAudioResource:url options:@{} error:&rerr];
                 if (rerr) {
                     NSLog(@"[YTMU-Taptic] register failed: %@", rerr);
                     return;
@@ -1106,7 +1106,7 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
         }
         NSURL *url = [NSURL fileURLWithPath:path];
         NSError *rerr = nil;
-        CHHapticAudioResourceID rid = [self.engine registerAudioResource:url options:nil error:&rerr];
+        CHHapticAudioResourceID rid = [self.engine registerAudioResource:url options:@{} error:&rerr];
         if (rerr) {
             NSLog(@"[YTMU-Taptic] chunk %ld register failed: %@", (long)idx, rerr);
             [self tapticTeardown];
