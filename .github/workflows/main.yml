@@ -35,7 +35,12 @@ concurrency:
 jobs:
   build:
     name: Build YTMusicUltimate
-    runs-on: macos-latest
+    # Intel macOS pool on purpose: macos-latest is arm64 (3 vCPU/7 GB) and jobs
+    # there get cancelled with "not acquired by Runner of type hosted" during
+    # capacity crunches. The Intel label is a separate pool with 4 vCPU/14 GB,
+    # and the host arch does not matter: Theos cross-compiles arm64 for
+    # iphone:clang:16.5:13.0 whatever machine runs it.
+    runs-on: macos-26-intel
     permissions:
       contents: write
 
