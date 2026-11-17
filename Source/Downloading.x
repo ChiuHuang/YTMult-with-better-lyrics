@@ -137,6 +137,16 @@ static NSString *YTMUCapturedStreamURL(NSString *videoID) {
     }
 }
 
+// Exported read for the Taptic Speaker's live mode (Source/MusicHaptics.x):
+// it streams the SAME audio URL the download path uses, in 10 s chunks.
+// The captured URL can carry a stale range/rn/sq parameter from the request
+// that produced it -- ffmpeg must open the file from its start, so strip
+// them exactly the way the download path does.
+NSString *YTMUCapturedAudioStreamURL(NSString *videoID) {
+    NSString *raw = YTMUCapturedStreamURL(videoID);
+    return raw.length ? YTMUCleanStreamURL(raw) : nil;
+}
+
 // ---------------------------------------------------------------------------
 // RUNTIME PROBE. The capture file (devfecab41d, 300 records over two days)
 // settled the assumption this capture was built on: youtubei API calls,

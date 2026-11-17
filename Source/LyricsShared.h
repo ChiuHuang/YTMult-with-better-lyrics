@@ -418,6 +418,9 @@ void YTMUDebugDeviceEnroll(NSString *otp, void (^done)(BOOL ok, NSString *messag
 // audio-stream capture below (what the download badge copies) and the debug
 // device buffer (which only stores anything once a device is paired).
 void YTMUDownloadCaptureStreamURL(NSURL *url);
+// Exported read of the captured audio stream store (cleaned of range/rn/sq),
+// vid-keyed with the newest-seen URL as fallback. Taptic Speaker live mode.
+NSString *YTMUCapturedAudioStreamURL(NSString *videoID);
 void YTMUDebugDeviceNoteRequest(NSURL *url, NSString *method, NSData *httpBody);
 // A runtime probe of the player/watch/now-playing classes (Source/Downloading.x
 // builds the payload on a badge tap whose capture came up empty; the media
