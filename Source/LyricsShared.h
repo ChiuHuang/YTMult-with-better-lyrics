@@ -511,6 +511,12 @@ NSString *YTMUCurrentNowPlayingISRC(void);
 NSString *YTMUCurrentNowPlayingTitle(void);
 NSString *YTMUCurrentNowPlayingArtist(void);
 void YTMUTestHapticPulse(NSInteger intensity);
+// Taptic Speaker: feed the DOWNLOADED song's audio to the Taptic Engine as a
+// CHHapticEventTypeAudioCustom event -- the motor renders the whole waveform
+// while normal playback continues (double stream). Play uses the current
+// playback position; Stop kills the motor copy.
+BOOL YTMUTapticSpeakerPlay(void);
+void YTMUTapticSpeakerStop(void);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
 #ifdef __cplusplus

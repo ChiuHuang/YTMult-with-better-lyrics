@@ -61,7 +61,7 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == 0) return 3; // toggle + intensity + fallback toggle
+    if (section == 0) return 5; // toggle + intensity + fallback + taptic speaker + taptic test
     if (section == 1) return 2; // sing toggle + model download
     if (section == 2) return 4; // Now Playing, ISRC, System Haptics, Test Motor
     return 0;
@@ -143,6 +143,34 @@
             sw.on = (val != nil) ? [val boolValue] : YES; // Default ON
             cell.accessoryView = sw;
             cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+
+        if (indexPath.row == 3) {
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"hapticsTapticCell"];
+            cell.textLabel.text = LOC(@"MUSIC_HAPTICS_TAPTIC");
+            cell.textLabel.adjustsFontSizeToFitWidth = YES;
+            cell.detailTextLabel.text = LOC(@"MUSIC_HAPTICS_TAPTIC_DESC");
+            cell.detailTextLabel.numberOfLines = 0;
+            cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
+
+            ABCSwitch *sw = [[NSClassFromString(@"ABCSwitch") alloc] init];
+            sw.onTintColor = [UIColor colorWithRed:30.0/255.0 green:150.0/255.0 blue:245.0/255.0 alpha:1.0];
+            [sw addTarget:self action:@selector(toggleTapticSwitch:) forControlEvents:UIControlEventValueChanged];
+            id val = YTMUltimateDict[@"tapticSpeaker"];
+            sw.on = (val != nil) ? [val boolValue] : NO; // Default OFF
+            cell.accessoryView = sw;
+            cell.selectionStyle = UITableViewCellSelectionStyleNone;
+            return cell;
+        }
+
+        if (indexPath.row == 4) {
+            cell.textLabel.text = LOC(@"MUSIC_HAPTICS_TAPTIC_TEST");
+            cell.textLabel.textColor = [UIColor systemBlueColor];
+            cell.textLabel.adjustsFontSizeToFitWidth = YES;
+            cell.detailTextLabel.text = LOC(@"MUSIC_HAPTICS_TAPTIC_TEST_DESC");
+            cell.detailTextLabel.numberOfLines = 0;
+            cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             return cell;
         }
     }
@@ -281,6 +309,16 @@
             } else {
                 [self startModelDownload];
             }
+        }
+    }
+
+    if (indexPath.section == 0 && indexPath.row == 4) {
+        if (!YTMUTapticSpeakerPlay()) {
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:LOC(@"MUSIC_HAPTICS_TAPTIC_TEST")
+                message:@"No song is playing (or its video id is unknown). Play a song first."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:alert animated:YES completion:nil];
         }
     }
 
@@ -446,6 +484,17 @@
     NSLog(@"[YTMU-Haptics] User toggled haptic fallback: %d", sender.isOn);
     if (sender.isOn) {
         YTMUTriggerBeatHaptic();
+    }
+}
+
+- (void)toggleTapticSwitch:(ABCSwitch *)sender {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *d = [NSMutableDictionary dictionaryWithDictionary:[defaults dictionaryForKey:@"YTMUltimate"]];
+    d[@"tapticSpeaker"] = @(sender.isOn);
+    [defaults setObject:d forKey:@"YTMUltimate"];
+    NSLog(@"[YTMU-Haptics] User toggled taptic speaker: %d", sender.isOn);
+    if (!sender.isOn) {
+        YTMUTapticSpeakerStop();
     }
 }
 
