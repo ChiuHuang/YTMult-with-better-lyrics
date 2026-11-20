@@ -482,10 +482,11 @@ static const NSUInteger YTMU_TYPEWRITER_MAX_CONCURRENT = 2;
     // no longer means taking a different route -- it means a different answer on
     // the same one.
     BOOL streamTranslate = YTMULyricsStreamTranslateEnabled();
-    NSMutableString *url = [NSMutableString stringWithFormat:@"%@/api/lyrics/stream?v=%@&lang=%@%@&tstream=%d",
+    NSMutableString *url = [NSMutableString stringWithFormat:@"%@/api/lyrics/stream?v=%@&lang=%@%@&tstream=%d&loc=%@",
                             YTMUApiBase(), YTMUUrlEncode(videoID),
                             YTMUUrlEncode(YTMUTargetLang()), YTMUAutoZhParam(),
-                            streamTranslate ? 1 : 0];
+                            streamTranslate ? 1 : 0,
+                            YTMUUrlEncode([[NSLocale preferredLanguages] firstObject] ?: @"en")];
     if (force) [url appendString:@"&force=1"];
     if (jwt.length) [url appendFormat:@"&jwt=%@", YTMUUrlEncode(jwt)];
     sendDebugLog([NSString stringWithFormat:@"[MUSIC] Streaming %@ for %@",

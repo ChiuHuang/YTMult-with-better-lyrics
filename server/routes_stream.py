@@ -26,7 +26,7 @@ from .utils import _safe_cache_component
 from .cache import get_cached, set_cached, sanitize_lyrics_parts, is_not_found_result
 from .jwt_pool import contribute_jwt as _pool_contribute, pick_jwt
 from .nodes import ask_nodes_for_cache
-from .providers_yt import get_song_info, yt_cover_url
+from .providers_yt import normalize_song_language, get_song_info, yt_cover_url
 from .metadata import get_search_queries
 from .pipeline import fetch_all_lyrics
 from .logging_util import _log_crash
@@ -379,7 +379,7 @@ def api_lyrics_tstream():
         # --- Song lookup (required by the pipeline) ---
         t_song = time_module.time()
         try:
-            song_info = get_song_info(video_id)
+            song_info = get_song_info(video_id, language=meta_language)
         except Exception as e:
             yield _sse_event('done', {'ok': False, 'error': f'song lookup failed: {e}'})
             return
@@ -545,6 +545,10 @@ def api_lyrics_stream():
     pdata_only = request.args.get('pdata', '0') == '1'
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)
+    # The device sends its own locale so `meta` carries the title/artist in
+    # the language its player shows. Without it the en ytmusicapi client
+    # returns the original English title for a zh-TW song.
+    meta_language = normalize_song_language(request.args.get('loc'))
     client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-IP') or request.remote_addr
 
     import copy as _copy

@@ -25,6 +25,45 @@ import logging
 
 _ytm = None
 _ytm_ja = None
+_ytm_lang = {}
+_ytm_lang_lock = threading.Lock()
+
+def normalize_song_language(raw):
+    """Map a device BCP-47 locale to a ytmusicapi `hl` code.
+
+    ytmusicapi only accepts its own SUPPORTED_LANGUAGES set (zh_TW, zh_CN,
+    ja, en, ...), while iOS sends zh-Hant-TW / zh-Hans-CN / ja-JP. Unknown
+    locales become en, which is the server's long-standing default.
+    """
+    s = (raw or '').strip().lower().replace('_', '-')
+    if not s:
+        return 'en'
+    if s.startswith('zh'):
+        if 'hant' in s or any(t in s for t in ('tw', 'hk', 'mo')):
+            return 'zh_TW'
+        return 'zh_CN'
+    if s.startswith('ja'):
+        return 'ja'
+    return 'en'
+
+def get_ytmusic_lang(language='en'):
+    """One cached YTMusic client per hl code: the meta path runs per song."""
+    lang = language or 'en'
+    with _ytm_lang_lock:
+        client = _ytm_lang.get(lang)
+        if client is None:
+            try:
+                from ytmusicapi import YTMusic
+                client = YTMusic(language=lang)
+            except Exception as e:
+                print(f"[ytmusicapi] language {lang} unavailable ({e}), using en")
+                lang = 'en'
+                client = _ytm_lang.get(lang)
+                if client is None:
+                    from ytmusicapi import YTMusic
+                    client = YTMusic()
+            _ytm_lang[lang] = client
+        return client
 
 def get_ytmusic():
     global _ytm
@@ -41,10 +80,15 @@ def get_ytmusic_ja():
     return _ytm_ja
 
 
-def get_song_info(video_id):
-    """Get song metadata from YT Music with dual-language lookup (EN & JA)."""
+def get_song_info(video_id, language=None):
+    """Get song metadata from YT Music with dual-language lookup (EN & JA).
+
+    `language` is an ytmusicapi hl code from the device locale. Without it
+    the default en client is used, which is why a zh-TW phone saw the
+    English original ("Displayholic") where its player shows 展示中毒.
+    """
     try:
-        ytm = get_ytmusic()
+        ytm = get_ytmusic_lang(language) if language else get_ytmusic()
         info = ytm.get_song(video_id)
         if not info or 'videoDetails' not in info:
             return None
@@ -136,24 +180,26 @@ _song_info_cache = OrderedDict()
 _song_info_lock = threading.RLock()
 
 
-def get_song_info_cached(video_id, ttl_s=_SONG_INFO_TTL_S):
+def get_song_info_cached(video_id, ttl_s=_SONG_INFO_TTL_S, language=None):
     """get_song_info with a small TTL+LRU cache. Returns None on failure
     without caching the failure (a retry next call is cheaper than a stale
-    miss)."""
+    miss). The key carries the hl code: the same id looked up from an en
+    client and a zh_TW client must not share an English title."""
     if not video_id:
         return None
+    key = (video_id, language or 'en')
     now = time_module.time()
     with _song_info_lock:
-        hit = _song_info_cache.get(video_id)
+        hit = _song_info_cache.get(key)
         if hit and (now - hit[0]) < ttl_s:
-            _song_info_cache.move_to_end(video_id)
+            _song_info_cache.move_to_end(key)
             return hit[1]
-    info = get_song_info(video_id)
+    info = get_song_info(video_id, language=language)
     if not info:
         return None
     with _song_info_lock:
-        _song_info_cache[video_id] = (time_module.time(), info)
-        _song_info_cache.move_to_end(video_id)
+        _song_info_cache[key] = (time_module.time(), info)
+        _song_info_cache.move_to_end(key)
         while len(_song_info_cache) > _SONG_INFO_MAX:
             _song_info_cache.popitem(last=False)
     return info
