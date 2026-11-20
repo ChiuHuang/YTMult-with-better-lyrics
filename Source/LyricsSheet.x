@@ -3060,6 +3060,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
 - (void)ytmu_collectNowPlayingLabelsIn:(UIView *)view depth:(NSInteger)depth out:(NSMutableArray *)out {
     if (!view || depth > 7) return;
+    // The Sing mode bar's buttons are UILabels ("Vocals only", "Normal",
+    // "Background only"). When it sits over the player the metadata scrape
+    // picked the first two as the song title and artist -- skip OUR control
+    // before walking its subviews, not just its exact texts (the labels are
+    // localised in other builds).
+    Class vocalBar = NSClassFromString(@"YTMUVocalSeparationBar");
+    if (vocalBar && [view isKindOfClass:vocalBar]) return;
     if ([view isKindOfClass:[UILabel class]]) {
         UILabel *lbl = (UILabel *)view;
         NSString *txt = [lbl.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
