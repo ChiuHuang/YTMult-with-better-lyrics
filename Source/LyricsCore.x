@@ -499,7 +499,11 @@ NSInteger YTMULyricsCacheParserEpoch(void) {
     // Bumping this drops every cached entry, which is the point: the next play
     // refetches and the phone shows what the current parser produces. Keep it in
     // step with cache.py or the device silently diverges from the server.
-    return 4;
+    // It was left at 4 while server/cache.py moved 5 -> 6 for the three-state
+    // `space` fix (background-vocal gaps), so those entries kept passing the
+    // pe gate forever with the OLD text: a parser bump that never reached the
+    // phone. 6 makes the one-time drop happen.
+    return 6;
 }
 NSInteger YTMULyricsCacheVersionForVideoID(NSString *videoID) {
     if (!videoID.length) return 0;
