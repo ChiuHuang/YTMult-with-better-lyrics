@@ -39,13 +39,17 @@ extern "C" UIColor *YTMULGArtworkTint(void) { return YTMURawArtworkAverage; }
 static BOOL YTMUThemePref(NSString *key) {
     return YTMULGFeatureEnabled(key);
 }
+static CGFloat YTMUCarouselCellScore(UICollectionView *cv, UICollectionViewCell *cell) {
+    CGRect r = [cv convertRect:cell.frame fromView:cell.superview ?: cv];
+    return fabs(CGRectGetMidX(r) - CGRectGetMidX(cv.bounds)) / MAX(1.0, r.size.width)
+         + fabs(CGRectGetMidY(r) - CGRectGetMidY(cv.bounds)) / MAX(1.0, r.size.height);
+}
 // The carousel publishes NEIGHBOUR pages too: every Up-next card is its own
-// YTMPlayerCarouselCell, its artwork is a related video's MV still, and its
-// -setImage: fires like the current page's. A cell counts as the current page
-// only when at least half of it sits inside its collection view's bounds;
-// an unlaid-out cell (frame zero) cannot be judged and is deferred by the
-// setImage: hook, never published on "unknown". The mini player has no
-// collection view and is always the current song.
+// YTMPlayerCarouselCell, its artwork is a related video's MV still. When the
+// player sheet is pulled down the viewport gets short, and a neighbour can
+// pass a 50%-visible test while the real page no longer does -- the backdrop
+// then wears the neighbour's palette. Pick the cell closest to the visible
+// centre instead; only that one may publish, whatever the sheet height.
 static BOOL YTMUCarouselPageCurrent(UIView *view) {
     UICollectionViewCell *cell = nil;
     UICollectionView *cv = nil;
@@ -55,12 +59,19 @@ static BOOL YTMUCarouselPageCurrent(UIView *view) {
     }
     if (!cell) return YES;
     if (!cv) return YES;
-    CGSize cellSize = cell.frame.size;
-    if (CGRectIsEmpty(cell.frame) || cellSize.width < 1.0) return YES;
+    if (CGRectIsEmpty(cell.frame) || cell.frame.size.width < 1.0) return YES;
     CGRect cellInCv = [cv convertRect:cell.frame fromView:cell.superview ?: cv];
-    CGRect cut = CGRectIntersection(cellInCv, cv.bounds);
-    CGFloat visible = MAX(0.0, cut.size.width) * MAX(0.0, cut.size.height);
-    return visible / (cellSize.width * cellSize.height) >= 0.5;
+    if (CGRectIsEmpty(CGRectIntersection(cellInCv, cv.bounds))) return NO;
+    CGFloat score = YTMUCarouselCellScore(cv, cell);
+    UICollectionViewCell *closest = cell;
+    for (UICollectionViewCell *other in cv.visibleCells) {
+        if (other == cell) continue;
+        CGRect r = [cv convertRect:other.frame fromView:other.superview ?: cv];
+        if (CGRectIsEmpty(CGRectIntersection(r, cv.bounds))) continue;
+        CGFloat s = YTMUCarouselCellScore(cv, other);
+        if (s < score) { score = s; closest = other; }
+    }
+    return closest == cell && score <= 0.75;
 }
 static BOOL YTMUCarouselPageJudged(UIView *view) {
     for (UIView *v = view; v; v = v.superview) {
