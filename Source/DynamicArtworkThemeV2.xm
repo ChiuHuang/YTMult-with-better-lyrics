@@ -3,7 +3,6 @@
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
 #import "YTMUVisualStyle.h"
-#import "LyricsShared.h"
 
 static NSString *const YTMUThemeChanged = @"YTMUThemeChanged";
 static UIColor *YTMUPrimaryColor;
