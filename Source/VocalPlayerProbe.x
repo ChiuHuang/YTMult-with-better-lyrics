@@ -17,7 +17,7 @@ static void YTMURecordSingPlayer(AVPlayer *player, NSString *event) {
     if (!player || !event.length) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         YTMUVocalSeparationManager *manager = [YTMUVocalSeparationManager sharedInstance];
-        if (manager.selectedMode == YTMUVocalSeparationModeNormal) return;
+        if (!YTMUSingUnlocked() || manager.selectedMode == YTMUVocalSeparationModeNormal) return;
 
         AVPlayerItem *item = player.currentItem;
         if (!item) return;

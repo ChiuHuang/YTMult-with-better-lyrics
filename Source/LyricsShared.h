@@ -520,6 +520,9 @@ void YTMUTestHapticPulse(NSInteger intensity);
 // playback position; Stop kills the motor copy.
 BOOL YTMUTapticSpeakerPlay(void);
 void YTMUTapticSpeakerStop(void);
+// Sing / vocal separation is unfinished: hidden unless unlocked from the
+// Debug page. Read live (one dictionary read, no cache) by every gate.
+BOOL YTMUSingUnlocked(void);
 BOOL YTMUInterfaceIsLight(UIView *v);
 
 #ifdef __cplusplus

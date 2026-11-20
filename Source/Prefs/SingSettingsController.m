@@ -61,22 +61,23 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    // Sing is unfinished: empty section until unlocked from Debug.
     if (section == 0) return 5; // toggle + intensity + fallback + taptic speaker + taptic test
-    if (section == 1) return 2; // sing toggle + model download
+    if (section == 1) return YTMUSingUnlocked() ? 2 : 0; // sing toggle + model download
     if (section == 2) return 4; // Now Playing, ISRC, System Haptics, Test Motor
     return 0;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) return LOC(@"MUSIC_HAPTICS");
-    if (section == 1) return LOC(@"SING_SECTION_HEADER");
+    if (section == 1) return YTMUSingUnlocked() ? LOC(@"SING_SECTION_HEADER") : nil;
     if (section == 2) return @"Diagnostics & Test";
     return nil;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return LOC(@"MUSIC_HAPTICS_FOOTER");
-    if (section == 1) return LOC(@"SING_FOOTER");
+    if (section == 1) return YTMUSingUnlocked() ? LOC(@"SING_FOOTER") : nil;
     if (section == 2) return @"Tap 'Test Haptic Pulse' to verify device vibration motor.";
     return nil;
 }

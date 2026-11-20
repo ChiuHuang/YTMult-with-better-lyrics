@@ -14,6 +14,14 @@
 static NSString *const YTMUVocalSeparationModelDidChange = @"YTMUVocalSeparationModelDidChange";
 static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationModeDidChange";
 
+// Sing is unfinished. Keep the whole feature dark until it is unlocked from
+// Debug > Actions > "Show Sing (unfinished)"; the pref is read live so the
+// switch takes effect without a respring.
+BOOL YTMUSingUnlocked(void) {
+    NSDictionary *d = [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"YTMUltimate"];
+    return [d[@"singDebugVisible"] boolValue];
+}
+
 @interface YTMUVocalSeparationManager ()
 @property (atomic, strong, readwrite) MLModel *coreMLModel;
 @property (atomic, strong, readwrite) YTMUMDXSeparator *separator;
@@ -61,7 +69,7 @@ static NSString *const YTMUVocalSeparationModeDidChange = @"YTMUVocalSeparationM
 }
 
 - (BOOL)isSingEnabled {
-    return self.isModelReady && self.selectedMode != YTMUVocalSeparationModeNormal;
+    return YTMUSingUnlocked() && self.isModelReady && self.selectedMode != YTMUVocalSeparationModeNormal;
 }
 
 - (NSString *)modelDirectoryPath {
@@ -330,11 +338,18 @@ static char kYTMUVocalSeparationBarKey;
 - (void)layoutSubviews {
     %orig;
     YTMUVocalSeparationBar *bar = objc_getAssociatedObject(self, &kYTMUVocalSeparationBarKey);
+    if (!YTMUSingUnlocked()) {
+        // No unfinished control on a normal device; the bar stays allocated
+        // so unlocking from Debug can show it on the very next layout pass.
+        bar.hidden = YES;
+        return;
+    }
     if (!bar) {
         bar = [[YTMUVocalSeparationBar alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(self, &kYTMUVocalSeparationBarKey, bar, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [self addSubview:bar];
     }
+    bar.hidden = NO;
     [bar layoutForPlayerSize:self.bounds.size];
     [self bringSubviewToFront:bar];
 }

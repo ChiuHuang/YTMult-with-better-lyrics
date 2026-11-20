@@ -1,5 +1,6 @@
 #import "DebugSettingsController.h"
 #import "../LyricsShared.h"
+#import "../VocalSeparation.h"
 #import "../Headers/Localization.h"
 
 // YTMUDebugUploadAllowed / YTMUAppSettingBool come from ../LyricsShared.h
@@ -229,7 +230,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0) return 6;
     if (section == 1) return 3;
-    if (section == 2) return 3;
+    if (section == 2) return 4;
     if (section == 3) return 5;
     return 0;
 }
@@ -335,7 +336,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     } else if (row == 1) {
         cell.textLabel.text = LOC(@"DEBUG_TEST_LOG");
         cell.imageView.image = [UIImage systemImageNamed:@"paperplane"];
-    } else {
+    } else if (row == 2) {
         // The automatic player census is once per PROCESS. A device that got
         // paired (or updated) after its first play already spent that shot, so
         // the only way to get the record is to ask for it again deliberately.
@@ -343,6 +344,19 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
         cell.imageView.image = [UIImage systemImageNamed:@"scope"];
         BOOL ready = YTMUDebugDeviceEnabled() && YTMUDebugDeviceToken().length;
         cell.detailTextLabel.text = ready ? LOC(@"DEBUG_CENSUS_DESC") : LOC(@"DEBUG_CENSUS_NEEDED");
+    } else {
+        // Sing is unfinished: its settings section and the player's mic bar
+        // stay hidden until this switch is on. The pref is read live.
+        cell.textLabel.text = @"Show Sing (unfinished)";
+        cell.textLabel.textColor = [UIColor labelColor];
+        cell.detailTextLabel.text = @"Vocal separation is still in development";
+        cell.imageView.image = [UIImage systemImageNamed:@"waveform.path.ecg"];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.accessibilityIdentifier = @"singDebugVisible";
+        sw.on = YTMUSingUnlocked();
+        [sw addTarget:self action:@selector(toggleSwitch:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = sw;
     }
     return cell;
 }
@@ -356,6 +370,7 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
         return;
     }
     if (indexPath.section != 2) return;
+    if (indexPath.row == 3) return; // the Sing switch handles its own tap
     if (indexPath.row == 0) {
         [self ytmu_copyDiagnostics];
         return;
@@ -400,6 +415,11 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
         YTMUDebugDeviceSetEnabled(sender.isOn);
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:3]
                      withRowAnimation:UITableViewRowAnimationNone];
+    }
+    if ([key isEqualToString:@"singDebugVisible"] && !sender.isOn) {
+        // Turning the unfinished feature back off must also stop the
+        // separator: mode is the only thing the player path checks.
+        [YTMUVocalSeparationManager sharedInstance].selectedMode = YTMUVocalSeparationModeNormal;
     }
 }
 
