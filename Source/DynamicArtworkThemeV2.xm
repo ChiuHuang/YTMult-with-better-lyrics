@@ -15,13 +15,14 @@ static const void *kThemeGradient = &kThemeGradientKey;
 // read can at worst publish once more or once less -- no invariant depends on
 // them. The image is one retained artwork, not a cache.
 static UIImage *YTMULastThemeImage;
-static CFTimeInterval YTMULastThemeAt;
+static UIImage *YTMULastRequestedImage;
+static CFTimeInterval YTMULastRequestedAt;
 // The mini player uses a CROPPED thumbnail (mostly the blue dress); the full
 // player's carousel shows the whole cover (gold frame included, warmer). Both
 // setImage: calls reach the same publish path, so a late mini thumbnail used
 // to repaint the full player with the crop's average. Rank the sources: a
 // full-player page always outranks the mini thumbnail.
-static NSInteger YTMULastThemeRank = -1;
+static NSInteger YTMULastRequestedRank = -1;
 static NSInteger YTMUAppliedRank = -1;
 static UIImage *YTMUAppliedImage;
 
@@ -122,8 +123,8 @@ static void YTMUPublishTheme(UIImage *image, NSInteger sourceRank) {
     // still in flight, in which case only the last one is worth sampling.
     if (!YTMUThemePref(@"wholeAppSongThemeEnabled") && !YTMUThemePref(@"playerSongThemeEnabled")) return;
     CFTimeInterval now = CACurrentMediaTime();
-    if (image == YTMULastThemeImage && sourceRank <= YTMULastThemeRank && now - YTMULastThemeAt < 1.0) return;
-    YTMULastThemeImage = image; YTMULastThemeAt = now; YTMULastThemeRank = sourceRank;
+    if (image == YTMULastRequestedImage && sourceRank <= YTMULastRequestedRank && now - YTMULastRequestedAt < 1.0) return;
+    YTMULastRequestedImage = image; YTMULastRequestedAt = now; YTMULastRequestedRank = sourceRank;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIColor *average = YTMUAverage(image); if (!average) return;
         // No sage/olive blend on the artwork-derived pair any more: 22-30% of
@@ -144,6 +145,10 @@ static void YTMUPublishTheme(UIImage *image, NSInteger sourceRank) {
             }
             if (sourceRank < YTMUAppliedRank) return;
             YTMUAppliedRank = sourceRank;
+            // YTMULGCurrentArtwork() feeds the blurred artwork backdrop.
+            // Publishing it at REQUEST time let a lower-ranked thumbnail that
+            // lost the palette race still replace the cover in that backdrop.
+            YTMULastThemeImage = image;
             // Only announce an actual change: the notification has no observer
             // in the tweak today, and a repaint on an identical colour is pure
             // layout churn on a song change.
