@@ -26,7 +26,7 @@ from .utils import _safe_cache_component
 from .cache import get_cached, set_cached, sanitize_lyrics_parts, is_not_found_result
 from .jwt_pool import contribute_jwt as _pool_contribute, pick_jwt
 from .nodes import ask_nodes_for_cache
-from .providers_yt import normalize_song_language, get_song_info, yt_cover_url
+from .providers_yt import normalize_song_language, get_song_info, get_song_info_cached, yt_cover_url
 from .metadata import get_search_queries
 from .pipeline import fetch_all_lyrics
 from .logging_util import _log_crash
@@ -319,6 +319,10 @@ def api_lyrics_tstream():
     auto_zh = request.args.get('az', '0') == '1'
     force_mode = request.args.get('force', '0') == '1'
     tstream = request.args.get('tstream', '1') == '1'
+    # Deprecated route still used by pre-switch builds; it must carry the same
+    # locale mapping as the live route or get_song_info(..., language=...) would
+    # reference an undefined name on every uncached song.
+    meta_language = normalize_song_language(request.args.get('loc'))
     full_cache_key = f"{video_id}:{translate_to}"
     req_id = _secrets.token_hex(3)
     client_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Forwarded-IP') or request.remote_addr
@@ -636,7 +640,22 @@ def api_lyrics_stream():
                 print(f"[OK] [REQ {req_id}] [Stream] cache hit source={cached.get('source')} lines={len(cached.get('lyrics', []))}")
                 cached = _repair_stale_han(cached, video_id, full_cache_key, translate_to, req_id)
                 _record_serve(cached, video_id, translate_to, client_ip)
-                yield emit_meta(cached.get('song', ''), cached.get('artist', ''),
+                # Some cached payloads (translations, node copies, dashboard
+                # applies) carry no song/artist. Emitting empty strings here
+                # made the device keep the PREVIOUS song's title -- the header
+                # only existed for uncached songs. A TTL-cached metadata read
+                # fills the gap; it costs one lookup per half hour at most.
+                meta_song = cached.get('song', '')
+                meta_artist = cached.get('artist', '')
+                if not (meta_song and meta_artist):
+                    try:
+                        meta_info = get_song_info_cached(video_id, language=meta_language)
+                    except Exception:
+                        meta_info = None
+                    if meta_info:
+                        meta_song = meta_info.get('title', '') or meta_song
+                        meta_artist = meta_info.get('artist', '') or meta_artist
+                yield emit_meta(meta_song, meta_artist,
                                 cached.get('duration', 0), 0)
                 payload = stream_payload(cached)
                 payload['stage'] = 'cached'
@@ -654,7 +673,7 @@ def api_lyrics_stream():
         # --- Song lookup (required by all providers) ---
         t_song = time_module.time()
         try:
-            song_info = get_song_info(video_id)
+            song_info = get_song_info(video_id, language=meta_language)
         except Exception as e:
             yield _sse_event('done', {'ok': False, 'error': f'song lookup failed: {e}'})
             return
