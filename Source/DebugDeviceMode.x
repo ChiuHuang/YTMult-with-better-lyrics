@@ -51,8 +51,19 @@ BOOL YTMUDebugDeviceEnabled(void) {
 // base, which is also where they would land again.
 static BOOL YTMUDebugSkipURL(NSString *url) {
     if (!url.length) return YES;
+    // Only the upload is skipped on our own base: the rest of our traffic
+    // (lyrics, probe, meta) is exactly what the capture is for. Recording the
+    // upload would feed it back into the next batch.
     NSString *base = YTMUApiBase();
-    if (base.length && [url hasPrefix:base]) return YES;
+    if (base.length && [url hasPrefix:[base stringByAppendingString:@"/api/debug/upload"]]) return YES;
+    // Avatar images and YT's playback-stat pings are a firehose: one image per
+    // shelf and a ~600 char query of st/et/cpn/muted/lact per ping, neither of
+    // which says anything about our code. The googlevideo MEDIA URLs stay --
+    // the taptic live mode's captured stream URL is one of them.
+    NSString *low = url.lowercaseString;
+    if ([low containsString:@"yt3.googleusercontent.com"]) return YES;
+    if ([low containsString:@"muted="] || [low containsString:@"cpn="] ||
+        [low containsString:@"lact="]) return YES;
     return NO;
 }
 
