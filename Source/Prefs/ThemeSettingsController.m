@@ -1,4 +1,5 @@
 #import "ThemeSettingsController.h"
+#import "../LyricsShared.h"
 
 @implementation ThemeSettingsController
 
@@ -30,7 +31,7 @@
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return 3;
+    return 4;
 }
 
 -(UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath{
@@ -48,7 +49,8 @@
         NSArray *settingsData = @[
             @{@"title": LOC(@"OLED_DARK_THEME"), @"desc": LOC(@"OLED_DARK_THEME_DESC"), @"key": @"oledTheme"},
             @{@"title": LOC(@"OLED_DARK_KEYBOARD"), @"desc": LOC(@"OLED_DARK_KEYBOARD_DESC"), @"key": @"oledKeyboard"},
-            @{@"title": LOC(@"LOW_CONTRAST"), @"desc": LOC(@"LOW_CONTRAST_DESC"), @"key": @"lowContrast"}
+            @{@"title": LOC(@"LOW_CONTRAST"), @"desc": LOC(@"LOW_CONTRAST_DESC"), @"key": @"lowContrast"},
+            @{@"title": LOC(@"LIGHT_THEME"), @"desc": LOC(@"LIGHT_THEME_DESC"), @"key": @"lightThemeEnabled"}
         ];
 
         NSDictionary *data = settingsData[indexPath.row];
@@ -78,7 +80,8 @@
     NSArray *settingsData = @[
         @{@"key": @"oledTheme"},
         @{@"key": @"oledKeyboard"},
-        @{@"key": @"lowContrast"}
+        @{@"key": @"lowContrast"},
+        @{@"key": @"lightThemeEnabled"}
     ];
 
     NSDictionary *data = settingsData[sender.tag];
@@ -87,6 +90,15 @@
 
     [YTMUltimateDict setObject:@([sender isOn]) forKey:data[@"key"]];
     [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+    if ([data[@"key"] isEqualToString:@"lightThemeEnabled"]) {
+        if (sender.isOn) {
+            // Light switch wins over the OLED dark switch.
+            [YTMUltimateDict setObject:@NO forKey:@"oledTheme"];
+            [defaults setObject:YTMUltimateDict forKey:@"YTMUltimate"];
+            [self.tableView reloadData];
+        }
+        YTMUApplyLightThemeAppearance();
+    }
 }
 
 @end

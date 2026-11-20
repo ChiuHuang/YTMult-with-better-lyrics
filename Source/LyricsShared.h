@@ -520,8 +520,13 @@ void YTMUTestHapticPulse(NSInteger intensity);
 // playback position; Stop kills the motor copy.
 BOOL YTMUTapticSpeakerPlay(void);
 void YTMUTapticSpeakerStop(void);
-// Sing / vocal separation is unfinished: hidden unless unlocked from the
-// Debug page. Read live (one dictionary read, no cache) by every gate.
+// Light theme: when enabled, the app follows the iOS light/dark appearance
+// (and takes priority over the OLED dark switch). Active = enabled AND the
+// SYSTEM is currently light; read live, no cache, so trait changes apply
+// on the next layout pass.
+BOOL YTMULightThemeEnabled(void);
+BOOL YTMULightThemeActive(void);
+void YTMUApplyLightThemeAppearance(void);
 BOOL YTMUSingUnlocked(void);
 BOOL YTMUInterfaceIsLight(UIView *v);
 

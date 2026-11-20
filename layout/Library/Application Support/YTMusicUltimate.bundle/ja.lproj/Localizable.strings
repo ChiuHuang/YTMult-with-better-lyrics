@@ -248,3 +248,5 @@
 "SING_MODEL_READY" = "モデル準備完了";
 "SING_DOWNLOAD_FAILED" = "ダウンロード失敗";
 "SING_FOOTER" = "歌唱モードはデバイス上の AI モデルを使用してボーカルを分離します。モデル（約 90 MB）は一度だけダウンロードされます。";
+"LIGHT_THEME" = "Light theme (follows iOS)";
+"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";

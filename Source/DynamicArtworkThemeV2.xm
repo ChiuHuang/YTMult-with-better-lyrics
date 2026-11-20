@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import "YTMULiquidGlassPreferences.h"
 #import "YTMUVisualStyle.h"
+#import "LyricsShared.h"
 
 static NSString *const YTMUThemeChanged = @"YTMUThemeChanged";
 static UIColor *YTMUPrimaryColor;
@@ -183,13 +184,24 @@ static void YTMUApplyTheme(UIView *host, BOOL wholeApp) {
     UIColor *p=YTMUPrimaryColor?:[UIColor colorWithWhite:.11 alpha:1];
     UIColor *s=YTMUSecondaryColor?:[UIColor colorWithWhite:.02 alpha:1];
     gradient.frame=host.bounds; gradient.startPoint=CGPointMake(.15,0); gradient.endPoint=CGPointMake(.85,1);
-    gradient.colors=@[(id)[p colorWithAlphaComponent:(wholeApp?.52:.82)].CGColor,(id)[s colorWithAlphaComponent:.96].CGColor,(id)UIColor.blackColor.CGColor];
-    gradient.locations=wholeApp?@[@0,@.46,@1]:@[@0,@.62,@1]; host.backgroundColor=UIColor.blackColor;
+    if (YTMULightThemeActive()) {
+        // System colors resolve to light/dark on the actual trait change;
+        // our song-tinted stops below stay the choice for dark theme.
+        gradient.colors=@[(id)[UIColor systemBackgroundColor].CGColor,
+                          (id)[UIColor secondarySystemBackgroundColor].CGColor,
+                          (id)[UIColor tertiarySystemBackgroundColor].CGColor];
+        host.backgroundColor=[UIColor systemBackgroundColor];
+    } else {
+        gradient.colors=@[(id)[p colorWithAlphaComponent:(wholeApp?.52:.82)].CGColor,(id)[s colorWithAlphaComponent:.96].CGColor,(id)UIColor.blackColor.CGColor];
+        host.backgroundColor=UIColor.blackColor;
+    }
+    gradient.locations=wholeApp?@[@0,@.46,@1]:@[@0,@.62,@1];
     CGFloat r = 0, g = 0, b = 0;
     [YTMURawArtworkAverage getRed:&r green:&g blue:&b alpha:NULL];
     BOOL light = YTMURawArtworkAverage && (0.299 * r + 0.587 * g + 0.114 * b) > .55;
-    YTMULGApplyArtworkBackdrop(host, light ? .22 : .40,
-        light ? UIBlurEffectStyleLight : UIBlurEffectStyleDark);
+    BOOL lt = YTMULightThemeActive();
+    YTMULGApplyArtworkBackdrop(host, lt ? .12 : (light ? .22 : .40),
+        (lt || light) ? UIBlurEffectStyleLight : UIBlurEffectStyleDark);
 }
 
 static void YTMUStyleLyricsEntries(UIView *root) {

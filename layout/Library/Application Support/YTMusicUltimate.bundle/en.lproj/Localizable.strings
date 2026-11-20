@@ -394,3 +394,5 @@
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
 "SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"LIGHT_THEME" = "Light theme (follows iOS)";
+"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";

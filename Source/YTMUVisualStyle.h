@@ -7,6 +7,17 @@
 #import <dispatch/dispatch.h>
 #import "YTMULiquidGlassPreferences.h"
 
+// Declared here instead of importing LyricsShared.h: that header declares
+// @interface YTMULyricsViewController, which several TUs redeclare locally,
+// and importing it from this widely-included header breaks them.
+#ifdef __cplusplus
+extern "C" {
+#endif
+BOOL YTMULightThemeActive(void);
+#ifdef __cplusplus
+}
+#endif
+
 // Shared visual tokens for the menu, player, and lyrics surfaces.
 static inline UIColor *YTMULGSage(void) {
     return [UIColor colorWithRed:0.62 green:0.69 blue:0.53 alpha:1.0];
@@ -193,12 +204,12 @@ static inline void YTMULGApplyArtworkBackdrop(UIView *host, CGFloat overlayAlpha
     // the wash is plain black: its job is contrast, not colour.
     tint.backgroundColor = mean ? [mean colorWithAlphaComponent:.34] : UIColor.clearColor;
     wash.frame = host.bounds;
-    wash.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:overlayAlpha];
+    wash.backgroundColor = [(YTMULightThemeActive() ? UIColor.whiteColor : UIColor.blackColor) colorWithAlphaComponent:overlayAlpha];
     if (artwork.superview != host) [host insertSubview:artwork atIndex:0];
     [host insertSubview:blur aboveSubview:artwork];
     [host insertSubview:tint aboveSubview:blur];
     [host insertSubview:wash aboveSubview:tint];
-    host.backgroundColor = UIColor.blackColor;
+    host.backgroundColor = YTMULightThemeActive() ? UIColor.systemBackgroundColor : UIColor.blackColor;
     YTMULGApplyDither(host, wash, .48);
 }
 

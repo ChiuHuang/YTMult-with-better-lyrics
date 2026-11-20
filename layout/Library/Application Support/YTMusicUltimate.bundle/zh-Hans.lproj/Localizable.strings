@@ -393,3 +393,5 @@
 "SING_MODEL_READY" = "模型已就绪";
 "SING_DOWNLOAD_FAILED" = "下载失败";
 "SING_FOOTER" = "伴唱模式使用设备端 AI 模型实时分离人声与伴奏，模型约 90 MB，仅需下载一次。";
+"LIGHT_THEME" = "浅色主题（跟随 iOS）";
+"LIGHT_THEME_DESC" = "跟随系统的浅色／深色外观。开启时优先于 OLED 深色主题。";

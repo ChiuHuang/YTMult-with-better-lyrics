@@ -4,6 +4,7 @@
 #import <objc/message.h>
 #import "YTMULiquidGlassPreferences.h"
 #import "YTMUVisualStyle.h"
+#import "LyricsShared.h"
 #import "Headers/YTMUBulkHook.h"
 
 static char kCardKey;
@@ -17,7 +18,7 @@ static void Card(UIView *h, CGFloat r) {
         b = [[UIVisualEffectView alloc] initWithEffect:
              [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemChromeMaterialDark]];
         b.userInteractionEnabled = NO;
-        b.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        b.overrideUserInterfaceStyle = YTMULightThemeActive() ? UIUserInterfaceStyleUnspecified : UIUserInterfaceStyleDark;
         b.contentView.backgroundColor = YTMULGGlassFill();
         [h insertSubview:b atIndex:0];
         objc_setAssociatedObject(h, &kCardKey, b, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -102,7 +103,7 @@ static void Screen(UIViewController *c, NSString *k) {
         // lightweight list (its class is
         // YTMLightweightSearchSuggestionsResponseViewController), but hooking
         // the list hosts separately is what brings them into the walk at all.
-        c.view.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        c.view.overrideUserInterfaceStyle = YTMULightThemeActive() ? UIUserInterfaceStyleUnspecified : UIUserInterfaceStyleDark;
         // THE BUG, found by toggling this very setting: the white page is OUR
         // product, not the app's. Screen() transparentised the controller and
         // the walk only ever killed two EXACT pointer-compared fills, so the
