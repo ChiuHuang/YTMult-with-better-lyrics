@@ -16,6 +16,14 @@ static const void *kThemeGradient = &kThemeGradientKey;
 // them. The image is one retained artwork, not a cache.
 static UIImage *YTMULastThemeImage;
 static CFTimeInterval YTMULastThemeAt;
+// The mini player uses a CROPPED thumbnail (mostly the blue dress); the full
+// player's carousel shows the whole cover (gold frame included, warmer). Both
+// setImage: calls reach the same publish path, so a late mini thumbnail used
+// to repaint the full player with the crop's average. Rank the sources: a
+// full-player page always outranks the mini thumbnail.
+static NSInteger YTMULastThemeRank = -1;
+static NSInteger YTMUAppliedRank = -1;
+static UIImage *YTMUAppliedImage;
 
 extern "C" UIImage *YTMULGCurrentArtwork(void) { return YTMULastThemeImage; }
 extern "C" UIColor *YTMULGCurrentArtworkMean(void) { return YTMURawArtworkAverage; }
@@ -30,24 +38,13 @@ extern "C" UIColor *YTMULGArtworkTint(void) { return YTMURawArtworkAverage; }
 static BOOL YTMUThemePref(NSString *key) {
     return YTMULGFeatureEnabled(key);
 }
-static BOOL YTMUArtworkAncestor(UIView *view) {
-    for (UIView *v = view; v; v = v.superview) {
-        NSString *name = NSStringFromClass(v.class);
-        if ([name isEqualToString:@"YTMPlayerCarouselCell"] || [name isEqualToString:@"YTMMiniPlayerView"]) return YES;
-    }
-    return NO;
-}
 // The carousel publishes NEIGHBOUR pages too: every Up-next card is its own
 // YTMPlayerCarouselCell, its artwork is a related video's MV still, and its
-// -setImage: fires like the current page's. The last set wins, so the
-// whole player wore a RELATED video's palette -- Mad at Disney (blue cover)
-// ran its transport in the warm reds of the next-up MV still because a
-// neighbour's image was set after the real artwork. A cell counts as the
-// current page only when at least half of it sits inside its collection
-// view's bounds; an unlaid-out cell (frame zero) cannot be judged, so it
-// publishes -- refusing to publish on unknown would mean no theme at all on
-// the first layout pass. The mini player has no collection view and is
-// always the current song.
+// -setImage: fires like the current page's. A cell counts as the current page
+// only when at least half of it sits inside its collection view's bounds;
+// an unlaid-out cell (frame zero) cannot be judged and is deferred by the
+// setImage: hook, never published on "unknown". The mini player has no
+// collection view and is always the current song.
 static BOOL YTMUCarouselPageCurrent(UIView *view) {
     UICollectionViewCell *cell = nil;
     UICollectionView *cv = nil;
@@ -63,6 +60,32 @@ static BOOL YTMUCarouselPageCurrent(UIView *view) {
     CGRect cut = CGRectIntersection(cellInCv, cv.bounds);
     CGFloat visible = MAX(0.0, cut.size.width) * MAX(0.0, cut.size.height);
     return visible / (cellSize.width * cellSize.height) >= 0.5;
+}
+static BOOL YTMUCarouselPageJudged(UIView *view) {
+    for (UIView *v = view; v; v = v.superview) {
+        if ([v isKindOfClass:[UICollectionViewCell class]]) {
+            UICollectionViewCell *cell = (UICollectionViewCell *)v;
+            return !CGRectIsEmpty(cell.frame) && cell.frame.size.width >= 1.0;
+        }
+    }
+    return YES; // no carousel cell (mini player) -- always judgeable
+}
+// 2 = full-player carousel page, 1 = mini thumbnail, -1 = not our artwork.
+static NSInteger YTMUThemeSourceRank(UIView *view) {
+    for (UIView *v = view; v; v = v.superview) {
+        NSString *name = NSStringFromClass(v.class);
+        if ([name isEqualToString:@"YTMPlayerCarouselCell"]) {
+            return YTMUCarouselPageCurrent(view) ? 2 : -1;
+        }
+        if ([name isEqualToString:@"YTMMiniPlayerView"]) return 1;
+    }
+    return -1;
+}
+// A hidden or offscreen image view must never repaint the visible player.
+static BOOL YTMUThemeViewVisible(UIView *view) {
+    if (!view.window || view.hidden || view.alpha < 0.05) return NO;
+    CGRect r = [view convertRect:view.bounds toView:nil];
+    return !CGRectIsEmpty(r) && CGRectGetWidth(r) >= 0.5 && CGRectGetHeight(r) >= 0.5;
 }
 static UIColor *YTMUAverage(UIImage *image) {
     if (!image.CGImage) return nil;
@@ -81,7 +104,8 @@ static UIColor *YTMUColor(UIColor *color, CGFloat saturation, CGFloat brightness
     if (![color getHue:&h saturation:&s brightness:&b alpha:&a]) return color;
     return [UIColor colorWithHue:h saturation:MIN(.82,MAX(.30,s+saturation)) brightness:MIN(.78,MAX(.20,b*brightness)) alpha:1];
 }
-static void YTMUPublishTheme(UIImage *image) {
+static void YTMUPublishTheme(UIImage *image, NSInteger sourceRank) {
+    if (sourceRank < 1) return;
     // 24pt, not 80: the mini player's thumbnail is a 40pt image (YT loads it at
     // screen scale, so UIImage.size is 40 points, not 120) and it is the ONLY
     // artwork on screen while the user browses the home tab. The old 80pt
@@ -98,8 +122,8 @@ static void YTMUPublishTheme(UIImage *image) {
     // still in flight, in which case only the last one is worth sampling.
     if (!YTMUThemePref(@"wholeAppSongThemeEnabled") && !YTMUThemePref(@"playerSongThemeEnabled")) return;
     CFTimeInterval now = CACurrentMediaTime();
-    if (image == YTMULastThemeImage && now - YTMULastThemeAt < 1.0) return;
-    YTMULastThemeImage = image; YTMULastThemeAt = now;
+    if (image == YTMULastThemeImage && sourceRank <= YTMULastThemeRank && now - YTMULastThemeAt < 1.0) return;
+    YTMULastThemeImage = image; YTMULastThemeAt = now; YTMULastThemeRank = sourceRank;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         UIColor *average = YTMUAverage(image); if (!average) return;
         // No sage/olive blend on the artwork-derived pair any more: 22-30% of
@@ -111,6 +135,15 @@ static void YTMUPublishTheme(UIImage *image) {
         UIColor *primary = YTMUColor(average, .18, .90);
         UIColor *secondary = YTMUColor(average, .02, .48);
         dispatch_async(dispatch_get_main_queue(), ^{
+            // A lower-ranked source (mini thumbnail) must never overwrite the
+            // full player's cover, even when its conversion finishes later.
+            // A new image pointer starts a fresh song's ranking.
+            if (image != YTMUAppliedImage) {
+                YTMUAppliedImage = image;
+                YTMUAppliedRank = -1;
+            }
+            if (sourceRank < YTMUAppliedRank) return;
+            YTMUAppliedRank = sourceRank;
             // Only announce an actual change: the notification has no observer
             // in the tweak today, and a repaint on an identical colour is pure
             // layout churn on a song change.
@@ -163,12 +196,23 @@ static void YTMUStyleLyricsEntries(UIView *root) {
 %hook UIImageView
 - (void)setImage:(UIImage *)image {
     %orig;
-    if (!image || !YTMUArtworkAncestor(self)) return;
-    // Neighbour carousel pages do not get to publish: their artwork is a
-    // related video's still and it used to win the "last set" race against
-    // the song the reader is actually looking at.
-    if (!YTMUCarouselPageCurrent(self)) return;
-    YTMUPublishTheme(image);
+    if (!image) return;
+    NSInteger rank = YTMUThemeSourceRank(self);
+    if (rank < 1) return;
+    // A cell image set before layout (or before the view joins a window) used
+    // to publish immediately. Defer one main-queue turn, then re-check
+    // visibility and the page geometry -- never publish on "unknown".
+    if (!YTMUThemeViewVisible(self) || !YTMUCarouselPageJudged(self)) {
+        __weak typeof(self) weakSelf = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) strongSelf = weakSelf;
+            if (!strongSelf || !YTMUThemeViewVisible(strongSelf)) return;
+            NSInteger deferredRank = YTMUThemeSourceRank(strongSelf);
+            if (deferredRank >= 1) YTMUPublishTheme(image, deferredRank);
+        });
+        return;
+    }
+    YTMUPublishTheme(image, rank);
 }
 %end
 @interface YTMNowPlayingView:UIView@end
