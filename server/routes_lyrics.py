@@ -577,6 +577,42 @@ def build_provider_data(video_id, lang=None):
     except Exception:
         cands = None
     if not cands:
+        # No provider snapshot: rebuild the switcher by reparsing the raw
+        # LZMA archive. This answers "all providers" from local text instead
+        # of re-hitting the providers, and picks up parser fixes for free.
+        try:
+            from . import raw_archive
+            from .race import _lyrics_score
+            duration = 0
+            try:
+                from .providers_yt import get_song_info_cached
+                info = get_song_info_cached(video_id)
+                duration = (info or {}).get('duration', 0) or 0
+            except Exception:
+                pass
+            raw_cands = raw_archive.candidates(video_id, duration)
+            if raw_cands:
+                raw_cands.sort(key=lambda c: _lyrics_score(c), reverse=True)
+                out = []
+                for c in raw_cands:
+                    lyrics = c.get('lyrics') or []
+                    if not lyrics:
+                        continue
+                    out.append({
+                        'provider': c.get('source', ''),
+                        'source': c.get('source', ''),
+                        'tier': 'wbw' if c.get('wordSynced') else ('line' if c.get('synced') else 'plain'),
+                        'lines': len(lyrics),
+                        'score': _lyrics_score(c),
+                        'elapsed_ms': 0,
+                        'lyrics': lyrics,
+                    })
+                if out:
+                    print(f"[RAW] provider data rebuilt from archive for {video_id}: {len(out)} source(s)")
+                    return {'ok': True, 'video_id': video_id, 'found': True,
+                            'providers': out}
+        except Exception as e:
+            print(f"[RAW] provider-data rebuild failed {video_id}: {e}")
         return {'ok': True, 'video_id': video_id, 'found': False, 'providers': []}
 
     out = []

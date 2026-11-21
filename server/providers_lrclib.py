@@ -21,11 +21,13 @@ import atexit
 import logging
 from urllib.parse import urlencode
 from .nodes import relay_http_request
+from . import raw_archive
+
 # ============================================================
 # Provider 1: LRCLIB (free, no auth)
 # ============================================================
 
-def fetch_lrclib(title, artist, album='', duration=0, via_node=None):
+def fetch_lrclib(title, artist, album='', duration=0, via_node=None, video_id=None):
     """Fetch lyrics from LRCLIB. Tries exact match, then search with strict validation.
     When via_node is set the HTTP calls go out over a connected node's outbound IP
     (same relay Cubey uses) so per-IP rate limits don't reach this server; any node
@@ -60,6 +62,13 @@ def fetch_lrclib(title, artist, album='', duration=0, via_node=None):
 
         data = _get('https://lrclib.net/api/get', params)
         if data and (data.get('syncedLyrics') or data.get('plainLyrics')):
+            if video_id:
+                if data.get('syncedLyrics'):
+                    raw_archive.save(video_id, 'LRCLib', 'lrc', data['syncedLyrics'],
+                                     meta={'title': title, 'artist': artist})
+                if data.get('plainLyrics'):
+                    raw_archive.save(video_id, 'LRCLib', 'plain', data['plainLyrics'],
+                                     meta={'title': title, 'artist': artist})
             return {
                 'synced': data.get('syncedLyrics'),
                 'plain': data.get('plainLyrics', ''),
@@ -90,6 +99,12 @@ def fetch_lrclib(title, artist, album='', duration=0, via_node=None):
                         continue
 
                 if r.get('syncedLyrics'):
+                    if video_id:
+                        raw_archive.save(video_id, 'LRCLib', 'lrc', r['syncedLyrics'],
+                                         meta={'title': title, 'artist': artist})
+                        if r.get('plainLyrics'):
+                            raw_archive.save(video_id, 'LRCLib', 'plain', r['plainLyrics'],
+                                             meta={'title': title, 'artist': artist})
                     return {
                         'synced': r['syncedLyrics'],
                         'plain': r.get('plainLyrics', ''),
@@ -110,6 +125,9 @@ def fetch_lrclib(title, artist, album='', duration=0, via_node=None):
                         continue
 
                 if r.get('plainLyrics'):
+                    if video_id:
+                        raw_archive.save(video_id, 'LRCLib', 'plain', r['plainLyrics'],
+                                         meta={'title': title, 'artist': artist})
                     return {
                         'synced': None,
                         'plain': r['plainLyrics'],

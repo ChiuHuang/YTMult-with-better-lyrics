@@ -23,7 +23,8 @@ import queue as queue_module
 from flask import Flask, request, jsonify, render_template, session, redirect, url_for, Response, stream_with_context
 from .app import app
 from .utils import _safe_cache_component
-from .cache import get_cached, set_cached, sanitize_lyrics_parts, is_not_found_result
+from .cache import get_cached, set_cached, sanitize_lyrics_parts, is_not_found_result, is_parser_stale
+from . import raw_archive
 from .jwt_pool import contribute_jwt as _pool_contribute, pick_jwt
 from .nodes import ask_nodes_for_cache
 from .providers_yt import normalize_song_language, get_song_info, get_song_info_cached, yt_cover_url
@@ -358,6 +359,12 @@ def api_lyrics_tstream():
         # doesn't either: a fast-grade result would be a downgrade). ---
         if not force_mode:
             cached = get_cached(full_cache_key)
+            # A parser-stale cache used to force a full provider re-fetch. We
+            # now hold the original raw text, so reparse it locally first.
+            if not cached and is_parser_stale(full_cache_key):
+                rebuilt = raw_archive.rebuild_cache(video_id, translate_to)
+                if rebuilt:
+                    cached = rebuilt
             if not cached:
                 cached = ask_nodes_for_cache(full_cache_key, timeout=2.0)
                 if cached:

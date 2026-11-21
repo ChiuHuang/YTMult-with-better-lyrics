@@ -22,6 +22,7 @@ import logging
 from urllib.parse import urlencode
 from .nodes import relay_http_request
 from .parsers_ttml import parse_ttml_basic
+from . import raw_archive
 
 # ============================================================
 # Provider 3: Unison (community lyrics, free with x-key-id)
@@ -102,6 +103,8 @@ def fetch_unison(video_id, title='', artist='', duration=0, via_node=None):
 
             if not lyrics_text:
                 return None
+            raw_archive.save(video_id, 'Unison', fmt or 'plain', lyrics_text,
+                             meta={'title': title, 'artist': artist, 'duration': duration})
 
             if fmt == 'lrc':
                 return {

@@ -23,6 +23,10 @@ import os
 DATA_DIR = 'database'
 
 LYRICS_DIR = os.path.join(DATA_DIR, 'lyrics')
+# Raw provider text, one LZMA-compressed file per song. This is the source of
+# truth for reparsing: when a parser changes, rebuild the parsed cache from
+# these files instead of re-hitting every provider.
+RAW_DIR = os.path.join(DATA_DIR, 'raw')
 TRANSLATE_DIR = os.path.join(DATA_DIR, 'translate')
 CANDIDATES_DIR = os.path.join(DATA_DIR, 'candidates')
 JWT_FILE = os.path.join(DATA_DIR, 'jwt.json')

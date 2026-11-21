@@ -75,7 +75,7 @@ def fetch_fast_lyrics(video_id, song_info, translate_to='zh-TW'):
     for q in queries:
         q_title = q['title']
         q_artist = q['artist']
-        lrc = fetch_lrclib(q_title, q_artist, album, duration, via_node=node)
+        lrc = fetch_lrclib(q_title, q_artist, album, duration, via_node=node, video_id=video_id)
         if lrc:
             if lrc.get('instrumental'):
                 result = {'lyrics': [{'time': 0, 'text': '[MUSIC] Instrumental', 'translated': '純音樂', 'duration': 0}], 'source': 'LRCLib', 'synced': False}
@@ -272,7 +272,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
     def _s_direct():
         _stage('braccato-direct', 'started')
         try:
-            direct = fetch_direct_best(queries, album, duration)
+            direct = fetch_direct_best(queries, album, duration, video_id=video_id)
             if direct:
                 print(f"  [OK] direct boidu/Binimum: {direct.get('source')} (wordSynced={direct.get('wordSynced')})")
                 consider(direct, 'braccato direct')
@@ -292,7 +292,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
             lrclib_node = pick_node()
             for q in queries:
                 try:
-                    lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
+                    lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node, video_id=video_id)
                 except Exception as e:
                     print(f"  [FAIL] LRCLIB query error (continuing): {e}")
                     continue
@@ -351,7 +351,7 @@ def fetch_all_lyrics(video_id, song_info, translate_to=None, jwt_token=None, on_
             from .providers_amll import fetch_amll
             for q in queries:
                 try:
-                    amll = fetch_amll(q['title'], q['artist'], duration)
+                    amll = fetch_amll(q['title'], q['artist'], duration, video_id=video_id)
                 except Exception as e:
                     print(f"  [FAIL] AMLL query error (continuing): {e}")
                     continue
@@ -801,7 +801,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             lrclib_node = pick_node()
             best = None
             for q in queries:
-                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node)
+                lrc = fetch_lrclib(q['title'], q['artist'], album, duration, via_node=lrclib_node, video_id=video_id)
                 if not lrc:
                     continue
                 if lrc.get('instrumental'):
@@ -853,7 +853,7 @@ def probe_providers(video_id, song_info, jwt_token=None, only_source=None, notes
             best = None
             for q in queries:
                 try:
-                    amll = fetch_amll(q['title'], q['artist'], duration)
+                    amll = fetch_amll(q['title'], q['artist'], duration, video_id=video_id)
                 except Exception as e:
                     print(f"  [probe] AMLL query error (continuing): {e}")
                     continue

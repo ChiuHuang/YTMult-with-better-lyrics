@@ -16,6 +16,7 @@ import requests
 from urllib.parse import urlencode
 from .parsers_qrc import parse_qrc_structured
 from .parsers_ttml import parse_ttml_basic
+from . import raw_archive
 
 BOIDU_TTML_URL = "https://lyrics-api.boidu.dev/getLyrics"
 BOIDU_QQ_URL = "https://lyrics-api.boidu.dev/qq/getLyrics"
@@ -116,13 +117,17 @@ def _boidu_query(url, song, artist, duration, album, via_node):
     return None
 
 
-def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None):
+def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None, video_id=None):
     """bLyrics TTML (boidu.dev/getLyrics). Word-synced when spans exist."""
     try:
         data = _boidu_query(BOIDU_TTML_URL, song, artist, duration, album, via_node)
         if not data:
             return None
-        lyrics = _parse_ttml(data.get('ttml'))
+        raw = _peel_json_string(data.get('ttml'))
+        if video_id and raw:
+            raw_archive.save(video_id, 'bLyrics', 'ttml', raw,
+                             meta={'title': song, 'artist': artist, 'duration': duration})
+        lyrics = _parse_ttml(raw)
         if not lyrics:
             return None
         return {'parsed': lyrics, 'source': 'bLyrics', 'wordSynced':
@@ -132,13 +137,17 @@ def fetch_boidu_ttml(song, artist, duration=0, album='', via_node=None):
         return None
 
 
-def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
+def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None, video_id=None):
     """Portato QRC (boidu.dev/qq/getLyrics): true word-by-word timing."""
     try:
         data = _boidu_query(BOIDU_QQ_URL, song, artist, duration, album, via_node)
         if not data:
             return None
-        entries = parse_qrc_structured(_peel_json_string(data.get('lyrics')))
+        raw = _peel_json_string(data.get('lyrics'))
+        if video_id and raw:
+            raw_archive.save(video_id, 'QQ', 'qrc', raw,
+                             meta={'title': song, 'artist': artist, 'duration': duration})
+        entries = parse_qrc_structured(raw)
         if not entries:
             return None
         return {'parsed': entries, 'source': 'QQ', 'wordSynced': True}
@@ -147,7 +156,7 @@ def fetch_boidu_qq(song, artist, duration=0, album='', via_node=None):
         return None
 
 
-def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None):
+def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None, video_id=None):
     """Legato LRC (boidu.dev/kugou/getLyrics)."""
     try:
         data = _boidu_query(BOIDU_KUGOU_URL, song, artist, duration, album, via_node)
@@ -156,13 +165,16 @@ def fetch_boidu_kugou(song, artist, duration=0, album='', via_node=None):
         lrc = _peel_json_string(data.get('lyrics'))
         if not lrc:
             return None
+        if video_id:
+            raw_archive.save(video_id, 'KuGou', 'lrc', lrc,
+                             meta={'title': song, 'artist': artist, 'duration': duration})
         return {'synced': lrc, 'source': 'KuGou', 'wordSynced': False}
     except Exception as e:
         print(f"[Legato] error: {e}")
         return None
 
 
-def fetch_binimum(song, artist, duration=0, album='', via_node=None):
+def fetch_binimum(song, artist, duration=0, album='', via_node=None, video_id=None):
     """BiniLyrics TTML via search -> lyricsUrl (lyrics-api.binimum.org)."""
     try:
         base = {'track': song, 'artist': artist, 'duration': str(int(duration))}
@@ -185,6 +197,9 @@ def fetch_binimum(song, artist, duration=0, album='', via_node=None):
         ttml_text = _retrieve(lyrics_url, None, via_node)
         if not ttml_text:
             return None
+        if video_id:
+            raw_archive.save(video_id, 'BiniLyrics', 'ttml', ttml_text,
+                             meta={'title': song, 'artist': artist, 'duration': duration})
         lyrics = _parse_ttml(ttml_text)
         if not lyrics:
             return None
@@ -221,7 +236,7 @@ def _candidate_dict(raw, duration, priority):
             'wordSynced': wbw, 'tier': (0 if wbw else 1), 'priority': priority}
 
 
-def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kugou', 'binimum'), via_node=None):
+def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kugou', 'binimum'), via_node=None, video_id=None):
     """Race the direct braccato providers across all search queries and
     return the single best result ({lyrics, source, synced, wordSynced}) or
     None. Word/syllable timing beats line sync; within a tier, source order
@@ -234,7 +249,8 @@ def fetch_direct_best(queries, album='', duration=0, sources=('ttml', 'qq', 'kug
             if not fetcher:
                 continue
             try:
-                raw = fetcher(q['title'], q['artist'], duration, album, via_node)
+                raw = fetcher(q['title'], q['artist'], duration, album, via_node,
+                              video_id=video_id)
             except Exception:
                 continue
             cand = _candidate_dict(raw, duration, priority=i)

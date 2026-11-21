@@ -11,6 +11,7 @@
 # caller can fall back exactly as if the provider were absent.
 import requests
 from .parsers_ttml import parse_ttml_basic
+from . import raw_archive
 
 AMLL_SEARCH_URL = "https://amlldb.bikonoo.com/api/search-lyrics"
 AMLL_RAW_URL = "https://amlldb.bikonoo.com/raw-lyrics"
@@ -107,7 +108,7 @@ def _fetch_ttml(file, via_node=None):
         return resp.text
 
 
-def fetch_amll(song, artist, duration=0, via_node=None):
+def fetch_amll(song, artist, duration=0, via_node=None, video_id=None):
     """AMLL word-synced TTML (search title, match artist, parse raw TTML).
     Tries the raw title then each search query implicitly via the caller's
     query loop; returns {parsed, source, wordSynced} or None."""
@@ -123,6 +124,9 @@ def fetch_amll(song, artist, duration=0, via_node=None):
             ttml = _fetch_ttml(hit['file'], via_node)
             if not ttml:
                 continue
+            if video_id:
+                raw_archive.save(video_id, 'AMLL', 'ttml', ttml,
+                                 meta={'title': song, 'artist': artist, 'duration': duration})
             lyrics = parse_ttml_basic(ttml, duration)
             if not lyrics:
                 continue

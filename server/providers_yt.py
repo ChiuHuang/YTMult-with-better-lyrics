@@ -19,6 +19,8 @@ import uuid
 import traceback
 import atexit
 import logging
+from . import raw_archive
+
 # ============================================================
 # Provider 2: YouTube Music Lyrics (via ytmusicapi)
 # ============================================================
@@ -164,6 +166,7 @@ def fetch_yt_lyrics(video_id):
         if lyrics_browse_id:
             lyrics = ytm.get_lyrics(lyrics_browse_id)
             if lyrics and lyrics.get('lyrics'):
+                raw_archive.save(video_id, 'YouTube Music', 'plain', lyrics['lyrics'])
                 return {'plain': lyrics['lyrics'], 'source': 'YouTube Music'}
     except Exception as e:
         print(f"  [FAIL] ytmusicapi error: {e}")
