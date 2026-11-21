@@ -33,8 +33,14 @@ the placeholders below. GIFs work well for lyric timing and player controls.
 <div align="center">
 <table>
 <tr>
-<td align="center"><strong>Synced lyrics</strong><br><em>Screenshot / GIF coming soon</em></td>
-<td align="center"><strong>Player & downloads</strong><br><em>Screenshot / GIF coming soon</em></td>
+<td align="center"><strong>Synced lyrics</strong><br><em>
+
+https://github.com/user-attachments/assets/ec09c6a6-dd31-4a98-9ad5-cb14d2ca0d41
+
+</em></td>
+<td align="center"><strong>Player & downloads</strong><br><em><img height="700" alt="image" src="https://github.com/user-attachments/assets/e02d97cc-130d-4922-8d1c-309db5620387" />
+
+</em></td>
 <td align="center"><strong>Liquid Glass</strong><br><em>Screenshot / GIF coming soon</em></td>
 </tr>
 </table>
