@@ -231,6 +231,10 @@
 @property (nonatomic, strong) UIButton *landscapeProviderButton;
 @property (nonatomic, strong) UIButton *landscapeReloadButton;
 @property (nonatomic, strong) UIButton *headerMenuButton;
+@property (nonatomic, strong) UIButton *tapticStreamButton;
+@property (nonatomic, strong) UIButton *singStreamButton;
+@property (nonatomic, strong) UIButton *landscapeTapticButton;
+@property (nonatomic, strong) UIButton *landscapeSingButton;
 @property (nonatomic, copy) NSString *providerJobID;
 @property (nonatomic, copy) NSString *providerProbeVideoID;
 @property (nonatomic, strong) NSTimer *providerPollTimer;
@@ -520,6 +524,11 @@ void YTMUTestHapticPulse(NSInteger intensity);
 // playback position; Stop kills the motor copy.
 BOOL YTMUTapticSpeakerPlay(void);
 void YTMUTapticSpeakerStop(void);
+BOOL YTMUTapticSpeakerIsActive(void);
+// Second stream for Sing: prepares the song's audio for the separator but
+// never changes the Sing mode, the player, or the mic bar.
+BOOL YTMUSingStreamIsActive(void);
+void YTMUSingStreamSetActive(BOOL active);
 // Light theme: when enabled, the app follows the iOS light/dark appearance
 // (and takes priority over the OLED dark switch). Active = enabled AND the
 // SYSTEM is currently light; read live, no cache, so trait changes apply

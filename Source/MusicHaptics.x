@@ -1212,6 +1212,54 @@ BOOL YTMUTapticSpeakerPlay(void) {
 void YTMUTapticSpeakerStop(void) {
     [[YTMUMusicHapticsManager sharedInstance] tapticTeardown];
 }
+BOOL YTMUTapticSpeakerIsActive(void) {
+    YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
+    return s.tapticPlayer != nil || s.tapticPreparing;
+}
+
+// Second stream for Sing. It only prepares the song's audio for the
+// separator; it never changes the separation mode, starts playback, or
+// shows the Sing control. The unfinished feature stays opt-in.
+static BOOL g_ytmuSingStreamActive = NO;
+BOOL YTMUSingStreamIsActive(void) {
+    return g_ytmuSingStreamActive;
+}
+void YTMUSingStreamSetActive(BOOL active) {
+    g_ytmuSingStreamActive = active;
+    if (!active) {
+        NSLog(@"[YTMU-Sing] second stream stopped");
+        return;
+    }
+    YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
+    NSString *vid = s.currentVideoID.length ? s.currentVideoID : g_currentVideoID;
+    if (vid.length < 5) {
+        g_ytmuSingStreamActive = NO;
+        return;
+    }
+    NSString *base = [[s tapticCAPathForVid:vid] stringByDeletingPathExtension];
+    NSString *dst = [base stringByAppendingString:@".sing.caf"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:dst]) return;
+    NSString *source = YTMULocalAudioPathForVideoID(vid);
+    BOOL streamed = source.length == 0;
+    if (streamed) source = YTMUCapturedAudioStreamURL(vid);
+    if (!source.length) {
+        g_ytmuSingStreamActive = NO;
+        NSLog(@"[YTMU-Sing] no audio source for second stream");
+        return;
+    }
+    NSString *input = [NSString stringWithFormat:@"\"%@\"", source];
+    dispatch_async(YTMUTapticConvertQueue(), ^{
+        [MobileFFmpegConfig resetStatistics];
+        NSString *cmd = [NSString stringWithFormat:@"-y -i %@ -ac 1 -ar 24000 -c:a pcm_s16le \"%@\"", input, dst];
+        long rc = [MobileFFmpeg execute:cmd];
+        if (rc != 0) {
+            g_ytmuSingStreamActive = NO;
+            NSLog(@"[YTMU-Sing] second stream convert failed rc=%ld", rc);
+        } else {
+            NSLog(@"[YTMU-Sing] second stream ready vid=%@", vid);
+        }
+    });
+}
 
 // ---- Hook: intercept every setNowPlayingInfo: call ----
 %hook MPNowPlayingInfoCenter

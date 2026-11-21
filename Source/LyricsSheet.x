@@ -2031,6 +2031,10 @@ static char s_ytmuClosedByRotationKey;
 - (NSString *)ytmu_formatTime:(CGFloat)seconds;
 - (void)ytmu_toolbarReload:(UIButton *)sender;
 - (void)ytmu_headerMenu:(UIButton *)sender;
+- (void)ytmu_toggleTapticStream:(UIButton *)sender;
+- (void)ytmu_toggleSingStream:(UIButton *)sender;
+- (UIButton *)ytmu_streamButtonWithImage:(NSString *)imageName action:(SEL)action;
+- (void)ytmu_refreshStreamButtons;
 - (void)ytmu_openProviderMenuFromView:(UIView *)sender;
 - (void)ytmu_beginProviderProbeWithJWT:(NSString *)jwt fromView:(UIView *)sender;
 - (void)ytmu_pollProviderJob:(NSTimer *)timer;
@@ -2239,6 +2243,18 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     [menuBtn addTarget:self action:@selector(ytmu_headerMenu:) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:menuBtn];
     self.headerMenuButton = menuBtn;
+
+    // Two independent stream toggles. Taptic drives the motor from a second
+    // copy of the song; Sing only prepares a second copy for the separator
+    // and never switches on the unfinished feature.
+    self.tapticStreamButton = [self ytmu_streamButtonWithImage:@"waveform"
+                                                        action:@selector(ytmu_toggleTapticStream:)];
+    self.tapticStreamButton.frame = CGRectMake(self.view.bounds.size.width - 94, 10, 36, 36);
+    [header addSubview:self.tapticStreamButton];
+    self.singStreamButton = [self ytmu_streamButtonWithImage:@"mic"
+                                                     action:@selector(ytmu_toggleSingStream:)];
+    self.singStreamButton.frame = CGRectMake(self.view.bounds.size.width - 136, 10, 36, 36);
+    [header addSubview:self.singStreamButton];
 
     if (self.isModal || self.presentingViewController) {
         UIButton *closeBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -2458,6 +2474,13 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
     self.landscapeReloadButton.accessibilityLabel = @"Reload lyrics";
     [self.landscapeReloadButton addTarget:self action:@selector(ytmu_toolbarReload:) forControlEvents:UIControlEventTouchUpInside];
     [self.landscapeToolbar addSubview:self.landscapeReloadButton];
+
+    self.landscapeTapticButton = [self ytmu_streamButtonWithImage:@"waveform"
+                                                          action:@selector(ytmu_toggleTapticStream:)];
+    [self.landscapeToolbar addSubview:self.landscapeTapticButton];
+    self.landscapeSingButton = [self ytmu_streamButtonWithImage:@"mic"
+                                                        action:@selector(ytmu_toggleSingStream:)];
+    [self.landscapeToolbar addSubview:self.landscapeSingButton];
 
     // Retranslate the current song through the current provider: same force
     // fetch the reload path uses, but it keeps the on-screen lyrics and the
@@ -3397,6 +3420,45 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
 
 #pragma mark - Provider actions menu
 
+- (UIButton *)ytmu_streamButtonWithImage:(NSString *)imageName action:(SEL)action {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    b.tintColor = YTMULyricInk(0.9, 0.9, self.view);
+    b.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    if (@available(iOS 13.0, *)) {
+        UIImage *img = [UIImage systemImageNamed:imageName];
+        if (img) [b setImage:img forState:UIControlStateNormal];
+    }
+    b.backgroundColor = YTMULyricFill(self.view);
+    b.layer.cornerRadius = 18;
+    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return b;
+}
+
+- (void)ytmu_toggleTapticStream:(UIButton *)sender {
+    if (YTMUTapticSpeakerIsActive()) {
+        YTMUTapticSpeakerStop();
+    } else {
+        YTMUTapticSpeakerPlay();
+    }
+    [self ytmu_refreshStreamButtons];
+}
+
+- (void)ytmu_toggleSingStream:(UIButton *)sender {
+    YTMUSingStreamSetActive(!YTMUSingStreamIsActive());
+    [self ytmu_refreshStreamButtons];
+}
+
+- (void)ytmu_refreshStreamButtons {
+    BOOL taptic = YTMUTapticSpeakerIsActive();
+    BOOL sing = YTMUSingStreamIsActive();
+    UIColor *on = YTMULyricInk(1.0, 1.0, self.view);
+    UIColor *off = [YTMULyricInk(0.9, 0.9, self.view) colorWithAlphaComponent:0.55];
+    self.tapticStreamButton.tintColor = taptic ? on : off;
+    self.singStreamButton.tintColor = sing ? on : off;
+    self.landscapeTapticButton.tintColor = taptic ? on : off;
+    self.landscapeSingButton.tintColor = sing ? on : off;
+}
+
 - (void)ytmu_headerMenu:(UIButton *)sender {
     [self ytmu_openProviderMenuFromView:sender];
 }
@@ -4135,7 +4197,7 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         // screen is too narrow for the full pill (never a second row, never
         // an unreachable control).
         CGFloat toolBtnS = 32, toolSmallS = 28, toolLabelW = 84, toolPad = 3, toolGap = 3;
-        CGFloat toolFixed = toolPad * 2 + 2 + toolGap * 5 + toolBtnS * 3 + toolSmallS * 2;
+        CGFloat toolFixed = toolPad * 2 + 2 + toolGap * 7 + toolBtnS * 5 + toolSmallS * 2;
         CGFloat toolMax = MAX(160.0, W - (leftW + kLyricsGap) - 16.0);
         if (toolLabelW > toolMax - toolFixed) toolLabelW = MAX(0.0, toolMax - toolFixed);
         CGFloat toolW = toolFixed + toolLabelW;
@@ -4153,6 +4215,9 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         self.landscapeReloadButton.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
         UIButton *retranslate = YTMURetranslateButton(self.landscapeToolbar);
         if (retranslate) retranslate.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS);
+        tx += toolBtnS + toolGap;
+        self.landscapeTapticButton.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS); tx += toolBtnS + toolGap;
+        self.landscapeSingButton.frame = CGRectMake(tx, yBig, toolBtnS, toolBtnS);
 
         // Keep title/artist fresh
         [self ytmu_updateLandscapeMetadata];
@@ -4631,6 +4696,11 @@ static UIView *YTMULyricsTaggedViewOnScreen(void) {
         tintBtn(self.headerMenuButton);
         self.headerMenuButton.backgroundColor = fill;
     }
+    if (self.tapticStreamButton) self.tapticStreamButton.backgroundColor = fill;
+    if (self.singStreamButton) self.singStreamButton.backgroundColor = fill;
+    if (self.landscapeTapticButton) self.landscapeTapticButton.backgroundColor = fill;
+    if (self.landscapeSingButton) self.landscapeSingButton.backgroundColor = fill;
+    [self ytmu_refreshStreamButtons];
     if (self.landscapeArtImageView) self.landscapeArtImageView.backgroundColor = fill;
     if (self.landscapeProgressTrack) self.landscapeProgressTrack.backgroundColor = YTMULyricInk(0.25, 0.2, ref);
     if (self.landscapeProgressFill) self.landscapeProgressFill.backgroundColor = YTMULyricInk(0.95, 0.9, ref);
