@@ -1,7 +1,7 @@
 "SETTINGS" = "Nustatymai";
 "ENABLED" = "Įjungti \"YTMusicUltimate\"";
 "ENABLED_DESC" = "\"Premium\" funkcijos, reklamų panaikinimas, foninis atkūrimas ir kt.";
-"RESTART_FOOTER" = "Iš naujo paleiskite programą, kad pritaikytumėte pakeitimus";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "\"Premium\" parinktys";
 "NO_ADS" = "Reklamų panaikinimas";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "Perkelia dainos zodas i dainos pradzia, kai praleidziama ne muzikine ivadinto dalis";
 
 "SEEK_BUTTONS" = "Pakeisti mygtukus kitas/buvęs mygtukais sukti į priekį/atgal";
-"SEEK_TIME_FOOTER" = "Pasirinkti pasukimo laiką sekundėmis\n\nNumatytieji:\nSukti atgal = 10 sek.\nSukti į priekį = 30 sek.";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "Numatytasis";
 
 "THEME_SETTINGS" = "Temos parinktys";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "Išvalyti talpyklą";
 
 "APPLY" = "Taikyti";
-"APPLY_DESC" = "Uždaro programėlę, kad pritaikytų pakeitimus";
+"APPLY_DESC" = "";
 
 "LINKS" = "Nuorodos";
 "TWITTER" = "Sekite %@ \"Twitter\"";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "Panašu, kad Youtube Music naudojimas jūsų šalyje yra apribotas.\n\n Prieigai prie YouTube Music naudokite VPN.";
 
 "DONT_RUSH" = "Neskubėkite talento";
-"DONT_RUSH_DESC" = "Reikia paleisti dainą, kad būtų gauta nuoroda";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "Pasirinkite veiksmą";
 "DOWNLOADING" = "Atsisiunčiama";
 "DOWNLOAD_PREMIUM" = "Atsisiųsti (reikia Premium)";
@@ -123,12 +123,12 @@
 "RENAME" = "Pervardyti";
 
 "AUTO_SYNC_TITLE" = "Automatiškai sinchronizuoti fone";
-"AUTO_SYNC_DESC" = "Tyliai įtraukti serverio vertimus į vietinę talpyklą (kas 6 val.)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "Atsisiųsti";
 "UPDATE_WHATS_NEW" = "Kas naujo:\n%@";
 
 "LYRICS_ENGINE" = "Dainos žodžių variklis";
-"LYRICS_ENGINE_FOOTER" = "Serveris gauna dainos žodžius ir verčia juos į žemiau nustatytą kalbą. Srautinis vertimas piešia kiekvieną eilutę ties modeliui rašant, o rašomosios mašinos efektas rašo vertimą po aktyvia eilute.";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "Srautinis vertimas";
 "STREAM_TRANSLATE_DESC" = "Pieš kiekvieną verčią eilutę, kol modelis rašo, nesulaukdamas visos dainos";
 "TYPEWRITER" = "Rašomosios mašinos efektas";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "Rašomosios mašinos greitis";
 "DEBUG_UPLOAD" = "Derinimo duomenų siuntimas";
 "DEBUG_LOG_LEVEL" = "Žurnalo lygis";
-"DEBUG_LOG_LEVEL_DESC" = "Išj. = nieko nesiunčiama, Err = tik klaidos, All = informacija + įspėjimai + klaidos";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "Siųsti derinimą į serverį";
-"DEBUG_SEND_DESC" = "Siųsti derinimo įvykius į dainos žodžių serverį, matomus skydelyje";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "Siųsti ekrano nuotraukos derinimą";
-"DEBUG_SCREENSHOT_DESC" = "Siųsti UI hierarchiją tik po ekrano nuotraukos";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "Veiksmai";
 "DEBUG_COPY" = "Kopijuoti diagnostiką";
 "DEBUG_TEST_LOG" = "Siųsti testo žurnalą";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "G.Failas";
 "DEBUG_NOW_PLAYING" = "dabar groja: %@";
 "DEBUG_LAST_EVENT" = "Paskutinis įvykis %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- užblokuotas dabar: pagrindinis jungiklis išjungtas arba žurnalo lygis nėra All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = išjungta";
-"DEBUG_TEST_SENT" = "Išsiųstas kaip informacinis žurnalo įrašas. Dabar jis pasiekė serverio skydelį.";
-"DEBUG_TEST_BLOCKED" = "Nesiųsta. Siuntimą blokuoja pagrindinis jungiklis, žurnalo lygis arba serverio upload_logs jungiklis.";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "Pilnas ekranas sukant";
 "LYRICS_FULLSCREEN_DESC" = "Sukant į gulsčią padėtį, dainos žodžiai atsiveria visame ekrane";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "Grotuvas";
 "LG_SECTION_APP" = "Programa";
 "LG_MASTER" = "Skystas stiklas";
-"LG_MASTER_DESC" = "Pagrindinis vaizdinės medžiagos jungiklis.";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "Visos programos dainos tema";
-"LG_SONG_THEME_WHOLE_DESC" = "Apple Music stiliaus spalvų atmosfera visoje programoje.";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "Grotuvo dainos tema";
-"LG_SONG_THEME_PLAYER_DESC" = "Naudoti albumo menamas spalvas viso ekrano grotnio fonu.";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "Viso ekrano grotuvas V2";
-"LG_FULLPLAYER_V2_DESC" = "Viršelio kortelė, stiklinė valdymo juosta, slankiklis ir padalinta antraštė.";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "Dainos žodžiai V2";
-"LG_LYRICS_V2_DESC" = "Įtraukiantis fonas su išblukusiu albumo menamu už teksto.";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "Eilė V2";
-"LG_QUEUE_V2_DESC" = "Stiklinis eilės sąrašas ir eilės antraštė.";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "Namai V2";
-"LG_HOME_V2_DESC" = "Suapvalinti albumo viršeliai, skaidrios lentynos ir stikliniai žetonai.";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "Apatinė navigacija V2";
-"LG_PIVOT_V2_DESC" = "Plūdžioji medžiagos navigacijos juosta.";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "Lapai V2";
-"LG_SHEETS_V2_DESC" = "Suapvalinti stikliniai veiksmų ir apatiniai lapai.";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass nustatymai";
 "LG_SEARCH_V2" = "Paieška V2";
-"LG_SEARCH_V2_DESC" = "Suapvalė paieškos laukas ir skaidrios rezultatų eilutės.";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "Biblioteka V2";
-"LG_LIBRARY_V2_DESC" = "Skaidrios bibliotekos puslapiai su suapvalėtais viršeliais.";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "Objektų puslapiai V2";
-"LG_ENTITY_V2_DESC" = "Bendra stiklo išklada albumui, atlikėjui ir grojaraščiui.";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "Atsisiuntimai V2";
-"LG_DOWNLOADS_V2_DESC" = "Suapvalėti neprisijungimo ir atsisiuntimų paviršiai.";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "Būsenos sluoksniai V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "Stikliniai pranešimai, įspėjimai ir eiga.";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "Bendrieji įvykiai V2";
-"LG_GLOBAL_STATES_V2_DESC" = "Stikliniai įkėlimo, tuščio, neprisijungimo ir klaidos įvykiai.";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "Video V2";
-"LG_VIDEO_V2_DESC" = "Skaidrus video sluoksnis be nereikalingų šešėlių.";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "Gulduoamas leistuvas V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "Gulduojamas išdėstymas pagal plokštes.";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "Nuotolinis valdymas";
-"LG_REMOTE_CONTROL_DESC" = "Leisti serveriui išjungti sajos funkcijas. Ijungus serveris negales nieko išjungti; jūsų perjungiklie lieka jūsų.";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "Nuotoline";
 "LYRICS_SINGER_BOTH" = "Abu";
 "LYRICS_SINGER_N" = "Dainininkas %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

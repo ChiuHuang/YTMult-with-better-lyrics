@@ -347,9 +347,9 @@ static NSString *YTMUDebugTrimmed(NSString *text, NSUInteger maxChars) {
     } else {
         // Sing is unfinished: its settings section and the player's mic bar
         // stay hidden until this switch is on. The pref is read live.
-        cell.textLabel.text = @"Show Sing (unfinished)";
+        cell.textLabel.text = @"Sing";
         cell.textLabel.textColor = [UIColor labelColor];
-        cell.detailTextLabel.text = @"Vocal separation is still in development";
+        cell.detailTextLabel.text = nil;
         cell.imageView.image = [UIImage systemImageNamed:@"waveform.path.ecg"];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         UISwitch *sw = [[UISwitch alloc] init];

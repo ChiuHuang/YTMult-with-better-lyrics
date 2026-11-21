@@ -1,7 +1,7 @@
 "SETTINGS" = "Settings";
 "ENABLED" = "Enable YTMusicUltimate";
 "ENABLED_DESC" = "Premium features, no ads, background playback, etc.";
-"RESTART_FOOTER" = "Restart the app to apply changes";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "Premium options";
 "NO_ADS" = "No ads";
@@ -40,10 +40,10 @@
 "SB_LYRICS_OFFSET_DESC" = "Moves the lyrics to the song start when a non-music intro gets skipped";
 
 "SEEK_BUTTONS" = "Replace next/previous with forward and backward buttons";
-"SEEK_TIME_FOOTER" = "Select a seek time in seconds\n\nDefaults:\nSeek backward = 10 sec.\nSeek forward = 30 sec.\n\nSkip to the next and previous tracks available by long-pressing the buttons.";
+"SEEK_TIME_FOOTER" = "";
 "ANIM_FPS" = "Animation frame rate";
-"ANIM_FPS_DESC" = "Frame rate for our animations and the progress bar (120 is native on ProMotion displays)";
-"ANIM_FPS_FOOTER" = "120 fps is the default. Lower this to 60 if the player stutters or you want less battery drain.";
+"ANIM_FPS_DESC" = "";
+"ANIM_FPS_FOOTER" = "";
 "DEFAULT" = "Default";
 
 "THEME_SETTINGS" = "Theme options";
@@ -83,7 +83,7 @@
 "CLEAR_CACHE" = "Clear cache";
 
 "APPLY" = "Apply";
-"APPLY_DESC" = "Closes the app to apply changes";
+"APPLY_DESC" = "";
 
 "LINKS" = "Links";
 "TWITTER" = "Follow %@ on Twitter";
@@ -105,7 +105,7 @@
 "REGIONAL_RESTRICTION" = "Looks like YouTube Music restricted in your country.\n\n Please use VPN to get access to YouTube Music.";
 
 "DONT_RUSH" = "Don't rush brilliance";
-"DONT_RUSH_DESC" = "Required to play the song to extract the link";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "Select Action";
 "DOWNLOAD_PREMIUM" = "Download (Premium required)";
 "DOWNLOADING" = "Downloading";
@@ -128,13 +128,13 @@
 "RENAME" = "Rename";
 
 "AUTO_SYNC_TITLE" = "Auto-sync in background";
-"AUTO_SYNC_DESC" = "Silently pull server translations into local cache (every 6h)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "Download";
 "UPDATE_WHATS_NEW" = "What's new:\n%@";
 
 "LYRICS_ENGINE" = "Lyrics Engine";
 
-"LYRICS_ENGINE_FOOTER" = "The server fetches the lyrics and translates them into the language set below. Stream translation paints every line while the model writes it, and the typewriter reveal types the translation under the active line.";
+"LYRICS_ENGINE_FOOTER" = "";
 
 "STREAM_TRANSLATE" = "Stream translation";
 
@@ -162,19 +162,19 @@
 
 "DEBUG_LOG_LEVEL" = "Log level";
 
-"DEBUG_LOG_LEVEL_DESC" = "Off = no uploads, Err = failures only, All = info + warnings + errors";
+"DEBUG_LOG_LEVEL_DESC" = "";
 
 "DEBUG_SEND" = "Send debug to server";
 
-"DEBUG_SEND_DESC" = "Upload debug events to the lyrics server, readable in the dashboard";
+"DEBUG_SEND_DESC" = "";
 
 "DEBUG_SCREENSHOT" = "Send screenshot debug data";
 
-"DEBUG_SCREENSHOT_DESC" = "Upload a UI hierarchy only after you take a screenshot";
+"DEBUG_SCREENSHOT_DESC" = "";
 
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 
 "DEBUG_ACTIONS" = "Actions";
 
@@ -182,21 +182,21 @@
 
 "DEBUG_TEST_LOG" = "Send test log";
 "DEBUG_CENSUS" = "Run player census";
-"DEBUG_CENSUS_DESC" = "Collects the player classes of this build and posts them as player-census2 (dashboard -> Debug -> Probe).";
-"DEBUG_CENSUS_NEEDED" = "Turn on device mode and pair this device first.";
+"DEBUG_CENSUS_DESC" = "";
+"DEBUG_CENSUS_NEEDED" = "";
 "DEBUG_DEVICE_SECTION" = "Debug device mode";
 "DEBUG_DEVICE_TOGGLE" = "Capture app requests";
-"DEBUG_DEVICE_TOGGLE_DESC" = "Records the app's own requests (method and URL only, no bodies or cookies) and uploads them to the server. Requires a one-time code from the dashboard, so ordinary users cannot upload.";
+"DEBUG_DEVICE_TOGGLE_DESC" = "";
 "DEBUG_DEVICE_STATE" = "Device token";
 "DEBUG_DEVICE_ENROLLED" = "enrolled";
 "DEBUG_DEVICE_NONE" = "no token";
 "DEBUG_DEVICE_ENTER_OTP" = "Enter one-time code";
-"DEBUG_DEVICE_OTP_PROMPT" = "Type the 6-digit code shown on the dashboard (Live logs page). It works once.";
+"DEBUG_DEVICE_OTP_PROMPT" = "";
 "DEBUG_DEVICE_OTP_OK" = "Device enrolled";
 "DEBUG_DEVICE_OTP_BAD" = "Code rejected";
 "DEBUG_DEVICE_FORGET" = "Forget device token";
 "DEBUG_DEVICE_FETCH_TOKEN" = "Copy fetch token";
-"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "Copies the pairing token plus curl forms for GET /api/debug/fetch, which returns this device's capture and the server log tail without opening the dashboard.";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "";
 "DEBUG_DEVICE_TOKEN_NONE" = "No device token: pair first";
 
 "DEBUG_COPIED" = "Diagnostics copied to the clipboard";
@@ -209,13 +209,13 @@
 
 "DEBUG_LAST_EVENT" = "last event %@ ms";
 
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- blocked right now: master switch off, or log level is not All";
+"DEBUG_UPLOAD_BLOCKED" = "";
 
-"DEBUG_UPLOAD_OFF" = "upload_logs = off";
+"DEBUG_UPLOAD_OFF" = "";
 
-"DEBUG_TEST_SENT" = "Sent as an info log. It reaches the server dashboard now.";
+"DEBUG_TEST_SENT" = "";
 
-"DEBUG_TEST_BLOCKED" = "Not sent. Uploads are blocked by the master switch, the log level, or the server's upload_logs switch.";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "Fullscreen on rotate";
 "LYRICS_FULLSCREEN_DESC" = "Rotate to landscape and the lyrics open fullscreen automatically";
@@ -225,42 +225,42 @@
 "LG_SECTION_PLAYER" = "Player";
 "LG_SECTION_APP" = "Application";
 "LG_MASTER" = "Liquid Glass";
-"LG_MASTER_DESC" = "Master visual-material switch.";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "Whole-app song theme";
-"LG_SONG_THEME_WHOLE_DESC" = "Apple Music-style color atmosphere across the app.";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "Player song theme";
-"LG_SONG_THEME_PLAYER_DESC" = "Use the artwork colors as the full player's background.";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "Full Player V2";
-"LG_FULLPLAYER_V2_DESC" = "Artwork card, transport glass, scrubber and split header.";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "Lyrics V2";
-"LG_LYRICS_V2_DESC" = "Immersive blurred-cover background behind the lyrics.";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "Queue V2";
-"LG_QUEUE_V2_DESC" = "Glass Up Next list and queue header.";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "Home V2";
-"LG_HOME_V2_DESC" = "Rounded artwork, transparent shelves and glass chips.";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "Bottom navigation V2";
-"LG_PIVOT_V2_DESC" = "Floating material navigation bar.";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "Sheets V2";
-"LG_SHEETS_V2_DESC" = "Rounded glass action and bottom sheets.";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass settings";
 "LG_SEARCH_V2" = "Search V2";
-"LG_SEARCH_V2_DESC" = "Rounded search field and transparent result rows.";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "Library V2";
-"LG_LIBRARY_V2_DESC" = "Transparent Library pages with rounded artwork.";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "Entity pages V2";
-"LG_ENTITY_V2_DESC" = "Shared glass shell for Album, Artist and Playlist.";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "Downloads V2";
-"LG_DOWNLOADS_V2_DESC" = "Rounded offline and download surfaces.";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "Status overlays V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "Glass toasts, alerts and progress indicators.";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "Global states V2";
-"LG_GLOBAL_STATES_V2_DESC" = "Glass loading, empty, offline and error states.";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "Video V2";
-"LG_VIDEO_V2_DESC" = "Transparent video overlay, no stray shadows.";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "Landscape player V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "Panel-based landscape layout for the full player.";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "Remote control";
-"LG_REMOTE_CONTROL_DESC" = "Allow the server to switch off interface features on this device.";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "Remote";
 "LYRICS_SINGER_BOTH" = "Both";
 "LYRICS_SINGER_N" = "Singer %ld";
@@ -284,11 +284,11 @@
 "SEC_PREVIEW" = "Preview (most recent cached)";
 "SEC_ACTIONS" = "Actions";
 "SEC_OFFSET" = "Timing Offset";
-"FOOTER_DISPLAY" = "Always show translated lyrics auto-opens the panel and storage is on-device.";
-"FOOTER_CACHE" = "Limits are enforced automatically on save. Count limit removes oldest first. Size limit removes oldest until under limit.";
-"FOOTER_PREVIEW" = "Preview shows up to 20 lines from the newest cached file.";
-"FOOTER_ACTIONS" = "Sync pulls songs already translated on the server straight into your local cache -- it never re-runs translation, so it's fast and free even for a large backlog.";
-"FOOTER_OFFSET" = "Per-song timing offset in seconds. Positive = lyrics ahead of audio. Range: -30 to +30 seconds. Applies to current song only. A skipped non-music intro (SponsorBlock) adds its own shift on top, so the first line lands on the first second of the song.";
+"FOOTER_DISPLAY" = "";
+"FOOTER_CACHE" = "";
+"FOOTER_PREVIEW" = "";
+"FOOTER_ACTIONS" = "";
+"FOOTER_OFFSET" = "";
 "LYRICS_ALWAYS_ON" = "Always show translated lyrics";
 "LYRICS_ALWAYS_ON_DESC" = "Auto-show custom panel when lyrics load";
 "LYRICS_CLIENT_CACHE" = "Enable client cache";
@@ -296,7 +296,7 @@
 "LYRICS_SELECTABLE" = "Selectable lyrics";
 "LYRICS_SELECTABLE_DESC" = "Allow selecting / copying text inside the lyrics panel";
 "LYRICS_FPS_METER" = "FPS meter on volume down";
-"LYRICS_FPS_METER_DESC" = "Volume-down toggles lyric render-rate readout (also lowers volume)";
+"LYRICS_FPS_METER_DESC" = "";
 "LYRICS_PRECACHE" = "Precache queue (next 5)";
 "LYRICS_PRECACHE_DESC" = "Pre-fetch lyrics for upcoming songs when queue changes";
 "LYRICS_AUTO_UPDATE" = "Auto update lyrics";
@@ -319,7 +319,7 @@
 "LYRICS_SYNC_SERVER" = "Sync cache from server";
 "LYRICS_SYNC_SERVER_DESC" = "Pull already-translated songs into local cache";
 "LYRICS_SYNC_BATCH" = "Sync & download (batch)";
-"LYRICS_SYNC_BATCH_DESC" = "Hash local cache, fetch missing/upgraded lyrics in one request";
+"LYRICS_SYNC_BATCH_DESC" = "";
 "LYRICS_SYNC_PLAYLIST" = "Sync a YouTube Music playlist";
 "LYRICS_SYNC_PLAYLIST_DESC" = "Fetch lyrics for all tracks in a playlist, tag unlyriced";
 "LYRICS_OFFSET_CURRENT" = "Current song offset";
@@ -373,12 +373,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -393,6 +393,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

@@ -1,7 +1,7 @@
 "SETTINGS" = "Cài đặt";
 "ENABLED" = "Bật YTMusicUltimate";
 "ENABLED_DESC" = "Mở khóa các tính năng Premium, chặn quảng cáo, phát trong nền, v.v.";
-"RESTART_FOOTER" = "Khởi động lại ứng dụng để áp dụng các thay đổi";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "Tùy chọn Premium";
 "NO_ADS" = "Chặn quảng cáo";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "Chuyen loi veo dau bai hat khi bo qua phan dau khong phai nhac";
 
 "SEEK_BUTTONS" = "Thay thế nút trước hoặc tiếp theo bằng nút tua nhạc";
-"SEEK_TIME_FOOTER" = "Chọn thời lượng tua theo đơn vị giây\n\nMặc định:\nTua lại = 10 giây.\nTua đi = 30 giây.\n\nBạn có thể nhấn giữ nút tua đế chuyển đến bản nhạc trước hoặc tiếp theo tương ứng.";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "Mặc định";
 
 "THEME_SETTINGS" = "Tùy chọn giao diện";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "Xóa bộ nhớ đệm";
 
 "APPLY" = "Áp dụng";
-"APPLY_DESC" = "Đóng ứng dụng để áp dụng các thay đổi";
+"APPLY_DESC" = "";
 
 "LINKS" = "Liên kết";
 "TWITTER" = "Theo dõi %@ trên Twitter";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "Có vẻ YouTube Music đã bị hạn chế ở quốc gia của bạn.\n\nVui lòng sử dụng VPN truy cập YouTube Music.";
 
 "DONT_RUSH" = "Đừng vội vàng";
-"DONT_RUSH_DESC" = "Bạn cần phát bài hát để có thể trích xuất liên kết";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "Chọn tác vụ";
 "DOWNLOAD_PREMIUM" = "Tải xuống (cần có Premium)";
 "DOWNLOADING" = "Đang tải";
@@ -123,12 +123,12 @@
 "RENAME" = "Đặt tên";
 
 "AUTO_SYNC_TITLE" = "Tự đồng bộ ở nền";
-"AUTO_SYNC_DESC" = "Lặng lẽ tải bản dịch từ máy chủ vào bộ nhớ đệm cục bộ (mỗi 6 giờ)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "Tải về";
 "UPDATE_WHATS_NEW" = "Có gì mới:\n%@";
 
 "LYRICS_ENGINE" = "Động cơ lời bài hát";
-"LYRICS_ENGINE_FOOTER" = "Máy chủ lấy lời bài hát và dịch sang ngôn ngữ đặt bên dưới. Dịch theo luồng hiển thị từng dòng ngay khi mô hình đang viết, còn hiệu ứng máy đánh máy gõ từng chữ dưới dòng đang nổi bật.";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "Dịch theo luồng";
 "STREAM_TRANSLATE_DESC" = "Hiển thị từng dòng đã dịch ngay khi mô hình đang viết, thay vì chờ hết cả bài";
 "TYPEWRITER" = "Hiệu ứng máy đánh máy";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "Tốc độ máy đánh máy";
 "DEBUG_UPLOAD" = "Dữ liệu gỡ lỗi tải lên";
 "DEBUG_LOG_LEVEL" = "Mức nhật ký";
-"DEBUG_LOG_LEVEL_DESC" = "Tắt = không tải lên, Err = chỉ lỗi, All = thông tin + cảnh báo + lỗi";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "Gửi dữ liệu gỡ lỗi lên máy chủ";
-"DEBUG_SEND_DESC" = "Tải sự kiện gỡ lỗi lên máy chủ lời bài hát, xem được trong bảng điều khiển";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "Gửi dữ liệu gỡ lỗi ảnh chụp màn hình";
-"DEBUG_SCREENSHOT_DESC" = "Chỉ tải lên cấu trúc phân cấp UI sau khi bạn chụp màn hình";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "Tác vụ";
 "DEBUG_COPY" = "Sao chép chẩn đoán";
 "DEBUG_TEST_LOG" = "Gửi nhật ký kiểm thử";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "Địa chệ máy chủ";
 "DEBUG_NOW_PLAYING" = "đang phát: %@";
 "DEBUG_LAST_EVENT" = "sự kiện cuối %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- hiện đang bị chặn: công tắc chính tắt, hoặc mức nhật ký không phải All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = tắt";
-"DEBUG_TEST_SENT" = "Đã gửi như một nhật ký thông tin. Nó đã tới bảng điều khiển máy chủ.";
-"DEBUG_TEST_BLOCKED" = "Chưa gửi. Việc tải lên bị chặn bởi công tắc chính, mức nhật ký, hoặc công tắc upload_logs của máy chủ.";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "Toàn màn hình khi xoay";
 "LYRICS_FULLSCREEN_DESC" = "Xoay máy sang ngang, lờ i bài hát sằ tự mḟ mở trong chế độ sể toàn màn hình";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "Trình phát";
 "LG_SECTION_APP" = "Ứng dụng";
 "LG_MASTER" = "Kính Lỏng";
-"LG_MASTER_DESC" = "Công tắc chính cho vật liệu giao diện.";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "Chủ đề bài hát toàn ứng dụng";
-"LG_SONG_THEME_WHOLE_DESC" = "Không khí màu kiểu Apple Music trên toàn ứng dụng.";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "Chủ đề bài hát trong trình phát";
-"LG_SONG_THEME_PLAYER_DESC" = "Dùng màu ảnh bìa làm nền cho trình phát toàn màn hình.";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "Trình phát toàn màn hình V2";
-"LG_FULLPLAYER_V2_DESC" = "Thẻ ảnh bìa, bảng điều khiển kính, thanh tua và tiêu đề chia đôi.";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "Lời bài hát V2";
-"LG_LYRICS_V2_DESC" = "Nền nhúng với ảnh bìa làm mờ phía sau lời bài hát.";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "Hàng đợi V2";
-"LG_QUEUE_V2_DESC" = "Danh sách Tiếp theo bằng kính và tiêu đề hàng đợi.";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "Trang chủ V2";
-"LG_HOME_V2_DESC" = "Ảnh bìa bo tròn, kệ trong suốt và thẻ nhỏ bằng kính.";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "Thanh điều hướng dưới V2";
-"LG_PIVOT_V2_DESC" = "Thanh điều hướng vật liệu nổi.";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "Trang V2";
-"LG_SHEETS_V2_DESC" = "Trang hành động và trang dưới bằng kính bo tròn.";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Cài đặt Liquid Glass";
 "LG_SEARCH_V2" = "Tìm kiếm V2";
-"LG_SEARCH_V2_DESC" = "Ô tìm kiếm bo tròn và hàng kết quả trong suốt.";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "Thư viện V2";
-"LG_LIBRARY_V2_DESC" = "Trang thư viện trong suốt với ảnh bìa bo tròn.";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "Trang thực thể V2";
-"LG_ENTITY_V2_DESC" = "Lớp vỏ chung cho Album, Nghệ sĩ và Danh sách phát.";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "Tải về V2";
-"LG_DOWNLOADS_V2_DESC" = "Bề mặt ngoại tuyến và tải về bo tròn.";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "Lớp trạng thái V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "Thông báo, cảnh báo và tiến trình dạng kính.";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "Trạng thái chung V2";
-"LG_GLOBAL_STATES_V2_DESC" = "Trạng thái đang tải, trống, ngoại tuyến và lỗi dạng kính.";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "Video V2";
-"LG_VIDEO_V2_DESC" = "Lớp video trong suốt, không bóng đổ.";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "Trình phát ngang V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "Bố cục ngang dựa trên bảng.";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "Điều khiển từ xa";
-"LG_REMOTE_CONTROL_DESC" = "Cho phép máy chủ tắt các tính năng giao diện trên thiết bị này. Khi tắt, máy chủ không thể tắt gì; công tắc của bạn vẫn là của bạn.";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "Từ xa";
 "LYRICS_SINGER_BOTH" = "Công tấy";
 "LYRICS_SINGER_N" = "Ca sá %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

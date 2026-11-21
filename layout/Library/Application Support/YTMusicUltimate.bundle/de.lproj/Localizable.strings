@@ -1,7 +1,7 @@
 "SETTINGS" = "Einstellungen";
 "ENABLED" = "YTMusicUltimate aktivieren";
 "ENABLED_DESC" = "Premium-Funktionen, keine Werbung, Hintergrundwiedergabe, usw.";
-"RESTART_FOOTER" = "Starte die App neu, um die Änderungen zu übernehmen";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "Premium-Optionen";
 "NO_ADS" = "Keine Werbung";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "Setzt den Liedtext auf den Liedbeginn, wenn ein Nicht-Musik-Intro ubersprungen wird";
 
 "SEEK_BUTTONS" = "Vor/Zurück-Buttons durch Vor- und Rückspul-Buttons ersetzen";
-"SEEK_TIME_FOOTER" = "Sprungzeit in Sekunden festlegen\n\nStandardwerte:\nRückwärts springen = 10 Sek.\nVorwärts springen = 30 Sek.\n\nZum nächsten bzw. vorherigen Titel springen durch langes Drücken der Buttons.";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "Standard";
 
 "THEME_SETTINGS" = "Theme-Optionen";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "Cache leeren";
 
 "APPLY" = "Übernehmen";
-"APPLY_DESC" = "Schließt die App, um Änderungen zu übernehmen";
+"APPLY_DESC" = "";
 
 "LINKS" = "Links";
 "TWITTER" = "%@ auf Twitter folgen";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "YouTube Music ist in deinem Land anscheinend nicht verfügbar.\n\nBitte nutze ein VPN, um auf YouTube Music zuzugreifen.";
 
 "DONT_RUSH" = "Gut Ding braucht Weile";
-"DONT_RUSH_DESC" = "Der Song muss abgespielt werden, um den Link zu extrahieren";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "Aktion auswählen";
 "DOWNLOAD_PREMIUM" = "Herunterladen (Premium erforderlich)";
 "DOWNLOADING" = "Wird heruntergeladen";
@@ -123,12 +123,12 @@
 "RENAME" = "Umbenennen";
 
 "AUTO_SYNC_TITLE" = "Automatisch im Hintergrund abgleichen";
-"AUTO_SYNC_DESC" = "Server-Uebersetzungen still in den lokalen Cache holen (alle 6 Stunden)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "Herunterladen";
 "UPDATE_WHATS_NEW" = "Neuerungen:\n%@";
 
 "LYRICS_ENGINE" = "Liedtext-Engine";
-"LYRICS_ENGINE_FOOTER" = "Der Server lädt die Liedtexte und übersetzt sie in die unten eingestellte Sprache. Streaming-Übersetzung malt jede Zeile, während das Modell schreibt, und die Schreibmaschinen-Anzeige tippt die Übersetzung unter der aktiven Zeile aus.";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "Streaming-Übersetzung";
 "STREAM_TRANSLATE_DESC" = "Jede übersetzte Zeile malen, während das Modell schreibt, statt auf den ganzen Song zu warten";
 "TYPEWRITER" = "Schreibmaschinen-Anzeige";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "Schreibmaschinen-Tempo";
 "DEBUG_UPLOAD" = "Debug-Uploads";
 "DEBUG_LOG_LEVEL" = "Log-Level";
-"DEBUG_LOG_LEVEL_DESC" = "Off = keine Uploads, Err = nur Fehler, All = Infos + Warnungen + Fehler";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "Debug an den Server senden";
-"DEBUG_SEND_DESC" = "Debug-Events an den Liedtext-Server hochladen, im Dashboard lesbar";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "Debug-Daten zum Screenshot senden";
-"DEBUG_SCREENSHOT_DESC" = "Die UI-Hierarchie nur hochladen, nachdem du einen Screenshot gemacht hast";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "Aktionen";
 "DEBUG_COPY" = "Diagnose kopieren";
 "DEBUG_TEST_LOG" = "Testlog senden";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "Endpunkt";
 "DEBUG_NOW_PLAYING" = "aktuelle Wiedergabe: %@";
 "DEBUG_LAST_EVENT" = "letztes Event %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- derzeit blockiert: Hauptschalter aus oder Log-Level ist nicht All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = aus";
-"DEBUG_TEST_SENT" = "Als Info-Log gesendet. Erreicht jetzt das Server-Dashboard.";
-"DEBUG_TEST_BLOCKED" = "Nicht gesendet. Uploads werden durch den Hauptschalter, das Log-Level oder den upload_logs-Schalter des Servers blockiert.";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "Vollbild beim Drehen";
 "LYRICS_FULLSCREEN_DESC" = "Drehe das Gerät ins Querformat, dann öffnet sich der Liedtext automatisch im Vollbild";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "Player";
 "LG_SECTION_APP" = "App";
 "LG_MASTER" = "Flüssigglas";
-"LG_MASTER_DESC" = "Hauptschalter für das visuelle Material.";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "Song-Theme für die ganze App";
-"LG_SONG_THEME_WHOLE_DESC" = "Farbatmosphäre im Apple-Music-Stil in der ganzen App.";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "Song-Theme im Player";
-"LG_SONG_THEME_PLAYER_DESC" = "Nutzt die Coverfarben als Hintergrund des Vollbild-Players.";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "Vollbild-Player V2";
-"LG_FULLPLAYER_V2_DESC" = "Coverkarte, Glastransport, Positionsleiste und geteilter Header.";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "Liedtext V2";
-"LG_LYRICS_V2_DESC" = "Tauchender Hintergrund mit dem Albumcover hinter dem Liedtext.";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "Warteschlange V2";
-"LG_QUEUE_V2_DESC" = "Glasliste Als Nächstes und Header der Warteschlange.";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "Startseite V2";
-"LG_HOME_V2_DESC" = "Abgerundete Cover, transparente Reihen und Glaskacheln.";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "Bottom-Navigation V2";
-"LG_PIVOT_V2_DESC" = "Schwebende Navigationsleiste aus Material.";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "Sheets V2";
-"LG_SHEETS_V2_DESC" = "Abgerundete Glas-Aktions- und Bottom-Sheets.";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid-Glas-Einstellungen";
 "LG_SEARCH_V2" = "Suche V2";
-"LG_SEARCH_V2_DESC" = "Abgerundetes Suchfeld und transparente Trefferzeilen.";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "Bibliothek V2";
-"LG_LIBRARY_V2_DESC" = "Transparente Bibliotheksseiten mit abgerundeten Covern.";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "Entitseiten V2";
-"LG_ENTITY_V2_DESC" = "Gemeinsame Glashuelle fuer Album, Kuenstler und Playlist.";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "Downloads V2";
-"LG_DOWNLOADS_V2_DESC" = "Abgerundete Offline- und Download-Flaechen.";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "Statusoverlays V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "Glas-Toasts, Dialoge und Fortschrittsanzeigen.";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "Globale Zustaende V2";
-"LG_GLOBAL_STATES_V2_DESC" = "Glas-Lade-, Leer-, Offline- und Fehlerzustaende.";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "Video V2";
-"LG_VIDEO_V2_DESC" = "Transparenter Video-Overlay ohne Stoerschatten.";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "Querformat-Player V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "Panelbasiertes Querformat-Layout.";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "Fernsteuerung";
-"LG_REMOTE_CONTROL_DESC" = "Dem Server erlauben, Oberflaechen-Features auf diesem Geraet zu deaktivieren. Ausgeschaltet kann er hier nichts abschalten; deine Schalter bleiben deine.";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "Remote";
 "LYRICS_SINGER_BOTH" = "Beide";
 "LYRICS_SINGER_N" = "Sänger %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

@@ -170,6 +170,31 @@ Current:
 - `[DONE] ses_f033796faffeC32ISpNDwW0STV | fitted lyric size + wipe word-level reveal + white ink landed | files: Source/LyricsSheet.x, Source/LyricsShared.h, Source/YTMUVisualStyle.h | next: device check | does: the fitted-size work (TextKit YTMUVisualLineCount, floor 18pt, rotation re-fit) rode into commit a6f350c TOGETHER with the wipe changes (they were one uncommitted tree), so it is NOT a separate commit as originally intended; the follow-up wipe/mismatch/size work is 464c942. TRAPS: see 464c942 message for the three wipe bugs (kern mismatch, wrapped-line ladder trim, rasterized mask staleness).`
 - `[ACTIVE] ses_eff28f66affdILC3ZVe9BGTjCE | extension ported to upstream 3.0.0.4 on branch ytmU-3.0 (+ manual push button); needs a real browser, then a PR | files: better-lyrics src/modules/lyrics/providers/{ytmu,ytmuUpgrade}.ts, src/options/{background,options}.ts, manifest.json; server/routes_admin.py | next: build the extension from ytmU-3.0 and confirm (a) the Sources page shows the key field + toggle + Send current lyrics, (b) a cold song no longer sits on "still searching" for 46s — the provider now resolves empty at 2.5s and the server finishes in the background, (c) a song the server lacks gets pushed back. TRAPS: a provider timeout must record tier -1, not nothing — "never asked" and "the server has nothing" are different states and only the second is fillable; the 2.4.0 ordering put ytmu-PLAIN at priority 2 where it beat every richsynced provider, so the three keys sit inside their own tier now; and 2 of the 54 upstream self-checks (bundle-sizes, ui-guards) fail on a CLEAN 3.0.0.4 tree here, so they are baseline`
 - `[DONE] ses_eff28f66affdILC3ZVe9BGTjCE | the extension is a two-way street now: same endpoint as the iOS app, its race upgrades OUR cache, our [instrumental] flag renders | files: server/library.py, server/routes_admin.py, server/routes_library.py, C:/Users/chiuhuang/better-lyrics/src/modules/lyrics/providers/{ytmu,ytmuUpgrade}.ts | next: none — open items: the extension half is committed on better-lyrics `master` (f7229df, still ahead of myfork/master by 2), untested in a real browser; the server half is 5496bc5, also unpushed | does: `fast=1` was the whole complaint — it is LRCLib+YouTube+fast Google, no JWT, writes the :fast key while the phone reads the full one, so the browser could be served line/plain for a song we had wbw for. library.apply_lyrics_payload is now the ONE write path for both the dashboard apply and POST /api/lyrics/contribute (key auth, same key as the JWT push, no CORS). require_better=True + tier read AFTER sanitize is the whole safety argument; :fast sibling upgraded too or the phone shows pre-upgrade lyrics for the first seconds. TRAPS: an ABSENT tier record is not -1 (never asked != had nothing, and reading it as empty makes every provider an upgrade); a 401 clears the pushed mark but a refusal does not; and `npm run lint` here reformats 15 unrelated files, so stage only what you touched`
+## Writing artifacts
+
+An artifact is anything produced for people other than the person being
+worked with: the app's interface and its text, user docs, prompts, skills,
+config. Its reader was not in the conversation, so write only what that
+reader needs.
+
+- Write every artifact for its own reader. Leave out decisions and their
+  reasons, conversation history, rejected options, implementation details
+  the reader does not need, and evidence that a requirement was met.
+- When something is removed, remove every trace of it, including any
+  instruction that forbids it.
+- In instructions, write a rule only for behaviour its reader would
+  actually show. Narrow an over-broad rule instead of adding exceptions.
+- In an interface, every element and string must help the end user act.
+  Do not repeat what is already shown; do not add hints or instructions
+  the interface itself should make unnecessary.
+- Use the end user's words, not build-time names.
+- When a design changes, delete whatever in that area no longer serves
+  the end user, whoever wrote it.
+- Show new interface elements and user-facing text as a prototype and get
+  approval before merging. Error messages and log lines do not need this.
+- Before reporting interface work, list each visible element and string
+  in the changed area with one line on why the end user needs it.
+
 ## How we talk (user expectations — keep these)
 - Reply in Traditional Chinese, Taiwan usage (繁體中文／台灣用語). The user reads
   and writes English casually but asked for zh-TW replies; this is a standing

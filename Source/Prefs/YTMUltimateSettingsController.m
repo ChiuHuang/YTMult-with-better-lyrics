@@ -237,7 +237,7 @@
             @{@"text": [NSString stringWithFormat:LOC(@"TWITTER"), @"Dayanch96"], @"detail": LOC(@"TWITTER_DESC"), @"image": @"dayanch96-24@2x"},
             @{@"text": LOC(@"DISCORD"), @"detail": LOC(@"DISCORD_DESC"), @"image": @"discord-24@2x"},
             @{@"text": LOC(@"SOURCE_CODE"), @"detail": LOC(@"SOURCE_CODE_DESC"), @"image": @"github-24@2x"},
-            @{@"text": @"Check for updates", @"detail": @"Compare this build's commit with the latest online build.", @"image": @"arrow.triangle.2.circlepath"},
+            @{@"text": @"Check for updates", @"detail": @"", @"image": @"arrow.triangle.2.circlepath"},
             // The policy lives on the lyrics server itself, so the link follows
             // whatever server this build talks to (a self-hosted one included).
             @{@"text": LOC(@"PRIVACY"), @"detail": LOC(@"PRIVACY_DESC"), @"image": @"hand.raised"}

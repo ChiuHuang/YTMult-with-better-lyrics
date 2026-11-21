@@ -1,7 +1,7 @@
 "SETTINGS" = "设置";
 "ENABLED" = "功能启用";
 "ENABLED_DESC" = "会员功能：去广告和背景播放等";
-"RESTART_FOOTER" = "重新启动App以应用设置更改";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "高级功能";
 "NO_ADS" = "去广告";
@@ -40,10 +40,10 @@
 "SB_LYRICS_OFFSET_DESC" = "跳过非音乐开头时，把歌词移到歌曲开始处";
 
 "SEEK_BUTTONS" = "用“快进/快退”按钮替换“上一曲/下一曲”";
-"SEEK_TIME_FOOTER" = "选择跳过时间(秒)\n\n默认:\n快退 = 10秒\n快进 = 30秒\n\n长按按钮可跳到下一曲和上一曲";
+"SEEK_TIME_FOOTER" = "";
 "ANIM_FPS" = "动画帧率";
-"ANIM_FPS_DESC" = "自绘动画与进度条的帧率（ProMotion 屏幕原生为 120）";
-"ANIM_FPS_FOOTER" = "默认 120 fps。若播放器卡顿或想省电可调回 60。";
+"ANIM_FPS_DESC" = "";
+"ANIM_FPS_FOOTER" = "";
 "DEFAULT" = "默认";
 
 "THEME_SETTINGS" = "主题选项";
@@ -83,7 +83,7 @@
 "CLEAR_CACHE" = "清除缓存";
 
 "APPLY" = "应用";
-"APPLY_DESC" = "按下应用会关闭APP以应用变更";
+"APPLY_DESC" = "";
 
 "LINKS" = "相关链接";
 "TWITTER" = "推特关注%@";
@@ -105,7 +105,7 @@
 "REGIONAL_RESTRICTION" = "貌似YouTube Music在您所在的国家\/地区受到限制。\n\n请使用VPN访问YouTube Music。";
 
 "DONT_RUSH" = "不要急。请等待！";
-"DONT_RUSH_DESC" = "需要播放歌曲才能提取链接";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "选择操作";
 "DOWNLOADING" = "下载中";
 "DOWNLOAD_PREMIUM" = "下载(需付费)";
@@ -128,13 +128,13 @@
 "RENAME" = "重命名";
 
 "AUTO_SYNC_TITLE" = "后台自动同步";
-"AUTO_SYNC_DESC" = "每 6 小时将服务器翻译静默拉回本地缓存";
+"AUTO_SYNC_DESC" = "从服务器拉取翻译";
 "DOWNLOAD" = "下载";
 "UPDATE_WHATS_NEW" = "更新内容：\n%@";
 
 "LYRICS_ENGINE" = "歌词引擎";
 
-"LYRICS_ENGINE_FOOTER" = "服务器负责抓取歌词并翻译成下方指定的语言。流式翻译会在模型输出的当下逐行显示，打字机效果则会在当前歌词下方逐字显示译文。";
+"LYRICS_ENGINE_FOOTER" = "";
 
 "STREAM_TRANSLATE" = "流式翻译";
 
@@ -162,18 +162,18 @@
 
 "DEBUG_LOG_LEVEL" = "记录等级";
 
-"DEBUG_LOG_LEVEL_DESC" = "关闭 = 不上传，Err = 只传失败，All = 信息 + 警告 + 错误";
+"DEBUG_LOG_LEVEL_DESC" = "";
 
 "DEBUG_SEND" = "将调试数据发送到服务器";
 
-"DEBUG_SEND_DESC" = "将调试事件上传到歌词服务器，可在仪表板中查看";
+"DEBUG_SEND_DESC" = "";
 
 "DEBUG_SCREENSHOT" = "发送截图调试数据";
 
-"DEBUG_SCREENSHOT_DESC" = "只有在你截图时才上传 UI 层级数据";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "应用日志捕获";
 
-"DEBUG_APPLOG_DESC" = "上传 App 自身的日志行（NSLog 与 os_log 文本）。respring 后生效";
+"DEBUG_APPLOG_DESC" = "";
 
 "DEBUG_ACTIONS" = "操作";
 
@@ -181,21 +181,21 @@
 
 "DEBUG_TEST_LOG" = "发送测试记录";
 "DEBUG_CENSUS" = "运行播放器普查";
-"DEBUG_CENSUS_DESC" = "重新收集这个 build 的播放器类别，并以 player-census2 上传（dashboard → Debug → Probe）。";
-"DEBUG_CENSUS_NEEDED" = "请先开启设备模式并完成配对。";
+"DEBUG_CENSUS_DESC" = "";
+"DEBUG_CENSUS_NEEDED" = "";
 "DEBUG_DEVICE_SECTION" = "调试设备模式";
 "DEBUG_DEVICE_TOGGLE" = "抓取 App 请求";
-"DEBUG_DEVICE_TOGGLE_DESC" = "记录 App 自己的请求（只有方法与网址，不含内容与 cookie）并上传到服务器。需要仪表板生成的一次性代码，普通用户无法上传。";
+"DEBUG_DEVICE_TOGGLE_DESC" = "";
 "DEBUG_DEVICE_STATE" = "设备令牌";
 "DEBUG_DEVICE_ENROLLED" = "已配对";
 "DEBUG_DEVICE_NONE" = "无令牌";
 "DEBUG_DEVICE_ENTER_OTP" = "输入一次性代码";
-"DEBUG_DEVICE_OTP_PROMPT" = "输入仪表板（实时日志页）显示的 6 位数字代码，只能使用一次。";
+"DEBUG_DEVICE_OTP_PROMPT" = "";
 "DEBUG_DEVICE_OTP_OK" = "设备已配对";
 "DEBUG_DEVICE_OTP_BAD" = "代码被拒绝";
 "DEBUG_DEVICE_FORGET" = "清除设备令牌";
 "DEBUG_DEVICE_FETCH_TOKEN" = "复制查询令牌";
-"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "复制配对令牌与 GET /api/debug/fetch 的 curl 示例，可直接读回本设备的上传记录与服务器日志结尾，不必打开仪表板。";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "";
 "DEBUG_DEVICE_TOKEN_NONE" = "尚无设备令牌：请先配对";
 
 "DEBUG_COPIED" = "诊断信息已复制到剪贴板";
@@ -208,13 +208,13 @@
 
 "DEBUG_LAST_EVENT" = "最后事件 %@ 毫秒";
 
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- 当前被阻止：总开关关闭，或记录等级不是 All";
+"DEBUG_UPLOAD_BLOCKED" = "";
 
-"DEBUG_UPLOAD_OFF" = "upload_logs = 关闭";
+"DEBUG_UPLOAD_OFF" = "";
 
-"DEBUG_TEST_SENT" = "已以 info 记录发送，现在就会出现在服务器仪表板。";
+"DEBUG_TEST_SENT" = "";
 
-"DEBUG_TEST_BLOCKED" = "未发送。上传被总开关、记录等级或服务器的 upload_logs 开关阻止。";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "旋转时全屏";
 "LYRICS_FULLSCREEN_DESC" = "转到横屏时自动全屏显示歌词";
@@ -224,42 +224,42 @@
 "LG_SECTION_PLAYER" = "播放器";
 "LG_SECTION_APP" = "应用";
 "LG_MASTER" = "液态玻璃";
-"LG_MASTER_DESC" = "可视材质的总开关。";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "全局歌曲主题";
-"LG_SONG_THEME_WHOLE_DESC" = "整个应用采用 Apple Music 风格的配色氛围。";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "播放器歌曲主题";
-"LG_SONG_THEME_PLAYER_DESC" = "用封面图的颜色作为全屏播放器的背景。";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "全屏播放器 V2";
-"LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制区、进度条和分栏标题栏。";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "歌词 V2";
-"LG_LYRICS_V2_DESC" = "歌词背后模糊封面图营造的沉浸式背景。";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "队列 V2";
-"LG_QUEUE_V2_DESC" = "玻璃质感的待播列表和队列标题栏。";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "首页 V2";
-"LG_HOME_V2_DESC" = "圆角封面、透明货架和玻璃标签。";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "底部导航 V2";
-"LG_PIVOT_V2_DESC" = "悬浮的材质导航栏。";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "面板 V2";
-"LG_SHEETS_V2_DESC" = "圆角玻璃操作面板和底部面板。";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass 设置";
 "LG_SEARCH_V2" = "搜索 V2";
-"LG_SEARCH_V2_DESC" = "圆角搜索框与透明结果行。";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "媒体库 V2";
-"LG_LIBRARY_V2_DESC" = "圆角封面的透明媒体库页面。";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "实体页 V2";
-"LG_ENTITY_V2_DESC" = "专辑、艺人与播放列表共用的玻璃外壳。";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "下载 V2";
-"LG_DOWNLOADS_V2_DESC" = "圆角的离线与下载界面。";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "状态浮层 V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "玻璃提示、警告与进度指示。";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "全局状态 V2";
-"LG_GLOBAL_STATES_V2_DESC" = "玻璃质感的加载、空、离线与错误状态。";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "视频 V2";
-"LG_VIDEO_V2_DESC" = "透明视频浮层，无多余阴影。";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "横屏播放器 V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "基于面板的横屏布局。";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "远程控制";
-"LG_REMOTE_CONTROL_DESC" = "允许服务器关闭本机的界面功能。关闭后服务器将无法再关闭任何功能，你的开关始终归你。";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "远程";
 "LYRICS_SINGER_BOTH" = "合唱";
 "LYRICS_SINGER_N" = "演唱者 %ld";
@@ -283,11 +283,11 @@
 "SEC_PREVIEW" = "预览（最新的缓存）";
 "SEC_ACTIONS" = "操作";
 "SEC_OFFSET" = "时间偏移";
-"FOOTER_DISPLAY" = "“始终显示翻译歌词”会自动打开歌词面板，歌词存储在设备上。";
-"FOOTER_CACHE" = "限制会在保存时自动执行。数量上限会先移除最旧的文件；大小上限会持续移除最旧的文件直到低于上限。";
-"FOOTER_PREVIEW" = "预览显示最新缓存文件的前 20 行。";
-"FOOTER_ACTIONS" = "同步会把服务器上已翻译的歌曲直接拉回本地缓存，不会重新翻译，所以即使积了很多首也很快、免费。";
-"FOOTER_OFFSET" = "每首歌单独的时间偏移（秒）。正在 = 歌词比音频早。范围 -30 到 +30 秒。只对当前这首歌生效。若 SponsorBlock 略过了非音乐开头，会在这个偏移之上再多偏移一段，让第一行歌词落在歌曲的第一秒。";
+"FOOTER_DISPLAY" = "";
+"FOOTER_CACHE" = "";
+"FOOTER_PREVIEW" = "";
+"FOOTER_ACTIONS" = "";
+"FOOTER_OFFSET" = "";
 "LYRICS_ALWAYS_ON" = "始终显示翻译歌词";
 "LYRICS_ALWAYS_ON_DESC" = "歌词载入时自动显示自定义歌词面板";
 "LYRICS_CLIENT_CACHE" = "启用设备缓存";
@@ -295,7 +295,7 @@
 "LYRICS_SELECTABLE" = "歌词可选择";
 "LYRICS_SELECTABLE_DESC" = "允许在歌词面板内选取／复制文字";
 "LYRICS_FPS_METER" = "音量键切换 FPS 表";
-"LYRICS_FPS_METER_DESC" = "按下音量下键会切换歌词渲染速率读数（同时调低音量）";
+"LYRICS_FPS_METER_DESC" = "";
 "LYRICS_PRECACHE" = "预先抓取列队（下 5 首）";
 "LYRICS_PRECACHE_DESC" = "队列变动时先抓取即将播放歌曲的歌词";
 "LYRICS_AUTO_UPDATE" = "自动更新歌词";
@@ -318,7 +318,7 @@
 "LYRICS_SYNC_SERVER" = "从服务器同步缓存";
 "LYRICS_SYNC_SERVER_DESC" = "把已翻译的歌曲拉回本地缓存";
 "LYRICS_SYNC_BATCH" = "同步＋下载（批次）";
-"LYRICS_SYNC_BATCH_DESC" = "为本地缓存计算哈希，一次请求补齐缺少／可升级的歌词";
+"LYRICS_SYNC_BATCH_DESC" = "";
 "LYRICS_SYNC_PLAYLIST" = "同步 YouTube Music 播放清单";
 "LYRICS_SYNC_PLAYLIST_DESC" = "抓取播放清单内所有歌曲的歌词，并标记无歌词的";
 "LYRICS_OFFSET_CURRENT" = "当前歌曲偏移";
@@ -372,12 +372,12 @@
 "MUSIC_HAPTICS" = "音乐触觉反馈";
 "MUSIC_HAPTICS_DESC" = "随节奏与逐字歌词提供触觉震动";
 "MUSIC_HAPTICS_FALLBACK" = "自定义触觉回退";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "我们的 CoreHaptics 引擎跟着节奏与歌词触发。关闭后只测试 iOS 18 系统的音乐触觉——我们的引擎会静音，节奏（若 iOS 对这首歌有提供）改由系统供应。";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic 扬声器";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "把歌曲的音频直接喂给 Taptic Engine——马达把整段波形震出来，与正常播放同时进行。已下载与流媒体的歌曲都可用（流媒体会慢一两秒）。音量小、音质低。";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "用 Taptic 播当前这首歌";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "从当前播放位置把歌曲喂进触觉引擎。流媒体的歌曲会慢一两秒。";
-"MUSIC_HAPTICS_FOOTER" = "将触觉震动与歌曲节奏及逐字歌词实时同步。在 iOS 18+ 上支持 Apple 原生音乐触觉反馈 (Music Haptics)。";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "播放当前歌曲";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "触觉震动强度";
 "MUSIC_HAPTICS_LIGHT" = "轻柔";
 "MUSIC_HAPTICS_MEDIUM" = "适中";
@@ -392,6 +392,6 @@
 "SING_MODEL_DOWNLOADING" = "下载中...";
 "SING_MODEL_READY" = "模型已就绪";
 "SING_DOWNLOAD_FAILED" = "下载失败";
-"SING_FOOTER" = "伴唱模式使用设备端 AI 模型实时分离人声与伴奏，模型约 90 MB，仅需下载一次。";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "浅色主题（跟随 iOS）";
-"LIGHT_THEME_DESC" = "跟随系统的浅色／深色外观。开启时优先于 OLED 深色主题。";
+"LIGHT_THEME_DESC" = "";

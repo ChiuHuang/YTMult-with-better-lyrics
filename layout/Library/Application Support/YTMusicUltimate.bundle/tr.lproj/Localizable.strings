@@ -1,7 +1,7 @@
 "SETTINGS" = "Ayarlar";
 "ENABLED" = "YTMusicUltimate'i etkinleştir";
 "ENABLED_DESC" = "Premium özellikler, reklam engelleme, arka planda oynatma vb.";
-"RESTART_FOOTER" = "Değişiklikleri uygulamak için uygulamayı yeniden başlatın";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "Premium ayarları";
 "NO_ADS" = "Reklam engelleme";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "Atlanan baslangic bolumunden sonra sozleri sarki basina getirir";
 
 "SEEK_BUTTONS" = "Önceki ve Sonraki düğmelerini Hızlı ileri ve Geri Sar düğmeleriyle değiştir";
-"SEEK_TIME_FOOTER" = "Sarma süresini seçiniz\n\Varsayılanlar:\nGeri Sar = 10 sn.\nHızlı ileri = 30 sn.\n\nButonlara uzun basılarak sonraki ve önceki parçalara geçebilirsiniz.";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "Varsayılan";
 
 "THEME_SETTINGS" = "Tema ayarları";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "Önbelleği temizle";
 
 "APPLY" = "Uygula";
-"APPLY_DESC" = "Değişiklikleri uygulamak için uygulamayı kapatır.";
+"APPLY_DESC" = "";
 
 "LINKS" = "Bağlantılar";
 "TWITTER" = "Twitter'da %@'i takip edin";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "YouTube Music, ülkende kısıtlanmış gibi görünüyor.\n\nYouTube Music'e erişim sağlamak için lütfen VPN kullan.";
 
 "DONT_RUSH" = "Mükemmellik aceleye gelmez";
-"DONT_RUSH_DESC" = "İndirmeyi başlatmak için şarkıyı çalmak gerkekli";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "Eylem Seç";
 "DOWNLOADING" = "İndiriliyor";
 "DOWNLOAD_PREMIUM" = "İndir (Premium gerekli)";
@@ -123,12 +123,12 @@
 "RENAME" = "Kaydet";
 
 "AUTO_SYNC_TITLE" = "Arka planda otomatik eşitleme";
-"AUTO_SYNC_DESC" = "Sunucu çevirilerini sessizce yerel önbelleğe al (6 saatte bir)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "İndir";
 "UPDATE_WHATS_NEW" = "Yenilikler:\n%@";
 
 "LYRICS_ENGINE" = "Şarkı sözleri motoru";
-"LYRICS_ENGINE_FOOTER" = "Sunucu şarkı sözlerini alır ve aşağıda ayarlanan dile çevirir. Akışlı çeviri model yazarken her satırı boyar, dakika yazımı ise çeviriyi etkin satırın altına harf harf yazar.";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "Akışlı çeviri";
 "STREAM_TRANSLATE_DESC" = "Model yazarken her çevrilmiş satırı boy, tüm şarkıyı bekleme";
 "TYPEWRITER" = "Dakika yazımı";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "Dakika yazımı hızı";
 "DEBUG_UPLOAD" = "Hata ayıklama yüklemeleri";
 "DEBUG_LOG_LEVEL" = "Günlük düzeyi";
-"DEBUG_LOG_LEVEL_DESC" = "Kapalı = yükleme yok, Err = yalnızca hatalar, All = bilgi + uyarılar + hatalar";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "Hata ayıklamayı sunucuya gönder";
-"DEBUG_SEND_DESC" = "Hata ayıklama olaylarını şarkı sözleri sunucusuna yükle, panelde okunur";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "Ekran görüntüsü hata ayıklaması gönder";
-"DEBUG_SCREENSHOT_DESC" = "UI hiyerarşisini yalnızca ekran görüntüsü aldıktan sonra yükle";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "Eylemler";
 "DEBUG_COPY" = "Tanılamayı kopyala";
 "DEBUG_TEST_LOG" = "Test günlüğünü gönder";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "Sunucu adresi";
 "DEBUG_NOW_PLAYING" = "ş u an çalıyor: %@";
 "DEBUG_LAST_EVENT" = "son olay %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- ş u an engellendi: ana anahtar kapalı, ya da günlük düzeyi All değil";
-"DEBUG_UPLOAD_OFF" = "upload_logs = kapalı";
-"DEBUG_TEST_SENT" = "Bilgi günlüğu olarak gönderildi. şimdi sunucu paneline ulaştı.";
-"DEBUG_TEST_BLOCKED" = "Gönderilmedi. Yüklemeleri ana anahtar, günlük düzeyi ya da sunucunun upload_logs anahtarı engelliyor.";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "Döndürünce tam ekran";
 "LYRICS_FULLSCREEN_DESC" = "Cihazı yatay çevir, şarkı sözleri otomatik olarak tam ekranda açılır";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "Oynatıcı";
 "LG_SECTION_APP" = "Uygulama";
 "LG_MASTER" = "Sıvı Cam";
-"LG_MASTER_DESC" = "Görsel materyal için ana anahtar.";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "Uygulama geneli şarkı teması";
-"LG_SONG_THEME_WHOLE_DESC" = "Uygulama genelinde Apple Music tarzı renk atmosferi.";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "Oynatıcı şarkı teması";
-"LG_SONG_THEME_PLAYER_DESC" = "Kapak görselinin renklerini tam ekran oynatıcının arka planı olarak kullanır.";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "Tam ekran oynatıcı V2";
-"LG_FULLPLAYER_V2_DESC" = "Kapak kartı, camlı kumanda, çubuk ve bölünmüş başlık.";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "Şarkı sözleri V2";
-"LG_LYRICS_V2_DESC" = "Dalmış arka plan arkasında bulanık kapak görseli.";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "Sıra V2";
-"LG_QUEUE_V2_DESC" = "Camlı Sıradakiler listesi ve sıra başlığı.";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "Ana Sayfa V2";
-"LG_HOME_V2_DESC" = "Yuvarlatılmış kapaklar, saydam raflar ve cam çipler.";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "Alt gezinme V2";
-"LG_PIVOT_V2_DESC" = "Yüzen malzeme gezinme çubuğu.";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "Sayfalar V2";
-"LG_SHEETS_V2_DESC" = "Yuvarlatılmış cam eylem ve alt sayfalar.";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass ayarları";
 "LG_SEARCH_V2" = "Arama V2";
-"LG_SEARCH_V2_DESC" = "Yuvarlak arama alanı ve saydam sonuç satırları.";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "Kitaplık V2";
-"LG_LIBRARY_V2_DESC" = "Yuvarlak kapaklı saydam kitaplık sayfaları.";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "Varlık sayfaları V2";
-"LG_ENTITY_V2_DESC" = "Albüm, Sanatçı ve Oynatma Listesi için ortak cam kabuk.";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "İndirilenler V2";
-"LG_DOWNLOADS_V2_DESC" = "Yuvarlak çevrimdışı ve indirme yüzeyleri.";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "Durum katmanları V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "Cam bildirimler, uyarılar ve ilerleme göstergeleri.";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "Genel durumlar V2";
-"LG_GLOBAL_STATES_V2_DESC" = "Cam yükleme, boş, çevrimdışı ve hata durumları.";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "Video V2";
-"LG_VIDEO_V2_DESC" = "Şeffaf video katmanı, gölgesiz.";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "Yatay oynatıcı V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "Panel tabanlı yatay düzen.";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "Uzaktan kontrol";
-"LG_REMOTE_CONTROL_DESC" = "Sunucunun bu cihazda arayuz ozelliklerini kapatmasina izin ver. Kapaliyken hicbir seyi kapatamaz; anahtarlarin sende kalir.";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "Uzaktan";
 "LYRICS_SINGER_BOTH" = "İkisi";
 "LYRICS_SINGER_N" = "Sanatçı %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

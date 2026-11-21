@@ -1,7 +1,7 @@
 "SETTINGS" = "設定";
 "ENABLED" = "有効";
 "ENABLED_DESC" = "プレミアム機能、広告非表示、バックグラウンド再生など";
-"RESTART_FOOTER" = "変更を適用するためにアプリを再起動";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "プレミアムオプション";
 "NO_ADS" = "広告を非表示";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "音楽ではないイントロをスキップすると、歌詞を曲頭に合わせてずらします";
 
 "SEEK_BUTTONS" = "次へ／前へを早送り・巻き戻しボタンに置き換える";
-"SEEK_TIME_FOOTER" = "Select a seek time in seconds\n\nDefaults:\nSeek backward = 10 sec.\nSeek forward = 30 sec.";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "デフォルト";
 
 "THEME_SETTINGS" = "テーマオプション";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "キャッシュを消去";
 
 "APPLY" = "適用";
-"APPLY_DESC" = "アプリを終了して変更を適用します";
+"APPLY_DESC" = "";
 
 "LINKS" = "リンク";
 "TWITTER" = "ツイッターで %@ をフォロー";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "お住まいの国では YouTube Music が制限されているようです。\n\nYouTube Music を利用するには VPN をお使いください。";
 
 "DONT_RUSH" = "才行を急がせない";
-"DONT_RUSH_DESC" = "リンクを抽出するには再生が必要です";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "アクションを選択";
 "DOWNLOADING" = "ダウンロード中";
 "DOWNLOAD_PREMIUM" = "ダウンロード（プレミアムが必要です）";
@@ -123,12 +123,12 @@
 "RENAME" = "名前を変更";
 
 "AUTO_SYNC_TITLE" = "バックグラウンド自動同期";
-"AUTO_SYNC_DESC" = "6時間ごとにサーバーの翻訳を自動取得";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "ダウンロード";
 "UPDATE_WHATS_NEW" = "新機能：\n%@";
 
 "LYRICS_ENGINE" = "歌詞エンジン";
-"LYRICS_ENGINE_FOOTER" = "サーバーが歌詞を取得し、下で設定した言語に翻訳します。ストリーム翻訳はモデルが書き進める間に行ごとに表示し、タイプワイター表示はアクティブ行の下に翻訳を一文字ずつ入力します。";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "ストリーム翻訳";
 "STREAM_TRANSLATE_DESC" = "曲全体を待つのではなく、モデルが書き進める翻訳済みの行をその場で表示します";
 "TYPEWRITER" = "タイプワイター表示";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "タイプワイター速度";
 "DEBUG_UPLOAD" = "デバッグ送信";
 "DEBUG_LOG_LEVEL" = "ログレベル";
-"DEBUG_LOG_LEVEL_DESC" = "Off = 送信しない、Err = 失敗のみ、All = 情報 + 警告 + エラー";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "デバッグをサーバーに送信";
-"DEBUG_SEND_DESC" = "デバッグイベントを歌詞サーバーに送信し、ダッショウドで確認できます";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "スクリーンショットのデバッグ情報を送信";
-"DEBUG_SCREENSHOT_DESC" = "スクリーンショットを揍った後にのみ UI 階層を送信します";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "アクション";
 "DEBUG_COPY" = "診断情報をコピー";
 "DEBUG_TEST_LOG" = "テストログを送信";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "エンドポイント";
 "DEBUG_NOW_PLAYING" = "再生中: %@";
 "DEBUG_LAST_EVENT" = "最終イベント %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- 現在ブロックされています: メインスイッチがオフ、またはログレベルが All ではありません";
-"DEBUG_UPLOAD_OFF" = "upload_logs = オフ";
-"DEBUG_TEST_SENT" = "情報ログとして送信しました。只今サーバーのダッシュボードに届きます。";
-"DEBUG_TEST_BLOCKED" = "送信しません。メインスイッチ、ログレベル、またはサーバーの upload_logs スイッチによって送信がブロックされています。";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "横向きで全画面表示";
 "LYRICS_FULLSCREEN_DESC" = "端末を横向きにすると、歌詞が自動で全画面表示に開きます";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "プレーヤー";
 "LG_SECTION_APP" = "アプリ";
 "LG_MASTER" = "リキッドグラス";
-"LG_MASTER_DESC" = "ビジュアルマテリアルのマスタースイッチです";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "アプリ全体の曲テーマ";
-"LG_SONG_THEME_WHOLE_DESC" = "アプリ全体に Apple Music 風の配色を適用します";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "プレーヤーの曲テーマ";
-"LG_SONG_THEME_PLAYER_DESC" = "ジャケットの色を全画面プレーヤーの背景に使用します";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "フルプレーヤー V2";
-"LG_FULLPLAYER_V2_DESC" = "ジャケットカード、ガラスの操作部、シークバー、分割ヘッダー";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "歌詞 V2";
-"LG_LYRICS_V2_DESC" = "歌詞背後のぼかしたジャケットによる没入型背景";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "キュー V2";
-"LG_QUEUE_V2_DESC" = "ガラスの次の曲リストとキューのヘッダー";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "ホーム V2";
-"LG_HOME_V2_DESC" = "角丸の、透明な棚、ガラスのチップ";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "ボトムナビゲーション V2";
-"LG_PIVOT_V2_DESC" = "浮遊するマテリアルのナビゲーションバー";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "シート V2";
-"LG_SHEETS_V2_DESC" = "角丸のガラスアクションシートとボトムシート";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass の設定";
 "LG_SEARCH_V2" = "検索 V2";
-"LG_SEARCH_V2_DESC" = "角丸の検索欄と透明な結果行。";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "ライブラリ V2";
-"LG_LIBRARY_V2_DESC" = "角丸ジャケットの透明なライブラリ画面。";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "エンティティページ V2";
-"LG_ENTITY_V2_DESC" = "アルバム・アーティスト・プレイリストの共通ガラス枠。";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "ダウンロード V2";
-"LG_DOWNLOADS_V2_DESC" = "角丸のオフラインとダウンロード画面。";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "ステータス表示 V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "ガラスのトースト、警告、進捗表示。";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "グローバル状態 V2";
-"LG_GLOBAL_STATES_V2_DESC" = "ガラスの読み込み・空・オフライン・エラー表示。";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "動画 V2";
-"LG_VIDEO_V2_DESC" = "影のない透明な動画オーバーレイ。";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "横向きプレーヤー V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "パネルベースの横向きレイアウト。";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "リモート制御";
-"LG_REMOTE_CONTROL_DESC" = "サーバーがこの端末のインターフェース機能を無効にできるようにします。オフにするとサーバーは何も無効にできません。自分のスイッチは自分のままです。";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "リモート";
 "LYRICS_SINGER_BOTH" = "ドュエット";
 "LYRICS_SINGER_N" = "ボーカー %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "ダウンロード中...";
 "SING_MODEL_READY" = "モデル準備完了";
 "SING_DOWNLOAD_FAILED" = "ダウンロード失敗";
-"SING_FOOTER" = "歌唱モードはデバイス上の AI モデルを使用してボーカルを分離します。モデル（約 90 MB）は一度だけダウンロードされます。";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";

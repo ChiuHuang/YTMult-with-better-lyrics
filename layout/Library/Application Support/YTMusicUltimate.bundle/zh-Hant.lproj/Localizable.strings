@@ -1,7 +1,7 @@
 "SETTINGS" = "設定";
 "ENABLED" = "啟用";
 "ENABLED_DESC" = "會員功能：無廣告和背景播放等";
-"RESTART_FOOTER" = "重新啟動應用程式以套用變更";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "Premium功能";
 "NO_ADS" = "無廣告";
@@ -40,10 +40,10 @@
 "SB_LYRICS_OFFSET_DESC" = "跳過非音樂開頭時，把歌詞移到歌曲開始處";
 
 "SEEK_BUTTONS" = "將「下一首/上一首」替換為「快轉/倒轉」按鈕";
-"SEEK_TIME_FOOTER" = "選擇一個「快轉/倒轉」時間/秒\n\n預設:\n倒轉 = 10秒\n快轉 = 30秒\n\n長按按鈕可跳到「下一首/上一首」曲目";
+"SEEK_TIME_FOOTER" = "";
 "ANIM_FPS" = "動畫幀率";
-"ANIM_FPS_DESC" = "自己繪製的動畫與進度條的幀率（ProMotion 螢幕原生為 120）";
-"ANIM_FPS_FOOTER" = "預設 120 fps。若播放器卡頓或想省電可調回 60。";
+"ANIM_FPS_DESC" = "";
+"ANIM_FPS_FOOTER" = "";
 "DEFAULT" = "預設";
 
 "THEME_SETTINGS" = "介面主題";
@@ -83,7 +83,7 @@
 "CLEAR_CACHE" = "清除快取";
 
 "APPLY" = "套用";
-"APPLY_DESC" = "按下套用會關閉應用程式讓變更生效";
+"APPLY_DESC" = "";
 
 "LINKS" = "相關連結";
 "TWITTER" = "在推特上跟隨%@";
@@ -105,7 +105,7 @@
 "WARNING" = "警告";
 
 "DONT_RUSH" = "不要急於求成";
-"DONT_RUSH_DESC" = "需要播放歌曲才能提取連結";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "選擇操作";
 "DOWNLOADING" = "下載中...";
 "DOWNLOAD_PREMIUM" = "下載(需要Premium)";
@@ -128,13 +128,13 @@
 "RENAME" = "重新命名";
 
 "AUTO_SYNC_TITLE" = "背景自動同步";
-"AUTO_SYNC_DESC" = "每 6 小時將伺服器翻譯靜默拉回本地快取";
+"AUTO_SYNC_DESC" = "從伺服器拉取翻譯";
 "DOWNLOAD" = "下載";
 "UPDATE_WHATS_NEW" = "更新內容：\n%@";
 
 "LYRICS_ENGINE" = "歌詞引擎";
 
-"LYRICS_ENGINE_FOOTER" = "伺服器負責抓取歌詞並翻譯成下方指定的語言。串流翻譯會在模型輸出的當下逐行顯示，打字機效果則會在當前歌詞下方逐字顯示譯文。";
+"LYRICS_ENGINE_FOOTER" = "";
 
 "STREAM_TRANSLATE" = "串流翻譯";
 
@@ -162,18 +162,18 @@
 
 "DEBUG_LOG_LEVEL" = "記錄等級";
 
-"DEBUG_LOG_LEVEL_DESC" = "關閉 = 不上傳，Err = 只傳失敗，All = 資訊 + 警告 + 錯誤";
+"DEBUG_LOG_LEVEL_DESC" = "";
 
 "DEBUG_SEND" = "將除錯資料傳送到伺服器";
 
-"DEBUG_SEND_DESC" = "將除錯事件上傳到歌詞伺服器，可於儀表板中查看";
+"DEBUG_SEND_DESC" = "";
 
 "DEBUG_SCREENSHOT" = "傳送截圖除錯資料";
 
-"DEBUG_SCREENSHOT_DESC" = "只有在你截圖時才上傳 UI 層級資料";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "應用程式日誌擷取";
 
-"DEBUG_APPLOG_DESC" = "上傳 App 自己的日誌行（NSLog 與 os_log 文字）。respring 後生效";
+"DEBUG_APPLOG_DESC" = "";
 
 "DEBUG_ACTIONS" = "操作";
 
@@ -181,21 +181,21 @@
 
 "DEBUG_TEST_LOG" = "傳送測試記錄";
 "DEBUG_CENSUS" = "執行播放器普查";
-"DEBUG_CENSUS_DESC" = "重新收集這個 build 的播放器類別，並以 player-census2 上傳（dashboard → Debug → Probe）。";
-"DEBUG_CENSUS_NEEDED" = "請先開啟裝置模式並完成配對。";
+"DEBUG_CENSUS_DESC" = "";
+"DEBUG_CENSUS_NEEDED" = "";
 "DEBUG_DEVICE_SECTION" = "除錯裝置模式";
 "DEBUG_DEVICE_TOGGLE" = "擷取 App 請求";
-"DEBUG_DEVICE_TOGGLE_DESC" = "記錄 App 自己的請求（只有方法與網址，不含內容與 cookie）並上傳到伺服器。需要儀表板產生的一次性代碼，一般使用者無法上傳。";
+"DEBUG_DEVICE_TOGGLE_DESC" = "";
 "DEBUG_DEVICE_STATE" = "裝置權杖";
 "DEBUG_DEVICE_ENROLLED" = "已配對";
 "DEBUG_DEVICE_NONE" = "無權杖";
 "DEBUG_DEVICE_ENTER_OTP" = "輸入一次性代碼";
-"DEBUG_DEVICE_OTP_PROMPT" = "輸入儀表板（即時日誌頁）顯示的 6 位數代碼，只能使用一次。";
+"DEBUG_DEVICE_OTP_PROMPT" = "";
 "DEBUG_DEVICE_OTP_OK" = "裝置已配對";
 "DEBUG_DEVICE_OTP_BAD" = "代碼被拒絕";
 "DEBUG_DEVICE_FORGET" = "清除裝置權杖";
 "DEBUG_DEVICE_FETCH_TOKEN" = "複製查詢權杖";
-"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "複製配對權杖與 GET /api/debug/fetch 的 curl 範例，可直接讀回本裝置的上傳紀錄與伺服器日誌結尾，不必開啟儀表板。";
+"DEBUG_DEVICE_FETCH_TOKEN_DESC" = "";
 "DEBUG_DEVICE_TOKEN_NONE" = "尚無裝置權杖：請先配對";
 
 "DEBUG_COPIED" = "診斷資訊已複製到剪貼簿";
@@ -208,13 +208,13 @@
 
 "DEBUG_LAST_EVENT" = "最後事件 %@ 毫秒";
 
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- 目前被封鎖：總開關關閉，或記錄等級不是 All";
+"DEBUG_UPLOAD_BLOCKED" = "";
 
-"DEBUG_UPLOAD_OFF" = "upload_logs = 關閉";
+"DEBUG_UPLOAD_OFF" = "";
 
-"DEBUG_TEST_SENT" = "已以 info 記錄傳送，現在就會出現在伺服器儀表板。";
+"DEBUG_TEST_SENT" = "";
 
-"DEBUG_TEST_BLOCKED" = "未傳送。上傳被總開關、記錄等級或伺服器的 upload_logs 開關封鎖。";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "旋轉時全螢幕";
 "LYRICS_FULLSCREEN_DESC" = "轉到橫向時自動全螢幕顯示歌詞";
@@ -224,42 +224,42 @@
 "LG_SECTION_PLAYER" = "播放器";
 "LG_SECTION_APP" = "應用程式";
 "LG_MASTER" = "液態玻璃";
-"LG_MASTER_DESC" = "視覺材質的總開關。";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "全應用程式歌曲主題";
-"LG_SONG_THEME_WHOLE_DESC" = "整個應用程式採用 Apple Music 風格的配色氛圍。";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "播放器歌曲主題";
-"LG_SONG_THEME_PLAYER_DESC" = "用封面圖的顏色作為全螢幕播放器的背景。";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "全螢幕播放器 V2";
-"LG_FULLPLAYER_V2_DESC" = "封面卡片、玻璃控制區、進度條和分割標題列。";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "歌詞 V2";
-"LG_LYRICS_V2_DESC" = "歌詞背後模糊封面圖打造的沉浸式背景。";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "佇列 V2";
-"LG_QUEUE_V2_DESC" = "玻璃質感的待播清單和佇列標題列。";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "首頁 V2";
-"LG_HOME_V2_DESC" = "圓角封面、透明層架和玻璃標籤。";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "底部導覽 V2";
-"LG_PIVOT_V2_DESC" = "浮動的材質導覽列。";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "面板 V2";
-"LG_SHEETS_V2_DESC" = "圓角玻璃操作面板和底部面板。";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "Liquid Glass 設定";
 "LG_SEARCH_V2" = "搜尋 V2";
-"LG_SEARCH_V2_DESC" = "圓角搜尋欄與透明結果列。";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "媒體庫 V2";
-"LG_LIBRARY_V2_DESC" = "圓角封面的透明媒體庫頁面。";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "實體頁 V2";
-"LG_ENTITY_V2_DESC" = "專輯、藝人與播放清單共用的玻璃外殼。";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "下載 V2";
-"LG_DOWNLOADS_V2_DESC" = "圓角的離線與下載介面。";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "狀態浮層 V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "玻璃提示、警示與進度指示。";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "全域狀態 V2";
-"LG_GLOBAL_STATES_V2_DESC" = "玻璃質感的載入、空、離線與錯誤狀態。";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "影片 V2";
-"LG_VIDEO_V2_DESC" = "透明影片浮層，無多餘陰影。";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "橫向播放器 V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "以面板為基礎的橫向版面。";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "遠端控制";
-"LG_REMOTE_CONTROL_DESC" = "允許伺服器關閉本機的介面功能。關閉後伺服器將無法再關閉任何功能，你的開關永遠歸你。";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "遠端";
 "LYRICS_SINGER_BOTH" = "合唱";
 "LYRICS_SINGER_N" = "演唱者 %ld";
@@ -283,11 +283,11 @@
 "SEC_PREVIEW" = "預覽（最新的快取）";
 "SEC_ACTIONS" = "操作";
 "SEC_OFFSET" = "時間偏移";
-"FOOTER_DISPLAY" = "「永遠顯示翻譯歌詞」會自動開啟歌詞面板，歌詞儲存在裝置上。";
-"FOOTER_CACHE" = "限制會在儲存時自動執行。數量上限會先移除最舊的檔案；體積上限會持續移除最舊的檔案直到低於上限。";
-"FOOTER_PREVIEW" = "預覽顯示最新快取檔案的前 20 行。";
-"FOOTER_ACTIONS" = "同步會把伺服器上已翻譯的歌曲直接拉回本機快取，不會重新翻譯，所以即使積了很多首歌也很快、免費。";
-"FOOTER_OFFSET" = "每首歌單獨的時間偏移（秒）。正值 = 歌詞比音訊早。範圍 -30 到 +30 秒。只對目前這首歌生效。若 SponsorBlock 略過了非音樂開頭，會在這個偏移之上再多偏移一段，讓第一行歌詞落在歌曲的第一秒。";
+"FOOTER_DISPLAY" = "";
+"FOOTER_CACHE" = "";
+"FOOTER_PREVIEW" = "";
+"FOOTER_ACTIONS" = "";
+"FOOTER_OFFSET" = "";
 "LYRICS_ALWAYS_ON" = "永遠顯示翻譯歌詞";
 "LYRICS_ALWAYS_ON_DESC" = "歌詞載入時自動顯示自訂歌詞面板";
 "LYRICS_CLIENT_CACHE" = "啟用裝置快取";
@@ -295,7 +295,7 @@
 "LYRICS_SELECTABLE" = "歌詞可選取";
 "LYRICS_SELECTABLE_DESC" = "允許在歌詞面板內選取／複製文字";
 "LYRICS_FPS_METER" = "音量鍵切換 FPS 表";
-"LYRICS_FPS_METER_DESC" = "按下音量下鍵會切換歌詞渲染速率讀數（同時調低音量）";
+"LYRICS_FPS_METER_DESC" = "";
 "LYRICS_PRECACHE" = "預先抓取佇列（下 5 首）";
 "LYRICS_PRECACHE_DESC" = "佇列變動時先抓取即將播放歌曲的歌詞";
 "LYRICS_AUTO_UPDATE" = "自動更新歌詞";
@@ -318,7 +318,7 @@
 "LYRICS_SYNC_SERVER" = "從伺服器同步快取";
 "LYRICS_SYNC_SERVER_DESC" = "把已翻譯的歌曲拉回本機快取";
 "LYRICS_SYNC_BATCH" = "同步＋下載（批次）";
-"LYRICS_SYNC_BATCH_DESC" = "為本機快取計算雜湊，一次請求補齊缺少／可升級的歌詞";
+"LYRICS_SYNC_BATCH_DESC" = "";
 "LYRICS_SYNC_PLAYLIST" = "同步 YouTube Music 播放清單";
 "LYRICS_SYNC_PLAYLIST_DESC" = "抓取播放清單內所有歌曲的歌詞，並標記無歌詞的";
 "LYRICS_OFFSET_CURRENT" = "目前歌曲偏移";
@@ -372,12 +372,12 @@
 "MUSIC_HAPTICS" = "音樂觸覺回饋";
 "MUSIC_HAPTICS_DESC" = "隨節奏與逐字歌詞提供震動回饋";
 "MUSIC_HAPTICS_FALLBACK" = "自訂觸覺回退";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "我們的 CoreHaptics 引擎跟著節奏與歌詞觸發。關閉後只測試 iOS 18 系統的音樂觸覺——我們的引擎會靜音，節奏（若 iOS 對這首歌有提供）改由系統供應。";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic 揚聲器";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "把歌曲的音訊直接餵給 Taptic Engine——馬達把整段波形震出來，與正常播放同時進行。已下載與串流的歌都可用（串流會慢一兩秒）。音量小、音質低。";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "用 Taptic 播目前這首歌";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "從目前播放位置把歌曲餵進觸覺引擎。串流的歌會慢一兩秒。";
-"MUSIC_HAPTICS_FOOTER" = "隨節奏與逐字歌詞即時同步震動。在支援的裝置與 iOS 18+ 上支援 Apple 原生音樂觸覺回饋 (Music Haptics)。";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "播放目前這首歌";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "觸覺震動強度";
 "MUSIC_HAPTICS_LIGHT" = "輕柔";
 "MUSIC_HAPTICS_MEDIUM" = "適中";
@@ -392,6 +392,6 @@
 "SING_MODEL_DOWNLOADING" = "下載中...";
 "SING_MODEL_READY" = "模型已就緒";
 "SING_DOWNLOAD_FAILED" = "下載失敗";
-"SING_FOOTER" = "伴唱模式使用裝置端 AI 模型即時分離人聲與伴奏，模型約 90 MB，僅需下載一次。";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "淺色主題（跟隨 iOS）";
-"LIGHT_THEME_DESC" = "跟隨系統的淺色／深色外觀。開啟時優先於 OLED 深色主題。";
+"LIGHT_THEME_DESC" = "";

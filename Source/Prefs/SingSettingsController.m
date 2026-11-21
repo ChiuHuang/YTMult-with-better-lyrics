@@ -78,7 +78,7 @@
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 0) return LOC(@"MUSIC_HAPTICS_FOOTER");
     if (section == 1) return YTMUSingUnlocked() ? LOC(@"SING_FOOTER") : nil;
-    if (section == 2) return @"Tap 'Test Haptic Pulse' to verify device vibration motor.";
+    if (section == 2) return @"";
     return nil;
 }
 
@@ -208,7 +208,7 @@
             if (modelReady) {
                 cell.textLabel.text = LOC(@"SING_MODEL_READY");
                 cell.textLabel.textColor = [UIColor systemGreenColor];
-                cell.detailTextLabel.text = @"mdx23c_instvoc_hq.mlpackage (Ready)";
+                cell.detailTextLabel.text = nil;
                 cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.accessoryType = UITableViewCellAccessoryCheckmark;
                 cell.selectionStyle = UITableViewCellSelectionStyleNone;
@@ -225,8 +225,8 @@
                 cell.accessoryView = pv;
                 cell.selectionStyle = UITableViewCellSelectionStyleNone;
             } else if (modelLoading) {
-                cell.textLabel.text = @"Preparing AI model…";
-                cell.detailTextLabel.text = @"Core ML is loading the downloaded model.";
+                cell.textLabel.text = @"Preparing…";
+                cell.detailTextLabel.text = nil;
                 cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.accessoryView = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
                 [(UIActivityIndicatorView *)cell.accessoryView startAnimating];
@@ -235,13 +235,13 @@
                 NSError *loadError = [YTMUVocalSeparationManager sharedInstance].modelLoadError;
                 cell.textLabel.text = loadError ? @"Retry loading AI model" : @"Load downloaded AI model";
                 cell.textLabel.textColor = [UIColor systemBlueColor];
-                cell.detailTextLabel.text = loadError.localizedDescription ?: @"The model is downloaded but has not been loaded.";
+                cell.detailTextLabel.text = nil;
                 cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             } else {
                 cell.textLabel.text = LOC(@"SING_MODEL_DOWNLOAD");
                 cell.textLabel.textColor = [UIColor systemBlueColor];
-                cell.detailTextLabel.text = self.downloadStatusText ?: @"Tap to download AI model (~42 MB compressed)";
+                cell.detailTextLabel.text = nil;
                 cell.detailTextLabel.textColor = [UIColor secondaryLabelColor];
                 cell.accessoryType = UITableViewCellAccessoryNone;
                 cell.selectionStyle = UITableViewCellSelectionStyleDefault;
@@ -286,7 +286,7 @@
         if (indexPath.row == 3) {
             cell.textLabel.text = @"Test Haptic Pulse";
             cell.textLabel.textColor = [UIColor systemBlueColor];
-            cell.detailTextLabel.text = @"Tap to test motor";
+            cell.detailTextLabel.text = nil;
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             return cell;
         }

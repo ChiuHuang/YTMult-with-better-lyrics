@@ -1,7 +1,7 @@
 "SETTINGS" = "การตั้งค่า";
 "ENABLED" = "เปิดใช้งาน YTMusicUltimate";
 "ENABLED_DESC" = "ฟีเจอร์พรีเมียม ไม่มีโฆษณา เล่นเบื้องหลัง และอื่นๆ";
-"RESTART_FOOTER" = "ต้องรีสตาร์ทแอปเพื่อปรับใช้งาน";
+"RESTART_FOOTER" = "";
 
 "PREMIUM_SETTINGS" = "พรีเมียม";
 "NO_ADS" = "ไม่มีโฆษณา";
@@ -40,7 +40,7 @@
 "SB_LYRICS_OFFSET_DESC" = "เลื่อนคำบทไปที่จุดเริ่มเพลงเมื่อข้ามส่วนที่ไม่ใช่ดนตรี";
 
 "SEEK_BUTTONS" = "แทนที่ปุ่มถัดไป/ก่อนหน้า ด้วยปุ่มกรอไปข้างหน้าและย้อนกลับ";
-"SEEK_TIME_FOOTER" = "เลือกเวลาการกรอเป็นวินาที\n\nค่าเริ่มต้น:\nย้อนกลับ = 10 วินาที\nกรอไปข้างหน้า = 30 วินาที\n\nสามารถข้ามไปเพลงถัดไปหรือก่อนหน้าได้โดยกดค้างที่ปุ่ม";
+"SEEK_TIME_FOOTER" = "";
 "DEFAULT" = "ค่าเริ่มต้น";
 
 "THEME_SETTINGS" = "ธีม";
@@ -80,7 +80,7 @@
 "CLEAR_CACHE" = "ล้างแคช";
 
 "APPLY" = "ปรับใช้";
-"APPLY_DESC" = "ปิดแอปเพื่อปรับใช้การตั้งค่า";
+"APPLY_DESC" = "";
 
 "LINKS" = "ลิงก์";
 "TWITTER" = "ติดตาม %@ บน Twitter";
@@ -100,7 +100,7 @@
 "REGIONAL_RESTRICTION" = "ดูเหมือนว่า YouTube Music จะถูกจำกัดในประเทศของคุณ\n\nกรุณาใช้ VPN เพื่อเข้าถึง YouTube Music";
 
 "DONT_RUSH" = "อย่ารีบกับสิ่งที่ดี";
-"DONT_RUSH_DESC" = "ต้องเล่นเพลงก่อนเพื่อดึงลิงก์ออกมา";
+"DONT_RUSH_DESC" = "";
 "SELECT_ACTION" = "เลือกการทำงาน";
 "DOWNLOAD_PREMIUM" = "ดาวน์โหลด (ต้องใช้พรีเมียม)";
 "DOWNLOADING" = "กำลังดาวน์โหลด";
@@ -123,12 +123,12 @@
 "RENAME" = "เปลี่ยนชื่อ";
 
 "AUTO_SYNC_TITLE" = "ซิงค์อัตโนมัติในพื้นหลัง";
-"AUTO_SYNC_DESC" = "ดึงคำแปลจากเซิร์ฟเวอร์เข้าแคชในเครื่องอย่างเงียบ ๆ (ทุก 6 ชม.)";
+"AUTO_SYNC_DESC" = "Pull translations from the server";
 "DOWNLOAD" = "ดาวน์โหลด";
 "UPDATE_WHATS_NEW" = "มีอะไรใหม่:\n%@";
 
 "LYRICS_ENGINE" = "ระบบเนื้อเพลง";
-"LYRICS_ENGINE_FOOTER" = "เซิร์ฟเวอร์ดึงเนื้อเพลงและแปลเป็นภาษาที่ตั้งไว้ด้านล่าง ส่วนคำแปลแบบสตรีมจะแสดงทีละบรรทัดขณะที่โมเดลกำลังเขียน และเอฟเฟกต์เครื่องพิมพ์ดีดจะพิมพ์คำแปลทีละตัวอักษรใต้บรรทัดปัจจุบัน";
+"LYRICS_ENGINE_FOOTER" = "";
 "STREAM_TRANSLATE" = "คำแปลแบบสตรีม";
 "STREAM_TRANSLATE_DESC" = "แสดงทีละบรรทัดขณะที่โมเดลกำลังเขียน แทนการรอจนเพลงทั้งเพลงแปลเสร็จ";
 "TYPEWRITER" = "เอฟเฟกต์เครื่องพิมพ์ดีด";
@@ -142,14 +142,14 @@
 "DEBUG_REVEAL" = "ความเร็วเครื่องพิมพ์ดีด";
 "DEBUG_UPLOAD" = "อัปโหลดข้อมูลดีบัก";
 "DEBUG_LOG_LEVEL" = "ระดับบันทึก";
-"DEBUG_LOG_LEVEL_DESC" = "ปิด = ไม่อัปโหลด, Err = เฉพาะข้อผิดพลาด, All = ข้อมูล + คำเตือน + ข้อผิดพลาด";
+"DEBUG_LOG_LEVEL_DESC" = "";
 "DEBUG_SEND" = "ส่งข้อมูลดีบักไปยังเซิร์ฟเวอร์";
-"DEBUG_SEND_DESC" = "อัปโหลดเหตุการณ์ดีบักไปยังเซิร์ฟเวอร์เนื้อเพลง ดูได้ในแดชบอร์ด";
+"DEBUG_SEND_DESC" = "";
 "DEBUG_SCREENSHOT" = "ส่งข้อมูลดีบักภาพหน้าจอ";
-"DEBUG_SCREENSHOT_DESC" = "อัปโหลดโครงสร้าง UI เฉพาะหลังคุณถ่ายภาพหน้าจอ";
+"DEBUG_SCREENSHOT_DESC" = "";
 "DEBUG_APPLOG" = "App log capture";
 
-"DEBUG_APPLOG_DESC" = "Upload the app's own log lines (NSLog and os_log text). Applies after a respring";
+"DEBUG_APPLOG_DESC" = "";
 "DEBUG_ACTIONS" = "การทำงาน";
 "DEBUG_COPY" = "คัดลอกข้อมูลวินิจฉัย";
 "DEBUG_TEST_LOG" = "ส่งบันทึกการทดสอบ";
@@ -159,10 +159,10 @@
 "DEBUG_ENDPOINT" = "ปลายทาง";
 "DEBUG_NOW_PLAYING" = "กำลังเล่น: %@";
 "DEBUG_LAST_EVENT" = "เหตุการณ์ล่าสุด %@ ms";
-"DEBUG_UPLOAD_BLOCKED" = "%@ -- ถูกบล็อกอยู่ตอนนี้: สวิตช์หลักปิดอยู่ หรือระดับบันทึกไม่ใช่ All";
-"DEBUG_UPLOAD_OFF" = "upload_logs = ปิด";
-"DEBUG_TEST_SENT" = "ส่งเป็นบันทึกข้อมูลแล้ว ขณะนี้ไปถึงแดชบอร์ดของเซิร์ฟเวอร์แล้ว";
-"DEBUG_TEST_BLOCKED" = "ไม่ได้ส่ง การอัปโหลดถูกบล็อกโดยสวิตช์หลัก ระดับบันทึก หรือสวิตช์ upload_logs ของเซิร์ฟเวอร์";
+"DEBUG_UPLOAD_BLOCKED" = "";
+"DEBUG_UPLOAD_OFF" = "";
+"DEBUG_TEST_SENT" = "";
+"DEBUG_TEST_BLOCKED" = "";
 
 "LYRICS_FULLSCREEN" = "เต็มจอเมื่อหมุนเครื่อง";
 "LYRICS_FULLSCREEN_DESC" = "หมุนเครื่องเป็นแนวนอน เนื้อเพลจะเปิดเต็มจออัตโนมัติ";
@@ -172,42 +172,42 @@
 "LG_SECTION_PLAYER" = "เครื่องเล่น";
 "LG_SECTION_APP" = "แอป";
 "LG_MASTER" = "กระจกเหลว";
-"LG_MASTER_DESC" = "สวิตช์หลักของวัสดุภาพ";
+"LG_MASTER_DESC" = "";
 "LG_SONG_THEME_WHOLE" = "ธีมเพลงทั้งแอป";
-"LG_SONG_THEME_WHOLE_DESC" = "บรรยากาศสีแบบ Apple Music ทั่วทั้งแอป";
+"LG_SONG_THEME_WHOLE_DESC" = "";
 "LG_SONG_THEME_PLAYER" = "ธีมเพลงในเครื่องเล่น";
-"LG_SONG_THEME_PLAYER_DESC" = "ใช้สีภาพปกเป็นพื้นหลังของเครื่องเล่นเต็มหน้าจอ";
+"LG_SONG_THEME_PLAYER_DESC" = "";
 "LG_FULLPLAYER_V2" = "เครื่องเล่นเต็มจอ V2";
-"LG_FULLPLAYER_V2_DESC" = "การ์ดภาพปก แถบควบคุมแบบกระจก แถบเลื่อนเวลา และส่วนหัวแบบแยกส่วน";
+"LG_FULLPLAYER_V2_DESC" = "";
 "LG_LYRICS_V2" = "เนื้อเพลง V2";
-"LG_LYRICS_V2_DESC" = "พื้นหลังแบบเต็มอิ่มพร้อมภาพปกเบลอหลังเนื้อเพลง";
+"LG_LYRICS_V2_DESC" = "";
 "LG_QUEUE_V2" = "คิว V2";
-"LG_QUEUE_V2_DESC" = "รายการเพลงถัดไปแบบกระจกและส่วนหัวของคิว";
+"LG_QUEUE_V2_DESC" = "";
 "LG_HOME_V2" = "หน้าแรก V2";
-"LG_HOME_V2_DESC" = "ภาพปกปลายมน ชั้นวางโปร่งใส และชิปกระจก";
+"LG_HOME_V2_DESC" = "";
 "LG_PIVOT_V2" = "แถบนำทางด้านล่าง V2";
-"LG_PIVOT_V2_DESC" = "แถบนำทางวัสดุลอยฟ้า";
+"LG_PIVOT_V2_DESC" = "";
 "LG_SHEETS_V2" = "ชีต V2";
-"LG_SHEETS_V2_DESC" = "ชีตคำสั่งและชีตด้านล่างแบบกระจกปลายมน";
+"LG_SHEETS_V2_DESC" = "";
 "LG_ENTRY_BUTTON" = "การตั้งค่า Liquid Glass";
 "LG_SEARCH_V2" = "ค้นหา V2";
-"LG_SEARCH_V2_DESC" = "ช่องค้นหามนและแถวผลลัพธ์โปร่งใส";
+"LG_SEARCH_V2_DESC" = "";
 "LG_LIBRARY_V2" = "ห้องสมุด V2";
-"LG_LIBRARY_V2_DESC" = "หน้าห้องสมุดโปร่งใสพร้อมภาพปกมน";
+"LG_LIBRARY_V2_DESC" = "";
 "LG_ENTITY_V2" = "หน้าอัลบั้ม V2";
-"LG_ENTITY_V2_DESC" = "โครงกระจกร่วมสำหรับอัลบั้ม ศิลปิน และเพลย์ลิสต์";
+"LG_ENTITY_V2_DESC" = "";
 "LG_DOWNLOADS_V2" = "ดาวน์โหลด V2";
-"LG_DOWNLOADS_V2_DESC" = "พื้นผิวออฟไลน์และดาวน์โหลดแบบมน";
+"LG_DOWNLOADS_V2_DESC" = "";
 "LG_STATUS_OVERLAYS_V2" = "สถานะทับหน้า V2";
-"LG_STATUS_OVERLAYS_V2_DESC" = "การแจ้งเตือน กล่องแจ้งเตือน และแถบความคืบหน้าแบบกระจก";
+"LG_STATUS_OVERLAYS_V2_DESC" = "";
 "LG_GLOBAL_STATES_V2" = "สถานะทั่วไป V2";
-"LG_GLOBAL_STATES_V2_DESC" = "สถานะกำลังโหลด ว่าง ออฟไลน์ และข้อผิดพลาดแบบกระจก";
+"LG_GLOBAL_STATES_V2_DESC" = "";
 "LG_VIDEO_V2" = "วิดีโอ V2";
-"LG_VIDEO_V2_DESC" = "ทับวิดีโอโปร่งใส ไม่มีเงา";
+"LG_VIDEO_V2_DESC" = "";
 "LG_LANDSCAPE_PLAYER_V2" = "เครื่องเล่นแนวนอน V2";
-"LG_LANDSCAPE_PLAYER_V2_DESC" = "เลย์เอาตแนวนอนแบบใช้แผง";
+"LG_LANDSCAPE_PLAYER_V2_DESC" = "";
 "LG_REMOTE_CONTROL" = "ควบคุมจากระยะไกล";
-"LG_REMOTE_CONTROL_DESC" = "อนุญาตให้เซิร์ฟเวอร์ปิดฟีเจอร์อินเทอร์เฟซบนอุปกรณ์นี้ เมื่อปิด เซิร์ฟเวอร์จะปิดอะไรไม่ได้ สวิตช์ของคุณยังเป็นของคุณ";
+"LG_REMOTE_CONTROL_DESC" = "";
 "LG_SECTION_REMOTE" = "ระยะไกล";
 "LYRICS_SINGER_BOTH" = "แหลุก";
 "LYRICS_SINGER_N" = "ศีกียา %ld";
@@ -227,12 +227,12 @@
 "MUSIC_HAPTICS" = "Music Haptics";
 "MUSIC_HAPTICS_DESC" = "Haptic feedback synchronized with rhythm and lyrics";
 "MUSIC_HAPTICS_FALLBACK" = "Haptic Fallback (ours)";
-"MUSIC_HAPTICS_FALLBACK_DESC" = "Our CoreHaptics engine follows the rhythm and lyrics. Turn OFF to test iOS 18 system Music Haptics alone -- our engine goes silent and the rhythm (if iOS provides one for this track) comes from the system.";
+"MUSIC_HAPTICS_FALLBACK_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC" = "Taptic Speaker";
-"MUSIC_HAPTICS_TAPTIC_DESC" = "Play the song's audio through the Taptic Engine itself -- the motor renders the whole waveform while normal playback continues. Works on downloaded songs and streams (streams lag a second or two). Quiet and low-fi.";
+"MUSIC_HAPTICS_TAPTIC_DESC" = "";
 "MUSIC_HAPTICS_TAPTIC_TEST" = "Play current song via Taptic";
-"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Feeds the song to the haptic engine from the current playback position. Streams lag a second or two.";
-"MUSIC_HAPTICS_FOOTER" = "Synchronizes device haptics with song rhythm and word-by-word lyrics. On iOS 18+, seamlessly integrates with Apple Music Haptics.";
+"MUSIC_HAPTICS_TAPTIC_TEST_DESC" = "Play the current song";
+"MUSIC_HAPTICS_FOOTER" = "";
 "MUSIC_HAPTICS_INTENSITY" = "Haptic Intensity";
 "MUSIC_HAPTICS_LIGHT" = "Light";
 "MUSIC_HAPTICS_MEDIUM" = "Medium";
@@ -247,6 +247,6 @@
 "SING_MODEL_DOWNLOADING" = "Downloading...";
 "SING_MODEL_READY" = "Model ready";
 "SING_DOWNLOAD_FAILED" = "Download failed";
-"SING_FOOTER" = "Sing Mode uses an on-device AI model to separate vocals from the instrumental. The model (~90 MB) is downloaded once and stored on your device.";
+"SING_FOOTER" = "";
 "LIGHT_THEME" = "Light theme (follows iOS)";
-"LIGHT_THEME_DESC" = "Follow the system light/dark appearance. Takes priority over OLED dark.";
+"LIGHT_THEME_DESC" = "";
