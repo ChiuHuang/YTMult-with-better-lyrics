@@ -43,6 +43,7 @@ from .jwt_pool import pick_jwt
 # ============================================================
 
 _PROVIDER_RANK = {
+    'Unison': 45,
     'Musixmatch': 40,
     'bLyrics': 38,
     'BiniLyrics': 37,
@@ -51,7 +52,6 @@ _PROVIDER_RANK = {
     'KuGou': 35,
     'NetEase': 33,
     'LRCLib': 30,
-    'Unison': 20,
     'YouTube Music': 10,
 }
 
