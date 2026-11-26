@@ -761,6 +761,13 @@ _RETITLE_PROMPT_TEMPLATE = (
     "歌ってみた, self cover tags, and YouTube noise.\n"
     "Remove 【...】 groups too: the event, workshop or channel name a Japanese "
     "upload puts at either end is not part of the song title.\n"
+    "Also remove variant tags that do not change which song this is: "
+    "sped-up, slowed, nightcore, 8d, reverb, reupload, reuploaded, "
+    "remastered, original speed, extended, original version, short version, "
+    "and speed markers like 2x/4x.\n"
+    "Remove a trailing 'renamed:' marker and its value, a trailing 11-char "
+    "video id in parentheses, and broken/placeholder characters "
+    "(▯, □, �, 卍, zero-width spaces).\n"
     "Only DELETE text. Never translate, reorder or rephrase a title, and "
     "never add a word that is not in the input.\n"
     "If the title contains Title - Artist format, split them properly.\n"
@@ -789,11 +796,58 @@ _DECORATION_RE = re.compile(
     r'(?i)(?:\bcover(?:ed)?\b|\bself\s*cover\b|歌ってみた|커버|翻唱|合作|'
     r'\bcollab\b|\bfeat\.?\b|\bft\.?\b|official|\blyrics?\b|\bmv\b|'
     r'\baudio\b|visuali[sz]er|full\s+ver|\bremix\b|ver\.|版本|'
-    r'【[^】]*】)')
+    r'【[^】]*】|'
+    # v2: variant + noise tags. Deletion only, never a rephrase.
+    r'\bsped\s*up\b|\bspedup\b|\bspeed\s*up\b|\bspeedup\b|\bnightcore\b|'
+    r'\bpitched\b|\d+(?:\.\d+)?x|\b8d\b|\breupload(?:ed|ing)?\b|\breup\b|'
+    r'\bremaster(?:ed)?\b|\boriginal\s*speed\b|\bslowed\b|\breverb\b|'
+    r'\bextended\b|\bshort\s*ver(?:sion)?\b|renamed:)')
 
 # 【...】 groups (event, channel, "アニメMV", a rewrite's own title). Stripped
 # whole, edges first: the text inside is never the song name.
 _CJK_BRACKET_RE = re.compile(r'【[^】]*】|〖[^〗]*〗')
+
+# --- retitle v2 additions ----------------------------------------------------
+# Variant tags that don't change which song this is. Deletion only: these are
+# removed for matching AND from the cleaned title, the song name underneath is
+# never rephrased.
+_VARIANT_NOISE_RE = re.compile(
+    r'(?i)\b(?:sped\s*up|spedup|speed\s*up|speedup|nightcore|pitched|'
+    r'\d+(?:\.\d+)?x|8d|8d\s*audio|reupload(?:ed|ing)?|reup|re-?upload(?:ed)?|'
+    r'remaster(?:ed)?|original\s*speed|original\s*ver(?:sion)?|slowed|'
+    r'slowed\s*\+\s*reverb|slowed\s*reverb|reverb|extended|short\s*ver(?:sion)?)\b')
+# Server-side rename marker on dashboard rows and raw feeds.
+_RENAMED_RE = re.compile(r'(?i)\s+renamed:\s*.*$')
+# A trailing 11-char YouTube id in parens, which rendered lists append.
+_VID_TRAIL_RE = re.compile(r'\s*\(([A-Za-z0-9_-]{11})\)\s*$')
+# Unicode junk that never belongs in a title: replacement char, box, swastika,
+# private-use, zero-width, BOM, soft hyphen, control.
+_GARBAGE_CHARS_RE = re.compile(
+    '[\u25AF\u25A1\u25A0\uFFFD\u535D\u534D\uFEFF\u200B\u200C\u200D\u200E\u200F'
+    '\u00AD\u0000-\u001F\u007F\uE000-\uF8FF\U000F0000-\U000FFFFD\uFE0F\uFE0E]')
+# Homoglyph folding for the COMPARISON key only, never for display. A title
+# mixing Cyrillic and Latin (or a stray Cyrillic letter in a Latin word) must
+# still match its clean original.
+_HOMOGLYPHS = {
+    'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y',
+    'к': 'k', 'і': 'i', 'ј': 'j', 'м': 'm', 'н': 'n', 'в': 'b', 'т': 't',
+    'А': 'A', 'Е': 'E', 'О': 'O', 'Р': 'P', 'С': 'C', 'Х': 'X', 'К': 'K',
+    'М': 'M', 'Н': 'H', 'В': 'B', 'Т': 'T', 'У': 'Y', 'І': 'I',
+}
+# Instrumental / karaoke / off-vocal: no vocal lyrics to find.
+_INSTRUMENTAL_RE = re.compile(
+    r'(?i)\b(?:instrumental|inst\.?|karaoke|kara|off[\s-]*vocal|offvocal|'
+    r'no\s*vocals?|no\s*vocal|backing\s*track|伴奏|纯音乐|純音樂|'
+    r'karaoke\s*version|instrumental\s*version|inst\s*ver(?:sion)?)\b|'
+    r'\[instrumental\]|【伴奏】|\(instrumental\)')
+# Content that is not a single song; retitle cannot help and providers should
+# not be hit.
+_NON_SONG_RE = re.compile(
+    r'(?i)\b(?:station|stream|radiostation|radio\s*station|live\s*stream|'
+    r'24/7|247|soundtrack|ost|menu\s*theme|theme\s*music|sound\s*effects?|sfx|'
+    r'ringtone|ambient|white\s*noise|guided\s*meditation|study\s*with|'
+    r'score)\b')
+
 
 
 def title_has_decoration(song):
@@ -958,6 +1012,10 @@ def _retitle_via_regex(song, artist):
     t = song or ''
     a = artist or ''
 
+    # A server-side rename marker is not part of the song name. Strip it
+    # BEFORE splitting "Song - Artist", or it lands in the artist.
+    t = _RENAMED_RE.sub('', t)
+
     # Strip official/cover/yt noise. Substitute a SPACE, never '': the closing
     # bracket is part of the match, so "TIME(Cover)Kobo" collapsed into
     # "TIMEKobo" and the mashed string was cached as the song title.
@@ -965,6 +1023,7 @@ def _retitle_via_regex(song, artist):
     t = _OFFICIAL_NOISE_RE.sub(' ', t)
     t = _COVER_NOISE_RE.sub(' ', t)
     t = _YT_NOISE_RE.sub(' ', t)
+    t = _VARIANT_NOISE_RE.sub(' ', t)
     t = _FEAT_TITLE_RE.sub(' ', t)
 
     # "Song - Artist" split. Only when the tail is actually adopted -- the
@@ -976,7 +1035,17 @@ def _retitle_via_regex(song, artist):
         a = parts[1].strip()
 
     t = _clean_title_text(t)
+    # Artist gets the same noise + junk + empty-bracket treatment, minus the
+    # Song-Artist split (already done above) and minus variant tags that
+    # belong to the song, not the artist.
+    a = _RENAMED_RE.sub('', a)
+    a = _VID_TRAIL_RE.sub('', a)
+    a = _GARBAGE_CHARS_RE.sub('', a)
+    a = _CJK_BRACKET_RE.sub(' ', a)
+    a = _OFFICIAL_NOISE_RE.sub(' ', a)
+    a = _YT_NOISE_RE.sub(' ', a)
     a = re.sub(r'\s+', ' ', a).strip(' -_./')
+    a = _clean_title_text(a)
 
     if not t:
         t = song or ''
@@ -992,7 +1061,10 @@ _EMPTY_BRACKET_RE = re.compile(r'(?:\(\s*\)|\[\s*\]|\{\s*\}|（\s*）|【\s*】|
 
 
 def _clean_title_text(t):
-    """Collapse whitespace and drop empty bracket pairs. Never raises."""
+    """Collapse whitespace, drop empty brackets, remove junk. Never raises."""
+    t = _RENAMED_RE.sub('', t or '')
+    t = _VID_TRAIL_RE.sub('', t)
+    t = _GARBAGE_CHARS_RE.sub('', t)
     prev = None
     while prev != t:
         prev = t
@@ -1002,7 +1074,55 @@ def _clean_title_text(t):
 
 def norm_title(s):
     """Loose compare key: case, whitespace and separator insensitive."""
-    return re.sub(r'[\s\-–—_/｜|·、,，]+', '', (s or '')).lower()
+    s = (s or '').lower()
+    s = _GARBAGE_CHARS_RE.sub('', s)
+    s = _RENAMED_RE.sub('', s)
+    s = _VID_TRAIL_RE.sub('', s)
+    s = ''.join(_HOMOGLYPHS.get(ch, ch) for ch in s)
+    return re.sub(r'[\s\-–—_/｜|·、,，]+', '', s)
+
+
+def is_instrumental_title(song):
+    """True when the title says there are no vocals (karaoke/off-vocal)."""
+    return bool(_INSTRUMENTAL_RE.search(song or ''))
+
+
+def is_non_song(song, artist=''):
+    """True when the entry is not a single song (station, score, stream...)."""
+    blob = f"{song or ''} {artist or ''}"
+    return bool(_NON_SONG_RE.search(blob))
+
+
+def variant_kind(song):
+    """Which variant family a title belongs to, for dedup. 'original' if none."""
+    s = (song or '').lower()
+    if re.search(r'\b(?:cover|covered|翻唱|歌ってみた|カバー|커버|self\s*cover)\b', s):
+        return 'cover'
+    if re.search(r'\b(?:reupload(?:ed|ing)?|reup|re-?upload(?:ed)?)\b', s):
+        return 'reupload'
+    if re.search(r'\b(?:sped\s*up|spedup|speed\s*up|speedup|nightcore|pitched|\d+(?:\.\d+)?x)\b', s):
+        return 'sped-up'
+    if re.search(r'\b(?:slowed|slowed\s*reverb|slowed\s*\+\s*reverb|8d)\b', s):
+        return 'slowed'
+    if re.search(r'\bremix\b', s):
+        return 'remix'
+    if re.search(r'\b(?:remaster(?:ed)?|original\s*speed)\b', s):
+        return 'original-speed'
+    if re.search(r'\b(?:extended|full\s*ver(?:sion)?)\b', s):
+        return 'extended'
+    return 'original'
+
+
+def classify_track(song, artist=''):
+    """Coarse classification for retitle/unlyriced handling."""
+    if is_instrumental_title(song):
+        return 'instrumental'
+    if is_non_song(song, artist):
+        return 'non-song'
+    k = variant_kind(song)
+    if k != 'original':
+        return k
+    return 'original'
 
 
 def retitle_reject_reason(orig_song, orig_artist, new_title, new_artist):
