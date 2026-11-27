@@ -2,6 +2,13 @@
   "cohere_keys": [],
   "chat": [
     {
+      "name": "ciallo",
+      "base_url": "https://ciallo.bar/v1",
+      "api_key": "",
+      "model": "gpt-6-luna",
+      "use_for": ["translate", "retitle"]
+    },
+    {
       "name": "orcarouter",
       "base_url": "https://api.orcarouter.ai/v1",
       "api_key": "",

@@ -27,7 +27,7 @@ import logging
 # Keys are NEVER hardcoded here: they load from config/ai_providers.json
 # (gitignored; see config/ai_providers.example.json) plus env vars.
 # server/ai_providers.py owns file/env merging.
-from .ai_providers import load_cohere_keys, load_chat_providers
+from .ai_providers import PREFERRED_CHAT, load_cohere_keys, load_chat_providers
 
 COHERE_API_KEYS = []  # compat mirror, refreshed in place on every access
 _cohere_key_idx = 0
@@ -54,17 +54,17 @@ _refresh_cohere_keys()
 
 
 # ------------------------------------------------------------
-# OpenAI-compatible chat fallback (e.g. OrcaRouter):
-# providers come from config/ai_providers.json + ORCAROUTER_API_KEY env.
+# OpenAI-compatible chat providers come from config/ai_providers.json or env.
 # Each entry carries its own url (base_url), headers, key, and model,
 # so a new provider is one JSON object (or one dashboard submit) away.
 # ------------------------------------------------------------
-def _chat_provider(use):
+def _chat_provider(use, preferred=False):
     try:
         providers = load_chat_providers(use)
     except Exception:
         return None
-    return providers[0] if providers else None
+    return next((p for p in providers
+                 if (p.get('name') == PREFERRED_CHAT) == preferred), None)
 
 
 def orca_enabled():
@@ -77,10 +77,20 @@ def translate_last_error():
     return getattr(_TLS, 'last_error', None)
 
 
-def orca_chat(messages, timeout=60, max_tokens=4000):
-    """Raw OpenAI-compatible chat call via the first translate provider.
+def _chat_payload(provider, messages, max_tokens):
+    body = {'model': provider.get('model') or 'orcarouter/free', 'messages': messages}
+    if provider.get('name') == PREFERRED_CHAT:
+        body['max_completion_tokens'] = max_tokens
+    else:
+        body.update(temperature=0.2, max_tokens=max_tokens)
+    return body
+
+
+def chat_completion(messages, timeout=60, max_tokens=4000, *,
+                    use='translate', preferred=False):
+    """Raw OpenAI-compatible chat call for the requested task.
     Returns text or None. Never raises."""
-    p = _chat_provider('translate')
+    p = _chat_provider(use, preferred=preferred)
     if not p:
         return None
     key = (p.get('api_key') or '').strip()
@@ -95,9 +105,7 @@ def orca_chat(messages, timeout=60, max_tokens=4000):
         resp = requests.post(
             base + '/chat/completions',
             headers=headers,
-            json={'model': p.get('model') or 'orcarouter/free',
-                  'messages': messages,
-                  'temperature': 0.2, 'max_tokens': max_tokens},
+            json=_chat_payload(p, messages, max_tokens),
             timeout=timeout,
         )
         if resp.status_code == 429:
@@ -106,17 +114,21 @@ def orca_chat(messages, timeout=60, max_tokens=4000):
             return None
         if resp.status_code != 200:
             _TLS.last_error = 'error'
-            print(f"  [Chat:{p.get('name', '?')}] Error {resp.status_code}: {resp.text[:200]}")
+            print(f"  [Chat:{p.get('name', '?')}] HTTP {resp.status_code}")
             return None
-        return resp.json()['choices'][0]['message']['content']
+        text = resp.json()['choices'][0]['message']['content']
+        if isinstance(text, str) and text.strip():
+            _TLS.last_error = None
+            return text
+        _TLS.last_error = 'error'
     except Exception as e:
         _TLS.last_error = 'error'
-        print(f"  [Chat:{p.get('name', '?')}] Exception: {e}")
-        return None
+        print(f"  [Chat:{p.get('name', '?')}] Exception: {type(e).__name__}")
+    return None
 
 
 def _parse_numbered_lines(translated_text, texts):
-    """Parse '[1] ...' lines back into an order-aligned list."""
+    """Parse '[1] ...' lines, returning None if no usable lines arrived."""
     result_map = {}
     for line in (translated_text or '').split('\n'):
         line = line.strip()
@@ -124,9 +136,13 @@ def _parse_numbered_lines(translated_text, texts):
             try:
                 bracket_end = line.index(']')
                 idx = int(line[1:bracket_end])
-                result_map[idx] = line[bracket_end + 1:].strip()
+                text = line[bracket_end + 1:].strip()
+                if 1 <= idx <= len(texts) and text:
+                    result_map[idx] = text
             except Exception:
                 pass
+    if not result_map:
+        return None
     return [result_map.get(i + 1, texts[i]) for i in range(len(texts))]
 
 
@@ -171,19 +187,18 @@ def _translate_prompt(texts, target_lang):
     )
 
 
-def orca_chat_translate(texts, target_lang='zh-TW'):
-    """Translate lines via OrcaRouter. Returns list or None. Never raises."""
+def _chat_translate(texts, target_lang='zh-TW', *, preferred=False):
+    """Translate lines via an OpenAI-compatible provider."""
     if not texts:
         return []
-    text = orca_chat([{'role': 'user', 'content': _translate_prompt(texts, target_lang)}], timeout=90)
+    text = chat_completion([{'role': 'user', 'content': _translate_prompt(texts, target_lang)}],
+                           timeout=90, preferred=preferred)
     if not text:
         return None
-    try:
-        return _parse_numbered_lines(text, texts)
-    except Exception as e:
+    result = _parse_numbered_lines(text, texts)
+    if result is None:
         _TLS.last_error = 'error'
-        print(f'  [Orca] Parse failed: {e}')
-        return None
+    return result
 
 import os
 from .paths import LYRICS_DIR, TRANSLATE_DIR
@@ -476,7 +491,7 @@ def find_stale_han_rows(lyrics, target_lang, song_lang=''):
 
 
 def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
-    """Translate a list of text lines using Cohere Command A Translate.
+    """Translate a list of text lines using the configured providers.
     song_lang (e.g. 'ja' from _detect_song_lang): for a non-Chinese song,
     Han-script lines are kanji, not Chinese -- translate them instead of
     skipping as already-Chinese."""
@@ -518,12 +533,15 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
 
     if to_translate_idx:
         subset = [texts[i] for i in to_translate_idx]
-        translated_subset = _cohere_translate_raw(subset, target_lang)
-        used_orca = False
+        fn = functools.partial(_chat_translate, preferred=True)
+        translated_subset = fn(subset, target_lang)
+        if translated_subset is None:
+            fn = _cohere_translate_raw
+            translated_subset = fn(subset, target_lang)
         if translated_subset is None and orca_enabled():
             print('  [Cohere] all keys failed, trying chat-provider fallback...')
-            translated_subset = orca_chat_translate(subset, target_lang)
-            used_orca = translated_subset is not None
+            fn = _chat_translate
+            translated_subset = fn(subset, target_lang)
         if translated_subset is None:
             # Total API failure: serve originals but do NOT cache them, or
             # every later lookup would serve the failure as a translation.
@@ -537,7 +555,6 @@ def cohere_translate(texts, target_lang='zh-TW', song_lang=''):
                if _echoes_original(subset[i], translated_subset[i])]
         if bad:
             print(f"  [Cohere] {len(bad)} line(s) echo the original, retrying once...")
-            fn = orca_chat_translate if used_orca else _cohere_translate_raw
             retry = fn([subset[i] for i in bad], target_lang)
             if retry is not None:
                 for k, i in enumerate(bad):
@@ -955,11 +972,11 @@ def _cohere_translate_stream(texts, target_lang):
     raise RuntimeError('Cohere stream failed on every key')
 
 
-def _chat_stream_deltas(messages, max_tokens=4000):
-    """Stream text deltas from the first 'translate' chat provider
+def _chat_stream_deltas(messages, max_tokens=4000, *, preferred=False):
+    """Stream text deltas from the selected 'translate' chat provider
     (OpenAI-compatible: `stream: true` -> choices[].delta.content).
     Raises RuntimeError when the provider is missing or the call fails."""
-    p = _chat_provider('translate')
+    p = _chat_provider('translate', preferred=preferred)
     if not p:
         raise RuntimeError('no chat provider configured')
     key = (p.get('api_key') or '').strip()
@@ -977,9 +994,7 @@ def _chat_stream_deltas(messages, max_tokens=4000):
         resp = requests.post(
             base + '/chat/completions',
             headers=headers,
-            json={'model': p.get('model') or 'orcarouter/free',
-                  'messages': messages, 'temperature': 0.2,
-                  'max_tokens': max_tokens, 'stream': True},
+            json={**_chat_payload(p, messages, max_tokens), 'stream': True},
             stream=True,
             timeout=(10, 60),
         )
@@ -1059,6 +1074,7 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
         # Fold the events into the final per-line text. Last event wins, so a
         # line that streamed partials ends up with its completed text.
         latest = {}
+        emitted = set()
 
         def _run(deltas):
             """Feed a delta iterator through a fresh parser, yielding every
@@ -1088,28 +1104,34 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
                     text = trimmed if trimmed and not _echoes_original(
                         subset[prompt_i - 1], trimmed) else subset[prompt_i - 1]
                 latest[prompt_i] = text
+                emitted.add(prompt_i)
                 out = dict(ev)
                 out['text'] = text
                 out['i'] = to_translate_idx[prompt_i - 1]
                 yield out
 
-        engine = 'cohere'
-        try:
-            for ev in _run(_cohere_translate_stream(subset, target_lang)):
-                yield ev
-        except Exception as e:
-            print(f"  [Cohere] {e}; trying chat-provider stream fallback...")
+        messages = [{'role': 'user', 'content': _translate_prompt(subset, target_lang)}]
+        preferred_retry = functools.partial(_chat_translate, preferred=True)
+        engines = [
+            ('Cohere', lambda: _cohere_translate_stream(subset, target_lang), _cohere_translate_raw),
+        ]
+        if _chat_provider('translate', preferred=True):
+            engines.insert(0, ('Ciallo', lambda: _chat_stream_deltas(messages, preferred=True),
+                               preferred_retry))
+        if orca_enabled():
+            engines.append(('Chat', lambda: _chat_stream_deltas(messages), _chat_translate))
+        for label, stream, retry_fn in engines:
             latest.clear()
-            engine = 'chat'
             try:
-                for ev in _run(_chat_stream_deltas(
-                        [{'role': 'user', 'content': _translate_prompt(subset, target_lang)}])):
-                    yield ev
-            except Exception as e2:
-                print(f"  [Chat] stream failed too: {e2}")
-        produced = bool(latest)
+                yield from _run(stream())
+                if latest:
+                    break
+                print(f"  [{label}] Stream produced no numbered lines")
+            except Exception as e:
+                latest.clear()
+                print(f"  [{label}] Stream failed: {type(e).__name__}")
 
-        if not produced:
+        if not latest:
             # Nothing came back at all: hand the job to the blocking path
             # (it retries the keys, the chat provider, and keeps the
             # originals uncached when the API is simply down).
@@ -1123,6 +1145,10 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
         for prompt_i, text in latest.items():
             if 1 <= prompt_i <= len(to_translate_idx):
                 results[to_translate_idx[prompt_i - 1]] = text
+        for prompt_i in sorted(emitted - latest.keys()):
+            # Replace any stale text the client saw from a failed stream.
+            i = to_translate_idx[prompt_i - 1]
+            yield {'i': i, 'text': results[i], 'done': True}
 
         # Belt-and-braces: the delta loop above already repairs echoes before
         # painting, so an echo reaching here means something slipped past it
@@ -1132,7 +1158,6 @@ def translate_stream(texts, target_lang='zh-TW', song_lang=''):
                if _echoes_original(subset[k], results[to_translate_idx[k]])]
         if bad:
             print(f"  [Cohere] {len(bad)} line(s) echo the original, retrying once...")
-            retry_fn = orca_chat_translate if engine == 'chat' else _cohere_translate_raw
             retry = retry_fn([subset[k] for k in bad], target_lang)
             if retry is not None:
                 for j, k in enumerate(bad):
@@ -1508,5 +1533,3 @@ def translate_queue_stats():
     s['workers'] = workers
     s['target'] = target
     return s
-
-

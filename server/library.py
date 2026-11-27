@@ -18,7 +18,7 @@ from .cache import (
 from .rerace import _tier, _rerace_video
 from .race import _wbw_line_count
 from .translate import (
-    cohere_key_list, get_cohere_key, rotate_cohere_key, cohere_translate,
+    chat_completion, cohere_key_list, get_cohere_key, rotate_cohere_key, cohere_translate,
     _detect_song_lang, lyrics_sample, translatable_rows,
 )
 from .paths import (
@@ -897,7 +897,7 @@ _FEAT_TITLE_RE = re.compile(
 
 
 def retitle_song(song, artist):
-    """Clean a song title + artist using Cohere LLM. Returns {title, artist}.
+    """Clean a song title + artist using an LLM. Returns {title, artist}.
     On any failure, falls back to regex-based cleaning. Never raises.
 
     Check retitle_batch() first if you have many pairs: it fills the same
@@ -932,9 +932,15 @@ def retitle_song(song, artist):
 
 
 def _retitle_via_llm(song, artist):
-    """Call Cohere for retitling. Returns {title, artist} or None."""
+    """Call the preferred chat provider, then the existing fallbacks."""
     prompt = _RETITLE_PROMPT_TEMPLATE.format(
         title=song or '', artist=artist or '')
+    messages = [{"role": "user", "content": prompt}]
+    text = chat_completion(messages, timeout=(10, 30), use='retitle', preferred=True)
+    if text:
+        parsed = _parse_json_from_text(text, song, artist)
+        if parsed is not None:
+            return parsed
     for attempt in range(len(cohere_key_list())):
         try:
             import requests as _requests
@@ -949,7 +955,7 @@ def _retitle_via_llm(song, artist):
                 },
                 json={
                     "model": _RETITLE_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                 },
                 timeout=30,
             )
@@ -968,40 +974,30 @@ def _retitle_via_llm(song, artist):
             print(f"  [RETITLE] [WARN] LLM error: {e}")
             rotate_cohere_key()
     print(f"  [RETITLE] [WARN] all LLM keys exhausted")
-    # Chat-provider fallback (config/ai_providers.json + ORCAROUTER_API_KEY
-    # env). Same JSON contract.
-    try:
-        from .translate import orca_enabled, orca_chat
-        if orca_enabled():
-            print("  [RETITLE] trying chat-provider fallback...")
-            text = orca_chat(
-                [{"role": "user", "content": prompt}], timeout=90)
-            if text:
-                parsed = _parse_json_from_text(text, song, artist)
-                if parsed:
-                    return parsed
-                print("  [RETITLE] [WARN] Orca reply had no JSON")
-    except Exception as e:
-        print(f"  [RETITLE] [WARN] Orca fallback error: {e}")
-    return None
+    text = chat_completion(messages, timeout=90, use='retitle')
+    return _parse_json_from_text(text, song, artist) if text else None
 
 
 def _parse_json_from_text(text, fallback_title, fallback_artist):
     """Extract the first {...} JSON from LLM output. Returns {title, artist}."""
+    def parse(raw):
+        obj = json.loads(raw)
+        if not isinstance(obj, dict) or not isinstance(obj.get('title'), str):
+            return None
+        artist = obj.get('artist', fallback_artist) or ''
+        if isinstance(artist, str):
+            return {'title': obj['title'], 'artist': artist}
+
     # Try direct parse first
     try:
-        obj = json.loads(text)
-        if 'title' in obj:
-            return {'title': obj['title'], 'artist': obj.get('artist', fallback_artist)}
+        return parse(text)
     except Exception:
         pass
     # Regex: find first { ... }
     m = re.search(r'\{[^{}]*\}', text)
     if m:
         try:
-            obj = json.loads(m.group(0))
-            if 'title' in obj:
-                return {'title': obj['title'], 'artist': obj.get('artist', fallback_artist)}
+            return parse(m.group(0))
         except Exception:
             pass
     return None
@@ -1253,6 +1249,12 @@ def _retitle_chunk_via_llm(chunk):
     for i, (_k, s, a) in enumerate(chunk):
         lines.append(f"{i}. Title: {s}\n   Artist: {a}")
     prompt = _BATCH_PROMPT_HEADER + "\n".join(lines)
+    messages = [{"role": "user", "content": prompt}]
+    text = chat_completion(messages, timeout=(10, 120), use='retitle', preferred=True)
+    if text:
+        answers = _parse_batch_from_text(text, chunk)
+        if answers is not None:
+            return answers
 
     for attempt in range(max(1, len(cohere_key_list()))):
         try:
@@ -1268,7 +1270,7 @@ def _retitle_chunk_via_llm(chunk):
                 },
                 json={
                     "model": _RETITLE_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                 },
                 timeout=120,
             )
@@ -1322,8 +1324,11 @@ def _parse_batch_from_text(text, chunk):
         if idx < 0 or idx >= len(chunk):
             continue
         _k, s, a = chunk[idx]
-        t = (item.get('title') or '').strip()
-        na = (item.get('artist') or '').strip() or a
+        t = item.get('title') or ''
+        na = item.get('artist') or ''
+        if not isinstance(t, str) or not isinstance(na, str):
+            continue
+        t, na = t.strip(), na.strip() or a
         reason = retitle_reject_reason(s, a, t, na)
         if not reason and not retitle_text_matches(s, t):
             reason = 'answer is not the original title minus decoration'
@@ -1334,6 +1339,8 @@ def _parse_batch_from_text(text, chunk):
         out[idx] = {'title': t, 'artist': na}
     if rejected:
         print(f"[RETITLE] [WARN] batch: {rejected} answer(s) rejected, used regex")
+    if not out:
+        return None
     for i in range(len(chunk)):
         out.setdefault(i, _retitle_via_regex(chunk[i][1], chunk[i][2]))
     for i, val in out.items():
@@ -1358,4 +1365,3 @@ def retitle_cache_clear():
         n = len(_retitled_cache)
         _retitled_cache.clear()
     return n
-

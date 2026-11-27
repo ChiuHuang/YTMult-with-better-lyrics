@@ -17,6 +17,7 @@
 # Env (merged with the file, same priority):
 #   YTMU_COHERE_KEYS="k1,k2"  ORCAROUTER_API_KEY="<key-here>"
 #   YTMU_ORCA_BASE=...  YTMU_ORCA_MODEL=...
+#   YTMU_CIALLO_API_KEY="<key-here>"  (preferred for translate and retitle)
 import json
 import os
 import re
@@ -24,6 +25,7 @@ import threading
 
 _PATH = 'config/ai_providers.json'
 _LOCK = threading.Lock()
+PREFERRED_CHAT = 'ciallo'
 
 
 def _env_list(name):
@@ -79,6 +81,20 @@ def _env_chat_provider():
     }
 
 
+def _env_ciallo_provider():
+    key = os.environ.get('YTMU_CIALLO_API_KEY', '').strip()
+    if not key:
+        return None
+    return {
+        'name': PREFERRED_CHAT,
+        'base_url': 'https://ciallo.bar/v1',
+        'api_key': key,
+        'model': 'gpt-6-luna',
+        'use_for': ['translate', 'retitle'],
+        'from_env': True,
+    }
+
+
 def load_cohere_keys():
     """All Cohere keys: file + YTMU_COHERE_KEYS env, deduped, non-empty."""
     with _LOCK:
@@ -92,7 +108,7 @@ def load_cohere_keys():
 
 
 def load_chat_providers(use=None):
-    """OpenAI-compatible chat providers: file + ORCAROUTER_API_KEY env.
+    """OpenAI-compatible chat providers from the file and environment.
     use filters by 'translate'/'retitle'. Never raises."""
     with _LOCK:
         d = _load_file()
@@ -100,7 +116,11 @@ def load_chat_providers(use=None):
                      if isinstance(p, dict) and p.get('api_key')]
     env_p = _env_chat_provider()
     if env_p and not any(p.get('name') == env_p['name'] for p in providers):
+        env_p['from_env'] = True
         providers.append(env_p)
+    ciallo = _env_ciallo_provider()
+    if ciallo:
+        providers = [ciallo] + [p for p in providers if p.get('name') != PREFERRED_CHAT]
     if use:
         providers = [p for p in providers
                      if use in (p.get('use_for') or ['translate', 'retitle'])]
@@ -127,8 +147,7 @@ def list_masked():
                   'base_url': p.get('base_url', ''),
                   'use_for': p.get('use_for') or [],
                   'masked': mask_key(p.get('api_key', '')),
-                  'from_env': p.get('name') == 'orcarouter'
-                  and bool(os.environ.get('ORCAROUTER_API_KEY'))}
+                   'from_env': bool(p.get('from_env'))}
                  for p in chats],
     }
 

@@ -145,6 +145,11 @@ python proxy_server.py        # listens on :20016
 - Add your own translation keys in `config/ai_providers.json` (there is an
   `.example.json` to copy). Config files are created on first use and are
   never committed.
+- To use `gpt-6-luna` for retitling and lyrics translation, set
+  `YTMU_CIALLO_API_KEY` in the server's environment and restart, or fill in the
+  `ciallo` entry in `config/ai_providers.json`. This sends uncached retitle and
+  translation requests to `https://ciallo.bar/v1` first; existing caches and
+  fallback providers remain in use.
 - The dashboard is password-gated and opens on first run so you can set one.
 - Debug features stay off until you pair a device; a normal install only asks
   for lyrics and sends one anonymous count ping.
