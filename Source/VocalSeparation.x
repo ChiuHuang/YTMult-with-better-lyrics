@@ -47,8 +47,7 @@ BOOL YTMUSingUnlocked(void) {
     if (self) {
         _vocalVolume = 1.0f;
         _backgroundVolume = 1.0f;
-        NSNumber *savedMode = [[NSUserDefaults standardUserDefaults] objectForKey:@"YTMUVocalSeparationMode"];
-        _selectedMode = savedMode ? (YTMUVocalSeparationMode)MIN(2, MAX(0, savedMode.integerValue)) : YTMUVocalSeparationModeNormal;
+        _selectedMode = YTMUVocalSeparationModeNormal;
         _pendingModelCompletions = [NSMutableArray array];
         [self setSelectedMode:_selectedMode];
         [self checkModelStatus];
@@ -64,7 +63,9 @@ BOOL YTMUSingUnlocked(void) {
     // audio stage is attached: vocals-only, original, background-only.
     self.vocalVolume = _selectedMode == YTMUVocalSeparationModeBackgroundOnly ? 0.0f : 1.0f;
     self.backgroundVolume = _selectedMode == YTMUVocalSeparationModeVocalOnly ? 0.0f : 1.0f;
-    [[NSUserDefaults standardUserDefaults] setInteger:_selectedMode forKey:@"YTMUVocalSeparationMode"];
+    if (changed && nextMode != YTMUVocalSeparationModeNormal && YTMUSingUnlocked() && !YTMUSingStreamIsActive())
+        YTMUSingStreamSetActive(YES);
+    if (changed) YTMUSingPlaybackTick();
     if (changed) [[NSNotificationCenter defaultCenter] postNotificationName:YTMUVocalSeparationModeDidChange object:self];
 }
 

@@ -27,6 +27,8 @@
   `Open / pending`: only what is genuinely not done.
 
 Current:
+- `[DONE] ses_sing_sync | connected MDX playback to the original player's clock and mute; Taptic uses amplitude-driven motor events | next: verify Sing and Taptic on device with paired capture`
+- `[DONE] ses_luna_deploy | deployed 2df5d00 to the lyrics container; HTTPS and both Luna API modes verified`
 - `[DONE] ses_luna_20261127 | Ciallo GPT-6 Luna preferred for new retitle and lyrics translation requests; configure a fresh key on the deployed server`
 - `[ACTIVE] ses_retitle_v2_20261126 | retitle v2 rules (6a9f52d, server-only): on top of existing only-DELETE model (retitle_text_matches + retitle_reject_reason unchanged) -- variant noise removal (sped-up/slowed/nightcore/8d/reverb/reupload/remastered/original-speed/extended/original-version/short-ver/Nx), junk chars (replacement, box, 卍, BOM, zero-width, soft-hyphen, control, PUA, VS), homoglyph folding for COMPARISON key only, `renamed:` strip before Song-Artist split, trailing 11-char vid strip, artist same noise cleanup, LLM prompt updated deletion-only. Classification helpers NOT wired into unlyriced: is_instrumental_title / is_non_song / variant_kind / classify_track. DEPLOYED server must PULL. Separately shipped raw LZMA archive d82dba9 + still open "..." lyric line + light-theme phase 2`
 - `[DONE] ses_taptic_speaker_20261117 | Taptic Speaker shipped in Build 465 (whole-file caf for downloads b7b7a23 + chunked re-stream of the captured googlevideo URL d3332f8 + nonnull options fix dd847c2); CoreHaptics AudioCustom event, NOT PCM tap (onset/peak atomics have no writer) | files: Source/MusicHaptics.x, Source/Downloading.x, Source/LyricsShared.h, Source/Prefs/SingSettingsController.m, 14 lproj | next: device check -- test row in Music Haptics section plays the song through the motor; streamed songs lag 1-2 s; TRAP: build 460 was only the AGENTS.md push, the first two taptic runs were cancelled (arm64 runner) before any code ran`
@@ -414,7 +416,8 @@ reader needs.
   real data needs real fixtures (`_extract_video_id` is exactly 11 chars).
 
 ## Done recently (digest — details are in the commit messages, `git show <sha>`)
-- `Ciallo integration` — `YTMU_CIALLO_API_KEY` or the `ciallo` chat entry enables GPT-6 Luna ahead of existing providers for single/batch retitle and blocking/SSE translate. Cache hits still bypass providers; mock HTTP verified priority and fallback, not live credentials.
+- `Sing playback` — prepare stereo 44.1 kHz, render selected MDX windows off-thread, mute only with a matched playing AVPlayer and a started stem; Taptic now uses continuous haptic events. Debug capture sources: sing, sing-player-path, taptic. Device verification pending.
+- `2df5d00` — GPT-6 Luna preferred for single/batch retitle and blocking/SSE translate. Deployed to Pelican container `80581121-b6c9-4f15-b147-f33398835e42`; key in the ignored config (0600), live blocking/SSE requests returned text. Cache hits still bypass providers.
 - `unreleased` — ISRC resolution prefers playback metadata, searches MusicBrainz by title and ranks title/artist credits; strong haptics reach full intensity; README stats read live badge endpoints. Trap: Vitrine uses Spotify-private track metadata, which YouTube Music does not expose through the same interface.
 - `716b99d` + `5e9b141` — the wipe is ONE continuous sweep (knots {ms,x,slope} per
   VISUAL row, fixed-width feather strip, Fritsch-Carlson) and the distance ladder

@@ -24,3 +24,7 @@ typedef NS_ENUM(NSInteger, YTMUVocalSeparationMode) {
 - (BOOL)hasModelOnDisk;
 - (void)loadModelIfAvailableWithCompletion:(void (^)(BOOL ready, NSError *error))completion;
 @end
+
+// Accessed on the main thread. Preparation alone never selects a stem.
+NSString *YTMUSingPreparedAudio(NSString *videoID);
+void YTMUSingPlaybackTick(void);

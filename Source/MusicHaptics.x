@@ -11,6 +11,12 @@
 #import <mach/mach_time.h>
 #import <string.h>
 #import "LyricsShared.h"
+#import "VocalSeparation.h"
+
+static void YTMUAudioNote(NSString *source, NSString *message) {
+    NSLog(@"[%@] %@", source, message);
+    YTMUDebugDeviceNoteLog(source, message);
+}
 
 static NSMutableArray<NSString *> *YTMUISRCRecentLogLines;
 static atomic_uint_fast64_t YTMUAudioLastHostTime;
@@ -158,6 +164,9 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 @property (nonatomic, assign) double tapticBaseEngineTime;
 @property (nonatomic, assign) BOOL tapticPaused;
 @property (nonatomic, assign) BOOL tapticPreparing;
+@property (nonatomic, copy) NSString *manualTapticVid;
+@property (nonatomic, copy) NSString *stoppedTapticVid;
+@property (nonatomic, strong) CHHapticPattern *chunkPattern;
 @property (nonatomic, assign) double lastTapticPlaybackTime;
 @property (nonatomic, assign) NSInteger tapticFrozenChecks;
 // Live mode (streamed songs): the captured googlevideo URL is streamed in
@@ -656,6 +665,7 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 - (void)audioHapticsMonitorTick {
+    YTMUSingPlaybackTick();
     [self tapticMonitorTick];
     // With the fallback off the audio tap has no consumer -- stop capturing
     // so the 40 Hz timer neither works nor wakes the CPU.
@@ -773,13 +783,8 @@ static NSString *YTMUArtistCredit(NSDictionary *recording) {
 }
 
 #pragma mark - Taptic Speaker
-// The song's own audio waveform rendered BY the Taptic Engine (not the
-// speaker): CoreHaptics accepts a registered audio file as a custom event
-// (CHHapticEventTypeAudioCustom), and the motor plays the whole envelope.
-// The YTM audio stream itself cannot be tapped for PCM, so this is a DOUBLE
-// stream: normal playback keeps running from the speakers while a copy of
-// the song drives the motor. Downloaded songs copy the whole file once;
-// streamed songs re-stream the captured googlevideo URL in chunks.
+// Convert each PCM chunk's amplitude into continuous haptic events. Custom
+// audio events target the audio output, not the motor.
 
 #define TAPTIC_LIVE_CHUNK_LEN 10.0
 
@@ -795,7 +800,9 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
 }
 
 - (BOOL)acceptsTapticWork {
-    return self.currentTitle.length > 0 && YTMU(@"musicHaptics") && YTMU(@"tapticSpeaker");
+    if ([self.stoppedTapticVid isEqualToString:g_currentVideoID]) return NO;
+    self.stoppedTapticVid = nil;
+    return [self.manualTapticVid isEqualToString:g_currentVideoID] || (YTMU(@"musicHaptics") && YTMU(@"tapticSpeaker"));
 }
 
 - (NSString *)tapticCAPathForVid:(NSString *)vid {
@@ -933,6 +940,8 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
     self.tapticPaused = NO;
     self.tapticPreparing = NO;
     self.tapticLiveMode = NO;
+    self.chunkPattern = nil;
+    self.manualTapticVid = nil;
     self.tapticLiveURL = nil;
     self.tapticLiveChunk = 0;
     self.tapticLiveResourceChunk = -1;
@@ -950,10 +959,8 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *name in [fm contentsOfDirectoryAtPath:dir error:nil]) {
         if (![name hasSuffix:@".caf"]) continue;
-        if (![name hasPrefix:vid] || name.length <= vid.length + 2) continue;
-        // chunk names look like "<vid>.c3.caf" -- the char right after "<vid>."
-        // is 'c'; the whole-file caf ("<vid>.caf") must survive
-        if ([name characterAtIndex:vid.length + 1] != 'c') continue;
+        if ([name hasPrefix:[vid stringByAppendingString:@"."]] ||
+            [name rangeOfString:@"^[A-Za-z0-9_-]{11}\\.c[0-9]+\\.caf$" options:NSRegularExpressionSearch].location == NSNotFound) continue;
         [fm removeItemAtPath:[dir stringByAppendingPathComponent:name] error:nil];
     }
 }
@@ -963,17 +970,22 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
 // is the one reliable sync signal for the motor copy.
 - (void)tapticHandlePlaybackState:(NSDictionary *)info {
     if (![self acceptsTapticWork]) {
-        if (self.tapticPlayer || self.tapticResourceRegistered) {
+        if (self.tapticPlayer || self.tapticLiveMode || self.tapticResourceRegistered) {
             [self tapticTeardown];
             NSLog(@"[YTMU-Taptic] stopped (pref or track changed)");
         }
         return;
     }
-    double rate = [info[@"MPNowPlayingInfoPropertyPlaybackRate"] doubleValue];
-    double elapsed = [info[@"MPNowPlayingInfoPropertyElapsedPlaybackTime"] doubleValue];
-    NSString *vid = self.currentVideoID;
+    NSNumber *rateValue = info[MPNowPlayingInfoPropertyPlaybackRate];
+    if (!rateValue) return;
+    double rate = rateValue.doubleValue;
+    NSNumber *elapsedValue = info[MPNowPlayingInfoPropertyElapsedPlaybackTime];
+    double elapsed = elapsedValue ? elapsedValue.doubleValue : g_currentPlaybackTime;
+    NSString *vid = g_currentVideoID ?: self.currentVideoID;
     if (vid.length < 5) return;
     if (rate <= 0.0) {
+        self.lastTapticPlaybackTime = g_currentPlaybackTime;
+        if (self.tapticLiveMode && !self.tapticPlayer) self.tapticPaused = YES;
         if (self.tapticPlayer && !self.tapticPaused) {
             [self.tapticPlayer pauseAtTime:CHHapticTimeImmediate error:nil];
             self.tapticPaused = YES;
@@ -981,21 +993,17 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
         }
         return;
     }
-    if (!self.tapticResourceRegistered || ![self.tapticVid isEqualToString:vid]) {
-        if (YTMULocalAudioPathForVideoID(vid).length) {
-            [self tapticPlayVid:vid offset:elapsed];
-        } else {
-            // streamed song: re-stream its captured URL into the motor, lagging
-            // one chunk conversion behind the song
-            [self tapticPlayLiveVid:vid offset:elapsed];
-        }
+    if (!self.tapticLiveMode || ![self.tapticVid isEqualToString:vid]) {
+        [self tapticPlayLiveVid:vid offset:elapsed];
         return;
     }
     if (self.tapticPaused) {
+        self.tapticPaused = NO;
         [self tapticRealignTo:elapsed];
         NSLog(@"[YTMU-Taptic] resumed at %.1f", elapsed);
         return;
     }
+    if (!self.tapticPlayer) return;
     double expected = self.tapticBaseOffset + (self.engine ? self.engine.currentTime - self.tapticBaseEngineTime : 0.0);
     if (fabs(elapsed - expected) > 1.0) {
         [self tapticRealignTo:elapsed];
@@ -1007,16 +1015,21 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
 // setNowPlayingInfo never arrived (playback clock frozen) and drift from
 // seeks, independently of the audio tap (which never carries raw PCM here).
 - (void)tapticMonitorTick {
+    if (self.tapticLiveMode && g_currentVideoID.length && ![self.tapticVid isEqualToString:g_currentVideoID]) { [self tapticTeardown]; return; }
+    if (self.tapticPaused && self.tapticPlayer && fabs(g_currentPlaybackTime-self.lastTapticPlaybackTime)>0.2) {
+        [self tapticRealignTo:MAX(0.,g_currentPlaybackTime)];
+    }
     if (self.tapticLiveMode && !self.tapticPlayer) {
+        if (self.tapticPaused && fabs(g_currentPlaybackTime-self.lastTapticPlaybackTime)<=0.2) return;
+        self.tapticPaused = NO;
         // parked waiting for a chunk conversion -- start it as soon as the
         // file shows up, give up after 8 s
         if (self.tapticLiveWaitingChunk == NSNotFound) return;
         NSString *path = [self tapticLiveChunkPath:self.tapticLiveWaitingChunk vid:self.tapticVid];
         if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
-            NSInteger chunk = self.tapticLiveWaitingChunk;
-            [self tapticLiveStartChunkAt:chunk * TAPTIC_LIVE_CHUNK_LEN];
-        } else if ([NSDate timeIntervalSinceReferenceDate] - self.tapticLiveWaitSince > 8.0) {
-            NSLog(@"[YTMU-Taptic] chunk %ld never converted, stopping live", (long)self.tapticLiveWaitingChunk);
+            [self tapticLiveStartChunkAt:MAX(0., g_currentPlaybackTime)];
+        } else if ([NSDate timeIntervalSinceReferenceDate] - self.tapticLiveWaitSince > 30.0) {
+            YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Timed out waiting for chunk %ld", (long)self.tapticLiveWaitingChunk]);
             [self tapticTeardown];
         }
         return;
@@ -1069,20 +1082,24 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
     double seek = idx * TAPTIC_LIVE_CHUNK_LEN;
     dispatch_async(YTMUTapticConvertQueue(), ^{
         [MobileFFmpegConfig resetStatistics];
+        NSString *tmp = [dst stringByAppendingString:@".tmp.caf"];
         NSString *cmd = [NSString stringWithFormat:
             @"-y -ss %.2f -i \"%@\" -t %.2f -ac 1 -ar 24000 -c:a pcm_s16le \"%@\"",
-            seek, url, TAPTIC_LIVE_CHUNK_LEN, dst];
+             seek, url, TAPTIC_LIVE_CHUNK_LEN, tmp];
         long rc = [MobileFFmpeg execute:cmd];
+        NSFileManager *fm = NSFileManager.defaultManager;
+        if (!rc && ![fm fileExistsAtPath:dst]) [fm moveItemAtPath:tmp toPath:dst error:nil];
+        [fm removeItemAtPath:tmp error:nil];
         @synchronized(self.tapticLiveConverting) {
             [self.tapticLiveConverting removeObject:@(idx)];
         }
-        if (rc != 0) NSLog(@"[YTMU-Taptic] chunk %ld convert rc=%ld", (long)idx, rc);
+        if (rc != 0) dispatch_async(dispatch_get_main_queue(), ^{ YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Chunk %ld conversion failed rc=%ld", (long)idx, rc]); });
     });
 }
 
 - (void)tapticLiveStartChunkAt:(double)offset {
     [self startEngineIfNeeded];
-    if (!self.engine || !self.tapticLiveMode) return;
+    if (!self.isEngineRunning || !self.tapticLiveMode) { YTMUAudioNote(@"taptic", @"Haptic engine unavailable"); [self tapticTeardown]; return; }
     NSInteger idx = (NSInteger)floor(offset / TAPTIC_LIVE_CHUNK_LEN);
     double intra = offset - idx * TAPTIC_LIVE_CHUNK_LEN;
     NSString *path = [self tapticLiveChunkPath:idx vid:self.tapticVid];
@@ -1100,40 +1117,53 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
     [self.tapticPlayer stopAtTime:CHHapticTimeImmediate error:nil];
     self.tapticPlayer = nil;
     if (self.tapticLiveResourceChunk != idx) {
-        if (self.tapticResourceRegistered) {
-            [self.engine unregisterAudioResource:self.tapticResourceID error:nil];
-            self.tapticResourceRegistered = NO;
-        }
         NSURL *url = [NSURL fileURLWithPath:path];
         NSError *rerr = nil;
-        CHHapticAudioResourceID rid = [self.engine registerAudioResource:url options:@{} error:&rerr];
-        if (rerr) {
-            NSLog(@"[YTMU-Taptic] chunk %ld register failed: %@", (long)idx, rerr);
+        AVAudioFile *file = [[AVAudioFile alloc] initForReading:url error:&rerr];
+        NSMutableArray *events = [NSMutableArray array];
+        if (file && file.length > 0 && file.length <= 11*24000 && file.processingFormat.sampleRate == 24000) {
+            AVAudioPCMBuffer *buf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:file.processingFormat frameCapacity:(AVAudioFrameCount)file.length];
+            if ([file readIntoBuffer:buf error:&rerr] && buf.floatChannelData) {
+                const float *pcm = buf.floatChannelData[0];
+                for (NSUInteger i=0; i<buf.frameLength; i+=2400) {
+                    NSUInteger n = MIN((NSUInteger)2400, buf.frameLength-i);
+                    double sum = 0; for (NSUInteger j=0; j<n; ++j) sum += pcm[i+j]*pcm[i+j];
+                    float level = (float)fmin(1., 2.5*sqrt(sum/n));
+                    [events addObject:[[CHHapticEvent alloc] initWithEventType:CHHapticEventTypeHapticContinuous parameters:@[[[CHHapticEventParameter alloc] initWithParameterID:CHHapticEventParameterIDHapticIntensity value:level]] relativeTime:i/24000. duration:n/24000.]];
+                }
+            }
+        }
+        self.chunkPattern = events.count ? [[CHHapticPattern alloc] initWithEvents:events parameters:@[] error:&rerr] : nil;
+        if (!self.chunkPattern) {
+            YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Chunk %ld envelope unavailable code=%ld", (long)idx, (long)rerr.code]);
             [self tapticTeardown];
             return;
         }
-        self.tapticResourceID = rid;
-        self.tapticResourceRegistered = YES;
         self.tapticLiveResourceChunk = idx;
-        self.tapticDuration = TAPTIC_LIVE_CHUNK_LEN;
+        self.tapticDuration = self.chunkPattern.duration;
     }
-    CHHapticPattern *pattern = [self tapticPattern];
+    CHHapticPattern *pattern = self.chunkPattern;
     if (!pattern) return;
     NSError *perr = nil;
     id<CHHapticAdvancedPatternPlayer> player = [self.engine createAdvancedPlayerWithPattern:pattern error:&perr];
     if (!player || perr) {
-        NSLog(@"[YTMU-Taptic] live player %ld failed: %@", (long)idx, perr);
+        YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Chunk %ld player failed code=%ld", (long)idx, (long)perr.code]);
+        [self tapticTeardown];
         return;
     }
     __weak typeof(self) weakSelf = self;
+    __weak id<CHHapticAdvancedPatternPlayer> weakPlayer = player;
     player.completionHandler = ^(__unused NSError *err) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf tapticLiveChunkDidFinish];
+            if (weakPlayer && weakSelf.tapticPlayer == weakPlayer) [weakSelf tapticLiveChunkDidFinish];
         });
     };
     self.tapticPlayer = player;
-    [player startAtTime:CHHapticTimeImmediate error:nil];
-    if (intra > 0.05) [player seekToOffset:intra error:nil];
+    if (![player startAtTime:CHHapticTimeImmediate error:&perr] || (intra > 0.05 && ![player seekToOffset:intra error:&perr])) {
+        YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Start/seek failed chunk=%ld offset=%.2f code=%ld", (long)idx, intra, (long)perr.code]);
+        [self tapticTeardown]; return;
+    }
+    if (idx != self.tapticLiveChunk || !self.tapticBaseEngineTime) YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Motor started chunk=%ld time=%.2f", (long)idx, offset]);
     self.tapticLiveChunk = idx;
     self.tapticPaused = NO;
     [self tapticMarkAlignedAtOffset:offset];
@@ -1147,9 +1177,9 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
 
 - (void)tapticPlayLiveVid:(NSString *)vid offset:(double)offset {
     if (vid.length < 5) return;
-    NSString *url = YTMUCapturedAudioStreamURL(vid);
+    NSString *url = YTMULocalAudioPathForVideoID(vid) ?: YTMUCapturedAudioStreamURL(vid);
     if (!url.length) {
-        NSLog(@"[YTMU-Taptic] no captured stream URL for vid=%@, motor stays silent", vid);
+        YTMUAudioNote(@"taptic", @"No downloaded audio or captured stream URL");
         [self tapticTeardown];
         return;
     }
@@ -1158,6 +1188,7 @@ static dispatch_queue_t YTMUTapticConvertQueue(void) {
         [self tapticSweepLiveChunksExcept:vid];
     }
     self.tapticLiveURL = url;
+    if (!self.tapticLiveConverting) self.tapticLiveConverting = [NSMutableSet set];
     self.tapticLiveMode = YES;
     self.tapticVid = vid;
     self.tapticLiveResourceChunk = -1;
@@ -1199,65 +1230,86 @@ void YTMUTestHapticPulse(NSInteger intensity) {
 }
 BOOL YTMUTapticSpeakerPlay(void) {
     YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
-    NSString *vid = s.currentVideoID.length ? s.currentVideoID : g_currentVideoID;
-    if (vid.length < 5) return NO;
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
+    if (vid.length < 5) { YTMUAudioNote(@"taptic", @"Manual play: missing video ID"); return NO; }
     double off = g_currentPlaybackTime > 0.0 ? g_currentPlaybackTime : 0.0;
-    if (YTMULocalAudioPathForVideoID(vid).length) {
-        [s tapticPlayVid:vid offset:off];
-    } else {
-        [s tapticPlayLiveVid:vid offset:off];
-    }
-    return YES;
+    s.stoppedTapticVid = nil;
+    YTMUAudioNote(@"taptic", [NSString stringWithFormat:@"Manual play time=%.2f source=%@ hardware=%d", off, YTMULocalAudioPathForVideoID(vid).length ? @"download" : @"stream", [CHHapticEngine capabilitiesForHardware].supportsHaptics]);
+    [s tapticPlayLiveVid:vid offset:off];
+    if (s.tapticLiveMode) s.manualTapticVid = vid;
+    return s.tapticLiveMode;
 }
 void YTMUTapticSpeakerStop(void) {
-    [[YTMUMusicHapticsManager sharedInstance] tapticTeardown];
+    YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
+    s.stoppedTapticVid = s.tapticVid;
+    [s tapticTeardown];
 }
 BOOL YTMUTapticSpeakerIsActive(void) {
     YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
-    return s.tapticPlayer != nil || s.tapticPreparing;
+    return s.tapticLiveMode || s.tapticPlayer != nil || s.tapticPreparing;
 }
 
 // Second stream for Sing. It only prepares the song's audio for the
 // separator; it never changes the separation mode, starts playback, or
 // shows the Sing control. The unfinished feature stays opt-in.
 static BOOL g_ytmuSingStreamActive = NO;
+static NSString *g_singVid, *g_singPath;
+static NSUInteger g_singRequest;
+NSString *YTMUSingPreparedAudio(NSString *videoID) {
+    return g_ytmuSingStreamActive && [videoID isEqualToString:g_singVid] ? g_singPath : nil;
+}
 BOOL YTMUSingStreamIsActive(void) {
     return g_ytmuSingStreamActive;
 }
 void YTMUSingStreamSetActive(BOOL active) {
     g_ytmuSingStreamActive = active;
+    NSUInteger generation = ++g_singRequest;
+    g_singPath = nil;
+    g_singVid = nil;
     if (!active) {
-        NSLog(@"[YTMU-Sing] second stream stopped");
+        YTMUSingPlaybackTick();
+        YTMUAudioNote(@"sing", @"Preparation stopped");
         return;
     }
     YTMUMusicHapticsManager *s = [YTMUMusicHapticsManager sharedInstance];
-    NSString *vid = s.currentVideoID.length ? s.currentVideoID : g_currentVideoID;
+    NSString *vid = YTMUResolveCurrentVideoID() ?: g_currentVideoID;
     if (vid.length < 5) {
         g_ytmuSingStreamActive = NO;
+        YTMUAudioNote(@"sing", @"Preparation skipped: no video ID");
         return;
     }
     NSString *base = [[s tapticCAPathForVid:vid] stringByDeletingPathExtension];
-    NSString *dst = [base stringByAppendingString:@".sing.caf"];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:dst]) return;
+    NSString *dst = [base stringByAppendingString:@".sing-stereo.caf"];
+    g_singVid = [vid copy];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:dst]) {
+        g_singPath = dst;
+        YTMUAudioNote(@"sing", @"Stereo input ready (cached)");
+        return;
+    }
     NSString *source = YTMULocalAudioPathForVideoID(vid);
     BOOL streamed = source.length == 0;
     if (streamed) source = YTMUCapturedAudioStreamURL(vid);
     if (!source.length) {
         g_ytmuSingStreamActive = NO;
-        NSLog(@"[YTMU-Sing] no audio source for second stream");
+        YTMUAudioNote(@"sing", @"Preparation failed: no local file or captured stream");
         return;
     }
     NSString *input = [NSString stringWithFormat:@"\"%@\"", source];
+    YTMUAudioNote(@"sing", streamed ? @"Preparing captured stream" : @"Preparing downloaded audio");
     dispatch_async(YTMUTapticConvertQueue(), ^{
         [MobileFFmpegConfig resetStatistics];
-        NSString *cmd = [NSString stringWithFormat:@"-y -i %@ -ac 1 -ar 24000 -c:a pcm_s16le \"%@\"", input, dst];
+        NSString *tmp = [dst stringByAppendingString:@".tmp.caf"];
+        NSString *cmd = [NSString stringWithFormat:@"-y -i %@ -vn -ac 2 -ar 44100 -c:a pcm_f32le \"%@\"", input, tmp];
         long rc = [MobileFFmpeg execute:cmd];
-        if (rc != 0) {
-            g_ytmuSingStreamActive = NO;
-            NSLog(@"[YTMU-Sing] second stream convert failed rc=%ld", rc);
-        } else {
-            NSLog(@"[YTMU-Sing] second stream ready vid=%@", vid);
-        }
+        NSFileManager *fm = NSFileManager.defaultManager;
+        BOOL ready = rc == 0 && ([fm fileExistsAtPath:dst] || [fm moveItemAtPath:tmp toPath:dst error:nil]);
+        [fm removeItemAtPath:tmp error:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (generation != g_singRequest) return;
+            g_ytmuSingStreamActive = ready;
+            g_singPath = ready ? dst : nil;
+            YTMUAudioNote(@"sing", [NSString stringWithFormat:@"Stereo input ready=%d rc=%ld", ready, rc]);
+        });
     });
 }
 
@@ -1325,7 +1377,8 @@ void YTMUSingStreamSetActive(BOOL active) {
     // Taptic Speaker sync: rate + elapsed drive the motor copy's play /
     // pause / seek alignment. Runs before the ISRC paths -- it only reads
     // the dict and never touches infoToSend.
-    [[YTMUMusicHapticsManager sharedInstance] tapticHandlePlaybackState:nowPlayingInfo];
+    if ([NSThread isMainThread]) [[YTMUMusicHapticsManager sharedInstance] tapticHandlePlaybackState:nowPlayingInfo];
+    else dispatch_async(dispatch_get_main_queue(), ^{ [[YTMUMusicHapticsManager sharedInstance] tapticHandlePlaybackState:nowPlayingInfo]; });
 
     YTMUMusicHapticsManager *isrcMgr = [YTMUMusicHapticsManager sharedInstance];
     NSString *isrc = isrcMgr.currentISRC;
